@@ -5,8 +5,47 @@
 var LoaderTotalRAM 0
 public LoaderTotalRAM
 
+fnptr StandaloneEntry { size api bootdev arg -- ret }
+
+fn Select { devpath -- success }
+	-1 success!
+
+	auto dn
+	devpath@ a3xDevTreeWalk dn!
+
+	if (dn@ 0 ==)
+		devpath@ "%s is an invalid device path.\n" Printf
+		return
+	end
+
+	auto rbm
+
+	dn@ a3xDeviceSelectNode
+		"readBlock" a3xDGetMethod rbm!
+	a3xDeviceExit
+
+	if (rbm@ 0 ==)
+		devpath@ "%s isn't a readable block device.\n" Printf
+		return
+	end
+
+	dn@ AFSMount success!
+
+	if (success@)
+		devpath@ "filesystem on %s failed to mount.\n" Printf
+	end
+
+	0 success!
+end
+
 fn Main { args -- ret }
 	0 ret!
+
+	(* clear BSS section *)
+
+	pointerof _bss
+	pointerof _bss_end pointerof _bss -
+	0 memset
 
 	args@ ArgsInit
 
@@ -18,5 +57,37 @@ fn Main { args -- ret }
 
 	"M31Loader - loader for andromeda\n" Printf
 
+	MemInit
+
+	AFSInit
+
+	if (a3xMyDevice@ AFSMount 0 ~=)
+		"couldn't mount boot device\n" LoaderPanic
+	end
+
+	auto sz
+	auto entry
+	"/andromeda/test.ax" LOFFLoad entry! sz!
+
+	sz@ entry@ "test: %x %d\n" Printf
+
+	sz@ a3xCIPtr@ a3xMyDevice@ args@ entry@ StandaloneEntry ret!
+
 	a3xConsoleUserOut
+
+	0 LoaderExit
+end
+
+fn LoaderExit { ret -- }
+	AFSExit
+
+	ret@ a3xReturn
+end
+
+fn LoaderPanic { ... fmt -- }
+	"M31Loader: panic: " Printf
+
+	argv argc@ fmt@ VPrintf
+
+	-1 LoaderExit
 end

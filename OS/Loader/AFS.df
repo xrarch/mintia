@@ -1,0 +1,340 @@
+#include "<df>/dragonfruit.h"
+#include "<ll>/rta3x/a3x.h"
+#include "loader.h"
+
+var AFSDevice 0
+public AFSDevice
+
+fn AFSReadBlock { buf block -- }
+	auto ok
+
+	if (AFSDevice@ ~~)
+		"AFSReadBlock with no device selected\n" LoaderPanic
+	end
+
+	AFSDevice@ a3xDeviceSelectNode
+		buf@ block@ "readBlock" a3xDCallMethod drop drop drop ok!
+	a3xDeviceExit
+
+	if (ok@ 1 ~=)
+		buf@ block@ ok@ "error %i reading block %d into buffer 0x%x\n" LoaderPanic
+	end
+end
+
+var AFSFATBlock 0
+var AFSFATBlockNum -1
+
+var AFSINodeBlock 0
+var AFSINodeBlockNum -1
+
+var AFSDataBlock 0
+var AFSDataBlockNum -1
+
+var AFSSuperblockBuf 0
+
+var AFSRootINode 0
+
+var AFSInited 0
+
+const AFSSuperblockMagic 0xAFBBAFBB
+const AFSSuperblockVersion 0x6
+
+fn AFSInit { -- }
+	4096 Malloc AFSFATBlock!
+	if (AFSFATBlock@ ERR ==)
+		"couldn't allocate fat block buffer\n" LoaderPanic
+	end
+
+	4096 Malloc AFSINodeBlock!
+	if (AFSINodeBlock@ ERR ==)
+		AFSFATBlock@ Free
+		"couldn't allocate inode block buffer\n" LoaderPanic
+	end
+
+	4096 Malloc AFSDataBlock!
+	if (AFSDataBlock@ ERR ==)
+		AFSFATBlock@ Free
+		AFSINodeBlock@ Free
+		"couldn't allocate data block buffer\n" LoaderPanic
+	end
+
+	AFSSuperblock_SIZEOF Malloc AFSSuperblockBuf!
+	if (AFSSuperblockBuf@ ERR ==)
+		AFSFATBlock@ Free
+		AFSINodeBlock@ Free
+		AFSDataBlock@ Free
+		"couldn't allocate superblock buffer\n" LoaderPanic
+	end
+
+	AFSINode_SIZEOF Malloc AFSRootINode!
+	if (AFSRootINode@ ERR ==)
+		AFSFATBlock@ Free
+		AFSINodeBlock@ Free
+		AFSDataBlock@ Free
+		AFSSuperblockBuf@ Free
+		"couldn't allocate root inode\n" LoaderPanic
+	end
+
+	1 AFSInited!
+end
+
+fn AFSExit { -- }
+	if (AFSInited@ ~~)
+		return
+	end
+
+	AFSFATBlock@ Free
+	AFSINodeBlock@ Free
+	AFSDataBlock@ Free
+	AFSSuperblockBuf@ Free
+	AFSRootINode@ Free
+end
+
+fn AFSReadDataBlock { block -- }
+	if (block@ -1 ==)
+		"tried to read data block -1\n" LoaderPanic
+	end
+
+	if (block@ AFSDataBlockNum@ ==)
+		return
+	end
+
+	AFSDataBlock@ block@ AFSReadBlock
+	block@ AFSDataBlockNum!
+end
+
+fn AFSReadFATBlock { block -- }
+	if (block@ -1 ==)
+		"tried to read fat block -1\n" LoaderPanic
+	end
+
+	if (block@ AFSFATBlockNum@ ==)
+		return
+	end
+
+	AFSFATBlock@ block@ AFSSuperblockBuf@ AFSSuperblock_FATStart + @ + AFSReadBlock
+	block@ AFSFATBlockNum!
+end
+
+fn AFSReadINodeBlock { block -- }
+	if (block@ -1 ==)
+		"tried to read fat block -1\n" LoaderPanic
+	end
+
+	if (block@ AFSINodeBlockNum@ ==)
+		return
+	end
+
+	AFSINodeBlock@ block@ AFSSuperblockBuf@ AFSSuperblock_IStart + @ + AFSReadBlock
+	block@ AFSINodeBlockNum!
+end
+
+fn AFSMount { dev -- ok }
+	0 ok!
+
+	if (dev@ AFSDevice@ ==)
+		return
+	end
+
+	-1 AFSINodeBlockNum!
+	-1 AFSFATBlockNum!
+	-1 AFSDataBlockNum!
+
+	dev@ AFSDevice!
+
+	0 AFSReadDataBlock
+
+	AFSSuperblockBuf@ AFSDataBlock@ AFSSuperblock_SIZEOF memcpy
+
+	if (AFSSuperblockBuf@ AFSSuperblock_Magic + @ AFSSuperblockMagic ~=)
+		ERR ok!
+		0 AFSDevice!
+		"invalid superblock\n" Printf
+		return
+	end
+
+	if (AFSSuperblockBuf@ AFSSuperblock_Version + @ AFSSuperblockVersion ~=)
+		ERR ok!
+		0 AFSDevice!
+		"bad version on superblock\n" Printf
+		return
+	end
+
+	1 AFSRootINode@ AFSIGetStruct
+end
+
+fn AFSIGet { inum -- ino }
+	AFSINode_SIZEOF Malloc ino!
+
+	if (ino@ ERR ==)
+		"couldn't allocate inode struct\n" LoaderPanic
+	end
+
+	inum@ ino@ AFSIGetStruct
+end
+
+fn AFSIGetStruct { inum ino -- }
+	auto iblk
+	inum@ AFSINode_SIZEOF * 4096 / iblk!
+
+	iblk@ AFSReadINodeBlock
+
+	auto inop
+	AFSINodeBlock@ inum@ AFSINode_SIZEOF * 4096 % + inop!
+
+	ino@ inop@ AFSINode_SIZEOF memcpy
+end
+
+fn AFSRead { buf len seek ino -- bytes }
+	if (seek@ ino@ AFSINode_Size + @ >=)
+		0 bytes!
+		return
+	end
+
+	if (seek@ len@ + ino@ AFSINode_Size + @ >)
+		ino@ AFSINode_Size + @ seek@ - len!
+	end
+
+	auto tot
+	0 tot!
+
+	auto bnum
+	seek@ ino@ AFSFATSeek bnum!
+
+	if (seek@ 4095 &)
+		bnum@ AFSReadDataBlock
+		bnum@ AFSBlockStatus bnum!
+	end
+
+	while (tot@ len@ <)
+		if (seek@ 4095 & 0 ==)
+			bnum@ AFSReadDataBlock
+			bnum@ AFSBlockStatus bnum!
+		end
+
+		auto m
+		len@ tot@ -
+		4096 seek@ 4096 % -
+		min m!
+
+		buf@
+		AFSDataBlock@ seek@ 4096 % +
+		m@ memcpy
+
+		m@ buf +=
+		m@ seek +=
+		m@ tot +=
+	end
+
+	len@ bytes!
+end
+
+fn AFSFreeINode { ino -- }
+	if (ino@ AFSRootINode@ ~=)
+		ino@ Free
+	end
+end
+
+fn AFSPath { path -- ino }
+	AFSRootINode@ ino!
+
+	auto pcomp
+	256 Malloc pcomp!
+
+	if (pcomp@ ERR ==)
+		"couldn't allocate pcomp\n" LoaderPanic
+	end
+
+	auto dirent
+	AFSDirEnt_SIZEOF Malloc dirent!
+
+	if (dirent@ ERR ==)
+		pcomp@ Free
+		"couldn't allocate dirent\n" LoaderPanic
+	end
+
+	auto bytes
+
+	while (1)
+		while (path@ gb '/' ==)
+			1 path +=
+		end
+
+		if (path@ gb 0 ==)
+			break
+		end
+
+		0 bytes!
+
+		while (1)
+			if (path@ gb '/' == path@ gb 0 == ||)
+				break
+			end
+
+			if (bytes@ 255 <)
+				path@ gb pcomp@ bytes@ + sb
+				1 bytes +=
+			end
+
+			1 path +=
+		end
+
+		0 pcomp@ bytes@ + sb
+
+		if (pcomp@ "." strcmp)
+			continue
+		end
+
+		auto seek
+		0 seek!
+
+		while (1)
+			dirent@ AFSDirEnt_SIZEOF seek@ ino@ AFSRead bytes!
+
+			if (bytes@ AFSDirEnt_SIZEOF ~=)
+				ino@ AFSFreeINode
+				-1 ino!
+				break
+			end
+
+			if (dirent@ AFSDirEnt_Name + pcomp@ strcmp)
+				ino@ AFSFreeINode
+				dirent@ AFSDirEnt_INum + @ AFSIGet ino!
+				break
+			end
+
+			AFSDirEnt_SIZEOF seek +=
+		end
+
+		if (ino@ -1 ==)
+			break
+		end
+	end
+
+	pcomp@ Free
+	dirent@ Free
+end
+
+fn AFSFATSeek { seek ino -- bnum }
+	auto seeks
+	seek@ 4096 / seeks!
+
+	ino@ AFSINode_StartBlock + @ bnum!
+
+	while (seeks@)
+		bnum@ AFSBlockStatus bnum!
+
+		1 seeks -=
+	end
+end
+
+fn AFSBlockStatus { bnum -- status }
+	auto fatblock
+	auto fatoff
+
+	bnum@ 4096 / fatblock!
+	bnum@ 4096 % fatoff!
+
+	fatblock@ AFSReadFATBlock
+	fatoff@ 4 * AFSFATBlock@ + @ status!
+end

@@ -15,7 +15,7 @@ Loader.a3x: $(OBJ)
 	$(LD) Loader.a3x L/rta3x/_boot.o $(OBJ) L/rta3x/rta3x.o
 	$(OBJTOOL) move Loader.a3x text=0x40000,data=text+text_size,bss=data+data_size
 	cp Loader.a3x Loader.LOFF
-	$(OBJTOOL) binary Loader.a3x
+	$(OBJTOOL) binary -nobss Loader.a3x
 
 %.o: %.df
 	$(DC) $< $@

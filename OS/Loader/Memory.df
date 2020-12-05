@@ -3,7 +3,11 @@
 
 buffer MemBitmap 8192
 
+var MemAllocated 0
+public MemAllocated
+
 var MemPages 0
+public MemAllocated
 
 fn MemInit { -- }
 	auto bm
@@ -15,45 +19,147 @@ fn MemInit { -- }
 
 	0xFFFFFFFF bm@!
 	0xFFFFFFFF bm@ 4 + !
-	0xFFFFFFFF bm@ 4 + !
-	0xFFFFFFFF bm@ 4 + !
+	0xFFFFFFFF bm@ 8 + !
+	0xFFFFFFFF bm@ 12 + !
+end
+
+fn HexDump { addr len -- }
+	auto i
+	0 i!
+
+	while (len@)
+		if (i@ 4 % 0 == i@ &&)
+			'\n' Putc
+		end
+
+		addr@ @ "%9x " Printf
+
+		1 i +=
+		4 addr +=
+		4 len -=
+	end
+
+	'\n' Putc
+end
+
+fn MemSetStatus { with pages start -- }
+	auto max
+	pages@ start@ + max!
+
+	auto bmp
+	MemBitmap start@ 32 / 4 * + bmp!
+
+	auto word
+	bmp@@ word!
+
+	auto q
+	start@ q!
+
+	while (start@ max@ <)
+		if (with@)
+			word@ start@ 31 & bitset word!
+		end else
+			word@ start@ 31 & bitclear word!
+		end
+
+		1 start +=
+
+		if (start@ 31 & ~~)
+			word@ bmp@!
+
+			4 bmp +=
+
+			bmp@@ word!
+		end
+	end
+
+	word@ bmp@!
+end
+
+fn MemFree { pages pstart -- }
+	pages@ MemAllocated -=
+
+	0 pages@ pstart@ MemSetStatus
 end
 
 fn MemAlloc { pages pstart -- astart ok }
 	-1 ok!
 
-	auto pc
-	MemPages@ pc!
-
-	auto i
-
-	if (pstart@ pages@ + pc@ >=)
-		pstart@ i!
-	end else
-		0 i!
+	if (pages@ 0 ==)
+		"tried to allocate 0 pages\n" LoaderPanic
 	end
 
+	auto chend
+	MemPages@ chend!
+
+	auto i
+	pstart@ i!
+
 	auto bmp
-	MemBitmap i@ 32 / 8 * + bmp!
+	MemBitmap i@ 32 / 4 * + bmp!
 
 	auto word
+	bmp@@ word!
 
-	auto caught
-	0 caught!
+	auto run
+	0 run!
 
-	while (i@ pc@ <)
+	auto mode
+	0 mode!
+
+	while (1)
+		if (run@ pages@ >=)
+			1 pages@ astart@ MemSetStatus
+
+			pages@ MemAllocated +=
+
+			MemBitmap 64 HexDump
+
+			0 ok!
+			return
+		end elseif (i@ chend@ >=)
+			if (mode@)
+				-1 ok!
+				return
+			end else
+				0 i!
+				1 mode!
+				0 run!
+				pstart@ chend!
+				MemBitmap bmp!
+				continue
+			end
+		end
+
 		if (i@ 31 & ~~)
 			bmp@@ word!
 
 			4 bmp +=
 
 			if (word@ 0xFFFFFFFF ==)
+				0 run!
+				32 i +=
+				continue
+			end elseif (word@ 0x00000000 ==)
+				if (run@ 0 ==)
+					i@ astart!
+				end
+
+				32 run +=
 				32 i +=
 				continue
 			end
 		end
 
+		if (word@ i@ 31 & bitget)
+			0 run!
+		end else
+			if (run@ 0 ==)
+				i@ astart!
+			end
 
+			1 run +=
+		end
 
 		1 i +=
 	end

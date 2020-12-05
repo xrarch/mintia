@@ -12,6 +12,8 @@ extern AFSPath { path -- ino }
 extern AFSFreeINode { ino -- }
 
 extern MemInit { -- }
+extern MemAlloc { pages pstart -- astart ok }
+extern MemFree { pages pstart -- }
 
 extern LOFFLoad { path -- sz entry }
 

@@ -2,49 +2,15 @@
 #include "<ll>/rta3x/a3x.h"
 #include "loader.h"
 
-struct LOFFHeader
-	4 Magic
-	4 SymbolTableOffset
-	4 SymbolCount
-	4 StringTableOffset
-	4 StringTableSize
-	4 TargetArchitecture
-	4 EntrySymbol
-	4 Stripped
-	28 Reserved
-	4 TextHeader
-	4 DataHeader
-	4 BSSHeader
-endstruct
-
-struct LOFFSectionHeader
-	4 FixupTableOffset
-	4 FixupCount
-	4 SectionOffset
-	4 SectionSize
-	4 LinkedAddress
-endstruct
-
-struct LOFFSymbol
-	4 NameOffset
-	4 Section
-	4 Type
-	4 Value
-endstruct
-
-const LOFFMagic 0x4C4F4633
+const LOFFMagic 0x4C4F4634
 const LOFFArch 2
-
-const LOFFGLOBAL 1
 
 const LOFFTEXT 1
 
 buffer LOFFHeaderBuf LOFFHeader_SIZEOF
 
-buffer LOFFSymbolBuf LOFFSymbol_SIZEOF
-
-fn LOFFLoad { path -- sz entry }
-	-1 entry!
+fn LOFFLoad { path loff -- ok }
+	-1 ok!
 
 	auto ino
 	path@ AFSPath ino!
@@ -56,7 +22,6 @@ fn LOFFLoad { path -- sz entry }
 
 	if (ino@ AFSINode_Type + @ 1 ~=)
 		ino@ AFSFreeINode
-		-1 ino!
 		"is a directory\n" Printf
 		return
 	end
@@ -66,95 +31,190 @@ fn LOFFLoad { path -- sz entry }
 
 	if (bytes@ LOFFHeader_SIZEOF ~=)
 		ino@ AFSFreeINode
-		-1 entry!
 		"short executable or error\n" Printf
 		return
 	end
 
 	if (LOFFHeaderBuf LOFFHeader_Magic + @ LOFFMagic ~=)
 		ino@ AFSFreeINode
-		-1 entry!
 		"corrupt executable\n" Printf
 		return
 	end
 
 	if (LOFFHeaderBuf LOFFHeader_TargetArchitecture + @ LOFFArch ~=)
 		ino@ AFSFreeINode
-		-1 entry!
 		"executable is not for this architecture\n" Printf
 		return
 	end
 
-	// having passed basic checks to make sure its not a text file or something, just trust it now
+	LOFFHeaderBuf LOFFHeader_EntrySymbol + @ loff@ LOFFLoaded_EntrySymbol + !
 
-	auto text
+	// having passed basic checks to make sure its not a text file or something, just trust it now
 
 	// load text section
 
+	loff@ LOFFLoaded_TextLinkedAddr +
 	0
 	LOFFHeaderBuf LOFFHeader_TextHeader + @
-	ino@ LOFFLoadSection entry! text! drop
+	ino@ LOFFLoadSection ok!
 
-	if (entry@ 0 ~=)
+	if (ok@ 0 ~=)
 		ino@ AFSFreeINode
-		-1 entry!
 		return
 	end
 
 	// load data section
 
+	loff@ LOFFLoaded_DataLinkedAddr +
 	0
 	LOFFHeaderBuf LOFFHeader_DataHeader + @
-	ino@ LOFFLoadSection entry! drop drop
+	ino@ LOFFLoadSection ok!
 
-	if (entry@ 0 ~=)
+	if (ok@ 0 ~=)
 		ino@ AFSFreeINode
-		-1 entry!
 		return
 	end
 
 	// load bss section
 
+	loff@ LOFFLoaded_BSSLinkedAddr +
 	1
 	LOFFHeaderBuf LOFFHeader_BSSHeader + @
-	ino@ LOFFLoadSection entry! drop sz!
+	ino@ LOFFLoadSection ok!
 
-	if (entry@ 0 ~=)
+	if (ok@ 0 ~=)
 		ino@ AFSFreeINode
-		-1 entry!
 		return
 	end
 
-	LOFFHeaderBuf LOFFHeader_EntrySymbol + @ entry!
-
-	if (entry@ 0xFFFFFFFF ~=) // if there is an entrypoint symbol,
-		auto symoff
-		LOFFHeaderBuf LOFFHeader_SymbolTableOffset + @ symoff!
-
-		entry@ LOFFSymbol_SIZEOF * symoff +=
-
-		LOFFSymbolBuf LOFFSymbol_SIZEOF symoff@ ino@ AFSRead bytes! // read the entry symbol
-
-		if (bytes@ LOFFSymbol_SIZEOF ~=)
-			ino@ AFSFreeINode
-			"short entry symbol or error\n" Printf
-			-1 entry!
-			return
-		end
-
-		LOFFSymbolBuf LOFFSymbol_Value + @ text@ + entry! // get its value
-	end else
-		0 entry! // no entry symbol
+	loff@ ino@ LOFFLoadTables ok!
+	if (ok@ 0 ~=)
+		ino@ AFSFreeINode
+		return
 	end
-
-	text@ sz -=
 
 	ino@ AFSFreeINode
 end
 
+fn LOFFGetString { loff offset -- str }
+	auto strtab
+	loff@ LOFFLoaded_StringTable + @ strtab!
+
+	if (strtab@ ~~)
+		"no string table\n" LoaderPanic
+		return
+	end
+
+	strtab@ offset@ + str!
+end
+
+fn LOFFLoadTables { loff ino -- ok }
+	auto count
+	LOFFHeaderBuf LOFFHeader_SymbolCount + @ count!
+
+	count@ loff@ LOFFLoaded_SymbolCount + !
+
+	auto offset
+
+	auto bytes
+
+	auto ptr
+
+	if (count@)
+		LOFFHeaderBuf LOFFHeader_SymbolTableOffset + @ offset!
+
+		count@ LOFFSymbol_SIZEOF * bytes!
+
+		bytes@ 4095 + 12 >> 0 MemAlloc ok! ptr!
+
+		if (ok@)
+			"couldn't allocate memory for symbol table\n" Printf
+			return
+		end
+
+		12 ptr <<=
+
+		ptr@ bytes@ offset@ ino@ AFSRead ok!
+
+		if (ok@ bytes@ ~=)
+			"short symtab or error\n" Printf
+			-1 ok!
+			return
+		end
+
+		ptr@ loff@ LOFFLoaded_SymbolTable + !
+	end
+
+	LOFFHeaderBuf LOFFHeader_StringTableSize + @ bytes!
+
+	bytes@ loff@ LOFFLoaded_StringSize + !
+
+	auto strtab
+	0 strtab!
+
+	if (bytes@)
+		LOFFHeaderBuf LOFFHeader_StringTableOffset + @ offset!
+
+		bytes@ 4095 + 12 >> 0 MemAlloc ok! ptr!
+
+		if (ok@)
+			"couldn't allocate memory for string table\n" Printf
+			return
+		end
+
+		12 ptr <<=
+
+		ptr@ bytes@ offset@ ino@ AFSRead ok!
+
+		if (ok@ bytes@ ~=)
+			"short string table or error\n" Printf
+			-1 ok!
+			return
+		end
+
+		ptr@ strtab!
+		ptr@ loff@ LOFFLoaded_StringTable + !
+	end
+
+	LOFFHeaderBuf LOFFHeader_ImportCount + @ count!
+
+	count@ loff@ LOFFLoaded_ImportCount + !
+
+	auto pages
+
+	if (count@)
+		LOFFHeaderBuf LOFFHeader_ImportTableOffset + @ offset!
+
+		count@ LOFFImport_SIZEOF * bytes!
+
+		bytes@ 4095 + 12 >> pages!
+
+		pages@ 0 MemAlloc ok! ptr!
+
+		if (ok@)
+			"couldn't allocate memory for import table\n" Printf
+			return
+		end
+
+		12 ptr <<=
+
+		ptr@ bytes@ offset@ ino@ AFSRead ok!
+
+		if (ok@ bytes@ ~=)
+			"short import table or error\n" Printf
+			-1 ok!
+			return
+		end
+
+		ptr@ loff@ LOFFLoaded_ImportTable + !
+	end
+
+	0 ok!
+end
+
 buffer LOFFSectionHeaderBuf LOFFSectionHeader_SIZEOF
 
-fn LOFFLoadSection { bss header ino -- endp la ok }
+fn LOFFLoadSection { section bss header ino -- ok }
 	LOFFSectionHeaderBuf LOFFSectionHeader_SIZEOF header@ ino@ AFSRead ok!
 
 	if (ok@ LOFFSectionHeader_SIZEOF ~=)
@@ -163,37 +223,85 @@ fn LOFFLoadSection { bss header ino -- endp la ok }
 		return
 	end
 
+	auto la
 	LOFFSectionHeaderBuf LOFFSectionHeader_LinkedAddress + @ la!
 
-	// make sure not to load this section over the top of us or the firmware
-
-	if (la@ 0x50000 <) // XXX platform specific
+	if (la@ 4095 &)
 		-1 ok!
-		la@ "section address 0x%x < 0x50000\n" Printf
+		"unaligned section\n" Printf
 		return
 	end
 
 	auto sz
 	LOFFSectionHeaderBuf LOFFSectionHeader_SectionSize + @ sz!
 
-	0 ok!
+	auto astart
 
-	if (bss@)
-		la@ sz@ 0 memset // bss section, just zero it out
-	end else
-		auto offset
-		LOFFSectionHeaderBuf LOFFSectionHeader_SectionOffset + @ offset!
+	if (sz@)
+		sz@ 4095 + 12 >> la@ 12 >> MemAlloc ok! astart!
 
-		la@ sz@ offset@ ino@ AFSRead ok! // read the section into memory
-
-		if (ok@ sz@ ~=)
-			-1 ok!
-			"short section or error\n" Printf
+		if (ok@)
+			"couldn't allocate memory for section\n" Printf
 			return
 		end
 
-		0 ok!
+		12 astart <<=
 	end
 
-	la@ sz@ + endp!
+	la@ section@ LOFFLoadedSection_LinkedAddr + !
+	astart@ section@ LOFFLoadedSection_RealAddr + !
+	sz@ section@ LOFFLoadedSection_Size + !
+
+	0 ok!
+
+	if (sz@)
+		if (bss@)
+			astart@ sz@ 0 memset // bss section, just zero it out
+		end else
+			auto offset
+
+			auto count
+			LOFFSectionHeaderBuf LOFFSectionHeader_FixupCount + @ count!
+
+			if (count@)
+				LOFFSectionHeaderBuf LOFFSectionHeader_FixupTableOffset + @ offset!
+
+				auto bsw
+				count@ LOFFSectionHeader_SIZEOF * bsw!
+
+				auto qp
+				bsw@ 4095 + 12 >> 0 MemAlloc ok! qp!
+
+				if (ok@)
+					"couldn't allocate memory for fixup table\n" Printf
+					return
+				end
+
+				12 qp <<=
+
+				qp@ bsw@ offset@ ino@ AFSRead ok!
+
+				if (ok@ bsw@ ~=)
+					-1 ok!
+					"short fixup table or error\n" Printf
+					return
+				end
+
+				qp@ section@ LOFFLoadedSection_FixupTable + !
+				count@ section@ LOFFLoadedSection_FixupCount + !
+			end
+
+			LOFFSectionHeaderBuf LOFFSectionHeader_SectionOffset + @ offset!
+
+			astart@ sz@ offset@ ino@ AFSRead ok! // read the section into memory
+
+			if (ok@ sz@ ~=)
+				-1 ok!
+				"short section or error\n" Printf
+				return
+			end
+
+			0 ok!
+		end
+	end
 end

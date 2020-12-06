@@ -1,0 +1,236 @@
+#include "<df>/dragonfruit.h"
+#include "loader.h"
+
+var DLLListHead 0
+
+struct DLL
+	128 Name
+
+	LOFFLoaded_SIZEOF LOFF
+
+	4 Next
+endstruct
+
+buffer DLLPathBuffer 128
+
+fn DLLLoad { name -- dll ok }
+	name@ DLLByName dll!
+
+	if (dll@)
+		0 ok!
+		return
+	end
+
+	DLL_SIZEOF Calloc dll!
+
+	dll@ DLL_Name + name@ strcpy
+
+	auto path
+
+	if (name@ gb '/' ==)
+		name@ path!
+	end else
+		DLLPathBuffer path!
+
+		auto prefix
+		"/Andromeda/" prefix!
+
+		path@ prefix@ strcpy
+
+		path@ prefix@ strlen + name@ strcpy
+	end
+
+	path@ "loading %s\n" Printf
+
+	auto loff
+	dll@ DLL_LOFF + loff!
+
+	path@ loff@ LOFFLoad ok!
+
+	if (ok@ 0 ~=)
+		dll@ Free
+		-1 ok!
+		return
+	end
+
+	auto l
+	DLLListHead@ l!
+
+	dll@ DLLListHead!
+
+	if (l@)
+		l@ dll@ DLL_Next + !
+	end
+
+	dll@ DLLDoImports ok!
+
+	if (ok@ 0 ~=)
+		dll@ Free
+		-1 ok!
+		return
+	end
+end
+
+fn DLLDoImports { dll -- ok }
+	auto loff
+	dll@ DLL_LOFF + loff!
+
+	auto count
+	loff@ LOFFLoaded_ImportCount + @ count!
+
+	auto i
+	0 i!
+
+	auto ptr
+	loff@ LOFFLoaded_ImportTable + @ ptr!
+
+	while (i@ count@ <)
+		auto dllp
+
+		loff@ ptr@ LOFFImport_Name + @ LOFFGetString DLLLoad ok! dllp!
+
+		if (ok@ 0 ~=)
+			dll@ DLL_Name + ptr@ LOFFImport_Name + @ LOFFGetString "couldn't load %s, needed by %s\n" Printf
+			return
+		end
+
+		dllp@ ptr@ LOFFImport_DLL + !
+
+		1 i +=
+		LOFFImport_SIZEOF ptr +=
+	end
+
+	0 ok!
+end
+
+fn DLLByName { name -- dll }
+	DLLListHead@ dll!
+
+	while (dll@)
+		if (dll@ DLL_Name + name@ strcmp)
+			return
+		end
+
+		dll@ DLL_Next + @ dll!
+	end
+end
+
+fn DLLGetSymbol { dll name -- symbol }
+	auto ptr
+	dll@ DLL_LOFF + LOFFLoaded_SymbolTable + @ ptr!
+
+	auto i
+	0 i!
+
+	auto count
+	dll@ DLL_LOFF + LOFFLoaded_SymbolCount + @ count!
+
+	0 symbol!
+
+	while (i@ count@ <)
+		if (ptr@ LOFFSymbol_Type + @ LOFFGLOBAL ==)
+			auto sname
+			dll@ DLL_LOFF + ptr@ LOFFSymbol_NameOffset + @ LOFFGetString sname!
+
+			if (sname@ name@ strcmp)
+				ptr@ symbol!
+				return
+			end
+		end
+
+		LOFFSymbol_SIZEOF ptr +=
+		1 i +=
+	end
+end
+
+fn DLLResolve { dll -- ok }
+	auto ptr
+	dll@ DLL_LOFF + LOFFLoaded_SymbolTable + @ ptr!
+
+	auto i
+	0 i!
+
+	auto count
+	dll@ DLL_LOFF + LOFFLoaded_SymbolCount + @ count!
+
+	auto importtab
+	dll@ DLL_LOFF + LOFFLoaded_ImportTable + @ importtab!
+
+	auto name
+
+	while (i@ count@ <)
+		if (ptr@ LOFFSymbol_Type + @ LOFFEXTERN ==)
+			dll@ DLL_LOFF + ptr@ LOFFSymbol_NameOffset + @ LOFFGetString name!
+
+			auto import
+			ptr@ LOFFSymbol_ImportIndex + @ import!
+
+			auto wsym
+			0 wsym!
+
+			auto sdll
+
+			if (import@) // we can be more targeted, this is faster
+				importtab@ import@ 1 - LOFFImport_SIZEOF * + import!
+
+				import@ LOFFImport_DLL + @ sdll!
+
+				sdll@ name@ DLLGetSymbol wsym!
+			end else // we have to search everybody, this is slower!
+				DLLListHead@ sdll!
+
+				while (sdll@)
+					if (sdll@ dll@ ~=)
+						sdll@ name@ DLLGetSymbol wsym!
+
+						if (wsym@)
+							break
+						end
+					end
+
+					sdll@ DLL_Next + @ sdll!
+				end
+			end
+
+			if (wsym@ ~~)
+				if (import@)
+					dll@ DLL_Name + import@ DLL_Name + name@ "symbol '%s' not found in %s, referenced by %s\n" Printf
+				end else
+					dll@ DLL_Name + name@ "symbol '%s' not found, referenced by %s\n" Printf
+				end
+
+				-1 ok!
+				return
+			end
+
+			sdll@ DLL_Name + name@ dll@ DLL_Name + "%s: resolved '%s' from %s\n" Printf
+
+			LOFFRESOLVED ptr@ LOFFSymbol_Type + !
+			wsym@ LOFFSymbol_Value + @ ptr@ LOFFSymbol_Value + !
+			wsym@ LOFFSymbol_Section + @ ptr@ LOFFSymbol_Section + !
+			wsym@ ptr@ LOFFSymbol_ImportIndex + !
+		end
+
+		LOFFSymbol_SIZEOF ptr +=
+		1 i +=
+	end
+
+	0 ok!
+end
+
+fn DLLResolveAll { -- ok }
+	auto dll
+	DLLListHead@ dll!
+
+	while (dll@)
+		dll@ DLLResolve ok!
+
+		if (ok@ 0 ~=)
+			return
+		end
+
+		dll@ DLL_Next + @ dll!
+	end
+
+	0 ok!
+end

@@ -15,7 +15,93 @@ extern MemInit { -- }
 extern MemAlloc { pages pstart -- astart ok }
 extern MemFree { pages pstart -- }
 
-extern LOFFLoad { path -- sz entry }
+extern LOFFLoad { path loff -- ok }
+extern LOFFGetString { loff offset -- str }
+
+struct LOFFLoaded
+	4 EntrySymbol
+
+	4 SymbolTable
+	4 SymbolCount
+
+	4 ImportTable
+	4 ImportCount
+
+	4 StringTable
+	4 StringSize
+
+	4 TextLinkedAddr
+	4 TextRealAddr
+	4 TextSize
+	4 TextFixupTable
+	4 TextFixupCount
+
+	4 DataLinkedAddr
+	4 DataRealAddr
+	4 DataSize
+	4 DataFixupTable
+	4 DataFixupCount
+
+	4 BSSLinkedAddr
+	4 BSSRealAddr
+	4 BSSSize
+	4 BSSFixupTable
+	4 BSSFixupCount
+endstruct
+
+struct LOFFHeader
+	4 Magic
+	4 SymbolTableOffset
+	4 SymbolCount
+	4 StringTableOffset
+	4 StringTableSize
+	4 TargetArchitecture
+	4 EntrySymbol
+	4 Stripped
+	4 ImportTableOffset
+	4 ImportCount
+	20 Reserved
+	4 TextHeader
+	4 DataHeader
+	4 BSSHeader
+endstruct
+
+struct LOFFSectionHeader
+	4 FixupTableOffset
+	4 FixupCount
+	4 SectionOffset
+	4 SectionSize
+	4 LinkedAddress
+endstruct
+
+struct LOFFSymbol
+	4 NameOffset
+	4 Section
+	4 Type
+	4 Value
+	4 ImportIndex
+endstruct
+
+struct LOFFLoadedSection
+	4 LinkedAddr
+	4 RealAddr
+	4 Size
+	4 FixupTable
+	4 FixupCount
+endstruct
+
+struct LOFFImport
+	4 Name
+	4 DLL
+	12 Reserved
+endstruct
+
+const LOFFGLOBAL 1
+const LOFFEXTERN 3
+const LOFFRESOLVED 256
+
+extern DLLLoad { name -- dll ok }
+extern DLLResolveAll { -- ok }
 
 externptr LoaderTotalRAM
 externptr AFSDevice

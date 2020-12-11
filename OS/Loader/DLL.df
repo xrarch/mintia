@@ -1,7 +1,8 @@
 #include "<df>/dragonfruit.h"
-#include "loader.h"
+#include "Loader.h"
 
 var DLLListHead 0
+public DLLListHead
 
 struct DLL
 	128 Name
@@ -25,6 +26,11 @@ fn DLLLoad { name -- dll ok }
 
 	dll@ DLL_Name + name@ strcpy
 
+	if (name@ "HAL.dll" strcmp) // if we're loading the HAL,
+		// use the actual HAL name, not AndromedaKernel's import name for it
+		LoaderHALName@ name!
+	end
+
 	auto path
 
 	if (name@ gb '/' ==)
@@ -36,7 +42,6 @@ fn DLLLoad { name -- dll ok }
 		"/Andromeda/" prefix!
 
 		path@ prefix@ strcpy
-
 		path@ prefix@ strlen + name@ strcpy
 	end
 
@@ -53,6 +58,16 @@ fn DLLLoad { name -- dll ok }
 		dll@ Free
 		-1 ok!
 		return
+	end
+
+	if (loff@ LOFFLoaded_Entrypoint + @ 0xFFFFFFFF ~=)
+		if (LoaderEntrypoint@)
+			"conflicting entry points\n" LoaderPanic
+		end
+
+		loff@ LOFFLoaded_Entrypoint + @ LoaderEntrypoint!
+
+		LoaderEntrypoint@ name@ "entrypoint = %s:0x%x\n" Printf
 	end
 
 	auto l
@@ -197,7 +212,7 @@ fn DLLResolve { dll -- ok }
 
 			if (wsym@ ~~)
 				if (import@)
-					dll@ DLL_Name + import@ DLL_Name + name@ "symbol '%s' not found in %s, referenced by %s\n" Printf
+					dll@ DLL_Name + sdll@ DLL_Name + name@ "symbol '%s' not found in %s, referenced by %s\n" Printf
 				end else
 					dll@ DLL_Name + name@ "symbol '%s' not found, referenced by %s\n" Printf
 				end
@@ -206,10 +221,16 @@ fn DLLResolve { dll -- ok }
 				return
 			end
 
-			sdll@ DLL_Name + name@ dll@ DLL_Name + "%s: resolved '%s' from %s\n" Printf
+			// sdll@ DLL_Name + name@ dll@ DLL_Name + "%s: resolved '%s' from %s\n" Printf
+
+			auto section
+			sdll@ DLL_LOFF +
+			LOFFLoaded_TextLinkedAddr +
+			wsym@ LOFFSymbol_Section + @ 1 -
+			LOFFLoadedSection_SIZEOF * + section!
 
 			LOFFRESOLVED ptr@ LOFFSymbol_Type + !
-			wsym@ LOFFSymbol_Value + @ ptr@ LOFFSymbol_Value + !
+			wsym@ LOFFSymbol_Value + @ section@ LOFFLoadedSection_RealAddr + @ + ptr@ LOFFSymbol_Value + !
 			wsym@ LOFFSymbol_Section + @ ptr@ LOFFSymbol_Section + !
 			wsym@ ptr@ LOFFSymbol_ImportIndex + !
 		end
@@ -227,6 +248,97 @@ fn DLLResolveAll { -- ok }
 
 	while (dll@)
 		dll@ DLLResolve ok!
+
+		if (ok@ 0 ~=)
+			return
+		end
+
+		dll@ DLL_Next + @ dll!
+	end
+
+	0 ok!
+end
+
+fn DLLDoFixup { ptr value type shift -- }
+	auto w
+	ptr@ 0x3 ~ & w!
+
+	// w@@ ptr@ value@ type@ shift@ "s=%d t=%d v=%x p=%x: %x ->" Printf
+
+	shift@ value >>=
+
+	if (type@ 4 ==)
+		value@ ptr@!
+	end elseif (type@ 3 ==)
+		w@@ 0xFF & value@ 8 << | w@!
+	end elseif (type@ 2 ==)
+		w@@ 0xFFFF & value@ 16 << | w@!
+	end
+
+	// w@@ " %x\n" Printf
+end
+
+fn DLLSectionRelocate { dll section id -- ok }
+	auto ptr
+	section@ LOFFLoadedSection_FixupTable + @ ptr!
+
+	auto symtab
+	dll@ DLL_LOFF + LOFFLoaded_SymbolTable + @ symtab!
+
+	auto i
+	0 i!
+
+	auto count
+	section@ LOFFLoadedSection_FixupCount + @ count!
+
+	// only rebase self-references if linked addr =/= real addr
+	auto rebaseme
+	section@ LOFFLoadedSection_LinkedAddr + @ section@ LOFFLoadedSection_RealAddr + @ ~= rebaseme!
+
+	auto rebase
+	dll@ DLL_LOFF + LOFFLoaded_Rebased + @ rebase!
+
+	auto base
+	section@ LOFFLoadedSection_RealAddr + @ base!
+
+	while (i@ count@ <)
+		auto sym
+		ptr@ LOFFFixup_SymbolIndex + @ LOFFSymbol_SIZEOF * symtab@ + sym!
+
+		if (sym@ LOFFSymbol_Type + @ LOFFRESOLVED ==)
+			ptr@ LOFFFixup_Offset + @ base@ +
+			sym@ LOFFSymbol_Value + @
+			ptr@ LOFFFixup_Size + @
+			ptr@ LOFFFixup_Shift + @
+			DLLDoFixup
+		end
+
+		LOFFFixup_SIZEOF ptr +=
+		1 i +=
+	end
+
+	0 ok!
+end
+
+fn DLLRelocate { dll -- ok }
+	auto loff
+	dll@ DLL_LOFF + loff!
+
+	dll@ loff@ LOFFLoaded_TextLinkedAddr + 1 DLLSectionRelocate ok!
+
+	if (ok@ 0 ~=)
+		return
+	end
+
+	dll@ loff@ LOFFLoaded_DataLinkedAddr + 2 DLLSectionRelocate ok!
+end
+
+fn DLLRelocateAll { -- ok }
+	auto dll
+	DLLListHead@ dll!
+
+	while (dll@)
+		dll@ DLLRelocate ok!
 
 		if (ok@ 0 ~=)
 			return

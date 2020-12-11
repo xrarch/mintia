@@ -1,3 +1,5 @@
+#include "LoaderGlobal.h"
+
 extern ArgsInit { argp -- }
 extern ArgsValue { arg -- out }
 extern ArgsCheck { arg -- present }
@@ -19,7 +21,7 @@ extern LOFFLoad { path loff -- ok }
 extern LOFFGetString { loff offset -- str }
 
 struct LOFFLoaded
-	4 EntrySymbol
+	4 Entrypoint
 
 	4 SymbolTable
 	4 SymbolCount
@@ -29,6 +31,8 @@ struct LOFFLoaded
 
 	4 StringTable
 	4 StringSize
+
+	4 Rebased
 
 	4 TextLinkedAddr
 	4 TextRealAddr
@@ -96,15 +100,30 @@ struct LOFFImport
 	12 Reserved
 endstruct
 
+struct LOFFFixup
+	4 SymbolIndex
+	4 Offset
+	4 Size
+	4 Shift
+endstruct
+
 const LOFFGLOBAL 1
 const LOFFEXTERN 3
 const LOFFRESOLVED 256
 
+const INITBITMAPSZ 2048
+
 extern DLLLoad { name -- dll ok }
 extern DLLResolveAll { -- ok }
+extern DLLRelocateAll { -- ok }
 
+externptr LoaderEntrypoint
 externptr LoaderTotalRAM
+externptr LoaderHALName
 externptr AFSDevice
+externptr MemBitmap
+externptr DLLListHead
+externptr ArgsBuffer
 
 struct AFSSuperblock
 	4 Version

@@ -1,45 +1,32 @@
 #include "<df>/dragonfruit.h"
 #include "<ll>/rta3x/a3x.h"
-#include "loader.h"
+#include "Loader.h"
 
 var LoaderTotalRAM 0
 public LoaderTotalRAM
 
-fnptr StandaloneEntry { size api bootdev arg -- ret }
+var LoaderEntrypoint 0
+public LoaderEntrypoint
 
-fn Select { devpath -- success }
-	-1 success!
+var LoaderHALName 0
+public LoaderHALName
 
-	auto dn
-	devpath@ a3xDevTreeWalk dn!
+fnptr StandaloneEntry { ldrinfo api bootdev arg -- ret }
 
-	if (dn@ 0 ==)
-		devpath@ "%s is an invalid device path.\n" Printf
-		return
-	end
-
-	auto rbm
-
-	dn@ a3xDeviceSelectNode
-		"readBlock" a3xDGetMethod rbm!
+fn LoaderNVRAMGetVar { name -- value }
+	"/nvram" a3xDeviceSelect
+		name@ "getVar" a3xDCallMethod drop drop drop value!
 	a3xDeviceExit
-
-	if (rbm@ 0 ==)
-		devpath@ "%s isn't a readable block device.\n" Printf
-		return
-	end
-
-	dn@ AFSMount success!
-
-	if (success@)
-		devpath@ "filesystem on %s failed to mount.\n" Printf
-	end
-
-	0 success!
 end
+
+buffer LoaderInfoBlock LoaderInfo_SIZEOF
+
+buffer HALNameBuffer 128
 
 fn Main { args -- ret }
 	0 ret!
+
+	LOADERMINOR LOADERMAJOR "\nM31Loader %d.%d - loader for andromeda\n" Printf
 
 	(* clear BSS section *)
 
@@ -49,13 +36,46 @@ fn Main { args -- ret }
 
 	args@ ArgsInit
 
-	'\n' Putc
+	LOADERMAJOR LoaderInfoBlock LoaderInfo_Major + !
+	LOADERMINOR LoaderInfoBlock LoaderInfo_Minor + !
+
+	MemBitmap LoaderInfoBlock LoaderInfo_InitMemBmp + !
+	INITBITMAPSZ LoaderInfoBlock LoaderInfo_InitMemBmpSz + !
+	DLLListHead@ LoaderInfoBlock LoaderInfo_DLLListHead + !
+	ArgsBuffer LoaderInfoBlock LoaderInfo_ArgsBuffer + !
+
+	// if a HAL has been specified, use that one 
+	auto halp
+	"HAL" ArgsValue halp!
+
+	if (halp@ ~~)
+		// nope, maybe in an NVRAM variable
+		"andromeda,HAL" LoaderNVRAMGetVar halp!
+	end
+
+	if (halp@ ~~) // a HAL wasn't specified, use the default one for the platform
+		"/platform" a3xDeviceSelect
+			"model" a3xDGetProperty halp!
+		a3xDeviceExit
+
+		if (halp@ ~~)
+			"/platform: node has no 'model' property!\n" LoaderPanic
+		end
+
+		HALNameBuffer "HAL" strcpy
+		HALNameBuffer 3 + halp@ strcpy
+		HALNameBuffer 3 + halp@ strlen + ".dll" strcpy
+
+		HALNameBuffer LoaderHALName!
+	end else
+		halp@ LoaderHALName!
+	end
+
+	LoaderHALName@ "andromeda,HAL = %s\n" Printf
 
 	"/memory" a3xDeviceSelect
 		"totalRAM" a3xDGetProperty LoaderTotalRAM!
 	a3xDeviceExit
-
-	"M31Loader - loader for andromeda\n" Printf
 
 	MemInit
 
@@ -71,19 +91,27 @@ fn Main { args -- ret }
 		"couldn't load AndromedaKernel.exe\n" LoaderPanic
 	end
 
-	"binding...\n" Printf
+	if (LoaderEntrypoint@ ~~)
+		"no entrypoint found!\n" LoaderPanic
+	end
+
+	// "binding...\n" Printf
 
 	DLLResolveAll ret!
 
-	ret@ "%i\n" Printf
+	if (ret@ 0 ~=)
+		"couldn't bind\n" LoaderPanic
+	end
 
-	// auto sz
-	// auto entry
-	// "/andromeda/test.ax" LOFFLoad entry! sz!
+	DLLRelocateAll ret!
 
-	// sz@ entry@ "test: %x %d\n" Printf
+	if (ret@ 0 ~=)
+		"couldn't relocate\n" LoaderPanic
+	end
 
-	// sz@ a3xCIPtr@ a3xMyDevice@ args@ entry@ StandaloneEntry ret!
+	"Into the fire.\n\n" Printf
+
+	LoaderInfoBlock a3xCIPtr@ a3xMyDevice@ args@ LoaderEntrypoint@ StandaloneEntry ret!
 
 	a3xConsoleUserOut
 

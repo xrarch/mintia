@@ -1,6 +1,6 @@
 #include "<df>/dragonfruit.h"
 #include "<ll>/rta3x/a3x.h"
-#include "loader.h"
+#include "Loader.h"
 
 const LOFFMagic 0x4C4F4634
 const LOFFArch 2
@@ -31,28 +31,27 @@ fn LOFFLoad { path loff -- ok }
 
 	if (bytes@ LOFFHeader_SIZEOF ~=)
 		ino@ AFSFreeINode
-		"short executable or error\n" Printf
+		"short LOFF image or error\n" Printf
 		return
 	end
 
 	if (LOFFHeaderBuf LOFFHeader_Magic + @ LOFFMagic ~=)
 		ino@ AFSFreeINode
-		"corrupt executable\n" Printf
+		"corrupt LOFF image\n" Printf
 		return
 	end
 
 	if (LOFFHeaderBuf LOFFHeader_TargetArchitecture + @ LOFFArch ~=)
 		ino@ AFSFreeINode
-		"executable is not for this architecture\n" Printf
+		"LOFF image is not for this architecture\n" Printf
 		return
 	end
-
-	LOFFHeaderBuf LOFFHeader_EntrySymbol + @ loff@ LOFFLoaded_EntrySymbol + !
 
 	// having passed basic checks to make sure its not a text file or something, just trust it now
 
 	// load text section
 
+	loff@
 	loff@ LOFFLoaded_TextLinkedAddr +
 	0
 	LOFFHeaderBuf LOFFHeader_TextHeader + @
@@ -65,6 +64,7 @@ fn LOFFLoad { path loff -- ok }
 
 	// load data section
 
+	loff@
 	loff@ LOFFLoaded_DataLinkedAddr +
 	0
 	LOFFHeaderBuf LOFFHeader_DataHeader + @
@@ -77,6 +77,7 @@ fn LOFFLoad { path loff -- ok }
 
 	// load bss section
 
+	loff@
 	loff@ LOFFLoaded_BSSLinkedAddr +
 	1
 	LOFFHeaderBuf LOFFHeader_BSSHeader + @
@@ -92,6 +93,21 @@ fn LOFFLoad { path loff -- ok }
 		ino@ AFSFreeINode
 		return
 	end
+
+	auto entry
+	LOFFHeaderBuf LOFFHeader_EntrySymbol + @ entry!
+
+	if (entry@ 0xFFFFFFFF ~=)
+		loff@ LOFFLoaded_SymbolTable + @ entry@ LOFFSymbol_SIZEOF * + entry!
+
+		if (entry@ LOFFSymbol_Section + @ LOFFTEXT ==)
+			loff@ LOFFLoaded_TextRealAddr + @ entry@ LOFFSymbol_Value + @ + entry!
+		end else
+			0xFFFFFFFF entry!
+		end
+	end
+
+	entry@ loff@ LOFFLoaded_Entrypoint + !
 
 	ino@ AFSFreeINode
 end
@@ -214,7 +230,7 @@ end
 
 buffer LOFFSectionHeaderBuf LOFFSectionHeader_SIZEOF
 
-fn LOFFLoadSection { section bss header ino -- ok }
+fn LOFFLoadSection { loff section bss header ino -- ok }
 	LOFFSectionHeaderBuf LOFFSectionHeader_SIZEOF header@ ino@ AFSRead ok!
 
 	if (ok@ LOFFSectionHeader_SIZEOF ~=)
@@ -246,6 +262,10 @@ fn LOFFLoadSection { section bss header ino -- ok }
 		end
 
 		12 astart <<=
+	end
+
+	if (la@ astart@ ~= sz@ &&)
+		1 loff@ LOFFLoaded_Rebased + !
 	end
 
 	la@ section@ LOFFLoadedSection_LinkedAddr + !

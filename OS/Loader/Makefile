@@ -17,7 +17,7 @@ Loader.a3x: $(OBJ)
 	cp Loader.a3x Loader.LOFF
 	$(OBJTOOL) binary -nobss Loader.a3x
 
-%.o: %.df
+%.o: %.df *.h
 	$(DC) $< $@
 
 cleanup:

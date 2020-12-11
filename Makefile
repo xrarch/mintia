@@ -10,6 +10,7 @@ OS_DIR     := ./OS
 LOAD_DIR   := $(OS_DIR)/Loader
 KERN_DIR   := $(OS_DIR)/Kernel
 LIB_DIR    := $(OS_DIR)/Library
+HAL_DIR    := $(OS_DIR)/HAL
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
@@ -26,10 +27,12 @@ kernel:
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	$(FSTOOL) w /Andromeda/Dragonfruit.dll $(LIB_DIR)/Dragonfruit.dll
+	make -C $(HAL_DIR)
+	$(FSTOOL) w /Andromeda/HALLIMNstation.dll $(LIB_DIR)/HALLIMNstation.dll
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll text=0x180000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll text=0x100000,data=text+text_size+align,bss=data+data_size+align
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=4096 count=$(DISTIMGSZ) 2>/dev/null

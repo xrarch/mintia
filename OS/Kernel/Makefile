@@ -14,7 +14,7 @@ all: AndromedaKernel.exe
 
 AndromedaKernel.exe: $(OBJ)
 	$(LD) AndromedaKernel.exe $(OBJ) -d $(LIBDIR)/Dragonfruit.dll HAL.dll:$(LIBDIR)/HALLIMNstation.dll
-	$(OBJTOOL) move AndromedaKernel.exe text=0x140000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move AndromedaKernel.exe text=0x120000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df
 	$(DC) $(DCFLAGS) $< $@

@@ -64,7 +64,9 @@ struct LOFFHeader
 	4 Stripped
 	4 ImportTableOffset
 	4 ImportCount
-	20 Reserved
+	4 HeaderSize
+	4 Fragment
+	12 Reserved
 	4 TextHeader
 	4 DataHeader
 	4 BSSHeader
@@ -96,8 +98,10 @@ endstruct
 
 struct LOFFImport
 	4 Name
+	4 ExpectedText
+	4 ExpectedData
+	4 ExpectedBSS
 	4 DLL
-	12 Reserved
 endstruct
 
 struct LOFFFixup

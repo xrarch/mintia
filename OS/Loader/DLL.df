@@ -27,7 +27,7 @@ fn DLLLoad { name -- dll ok }
 	dll@ DLL_Name + name@ strcpy
 
 	if (name@ "HAL.dll" strcmp) // if we're loading the HAL,
-		// use the actual HAL name, not AndromedaKernel's import name for it
+		// use the actual chosen HAL name, not AndromedaKernel's import name for it
 		LoaderHALName@ name!
 	end
 
@@ -110,6 +110,18 @@ fn DLLDoImports { dll -- ok }
 			dll@ DLL_Name + loff@ ptr@ LOFFImport_Name + @ LOFFGetString "couldn't load %s, needed by %s\n" Printf
 			-1 ok!
 			return
+		end
+
+		auto loffp
+		dllp@ DLL_LOFF + loffp!
+
+		if (loffp@ LOFFLoaded_TextRealAddr + @ ptr@ LOFFImport_ExpectedText + @ ~=)
+			1 loff@ LOFFLoaded_Rebased + !
+		end elseif (loffp@ LOFFLoaded_DataRealAddr + @ ptr@ LOFFImport_ExpectedData + @ ~=)
+			1 loff@ LOFFLoaded_Rebased + !
+		end elseif (loffp@ LOFFLoaded_BSSRealAddr + @ ptr@ LOFFImport_ExpectedBSS + @ ~=)
+			loffp@ LOFFLoaded_BSSRealAddr + @ ptr@ LOFFImport_ExpectedBSS + @ dllp@ DLL_Name + "%s: cuz bad bss %x -> %x\n" Printf
+			1 loff@ LOFFLoaded_Rebased + !
 		end
 
 		dllp@ ptr@ LOFFImport_DLL + !
@@ -247,10 +259,12 @@ fn DLLResolveAll { -- ok }
 	DLLListHead@ dll!
 
 	while (dll@)
-		dll@ DLLResolve ok!
+		if (dll@ DLL_LOFF + LOFFLoaded_Rebased + @)
+			dll@ DLLResolve ok!
 
-		if (ok@ 0 ~=)
-			return
+			if (ok@ 0 ~=)
+				return
+			end
 		end
 
 		dll@ DLL_Next + @ dll!
@@ -291,12 +305,8 @@ fn DLLSectionRelocate { dll section id -- ok }
 	auto count
 	section@ LOFFLoadedSection_FixupCount + @ count!
 
-	// only rebase self-references if linked addr =/= real addr
-	auto rebaseme
-	section@ LOFFLoadedSection_LinkedAddr + @ section@ LOFFLoadedSection_RealAddr + @ ~= rebaseme!
-
-	auto rebase
-	dll@ DLL_LOFF + LOFFLoaded_Rebased + @ rebase!
+	auto loff
+	dll@ DLL_LOFF + loff!
 
 	auto base
 	section@ LOFFLoadedSection_RealAddr + @ base!
@@ -311,6 +321,26 @@ fn DLLSectionRelocate { dll section id -- ok }
 			ptr@ LOFFFixup_Size + @
 			ptr@ LOFFFixup_Shift + @
 			DLLDoFixup
+		end else // this fixup refers to this code module
+			if (sym@ LOFFSymbol_Section + @ id@ ~=)
+				auto q
+				loff@
+				LOFFLoaded_TextLinkedAddr +
+				sym@ LOFFSymbol_Section + @ 1 -
+				LOFFLoadedSection_SIZEOF * + q!
+
+				ptr@ LOFFFixup_Offset + @ base@ +
+				sym@ LOFFSymbol_Value + @ q@ LOFFLoadedSection_RealAddr + @ +
+				ptr@ LOFFFixup_Size + @
+				ptr@ LOFFFixup_Shift + @
+				DLLDoFixup
+			end else
+				ptr@ LOFFFixup_Offset + @ base@ +
+				sym@ LOFFSymbol_Value + @ base@ +
+				ptr@ LOFFFixup_Size + @
+				ptr@ LOFFFixup_Shift + @
+				DLLDoFixup
+			end
 		end
 
 		LOFFFixup_SIZEOF ptr +=
@@ -338,10 +368,12 @@ fn DLLRelocateAll { -- ok }
 	DLLListHead@ dll!
 
 	while (dll@)
-		dll@ DLLRelocate ok!
+		if (dll@ DLL_LOFF + LOFFLoaded_Rebased + @)
+			dll@ DLLRelocate ok!
 
-		if (ok@ 0 ~=)
-			return
+			if (ok@ 0 ~=)
+				return
+			end
 		end
 
 		dll@ DLL_Next + @ dll!

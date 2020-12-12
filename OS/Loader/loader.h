@@ -23,6 +23,8 @@ extern LOFFGetString { loff offset -- str }
 struct LOFFLoaded
 	4 Entrypoint
 
+	4 Base
+
 	4 SymbolTable
 	4 SymbolCount
 
@@ -64,9 +66,9 @@ struct LOFFHeader
 	4 Stripped
 	4 ImportTableOffset
 	4 ImportCount
-	4 HeaderSize
+	4 Reserved1
 	4 Fragment
-	12 Reserved
+	12 Reserved2
 	4 TextHeader
 	4 DataHeader
 	4 BSSHeader

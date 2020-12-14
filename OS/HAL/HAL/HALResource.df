@@ -1,0 +1,87 @@
+#include "<df>/dragonfruit.h"
+#include "../../Loader/LoaderGlobal.h"
+
+#include "<inc>/HALConsole.h"
+
+var HALResourceListHead 0
+
+fn HALResourceInit { ldrinfo -- ok }
+	ldrinfo@ LoaderInfo_ResourceListHead + @ HALResourceListHead!
+
+	0 ok!
+end
+
+fn HALResourceByName { name -- rsrc }
+	HALResourceListHead@ rsrc!
+
+	while (rsrc@)
+		if (rsrc@ BootResource_Data + @)
+			if (rsrc@ BootResource_Name + name@ strcmp)
+				return
+			end
+		end
+
+		rsrc@ BootResource_Next + @ rsrc!
+	end
+end
+
+// free up memory by eliminating the bitmap allocations for any resources marked jettisonable
+// this is done before the kernel sets up its memory allocator using the bootloader's initial bitmap
+// so we need the support routine HALJettisonSupportMemSetStatus to accomplish this
+
+fn HALResourceJettison { ldrinfo -- }
+	auto bmp
+	ldrinfo@ LoaderInfo_InitMemBmp + @ bmp!
+
+	auto rsrc
+	HALResourceListHead@ rsrc!
+
+	while (rsrc@)
+		if (rsrc@ BootResource_Jettison + @)
+			auto sz
+			rsrc@ BootResource_Size + @ 4095 + 12 >> sz!
+
+			auto start
+			rsrc@ BootResource_Data + @ start!
+
+			bmp@ 0 sz@ start@ HALJettisonSupportMemSetStatus
+
+			0 rsrc@ BootResource_Data + ! // mark jettisoned
+		end
+
+		rsrc@ BootResource_Next + @ rsrc!
+	end
+end
+
+fn HALJettisonSupportMemSetStatus { bmp with pages start -- }
+	auto max
+	pages@ start@ + max!
+
+	start@ 32 / 4 * bmp +=
+
+	auto word
+	bmp@@ word!
+
+	auto q
+	start@ q!
+
+	while (start@ max@ <)
+		if (with@)
+			word@ start@ 31 & bitset word!
+		end else
+			word@ start@ 31 & bitclear word!
+		end
+
+		1 start +=
+
+		if (start@ 31 & ~~)
+			word@ bmp@!
+
+			4 bmp +=
+
+			bmp@@ word!
+		end
+	end
+
+	word@ bmp@!
+end

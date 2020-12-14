@@ -9,9 +9,12 @@ struct LoaderInfo
 	4 DLLListHead
 	4 ResourceListHead
 	4 ArgsBuffer
+	4 KeMain
 endstruct
 
-struct LoaderResource
+struct BootResource
+	4 Next
+	4 Jettison
 	64 Name
 	4 Size
 	4 Data

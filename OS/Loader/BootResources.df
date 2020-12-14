@@ -1,0 +1,222 @@
+#include "<df>/dragonfruit.h"
+#include "Loader.h"
+
+var ResourceListHead 0
+public ResourceListHead
+
+buffer ResourceLineBuf 256
+
+var ResourceSeek 0
+
+fn ResourceGetLineRaw { ino -- more }
+	auto chars
+	0 chars!
+
+	auto p
+	ResourceLineBuf p!
+
+	1 more!
+
+	auto comment
+	0 comment!
+
+	auto r
+
+	while (chars@ 255 <)
+		p@ 1 ResourceSeek@ ino@ AFSRead r!
+
+		if (r@ 0 ==)
+			if (chars@ 0 ==)
+				0 more!
+			end
+
+			break
+		end
+
+		r@ ResourceSeek +=
+
+		if (p@ gb '\n' ==)
+			break
+		end
+
+		if (comment@)
+			continue
+		end
+
+		1 p +=
+
+		if (p@ 1 - gb '#' ==)
+			1 p -=
+			0 p@ sb
+
+			while (p@ gb ' ' ==)
+				0 p@ sb
+				1 p -=
+			end
+
+			1 comment!
+		end
+
+		1 chars +=
+	end
+
+	0 p@ sb
+end
+
+var ResourceLBP 0
+
+fn ResourceGetLine { ino -- more }
+	ResourceLineBuf ResourceLBP!
+
+	0 ResourceLineBuf sb
+
+	1 more!
+
+	while (ResourceLineBuf strlen 0 ==)
+		if (more@ 0 ==)
+			return
+		end
+
+		ino@ ResourceGetLineRaw more!
+	end
+end
+
+fn ResourceParseField { field m -- }
+	if (ResourceLBP@ ~~)
+		0 field@ sb
+		return
+	end
+
+	ResourceLBP@ field@ ' ' m@ strntok ResourceLBP!
+end
+
+buffer ResourcePathBuffer 128
+
+fn ResourceByName { name -- rsrc }
+	ResourceListHead@ rsrc!
+
+	while (rsrc@)
+		if (rsrc@ BootResource_Name + name@ strcmp)
+			return
+		end
+
+		rsrc@ BootResource_Next + @ rsrc!
+	end
+end
+
+fn ResourceLoad { name file -- ok }
+	auto rsrc
+	name@ ResourceByName rsrc!
+
+	if (rsrc@)
+		0 ok!
+		return
+	end
+
+	BootResource_SIZEOF Calloc rsrc!
+
+	rsrc@ BootResource_Name + name@ strcpy
+
+	auto path
+
+	if (file@ gb '/' ==)
+		file@ path!
+	end else
+		ResourcePathBuffer path!
+
+		auto prefix
+		"/Andromeda/BootResources/" prefix!
+
+		path@ prefix@ strcpy
+		path@ prefix@ strlen + file@ strcpy
+	end
+
+	path@ name@ "resource %s @ %s... " Printf
+
+	auto ino
+	path@ AFSPath ino!
+
+	if (ino@ -1 ==)
+		"not found\n" Printf
+		rsrc@ Free
+		-1 ok!
+		return
+	end
+
+	auto sz
+	ino@ AFSINodeSize sz!
+
+	auto data
+	sz@ 4095 + 12 >> 0 MemAlloc ok! data!
+
+	if (ok@ -1 ==)
+		ino@ AFSFreeINode
+		rsrc@ Free
+
+		"not enough memory\n" Printf
+		return
+	end
+
+	12 data <<=
+
+	data@ sz@ 0 ino@ AFSRead ok!
+
+	ino@ AFSFreeINode
+
+	if (ok@ sz@ ~=)
+		sz@ 4095 + 12 >> data@ 12 >> MemFree
+		rsrc@ Free
+
+		"error\n" Printf
+
+		-1 ok!
+		return
+	end
+
+	'\n' Putc
+
+	data@ rsrc@ BootResource_Data + !
+	sz@ rsrc@ BootResource_Size + !
+	1 rsrc@ BootResource_Jettison + !
+
+	if (ResourceListHead@)
+		ResourceListHead@ rsrc@ BootResource_Next + !
+	end
+
+	rsrc@ ResourceListHead!
+end
+
+fn ResourceLoadAll { -- ok }
+	auto rsrci
+	"/Andromeda/BootResources.txt" AFSPath rsrci!
+
+	if (rsrci@ -1 ==)
+		"couldn't find /Andromeda/BootResources.txt\n" Printf
+		-1 ok!
+		return
+	end
+
+	auto name
+	64 alloc name!
+
+	auto file
+	128 alloc file!
+
+	0 ResourceSeek!
+
+	0 ok!
+
+	auto next
+	rsrci@ ResourceGetLine next!
+
+	while (next@)
+		name@ 63 ResourceParseField
+		file@ 127 ResourceParseField
+
+		name@ file@ ResourceLoad ok!
+
+		rsrci@ ResourceGetLine next!
+	end
+
+	rsrci@ AFSFreeINode
+end

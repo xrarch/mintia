@@ -12,7 +12,7 @@ DCFLAGS = incdir=./include/:../HAL/include
 
 all: AndromedaKernel.exe
 
-AndromedaKernel.exe: $(OBJ)
+AndromedaKernel.exe: $(OBJ) $(LIBDIR)/Dragonfruit.dll $(LIBDIR)/HALLIMNstation.dll
 	$(LD) AndromedaKernel.exe $(OBJ) -d $(LIBDIR)/Dragonfruit.dll HAL.dll:$(LIBDIR)/HALLIMNstation.dll
 	$(OBJTOOL) move AndromedaKernel.exe text=0x120000,data=text+text_size+align,bss=data+data_size+align
 
@@ -20,4 +20,4 @@ AndromedaKernel.exe: $(OBJ)
 	$(DC) $(DCFLAGS) $< $@
 
 cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF
+	rm -f ${OBJ} *.a3x *.LOFF AndromedaKernel.exe

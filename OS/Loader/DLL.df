@@ -70,14 +70,11 @@ fn DLLLoad { name -- dll ok }
 		LoaderEntrypoint@ name@ "entrypoint = %s:0x%x\n" Printf
 	end
 
-	auto l
-	DLLListHead@ l!
+	if (DLLListHead@)
+		DLLListHead@ dll@ DLL_Next + !
+	end
 
 	dll@ DLLListHead!
-
-	if (l@)
-		l@ dll@ DLL_Next + !
-	end
 
 	dll@ DLLDoImports ok!
 
@@ -173,6 +170,23 @@ fn DLLGetSymbol { dll name -- symbol }
 	end
 end
 
+fn DLLGetSymbolAddress { dll name -- address }
+	auto sym
+	dll@ name@ DLLGetSymbol sym!
+
+	0 address!
+
+	if (sym@)
+		auto section
+		dll@ DLL_LOFF +
+		LOFFLoaded_TextLinkedAddr +
+		sym@ LOFFSymbol_Section + @ 1 -
+		LOFFLoadedSection_SIZEOF * + section!
+
+		sym@ LOFFSymbol_Value + @ section@ LOFFLoadedSection_RealAddr + @ + address!
+	end
+end
+
 fn DLLResolve { dll -- ok }
 	auto ptr
 	dll@ DLL_LOFF + LOFFLoaded_SymbolTable + @ ptr!
@@ -205,13 +219,13 @@ fn DLLResolve { dll -- ok }
 
 				import@ LOFFImport_DLL + @ sdll!
 
-				sdll@ name@ DLLGetSymbol wsym!
+				sdll@ name@ DLLGetSymbolAddress wsym!
 			end else // we have to search everybody, this is slower!
 				DLLListHead@ sdll!
 
 				while (sdll@)
 					if (sdll@ dll@ ~=) // don't search myself, I'm the only place it can't be
-						sdll@ name@ DLLGetSymbol wsym!
+						sdll@ name@ DLLGetSymbolAddress wsym!
 
 						if (wsym@)
 							break
@@ -233,18 +247,8 @@ fn DLLResolve { dll -- ok }
 				return
 			end
 
-			// sdll@ DLL_Name + name@ dll@ DLL_Name + "%s: resolved '%s' from %s\n" Printf
-
-			auto section
-			sdll@ DLL_LOFF +
-			LOFFLoaded_TextLinkedAddr +
-			wsym@ LOFFSymbol_Section + @ 1 -
-			LOFFLoadedSection_SIZEOF * + section!
-
 			LOFFRESOLVED ptr@ LOFFSymbol_Type + !
-			wsym@ LOFFSymbol_Value + @ section@ LOFFLoadedSection_RealAddr + @ + ptr@ LOFFSymbol_Value + !
-			wsym@ LOFFSymbol_Section + @ ptr@ LOFFSymbol_Section + !
-			wsym@ ptr@ LOFFSymbol_ImportIndex + !
+			wsym@ ptr@ LOFFSymbol_Value + !
 		end
 
 		LOFFSymbol_SIZEOF ptr +=

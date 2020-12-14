@@ -29,6 +29,7 @@ sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	$(FSTOOL) w /Andromeda/Dragonfruit.dll $(LIB_DIR)/Dragonfruit.dll
 	make -C $(HAL_DIR)
 	$(FSTOOL) w /Andromeda/HALLIMNstation.dll $(LIB_DIR)/HALLIMNstation.dll
+	$(FSTOOL) w /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll

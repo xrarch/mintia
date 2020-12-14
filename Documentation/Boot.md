@@ -12,7 +12,7 @@ The boot process starts when the [LIMNstation BIOS](https://github.com/limnarch/
 
 ## Loader
 
-Loader starts by loading the kernel, AndromedaKernel.exe, from the system directory. It will also load any dependencies of the kernel, which will typically drag in the Hardware Abstraction Layer (HAL) and the dragonfruit library. It will try to fit these things into the natural addresses they're linked to, but if it can't, it will relocate them. This is much slower, and therefore bad, and should be avoided.
+Loader starts by loading the kernel, AndromedaKernel.exe, from the system directory. It will also load any dependencies of the kernel. This process will typically drag in the Hardware Abstraction Layer (HAL) and the dragonfruit library. It will try to fit these things into the natural addresses they're linked to, but if it can't, it will relocate them. This is much slower, and therefore bad, and should be avoided.
 
 Loader will then iterate through the BIOS device tree and load the drivers for any unique device models it finds. It will try to load them as "[model]:[revision].dll", and if one or more drivers for the suitable model is found, but not for the correct revision number, it will present a list of choices to the user to try to use for that device. It will also read the `Drivers/BootDrivers.txt` file, and load any modules it finds there, assuming they are not already loaded.
 

@@ -1,14 +1,139 @@
 #include "<df>/dragonfruit.h"
+#include "../../Loader/LoaderGlobal.h"
 
-var HALLogLastSource 0
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALConsole.h"
+#include "<inc>/HALResource.h"
 
-fn HALLog { ... fmt src -- }
-	if (HALLogLastSource@ src@ ==)
-		"  " Printf
-	end else
-		src@ HALLogLastSource!
-		src@ "%s: " Printf
+extern HALPlatformConsoleInit { format wantmode -- havemode }
+
+var HALConsoleMode 0
+public HALConsoleMode
+
+var HALConsoleFont 0
+public HALConsoleFont
+
+fn HALConsoleInit { ldrinfo -- }
+	auto mode
+	CONSOLEMODETTY mode!
+
+	auto font
+	0 font!
+
+	auto format
+	ldrinfo@ LoaderInfo_HALConsoleFBFormat + @ format!
+
+	if ("-ttymode" HALArgsCheck ~~)
+		if (format@)
+			"HALFont" HALResourceByName font!
+
+			if (font@)
+				font@ HALResourceWire
+
+				font@ HALResourceData font!
+
+				if (font@ HCFHeader_Magic + @ HCFMAGIC ==)
+					ldrinfo@ font@ HALConsoleInitParameters
+
+					CONSOLEMODESCREEN mode!
+				end
+			end
+		end
 	end
 
-	argv argc@ fmt@ VPrintf
+	ldrinfo@ mode@ HALPlatformConsoleInit mode!
+
+	mode@ HALConsoleMode!
+
+	if (mode@ CONSOLEMODESCREEN ==)
+		CONSOLEBG HALPlatformConsoleClear
+	end
+end
+
+var HALConsoleFontWidth 0
+public HALConsoleFontWidth
+
+var HALConsoleFontHeight 0
+public HALConsoleFontHeight
+
+var HALConsoleWidthChars 0
+public HALConsoleWidthChars
+
+var HALConsoleHeightChars 0
+public HALConsoleHeightChars
+
+var HALConsoleWidthPix 0
+public HALConsoleWidthPix
+
+var HALConsoleHeightPix 0
+public HALConsoleHeightPix
+
+var HALConsoleFontGlyphSize 0
+
+fn HALConsoleInitParameters { ldrinfo font -- }
+	font@ HCFHeader_SIZEOF + HALConsoleFont!
+
+	auto cw
+	font@ HCFHeader_Width + @ cw!
+
+	cw@ HALConsoleFontWidth!
+
+	auto ch
+	font@ HCFHeader_Height + @ ch!
+
+	ch@ HALConsoleFontHeight!
+
+	cw@ 7 + 3 >> ch@ * HALConsoleFontGlyphSize!
+
+	auto sw
+	ldrinfo@ LoaderInfo_HALConsoleFBWidth + @ sw!
+
+	sw@ HALConsoleWidthPix!
+
+	auto sh
+	ldrinfo@ LoaderInfo_HALConsoleFBHeight + @ sh!
+
+	sh@ HALConsoleHeightPix!
+
+	sw@ cw@ / HALConsoleWidthChars!
+	sh@ ch@ / HALConsoleHeightChars!
+end
+
+extern HALPlatformConsolePutc { c -- }
+
+extern HALPlatformConsoleDrawChar { bmp x y -- }
+
+extern HALPlatformConsoleClear { color -- }
+
+var HALConsoleX 0
+var HALConsoleY 0
+
+fn private Newline { -- }
+	1 HALConsoleY +=
+	0 HALConsoleX!
+
+	if (HALConsoleY@ HALConsoleHeightChars@ ==)
+		0 HALConsoleX!
+		0 HALConsoleY!
+
+		CONSOLEBG HALPlatformConsoleClear
+	end
+end
+
+fn HALPutc { c -- }
+	if (HALConsoleMode@ CONSOLEMODESCREEN ==)
+		if (c@ '\n' ==)
+			Newline
+		end else
+			if (HALConsoleX@ 1 + HALConsoleWidthChars@ ==)
+				Newline
+			end
+
+			HALConsoleFont@ c@ HALConsoleFontGlyphSize@ * + HALConsoleX@ HALConsoleFontWidth@ * HALConsoleY@ HALConsoleFontHeight@ * HALPlatformConsoleDrawChar
+
+			1 HALConsoleX +=
+		end
+	end else
+		c@ HALPlatformConsolePutc
+	end
 end

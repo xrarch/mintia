@@ -4,8 +4,22 @@ struct HCFHeader
 	4 Magic
 	4 Width
 	4 Height
-	12 Reserved
+	20 Reserved
 endstruct
 
 extern HALPutc { c -- }
-extern HALLog { ... fmt src -- }
+
+const CONSOLEBG 5 // purple
+
+const CONSOLEMODEOFF 0
+const CONSOLEMODETTY 1
+const CONSOLEMODESCREEN 2
+
+externptr HALConsoleMode
+externptr HALConsoleFont
+externptr HALConsoleFontWidth
+externptr HALConsoleFontHeight
+externptr HALConsoleWidthChars
+externptr HALConsoleHeightChars
+externptr HALConsoleWidthPix
+externptr HALConsoleHeightPix

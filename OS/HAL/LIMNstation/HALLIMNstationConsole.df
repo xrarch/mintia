@@ -1,6 +1,101 @@
 #include "<ll>/rta3x/a3x.h"
 #include "<df>/dragonfruit.h"
+#include "../../Loader/LoaderGlobal.h"
 
-fn HALPutc { c -- }
+#include "<inc>/HALConsole.h"
+
+table Palette
+	0x7FFF // 0: white
+	0x07DF // 1: yellow
+	0x019F // 2: orange
+	0x043B // 3: red
+	0x403D // 4: magenta
+	0x5009 // 5: purple
+	0x6800 // 6: blue
+	0x72A0 // 7: cyan
+	0x0AC4 // 8: green
+	0x0980 // 9: dark green
+	0x04AA // 10: brown
+	0x1DD2 // 11: tan
+	0x5EF7 // 12: light gray
+	0x4210 // 13: gray
+	0x2108 // 14: dark gray
+	0x0000 // 15: black
+endtable
+
+var FBAddr 0
+var FBSize 0
+var FBModulo 0
+
+asm "
+
+;a0 - glyph addr
+;a1 - fb modulo
+;a2 - start addr
+;a3 - height
+DrawGlyph:
+	li t4, 0x7FFF
+
+.yloop:
+	subi a3, a3, 1
+
+	li t1, 8
+
+	l.b t2, a0, zero
+
+.xloop:
+	subi t1, t1, 1
+
+	rsh t3, t2, t1
+	andi t3, t3, 1
+	beq t3, zero, .nopix
+
+	s.i a2, zero, t4
+
+.nopix:
+	addi a2, a2, 2
+	bne t1, zero, .xloop
+
+	addi a0, a0, 1
+	add a2, a2, a1
+	bne a3, zero, .yloop
+
+	ret
+
+"
+
+extern DrawGlyph { height start mod bmp -- }
+
+fn HALPlatformConsoleDrawChar { bmp x y -- }
+	HALConsoleFontHeight@ y@ HALConsoleWidthPix@ * x@ + 1 << FBAddr@ + FBModulo@ bmp@ DrawGlyph
+end
+
+fn HALPlatformConsolePutc { c -- }
 	c@ a3xPutc
+end
+
+fn HALPlatformConsoleClear { color -- }
+	auto c
+	[color@]Palette@ c!
+
+	auto c32
+	c@ 16 << c@ | c32!
+
+	FBAddr@ FBSize@ c32@ memset
+end
+
+fn HALPlatformConsoleInit { ldrinfo wantmode -- havemode }
+	if (wantmode@ CONSOLEMODESCREEN ==)
+		if (ldrinfo@ LoaderInfo_HALConsoleFBFormat + @ BOOTFBFORMAT_AB5G5R5 ~=)
+			CONSOLEMODETTY havemode!
+		end else
+			ldrinfo@ LoaderInfo_HALConsoleFBAddr + @ FBAddr!
+			HALConsoleWidthPix@ HALConsoleHeightPix@ * 1 << FBSize!
+			HALConsoleWidthPix@ HALConsoleFontWidth@ - 1 << FBModulo!
+
+			wantmode@ havemode!
+		end
+	end else
+		wantmode@ havemode!
+	end
 end

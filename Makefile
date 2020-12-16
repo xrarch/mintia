@@ -1,9 +1,9 @@
-DISTIMAGE  := ./dist/dist.img
+DISTIMAGE  := ./Distribution/Andromeda.img
 DISTIMGSZ  := 2048
 FST        := ../sdk/fstool.sh
 OBJTOOL    := ../sdk/link.sh
 
-DISKLABEL  := ./dist/preset.disklabel
+DISKLABEL  := ./Distribution/DiskLabel.bin
 OFFSET     := 2
 
 OS_DIR     := ./OS
@@ -11,6 +11,7 @@ LOAD_DIR   := $(OS_DIR)/Loader
 KERN_DIR   := $(OS_DIR)/Kernel
 LIB_DIR    := $(OS_DIR)/Library
 HAL_DIR    := $(OS_DIR)/HAL
+BR_DIR     := $(OS_DIR)/BootResources
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
@@ -26,10 +27,10 @@ kernel:
 	$(FSTOOL) w /Andromeda/AndromedaKernel.exe $(KERN_DIR)/AndromedaKernel.exe
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
-	$(FSTOOL) w /Andromeda/Dragonfruit.dll $(LIB_DIR)/Dragonfruit.dll
 	make -C $(HAL_DIR)
-	$(FSTOOL) w /Andromeda/HALLIMNstation.dll $(LIB_DIR)/HALLIMNstation.dll
 	$(FSTOOL) w /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
+	make -C $(LIB_DIR)
+	make -C $(BR_DIR)
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll

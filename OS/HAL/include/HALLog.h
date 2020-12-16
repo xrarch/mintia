@@ -1,0 +1,1 @@
+extern HALLog { ... fmt src -- }

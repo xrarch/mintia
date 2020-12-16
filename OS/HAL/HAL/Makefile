@@ -13,7 +13,7 @@ all: HALhal.o
 HALhal.o: $(OBJ)
 	$(LD) -f HALhal.o $(OBJ)
 
-%.o: %.df
+%.o: %.df ../include/*.h
 	$(DC) $(DCFLAGS) $< $@
 
 cleanup:

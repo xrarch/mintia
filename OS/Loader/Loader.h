@@ -26,6 +26,8 @@ extern LOFFGetString { loff offset -- str }
 struct LOFFLoaded
 	4 Entrypoint
 
+	4 Timestamp
+
 	4 Base
 
 	4 SymbolTable
@@ -69,7 +71,7 @@ struct LOFFHeader
 	4 Stripped
 	4 ImportTableOffset
 	4 ImportCount
-	4 Reserved1
+	4 Timestamp
 	4 Fragment
 	12 Reserved2
 	4 TextHeader
@@ -106,7 +108,7 @@ struct LOFFImport
 	4 ExpectedText
 	4 ExpectedData
 	4 ExpectedBSS
-	4 DLL
+	4 Timestamp
 endstruct
 
 struct LOFFFixup
@@ -135,6 +137,7 @@ externptr MemBitmap
 externptr DLLListHead
 externptr ArgsBuffer
 externptr ResourceListHead
+externptr DLLForceRelink
 
 struct AFSSuperblock
 	4 Version

@@ -12,7 +12,7 @@ extern HALConsoleQuery { -- w h x y }
 extern HALConsoleSetCursor { x y -- }
 extern HALConsoleClear { -- }
 
-const CONSOLEBG 5 // blue
+const CONSOLEBG 6 // blue
 
 const CONSOLEMODEOFF 0
 const CONSOLEMODETTY 1

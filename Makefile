@@ -44,4 +44,4 @@ $(DISTIMAGE):
 cleanup:
 	make -C $(OS_DIR) cleanup
 	rm -f $(DISTIMAGE)
-	rm -f OS/Library/*
+	rm -f OS/Library/*.dll

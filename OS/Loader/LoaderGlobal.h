@@ -17,6 +17,8 @@ struct LoaderInfo
 	4 HALConsoleFBHeight
 	4 HALConsoleFBFormat
 	4 TotalRAM
+	4 InterruptStack
+	4 InterruptStackPages
 endstruct
 
 struct BootResource
@@ -25,4 +27,64 @@ struct BootResource
 	64 Name
 	4 Size
 	4 Data
+endstruct
+
+struct LOFFLoaded
+	4 Entrypoint
+
+	4 Timestamp
+
+	4 Base
+
+	4 SymbolTable
+	4 SymbolCount
+
+	4 ImportTable
+	4 ImportCount
+
+	4 StringTable
+	4 StringSize
+
+	4 Rebased
+
+	4 TextLinkedAddr
+	4 TextRealAddr
+	4 TextSize
+	4 TextFixupTable
+	4 TextFixupCount
+
+	4 DataLinkedAddr
+	4 DataRealAddr
+	4 DataSize
+	4 DataFixupTable
+	4 DataFixupCount
+
+	4 BSSLinkedAddr
+	4 BSSRealAddr
+	4 BSSSize
+	4 BSSFixupTable
+	4 BSSFixupCount
+endstruct
+
+struct DLL
+	4 Next
+	128 Name
+
+	LOFFLoaded_SIZEOF LOFF
+endstruct
+
+struct LOFFSymbol
+	4 NameOffset
+	4 Section
+	4 Type
+	4 Value
+	4 ImportIndex
+endstruct
+
+struct LOFFLoadedSection
+	4 LinkedAddr
+	4 RealAddr
+	4 Size
+	4 FixupTable
+	4 FixupCount
 endstruct

@@ -11,7 +11,49 @@ public LoaderEntrypoint
 var LoaderHALName 0
 public LoaderHALName
 
-fnptr StandaloneEntry { ldrinfo api bootdev arg -- ret }
+var LoaderInterruptStackTop 0
+
+asm "
+
+SavedSP:
+	.dl 0
+
+StandaloneEntry:
+	push lr
+
+	la  t0, SavedSP
+	s.l t0, zero, sp
+
+	la  t0, LoaderInterruptStackTop
+	l.l sp, t0, zero
+
+	subi  sp, sp, 8
+	s.l   sp, zero, zero
+	sio.l sp, 4, zero
+
+	la  t0, LoaderEntrypoint
+	l.l t0, t0, zero
+
+	la  t1, a3xMyDevice
+	l.l a1, t1, zero
+
+	la  t1, a3xCIPtr
+	l.l a2, t1, zero
+
+	la  a3, LoaderInfoBlock
+
+	jalr t0
+
+	la  t0, SavedSP
+	l.l sp, t0, zero
+
+	pop lr
+
+	ret
+
+"
+
+extern StandaloneEntry { -- ret }
 
 fn LoaderNVRAMGetVar { name -- value }
 	"/nvram" a3xDeviceSelect
@@ -22,6 +64,8 @@ end
 buffer LoaderInfoBlock LoaderInfo_SIZEOF
 
 buffer HALNameBuffer 128
+
+const INTERRUPTSTACKPAGES 2
 
 fn Main { args -- ret }
 	0 ret!
@@ -130,6 +174,16 @@ fn Main { args -- ret }
 		a3xDeviceExit
 	end
 
+	auto istack
+	INTERRUPTSTACKPAGES 0 MemAlloc ret! istack!
+
+	if (ret@ 0 ~=)
+		"couldn't allocate interrupt stack\n" LoaderPanic
+	end
+
+	12 istack <<=
+	istack@ INTERRUPTSTACKPAGES 12 << + LoaderInterruptStackTop!
+
 	LOADERMAJOR LoaderInfoBlock LoaderInfo_Major + !
 	LOADERMINOR LoaderInfoBlock LoaderInfo_Minor + !
 
@@ -140,10 +194,12 @@ fn Main { args -- ret }
 	ArgsBuffer LoaderInfoBlock LoaderInfo_ArgsBuffer + !
 	kemain@ LoaderInfoBlock LoaderInfo_KeMain + !
 	LoaderTotalRAM@ LoaderInfoBlock LoaderInfo_TotalRAM + !
+	istack@ LoaderInfoBlock LoaderInfo_InterruptStack + !
+	INTERRUPTSTACKPAGES LoaderInfoBlock LoaderInfo_InterruptStackPages + !
 
 	"Into the fire.\n\n" Printf
 
-	LoaderInfoBlock a3xCIPtr@ a3xMyDevice@ args@ LoaderEntrypoint@ StandaloneEntry ret!
+	StandaloneEntry ret!
 
 	a3xConsoleUserOut
 

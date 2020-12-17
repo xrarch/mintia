@@ -8,8 +8,11 @@ struct HCFHeader
 endstruct
 
 extern HALPutc { c -- }
+extern HALConsoleQuery { -- w h x y }
+extern HALConsoleSetCursor { x y -- }
+extern HALConsoleClear { -- }
 
-const CONSOLEBG 5 // purple
+const CONSOLEBG 5 // blue
 
 const CONSOLEMODEOFF 0
 const CONSOLEMODETTY 1

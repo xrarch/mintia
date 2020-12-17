@@ -1,3 +1,3 @@
 # Andromeda
 
-Vaguely NT-inspired operating system for LIMNstation. Better-designed sibling of [aisix](http://github.com/limnarch/aisix).
+Vaguely NT-inspired operating system for LIMNstation. Attempt at a better-designed sibling of [aisix](http://github.com/limnarch/aisix).

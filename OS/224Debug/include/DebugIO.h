@@ -1,0 +1,1 @@
+extern DebugGets { s max -- }

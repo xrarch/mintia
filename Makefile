@@ -11,11 +11,12 @@ LOAD_DIR   := $(OS_DIR)/Loader
 KERN_DIR   := $(OS_DIR)/Kernel
 LIB_DIR    := $(OS_DIR)/Library
 HAL_DIR    := $(OS_DIR)/HAL
+DBG_DIR    := $(OS_DIR)/224Debug
 BR_DIR     := $(OS_DIR)/BootResources
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
-dist: $(DISTIMAGE) bootable sysfiles kernel
+dist: $(DISTIMAGE) bootable sysfiles kernel 224debug
 
 bootable:
 	make -C $(LOAD_DIR)
@@ -25,6 +26,10 @@ bootable:
 kernel:
 	make -C $(KERN_DIR)
 	$(FSTOOL) w /Andromeda/AndromedaKernel.exe $(KERN_DIR)/AndromedaKernel.exe
+
+224debug:
+	make -C $(DBG_DIR)
+	$(FSTOOL) w /Andromeda/224Debug.exe $(DBG_DIR)/224Debug.exe
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	make -C $(HAL_DIR)

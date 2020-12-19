@@ -3,7 +3,7 @@ DISTIMGSZ  := 2048
 FST        := ../sdk/fstool.sh
 OBJTOOL    := ../sdk/link.sh
 
-DISKLABEL  := ./Distribution/DiskLabel.bin
+DISKLABEL  := ./Distribution/DiskLabel.vh
 OFFSET     := 2
 
 OS_DIR     := ./OS

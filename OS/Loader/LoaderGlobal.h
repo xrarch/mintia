@@ -1,4 +1,4 @@
-const LOADERMAJOR 1
+const LOADERMAJOR 2
 const LOADERMINOR 0
 
 const BOOTFBFORMAT_AB5G5R5 1
@@ -36,6 +36,7 @@ struct LOFFLoaded
 	4 Timestamp
 
 	4 Base
+	4 HeaderSize
 
 	4 SymbolTable
 	4 SymbolCount

@@ -19,7 +19,7 @@ struct LoaderInfo
 	4 TotalRAM
 	4 InterruptStack
 	4 InterruptStackPages
-	4 DebuggerEntry
+	4 DebugInit
 endstruct
 
 struct BootResource

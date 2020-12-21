@@ -1,0 +1,174 @@
+#include "<ll>/rta3x/a3x.h"
+#include "<df>/dragonfruit.h"
+#include "../Loader/LoaderGlobal.h"
+
+#include "<inc>/HALConsole.h"
+#include "<inc>/DebugTrace.h"
+
+externptr HALLoaderInfo
+
+var DebugLink 0
+
+asm "
+
+GetLink:
+	la t0, DebugLink
+	s.l t0, zero, sp
+	ret
+
+"
+
+extern GetLink { -- }
+
+fn DebugDump { rows cols -- }
+	GetLink
+
+	auto link
+	DebugLink@ link!
+
+	pointerof DebugDump 4 + link@ rows@ cols@ DebugTrace
+end
+
+fn private GetSymDLL { pc -- dll symbase symname }
+	HALLoaderInfo@ LoaderInfo_DLLListHead + @ dll!
+
+	0 symbase!
+	0 symname!
+
+	while (dll@)
+		auto loff
+		dll@ DLL_LOFF + loff!
+
+		if (pc@ loff@ LOFFLoaded_TextRealAddr + @ <)
+			dll@ DLL_Next + @ dll!
+			continue
+		end
+
+		if (pc@ loff@ LOFFLoaded_TextRealAddr + @ loff@ LOFFLoaded_TextSize + @ + >=)
+			dll@ DLL_Next + @ dll!
+			continue
+		end
+
+		auto ptr
+		loff@ LOFFLoaded_SymbolTable + @ ptr!
+
+		auto i
+		0 i!
+
+		auto count
+		loff@ LOFFLoaded_SymbolCount + @ count!
+
+		auto stab
+		loff@ LOFFLoaded_StringTable + @ stab!
+
+		while (i@ count@ <)
+			if (ptr@ LOFFSymbol_Section + @ 1 == ptr@ LOFFSymbol_Type + @ 1 == &&)
+				auto sptr
+				ptr@ LOFFSymbol_Value + @ loff@ LOFFLoaded_TextRealAddr + @ + sptr!
+
+				if (pc@ sptr@ >=)
+					sptr@ symbase!
+					if (ptr@ LOFFSymbol_NameOffset + @ 0xFFFFFFFF ~=)
+						ptr@ LOFFSymbol_NameOffset + @ stab@ + symname!
+
+						// symname@ sptr@ "%x %s " Printf
+					end else
+						0 symname!
+					end
+				end elseif (pc@ sptr@ <)
+					return
+				end
+			end
+
+			LOFFSymbol_SIZEOF ptr +=
+			1 i +=
+		end
+
+		if (symbase@)
+			return
+		end
+
+		dll@ DLL_Next + @ dll!
+	end
+
+	0 symbase!
+	0 symname!
+end
+
+buffer TraceNameBuffer 128
+
+fn DebugTrace { pc link rows cols -- }
+	"\n" Printf
+
+	1 rows -=
+
+	auto infocols
+	cols@ 80 / infocols!
+
+	auto i
+	infocols@ i!
+
+	while (i@)
+		"StackPtr DWORD+08 DWORD+12 DWORD+16 Name                              " Printf
+		1 i -=
+	end
+
+	"\n" Printf
+
+	1 rows -=
+
+	auto links
+	0 links!
+
+	while (link@ rows@ &&)
+		infocols@ i!
+
+		while (link@ i@ &&)
+			if (links@ 128 >=)
+				" maxtrace!\n" Printf
+				return
+			end
+
+			if (link@ 3 &)
+				" unaligned!\n" Printf
+				return
+			end
+
+			auto symname
+			auto symbase
+			auto dll
+
+			4 pc -=
+
+			pc@ GetSymDLL symname! symbase! dll!
+
+			if (symbase@ ~~)
+				TraceNameBuffer "UNKNOWN" strcpy
+			end else
+				if (symname@ ~~)
+					"NAMELESS" symname!
+				end
+
+				TraceNameBuffer	dll@ DLL_Name + strcpy
+				TraceNameBuffer TraceNameBuffer strlen + "!" strcpy
+				TraceNameBuffer TraceNameBuffer strlen + symname@ strcpy
+			end
+
+			TraceNameBuffer
+			link@ 16 + @
+			link@ 12 + @
+			link@ 8 + @
+			link@ "%08x %08x %08x %08x %33s " Printf
+
+			link@ 4 + @ pc!
+			link@@ link!
+
+			1 i -=
+			1 links +=
+		end
+
+		"\n" Printf
+
+		1 rows -=
+	end
+end

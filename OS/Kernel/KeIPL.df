@@ -1,0 +1,71 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/KeIPL.h"
+#include "<inc>/KeCrash.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/KeDPC.h"
+
+// XXX this global will NOT work out well if we ever go multiprocessor
+var KeIPLCurrent IPLHIGH
+
+fn KeIPLCurrentGet { -- ipl }
+	KeIPLCurrent@ ipl!
+end
+
+fn KeIPLSet { ipl -- }
+	ipl@ HALPlatformIPLSet
+
+	ipl@ KeIPLCurrent!
+end
+
+fn KeIPLRaise { newipl -- oldipl }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	KeIPLCurrent@ oldipl!
+
+	if (newipl@ oldipl@ ==)
+		rs@ HALCPUInterruptRestore
+		return
+	end
+
+	if (newipl@ oldipl@ <)
+		newipl@ oldipl@ "IPL not greater or equal (old=%d new=%d)\n" KeCrash
+	end
+
+	newipl@ KeIPLSet
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeIPLLower { newipl -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldipl
+	KeIPLCurrent@ oldipl!
+
+	if (newipl@ oldipl@ ==)
+		rs@ HALCPUInterruptRestore
+		return
+	end
+
+	if (newipl@ oldipl@ >)
+		newipl@ oldipl@ "IPL not less or equal (old=%d new=%d)\n" KeCrash
+	end
+
+	if (oldipl@ IPLDPC >=)
+		if (newipl@ IPLDPC <)
+			// must have been lowered below IPLDPC
+			IPLDPC KeIPLSet
+
+			rs@ KeDPCDispatchQueue
+		end
+	end
+
+	newipl@ KeIPLSet
+
+	rs@ HALCPUInterruptRestore
+end

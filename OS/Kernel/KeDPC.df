@@ -1,0 +1,82 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/KeIPL.h"
+#include "<inc>/KeCrash.h"
+#include "<inc>/KeDPC.h"
+
+#include "<inc>/HALCPU.h"
+
+var KeDPCListHead 0
+var KeDPCListTail 0
+
+fn KeDPCQueue { dpc -- }
+	auto ipl
+
+	if (KeIPLCurrentGet IPLDPC <)
+		// just do it immediately
+
+		IPLDPC KeIPLRaise ipl!
+
+		dpc@ DPC_Function + @ DPCFunction
+
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	IPLHIGH KeIPLRaise ipl!
+
+	auto dpch
+	KeDPCListHead@ dpch!
+
+	if (dpch@)
+		if (dpc@ DPC_Importance + @ DPCHIGHIMPORTANCE ==) // put it in front
+			dpc@ KeDPCListHead!
+			dpch@ dpc@ DPC_Next + !
+		end else // put it in the back
+			KeDPCListTail@ dpch!
+
+			0 dpc@ DPC_Next + !
+			dpc@ dpch@ DPC_Next + !
+			dpc@ KeDPCListTail!
+		end
+	end else
+		0 dpc@ DPC_Next + !
+		dpc@ KeDPCListHead!
+		dpc@ KeDPCListTail!
+	end
+
+	ipl@ KeIPLLower
+end
+
+var KeDPCActive 0
+
+// must be called with interrupts disabled
+fn KeDPCDispatchQueue { rs -- }
+	if (KeDPCActive@)
+		return
+	end
+
+	1 KeDPCActive!
+
+	auto dpc
+	KeDPCListHead@ dpc!
+
+	while (dpc@)
+		rs@ HALCPUInterruptRestore
+
+		dpc@ DPC_Function + @ DPCFunction
+
+		HALCPUInterruptDisable rs!
+
+		auto ndpc
+		dpc@ DPC_Next + @ ndpc!
+		0 dpc@ DPC_Next + !
+		ndpc@ KeDPCListHead!
+		ndpc@ dpc!
+	end
+
+	0 KeDPCActive!
+end

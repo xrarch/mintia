@@ -39,7 +39,7 @@ sysfiles: $(LIB_DIR)/Dragonfruit.dll
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll text=0xA0000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll text=0x200000,data=text+text_size+align,bss=data+data_size+align
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=4096 count=$(DISTIMGSZ) 2>/dev/null

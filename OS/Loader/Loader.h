@@ -85,6 +85,7 @@ externptr DLLListHead
 externptr ArgsBuffer
 externptr ResourceListHead
 externptr DLLForceRelink
+externptr MemPageFrameDB
 
 struct AFSSuperblock
 	4 Version

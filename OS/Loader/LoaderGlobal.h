@@ -20,6 +20,7 @@ struct LoaderInfo
 	4 InterruptStack
 	4 InterruptStackPages
 	4 DebugInit
+	4 PageFrameDB
 endstruct
 
 struct BootResource

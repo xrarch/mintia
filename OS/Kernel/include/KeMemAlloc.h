@@ -1,1 +1,1 @@
-extern KeMemPageAlloc { -- pfn }
+extern KeMemPageAlloc { -- pfdbe pfn }

@@ -21,6 +21,8 @@ struct LoaderInfo
 	4 InterruptStackPages
 	4 DebugInit
 	4 PageFrameDB
+	4 Heap
+	4 HeapSize
 endstruct
 
 struct BootResource

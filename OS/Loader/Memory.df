@@ -13,26 +13,45 @@ public MemPages
 var MemPageFrameDB 0
 public MemPageFrameDB
 
+var MemHeap 0
+public MemHeap
+
+var MemHeapSize 0
+public MemHeapSize
+
+const HEAPMAXDEFAULT (512 1024 *)
+
+const HEAPMINDEFAULT (32 1024 *)
+
+const HEAPSHFDEFAULT 5
+
 fn MemInit { -- }
 	auto bm
 	MemBitmap bm!
 
-	// limit to first 64MB as thats as far as limn2k can jump
+	auto pages
+	LoaderTotalRAM@ 12 >> pages!
 
-	LoaderTotalRAM@ 4096 / 16384 min MemPages!
+	// limit to first 64MB as thats the size of a limn2k jump segment
+	pages@ 16384 min MemPages!
 
-	// reserve 32*4*4096 = 512kb
-	// so as not to allocate over firmware and loader code and data
+	// reserve loader code and data
 
-	0xFFFFFFFF bm@!
-	0xFFFFFFFF bm@ 4 + !
-	0xFFFFFFFF bm@ 8 + !
-	0xFFFFFFFF bm@ 12 + !
+	// XXX this only works because a3x firmware and bootloader data are
+	// contiguous and start at 0x0
 
-	// do this before we fragment physical memory by loading OS modules
+	auto ldrtop
+	pointerof _bss_end ldrtop!
+
+	1 ldrtop@ 4095 + 12 >> 0 MemSetStatus
+
+	// allocate these before we fragment physical memory by loading OS modules
 
 	auto rps
-	LoaderTotalRAM@ 4096 / 32 * rps!
+
+	// allocate pageframe DB
+
+	pages@ 32 * rps!
 
 	auto astart
 
@@ -44,6 +63,56 @@ fn MemInit { -- }
 	end
 
 	astart@ 12 << MemPageFrameDB!
+
+	// allocate kernel heap
+
+	auto heapmax
+	"HEAPMAX" ArgsValue heapmax!
+
+	if (heapmax@)
+		heapmax@ atoi 1024 * heapmax!
+	end else
+		HEAPMAXDEFAULT heapmax!
+	end
+
+	auto heapmin
+	"HEAPMIN" ArgsValue heapmin!
+
+	if (heapmin@)
+		heapmin@ atoi 1024 * heapmin!
+	end else
+		HEAPMINDEFAULT heapmin!
+	end
+
+	auto heapshf
+	"HEAPSHF" ArgsValue heapshf!
+
+	if (heapshf@)
+		heapshf@ atoi heapshf!
+	end else
+		HEAPSHFDEFAULT heapshf!
+	end
+
+	pages@ heapshf@ >> 12 << rps!
+
+	if (rps@ heapmin@ <)
+		heapmin@ rps!
+	end elseif (rps@ heapmax@ >)
+		heapmax@ rps!
+	end
+
+	rps@ 4095 + 12 >> rps!
+
+	rps@ 12 << "heap is %d bytes\n" Printf
+
+	rps@ 0 MemAlloc ok! astart!
+
+	if (ok@)
+		"couldn't allocate kernel heap\n" LoaderPanic
+	end
+
+	astart@ 12 << MemHeap!
+	rps@ 12 << MemHeapSize!
 end
 
 fn HexDump { addr len -- }

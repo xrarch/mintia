@@ -20,6 +20,17 @@ struct PFDBEFree
 	4 R7
 endstruct
 
+struct PFDBEPool
+	4 Next
+	4 PFN
+	4 Prev
+	4 BytesFree
+	4 R5
+	4 R6
+	4 R7
+	4 R8
+endstruct
+
 externptr KeMemPageFrameDB
 
 externptr KeMemPageFreeListHead

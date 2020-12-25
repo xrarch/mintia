@@ -86,6 +86,8 @@ externptr ArgsBuffer
 externptr ResourceListHead
 externptr DLLForceRelink
 externptr MemPageFrameDB
+externptr MemHeap
+externptr MemHeapSize
 
 struct AFSSuperblock
 	4 Version

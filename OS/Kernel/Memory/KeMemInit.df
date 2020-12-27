@@ -13,11 +13,26 @@ externptr HALLoaderInitialBitmapSize
 
 externptr HALLoaderTotalRAM
 
+externptr HALLoaderHeap
+
+externptr HALLoaderHeapSize
+
 var KeMemPageFrameDB 0
 public KeMemPageFrameDB
 
 var KeMemPageFreeListHead 0
 public KeMemPageFreeListHead
+
+table KeMemBuckets[BUCKETS]
+public KeMemBuckets
+
+var KeMemHeapSize 0
+public KeMemHeapSize
+
+var KeMemHeap 0
+public KeMemHeap
+
+const BIGBLOCKTAG 'Bgbl'
 
 fn KeMemInit { -- }
 	auto ptr
@@ -28,7 +43,7 @@ fn KeMemInit { -- }
 	0 i!
 
 	auto pages
-	HALLoaderTotalRAM@ 4096 / pages!
+	HALLoaderTotalRAM@ 12 >> pages!
 
 	auto bmp
 	HALLoaderInitialBitmap@ bmp!
@@ -40,6 +55,9 @@ fn KeMemInit { -- }
 
 	auto last
 	0 last!
+
+	// initialize the page DB by linking all of the entries into the
+	// free list, except those marked allocated in the loader bitmap.
 
 	while (i@ pages@ <)
 		if (i@ sz@ <)
@@ -71,5 +89,41 @@ fn KeMemInit { -- }
 
 		PFDBE_SIZEOF ptr +=
 		1 i +=
+	end
+
+	// initialize the heap as one block on the free list
+
+	HALLoaderHeap@ ptr!
+
+	KEMEMBLOCKMAGIC ptr@ KeMemBlock_Magic + !
+	0 ptr@ KeMemBlock_Next + !
+	0 ptr@ KeMemBlock_Prev + !
+	KEMEMBLOCKFREE ptr@ KeMemBlock_Tag + !
+
+	0 i!
+	1 BUCKETSPO2START << sz!
+	0 word!
+
+	while (i@ BUCKETS <)
+		if (HALLoaderHeapSize@ sz@ ==)
+			i@ ptr@ KeMemBlock_BucketIndex + !
+
+			// found the correct bucket
+			ptr@ [i@]KeMemBuckets!
+
+			1 word!
+
+			break
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	HALLoaderHeapSize@ KeMemHeapSize!
+	HALLoaderHeap@ KeMemHeap!
+
+	if (word@ ~~)
+		"couldn't initialize heap bucket\n" KeCrash
 	end
 end

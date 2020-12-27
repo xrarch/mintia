@@ -5,6 +5,7 @@
 
 #include "<inc>/KeMem.h"
 #include "<inc>/KeMemAlloc.h"
+#include "<inc>/KeErrorCodes.h"
 
 #include "<inc>/KeIPL.h"
 
@@ -19,11 +20,218 @@ fn KeMemPageAlloc { -- pfdbe pfn }
 		pfdbe@ PFDBEFree_Next + @ KeMemPageFreeListHead!
 		0 pfdbe@ PFDBEFree_Next + !
 	end else
-		// swapper should have woken up to yeet some page frames by now.
-		// if it has not, there is a bug!
-		"Out of page frames\n" KeCrash
+		ERR_NO_MEMORY pfn!
+		0 pfdbe!
 	end
 
 	ipl@ KeIPLLower
 end
 
+fn KeMemDumpBuckets { -- }
+	auto i
+	0 i!
+
+	auto sz
+	1 BUCKETSPO2START << sz!
+
+	while (i@ BUCKETS <)
+		sz@ "[%d]: " Printf
+
+		auto ptr
+		[i@]KeMemBuckets@ ptr!
+
+		while (ptr@)
+			auto bsz
+			1 ptr@ KeMemBlock_BucketIndex + @ BUCKETSPO2START + << bsz!
+
+			bsz@ bsz@ ptr@ + 0x4f000 - ptr@ 0x4f000 - "%x-%x (%d)" Printf
+
+			ptr@ KeMemBlock_Next + @ ptr!
+		end
+
+		'\n' Putc
+
+		1 sz <<=
+		1 i +=
+	end
+end
+
+fn KeMemAllocWithTag { bytes tag -- ptr ok }
+	KeMemBlock_SIZEOF bytes +=
+
+	auto sz
+	1 BUCKETSPO2START << sz!
+
+	auto i
+	0 i!
+
+	auto dist
+	-1 dist!
+
+	ERR_NO_MEMORY ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	while (i@ BUCKETS <)
+		if (bytes@ sz@ <=)
+			if (dist@ -1 ==)
+				i@ dist!
+			end
+
+			[i@]KeMemBuckets@ ptr!
+
+			if (ptr@)
+				auto ts
+				sz@ ts!
+
+				auto pt
+				ptr@ KeMemBlock_Next + @ pt!
+
+				pt@ [i@]KeMemBuckets!
+
+				if (pt@)
+					0 pt@ KeMemBlock_Prev + !
+				end
+
+				while (i@ dist@ >)
+					1 i -=
+					1 ts >>=
+
+					auto tp
+					ptr@ ts@ + tp!
+
+					KEMEMBLOCKMAGIC tp@ KeMemBlock_Magic + !
+					i@ tp@ KeMemBlock_BucketIndex + !
+					KEMEMBLOCKFREE tp@ KeMemBlock_Tag + !
+
+					[i@]KeMemBuckets@ pt!
+
+					if (pt@)
+						tp@ pt@ KeMemBlock_Prev + !
+					end
+
+					pt@ tp@ KeMemBlock_Next + !
+					tp@ [i@]KeMemBuckets!
+				end
+
+				KEMEMBLOCKMAGIC ptr@ KeMemBlock_Magic + !
+				i@ ptr@ KeMemBlock_BucketIndex + !
+				tag@ ptr@ KeMemBlock_Tag + !
+
+				0 ok!
+				KeMemBlock_SIZEOF ptr +=
+
+				break
+			end
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeMemDumpBuddy { block -- }
+	KeMemBlock_SIZEOF block -=
+
+	auto sz
+	1 block@ KeMemBlock_BucketIndex + @ BUCKETSPO2START + << sz!
+
+	sz@ block@ sz@ ^ 0x4f000 - block@ 0x4f000 - "  %x <-> %x (%d)\n" Printf
+end
+
+fn KeMemFree { ptr -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	KeMemBlock_SIZEOF ptr -=
+
+	if (ptr@ KeMemBlock_Magic + @ KEMEMBLOCKMAGIC ~=)
+		ptr@ "tried to free corrupted heap block: 0x%x\n" KeCrash
+	end
+
+	if (ptr@ KeMemBlock_Tag + @ KEMEMBLOCKFREE ==)
+		ptr@ "tried to free heap block that was already free: 0x%x\n" KeCrash
+	end
+
+	auto hpsz
+	KeMemHeapSize@ hpsz!
+
+	auto base
+	KeMemHeap@ base!
+
+	KEMEMBLOCKFREE ptr@ KeMemBlock_Tag + !
+
+	auto i
+	ptr@ KeMemBlock_BucketIndex + @ i!
+
+	auto sz
+	1 ptr@ KeMemBlock_BucketIndex + @ BUCKETSPO2START + << sz!
+
+	while (i@ BUCKETS 1 - <)
+		if (sz@ hpsz@ >=)
+			break
+		end
+
+		auto buddy
+		ptr@ base@ - sz@ ^ base@ + buddy!
+
+		if (buddy@ KeMemBlock_Magic + @ KEMEMBLOCKMAGIC ~=)
+			buddy@ "corrupted buddy: 0x%x\n" KeCrash
+		end
+
+		if (buddy@ KeMemBlock_Tag + @ KEMEMBLOCKFREE ==)
+			// coalesce
+
+			// remove buddy, who is free, from the bucket he's listed on
+
+			auto l
+			buddy@ KeMemBlock_Prev + @ l!
+
+			auto n
+			buddy@ KeMemBlock_Next + @ n!
+
+			if (l@)
+				n@ l@ KeMemBlock_Next + !
+			end else
+				// no last block means buddy was the bucket list head
+				n@ [i@]KeMemBuckets!
+			end
+
+			if (n@)
+				l@ n@ KeMemBlock_Prev + !
+			end
+
+			if (buddy@ ptr@ >)
+				0 buddy@ KeMemBlock_Magic + !
+				i@ 1 + ptr@ KeMemBlock_BucketIndex + !
+			end else
+				0 ptr@ KeMemBlock_Magic + !
+				i@ 1 + buddy@ KeMemBlock_BucketIndex + !
+				buddy@ ptr!
+			end
+		end else
+			// buddy's not free, can't do any more coalescing
+
+			break
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	auto pt
+	[i@]KeMemBuckets@ pt!
+
+	if (pt@)
+		ptr@ pt@ KeMemBlock_Prev + !
+	end
+
+	pt@ ptr@ KeMemBlock_Next + !
+
+	ptr@ [i@]KeMemBuckets!
+
+	ipl@ KeIPLLower
+end

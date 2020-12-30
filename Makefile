@@ -13,10 +13,11 @@ LIB_DIR    := $(OS_DIR)/Library
 HAL_DIR    := $(OS_DIR)/HAL
 DBG_DIR    := $(OS_DIR)/224Debug
 BR_DIR     := $(OS_DIR)/BootResources
+DRIVER_DIR := $(OS_DIR)/BootDrivers
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
-dist: $(DISTIMAGE) bootable sysfiles kernel 224debug
+dist: $(DISTIMAGE) bootable sysfiles kernel 224debug drivers
 
 bootable:
 	make -C $(LOAD_DIR)
@@ -36,6 +37,9 @@ sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	$(FSTOOL) w /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
 	make -C $(LIB_DIR)
 	make -C $(BR_DIR)
+
+drivers: $(LIB_DIR)/Dragonfruit.dll
+	make -C $(DRIVER_DIR)/LIMNstation
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll

@@ -75,6 +75,10 @@ struct DLL
 	4 Next
 	128 Name
 
+	4 DriverDeviceNode
+	4 DriverInitEarly
+	4 DriverInit
+
 	LOFFLoaded_SIZEOF LOFF
 endstruct
 

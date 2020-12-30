@@ -1,0 +1,92 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALLimn2kContext.h"
+
+asm "
+
+HALLimn2kExceptionVector:
+.global HALLimn2kExceptionVector
+	mov   k2, sp ; save old sp in k2,
+	             ; this could be a usermode sp, in which case it needs saving,
+	             ; or a kernel mode sp, in which case we'll keep using it,
+	             ; but it's much easier and faster to save it unconditionally,
+	             ; instead of trying to figure it out.
+
+	; la    k0, CurrentThread
+	; l.l   k0, k0, zero      ; k0 = [CurrentThread]
+
+	; andi  k1, ers,  RS_USER    ; if the code that just got interrupted was kernel code,
+	; beq   k1, zero, .waskernel ; don't switch stacks, continue using the kernel mode stacks
+	                             ; for this thread.
+
+	; lio.l sp, k0, Thread_KernelStackTop ; load new sp from the current thread's structure
+
+.waskernel:
+	subi.i sp, Limn2kContext_SIZEOF   ; reserve space in stack for context save
+	sio.l  sp, Limn2kContext_sp,  k2  ; store the saved sp from above's longwinded comment
+	sio.l  sp, Limn2kContext_ers, ers ; store the interrupted thread's processor mode
+	sio.l  sp, Limn2kContext_epc, epc ; store the interrupted thread's program counter
+	sio.l  sp, Limn2kContext_lr,  lr  ; store the interrupted thread's return address register
+	sgpr   sp                         ; save the rest of the general purpose registers
+	                                  ; what a convenient instruction sgpr is
+
+	mov    a2, badaddr
+	mov    a1, ecause
+	mov    a0, sp                     ; give HALLimn2kException our context
+
+	subi.i sp, 4
+	s.l    sp, zero, zero             ; put a zero link so that stacktraces dont freak out here
+
+	jal    HALLimn2kException         ; call HALLimn2kException, to handle the exception
+
+	li     badaddr, 0                 ; clear badaddr because the processor doesn't do it for us
+
+	addi.i sp, 4
+
+forkret:
+
+	lgpr  sp                          ; restore general purpose registers
+	lio.l ers, sp, Limn2kContext_ers  ; restore interrupted thread's processor mode
+	lio.l epc, sp, Limn2kContext_epc  ; restore interrupted thread's program counter
+	lio.l lr,  sp, Limn2kContext_lr   ; restore interrupted thread's return address register
+	lio.l sp,  sp, Limn2kContext_sp   ; restore interrupted thread's stack pointer, just in case
+	                                  ; it was user code
+
+	rfe ; give control back to the thread
+
+HALLimn2kExceptionRefillVector:
+.global HALLimn2kExceptionRefillVector
+	rfe
+
+; -- sp
+HALCPUGetSP:
+.global HALCPUGetSP
+	mov v0, sp
+	ret
+
+; -- rs
+HALCPUInterruptDisable:
+.global HALCPUInterruptDisable
+	mov v0, rs
+	bclri rs, rs, 3
+	bclri rs, rs, 1
+	ret
+
+; rs --
+HALCPUInterruptRestore:
+.global HALCPUInterruptRestore
+	mov rs, a0
+	ret
+
+; --
+HALCPUInterruptEnable:
+.global HALCPUInterruptEnable
+	bseti rs, rs, 1
+	ret
+
+"
+
+fn HALLimn2kException { badaddr ecause tf -- }
+	tf@ ecause@ badaddr@ "badaddr = %x\necause = %x\ntf = %x\n" Printf
+
+	// while (1) end
+end

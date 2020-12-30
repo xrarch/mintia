@@ -23,6 +23,10 @@ extern MemFree { pages pstart -- }
 extern LOFFLoad { path loff -- ok }
 extern LOFFGetString { loff offset -- str }
 
+extern DriverLoadNode { -- }
+extern DriverLoad { name -- dll }
+extern DriverLoadAll { -- ok }
+
 struct LOFFHeader
 	4 Magic
 	4 SymbolTableOffset
@@ -75,6 +79,7 @@ extern DLLLoad { name -- dll ok }
 extern DLLResolveAll { -- ok }
 extern DLLRelocateAll { -- ok }
 extern DLLGetSymbolAddress { dll name -- address }
+extern DLLLoadPrefix { prefix name -- dll ok }
 
 externptr LoaderEntrypoint
 externptr LoaderTotalRAM

@@ -1,0 +1,166 @@
+#include "<df>/dragonfruit.h"
+#include "<ll>/rta3x/a3x.h"
+#include "Loader.h"
+
+buffer DriverLineBuf 256
+
+var DriverSeek 0
+
+fn DriverGetLineRaw { ino -- more }
+	auto chars
+	0 chars!
+
+	auto p
+	DriverLineBuf p!
+
+	1 more!
+
+	auto comment
+	0 comment!
+
+	auto r
+
+	while (chars@ 255 <)
+		p@ 1 DriverSeek@ ino@ AFSRead r!
+
+		if (r@ 0 ==)
+			if (chars@ 0 ==)
+				0 more!
+			end
+
+			break
+		end
+
+		r@ DriverSeek +=
+
+		if (p@ gb '\n' ==)
+			break
+		end
+
+		if (comment@)
+			continue
+		end
+
+		1 p +=
+
+		if (p@ 1 - gb '#' ==)
+			1 p -=
+			0 p@ sb
+
+			while (p@ gb ' ' ==)
+				0 p@ sb
+				1 p -=
+			end
+
+			1 comment!
+		end
+
+		1 chars +=
+	end
+
+	0 p@ sb
+end
+
+var DriverLBP 0
+
+fn DriverGetLine { ino -- more }
+	DriverLineBuf DriverLBP!
+
+	0 DriverLineBuf sb
+
+	1 more!
+
+	while (DriverLineBuf strlen 0 ==)
+		if (more@ 0 ==)
+			return
+		end
+
+		ino@ DriverGetLineRaw more!
+	end
+end
+
+fn DriverLoadNode { -- }
+	auto name
+	128 alloc name!
+
+	auto rv
+	16 alloc rv!
+
+	auto model
+	"model" a3xDGetProperty model!
+
+	auto wp
+
+	if (model@)
+		name@ model@ strcpy
+
+		model@ strlen wp!
+
+		name@ wp@ + ":" strcpy
+
+		1 wp +=
+
+		"revision" a3xDGetProperty rv@ itoa
+
+		name@ wp@ + rv@ strcpy
+
+		rv@ strlen wp +=
+
+		name@ wp@ + ".sys" strcpy
+
+		4 wp +=
+
+		auto dll
+		name@ DriverLoad dll!
+
+		if (dll@)
+			a3xDGetCurrent dll@ DLL_DriverDeviceNode + !
+		end
+	end
+end
+
+fn DriverLoad { name -- dll }
+	auto ok
+
+	"BootDrivers/" name@ DLLLoadPrefix ok! dll!
+
+	if (ok@)
+		0 dll!
+		return
+	end
+
+	auto di
+
+	dll@ "DriverInit" DLLGetSymbolAddress di!
+
+	di@ dll@ DLL_DriverInit + !
+
+	dll@ "DriverInitEarly" DLLGetSymbolAddress di!
+
+	di@ dll@ DLL_DriverInitEarly + !
+end
+
+fn DriverLoadAll { -- ok }
+	auto rsrci
+	"/Andromeda/BootDrivers.txt" AFSPath rsrci!
+
+	if (rsrci@ -1 ==)
+		"couldn't find /Andromeda/BootDrivers.txt\n" Printf
+		-1 ok!
+		return
+	end
+
+	auto name
+	64 alloc name!
+
+	auto next
+	rsrci@ DriverGetLine next!
+
+	while (next@)
+		name@ DriverLoad drop
+
+		rsrci@ DriverGetLine next!
+	end
+
+	rsrci@ AFSFreeINode
+end

@@ -1,12 +1,3 @@
-const HCFMAGIC 0x664E4C45
-
-struct HCFHeader
-	4 Magic
-	4 Width
-	4 Height
-	20 Reserved
-endstruct
-
 extern HALPutc { c -- }
 extern HALGetc { -- c }
 extern HALConsoleQuery { -- w h x y }
@@ -28,3 +19,14 @@ externptr HALConsoleWidthChars
 externptr HALConsoleHeightChars
 externptr HALConsoleWidthPix
 externptr HALConsoleHeightPix
+
+// definitions for the HAL Console Font (HCF) format
+
+const HCFMAGIC 0x664E4C45
+
+struct HCFHeader
+	4 Magic
+	4 Width
+	4 Height
+	20 Reserved
+endstruct

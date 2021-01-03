@@ -43,10 +43,21 @@ fn (FDriverInitEarly) DriverInitEarly { arg1 arg2 arg3 arg4 -- ok }
 	0 ok!
 end
 
+buffer DriverRTCUpdateLast KeTime_SIZEOF
+
 fn (FDriverInit) DriverInit { -- ok }
 	// start the clock interrupt
 
-	DriverRTCTimeCurrent DriverRTCQuerySlow
+	auto ctime
+	DriverRTCTimeCurrent ctime!
+
+	ctime@ DriverRTCQuerySlow
+
+	auto utime
+	DriverRTCUpdateLast utime!
+
+	ctime@ KeTime_SecPart + @ utime@ KeTime_SecPart + !
+	ctime@ KeTime_MsPart + @ utime@ KeTime_MsPart + !
 
 	RTCINTERVAL DriverRTCPortData@ HALLIMNstationCitronOutl
 	RTCCMDINTERVAL DriverRTCPortCmd@ HALLIMNstationCitronCommand
@@ -54,23 +65,28 @@ fn (FDriverInit) DriverInit { -- ok }
 	0 ok!
 end
 
-var Queries 0
-
 fn (HALRTCQueryF) DriverRTCQuery { time -- }
-	if (Queries@ 7 & ~~)
-		DriverRTCTimeCurrent DriverRTCQuerySlow
-	end
-
 	auto ctime
 	DriverRTCTimeCurrent ctime!
 
+	auto utime
+	DriverRTCUpdateLast utime!
+
+	// update our local cache of the current time from the RTC's every 8 seconds
+	// because otherwise we can begin to drift juuuuust a little bit
+
+	if (ctime@ KeTime_SecPart + @ utime@ KeTime_SecPart + @ - 8 >=)
+		ctime@ DriverRTCQuerySlow
+
+		ctime@ KeTime_SecPart + @ utime@ KeTime_SecPart + !
+		ctime@ KeTime_MsPart + @ utime@ KeTime_MsPart + !
+	end
+
 	ctime@ KeTime_SecPart + @ time@ KeTime_SecPart + !
 	ctime@ KeTime_MsPart + @ time@ KeTime_MsPart + !
-
-	1 Queries +=
 end
 
-fn (HALRTCQueryF) DriverRTCQuerySlow { time -- }
+fn DriverRTCQuerySlow { time -- }
 	auto ipl
 	IPLHIGH KeIPLRaise ipl!
 

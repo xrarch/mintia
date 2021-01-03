@@ -11,7 +11,7 @@ OFFSET     := 2
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
 sysfiles:
-	$(FSTOOL) wd $(SYSFILEDIR) ./Dist.fst
+	$(FSTOOL) ud $(SYSFILEDIR) ./Dist.fst
 
 cleanup:
 	make -C RTC cleanup

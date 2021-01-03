@@ -26,15 +26,15 @@ bootable:
 
 kernel:
 	make -C $(KERN_DIR)
-	$(FSTOOL) w /Andromeda/AndromedaKernel.exe $(KERN_DIR)/AndromedaKernel.exe
+	$(FSTOOL) u /Andromeda/AndromedaKernel.exe $(KERN_DIR)/AndromedaKernel.exe
 
 224debug:
 	make -C $(DBG_DIR)
-	$(FSTOOL) w /Andromeda/224Debug.exe $(DBG_DIR)/224Debug.exe
+	$(FSTOOL) u /Andromeda/224Debug.exe $(DBG_DIR)/224Debug.exe
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	make -C $(HAL_DIR)
-	$(FSTOOL) w /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
+	$(FSTOOL) u /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
 	make -C $(LIB_DIR)
 	make -C $(BR_DIR)
 

@@ -7,7 +7,7 @@ AS      = ../../../../sdk/asm.sh
 OBJTOOL = ../../../../sdk/link.sh
 LD      =  $(OBJTOOL) link
 
-DCFLAGS = incdir=./include/
+DCFLAGS = incdir=./include/:../include/
 
 all: HALlimn2k.o
 

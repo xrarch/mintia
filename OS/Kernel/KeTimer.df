@@ -1,0 +1,182 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/KeIPL.h"
+
+#include "<inc>/KeCrash.h"
+
+#include "<inc>/KeTimer.h"
+
+#include "<inc>/KeMemAlloc.h"
+
+#include "<inc>/HALRTC.h"
+
+var KeTimerListHead 0
+public KeTimerListHead
+
+var KeTimerListTail 0
+
+fn KeTimeCompare { time1 time2 -- result }
+	auto s1
+	auto s2
+
+	time1@ KeTime_SecPart + @ s1!
+	time2@ KeTime_SecPart + @ s2!
+
+	if (s1@ s2@ >)
+		TIMEGREATERTHAN result!
+		return
+	end elseif (s1@ s2@ <)
+		TIMELESSTHAN result!
+		return
+	end else
+		time1@ KeTime_MsPart + @ s1!
+		time2@ KeTime_MsPart + @ s2!
+
+		if (s1@ s2@ >)
+			TIMEGREATERTHAN result!
+			return
+		end elseif (s1@ s2@ <)
+			TIMELESSTHAN result!
+			return
+		end
+
+		TIMEEQUALTO result!
+		return
+	end
+end
+
+fn KeTimeAddMs { ms time -- }
+	time@ KeTime_MsPart + @ ms +=
+
+	auto sd
+	ms@ 1000 / sd!
+
+	1000 ms %=
+
+	ms@ time@ KeTime_MsPart + !
+	sd@ time@ KeTime_SecPart + +=
+end
+
+fn KeTimePrint { time -- }
+	time@ KeTime_MsPart + @ time@ KeTime_SecPart + @ "%d sec %d ms\n" Printf
+end
+
+fn KeTimeTest { -- }
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	time@ HALRTCQuery
+
+	time@ KeTimePrint
+end
+
+fn KeTimerCreate { interval function context1 context2 -- timer ok }
+	KeTimer_SIZEOF 'Time' KeMemAllocWithTag ok! timer!
+
+	if (ok@) // failed to allocate the timer, return the error code
+		return
+	end
+
+	interval@ function@ context1@ context2@ timer@ KeTimerInitialize ok!
+end
+
+fn KeTimerInitialize { interval function context1 context2 timer -- ok }
+	if (interval@ 0 ==)
+		"KeTimerInitialize: attempt to initialize with interval of 0ms\n" KeCrash
+	end
+
+	auto time
+	timer@ KeTimer_ExpiryTime + time!
+
+	time@ HALRTCQuery
+
+	interval@ time@ KeTimeAddMs
+
+	0 timer@ KeTimer_Next + !
+	0 timer@ KeTimer_Prev + !
+
+	function@ DPCHIGHIMPORTANCE context1@ context2@ timer@ KeTimer_DPC + KeDPCInitialize ok!
+end
+
+fn KeTimerQueue { timer -- ok }
+	0 ok!
+
+	if (timer@ KeTimer_Next + @ timer@ KeTimer_Prev + @ ||)
+		"KeTimerQueue: attempt to queue an enqueued timer\n" KeCrash
+	end
+
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	time@ HALRTCQuery
+
+	auto expirytime
+	timer@ KeTimer_ExpiryTime + expirytime!
+
+	if (time@ expirytime@ KeTimeCompare TIMEEQUALTO <=)
+		// timer already expired, just queue its DPC now
+
+		timer@ KeTimer_DPC + KeDPCQueue
+
+		return
+	end
+
+	auto ipl
+	IPLCLOCK KeIPLRaise ipl!
+
+	auto t
+	KeTimerListHead@ t!
+
+	if (t@ ~~)
+		t@ KeTimerListHead!
+		t@ KeTimerListTail!
+
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	auto p
+	auto n
+
+	while (t@)
+		t@ KeTimer_ExpiryTime + time!
+
+		if (time@ expirytime@ KeTimeCompare TIMEGREATERTHAN ==)
+			// this timer expires later than we do, therefore we will insert
+			// ourselves before it on the list
+
+			t@ KeTimer_Prev + @ p!
+			
+			if (p@)
+				timer@ p@ KeTimer_Next + !
+			end else
+				timer@ KeTimerListHead!
+			end
+
+			p@ timer@ KeTimer_Prev + !
+			t@ timer@ KeTimer_Next + !
+
+			timer@ t@ KeTimer_Prev + !
+
+			ipl@ KeIPLLower
+			return
+		end
+
+		t@ KeTimer_Next + @ t!
+	end
+
+	// there were no timers on the list that expired later than us, so we go
+	// at the tail
+
+	KeTimerListTail@ t!
+
+	t@ timer@ KeTimer_Prev + !
+	timer@ t@ KeTimer_Next + !
+
+	timer@ KeTimerListTail!
+
+	ipl@ KeIPLLower
+end

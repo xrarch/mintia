@@ -1,3 +1,3 @@
-fnptr HALRTCQueryF { -- sec ms }
+fnptr HALRTCQueryF { time -- }
 
-extern HALRTCQuery { -- sec ms }
+extern HALRTCQuery { time -- }

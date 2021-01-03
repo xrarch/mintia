@@ -11,6 +11,7 @@
 #include "<inc>/HALInterrupt.h"
 
 #include "<inc>/KeIPL.h"
+#include "<inc>/KeTimer.h"
 
 var DriverRTCPortCmd 0
 var DriverRTCPortData 0
@@ -18,11 +19,13 @@ var DriverRTCInterruptNumber 0
 
 externptr HALRTCQueryFunction
 
-const RTCINTERVAL 10
+const RTCINTERVAL 5
 
 const RTCCMDINTERVAL 1
 const RTCCMDQUERYSEC 2
 const RTCCMDQUERYMS 3
+
+buffer DriverRTCTimeCurrent KeTime_SIZEOF
 
 extern DriverRTCInterrupt { int -- }
 
@@ -43,28 +46,110 @@ end
 fn (FDriverInit) DriverInit { -- ok }
 	// start the clock interrupt
 
+	DriverRTCTimeCurrent DriverRTCQuerySlow
+
 	RTCINTERVAL DriverRTCPortData@ HALLIMNstationCitronOutl
 	RTCCMDINTERVAL DriverRTCPortCmd@ HALLIMNstationCitronCommand
 
 	0 ok!
 end
 
-fn (HALRTCQueryF) DriverRTCQuery { -- sec ms }
+var Queries 0
+
+fn (HALRTCQueryF) DriverRTCQuery { time -- }
+	if (Queries@ 7 & ~~)
+		DriverRTCTimeCurrent DriverRTCQuerySlow
+	end
+
+	auto ctime
+	DriverRTCTimeCurrent ctime!
+
+	ctime@ KeTime_SecPart + @ time@ KeTime_SecPart + !
+	ctime@ KeTime_MsPart + @ time@ KeTime_MsPart + !
+
+	1 Queries +=
+end
+
+fn (HALRTCQueryF) DriverRTCQuerySlow { time -- }
 	auto ipl
-	IPLCLOCK KeIPLRaise ipl!
+	IPLHIGH KeIPLRaise ipl!
 
 	RTCCMDQUERYSEC DriverRTCPortCmd@ HALLIMNstationCitronCommand
-	DriverRTCPortData@ HALLIMNstationCitronInl sec!
+	DriverRTCPortData@ HALLIMNstationCitronInl time@ KeTime_SecPart + !
 
 	RTCCMDQUERYMS DriverRTCPortCmd@ HALLIMNstationCitronCommand
-	DriverRTCPortData@ HALLIMNstationCitronInl ms!
+	DriverRTCPortData@ HALLIMNstationCitronInl time@ KeTime_MsPart + !
 
 	ipl@ KeIPLLower
 end
 
+// DriverRTCInterrupt must go through the list of queued timers until it finds
+// one that has not yet expired. For each expired timer, it must place its
+// DPC on the DPC queue, and remove the timer from the head of the list.
+
+// It executes with interrupts disabled on the processor level, so it never
+// has to raise the IPL to IPLCLOCK and do associated logic. However,
+// if the current IPL is below IPLDPC, it will call KeDPCDispatchQueue
+// before returning.
+
+// it is an interrupt handler and therefore must obey the ABI and save any
+// non-temporary registers it uses!!
+
+// written in asm for I AM SPEED purposes
+
+// we can use this directly because we are running with interrupts disabled,
+// at the highest IPL
+externptr KeIPLCurrent
+
 asm "
 
 DriverRTCInterrupt:
+.global DriverRTCInterrupt
+	la  t0, DriverRTCTimeCurrent ; get the address of the current time struct
+	lio.l t1, t0, KeTime_SecPart ; get the second part in t1
+	lio.l t2, t0, KeTime_MsPart  ; get the millisecond part in t2
+
+	addi  t2, t2, RTCINTERVAL    ; add the RTC interval to the ms part
+	li    t3, 1000
+	blt   t2, t3, .nooverflow    ; did the ms part overflow?
+
+	addi  t1, t1, 1              ; it did, add one to the seconds part
+	sub   t2, t2, t3             ; subtract 1000 from the ms part
+
+	sio.l t0, KeTime_SecPart, t1 ; update the seconds part
+
+.nooverflow:
+
+	sio.l t0, KeTime_MsPart,  t2 ; update the ms part
+
+	; process the expired timers
+
+	la  t0, KeTimerListHead
+	l.l t0, t0, zero
+
+	beq t0, zero, .none
+
+.more:
+	
+	lio.l t3, t0, KeTimerH_ExpiryTimeSec
+	blt   t1, t3, .done
+
+	lio.l t3, t0, KeTimerH_ExpiryTimeMs
+	blt   t2, t3, .done
+
+	; this timer has expired and must be dequeued, and have its DPC enqueued
+	; TODO
+
+	lio.l t0, t0, KeTimer_Next
+	bne   t0, zero, .more
+
+.done:
+
+	; process DPC queue if IPL < IPLDPC
+	; TODO
+
+.none:
+
 	ret
 
 "

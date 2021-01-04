@@ -1,5 +1,8 @@
 fnptr DPCFunction { context1 context2 -- }
 
+// WARNING: changing the offset of the Next field may break optimized asm
+// routines
+
 struct DPC
 	4 Next
 	4 Function

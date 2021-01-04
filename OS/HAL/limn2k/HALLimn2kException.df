@@ -18,14 +18,18 @@ HALLimn2kExceptionVector:
 	             ; but it's much easier and faster to save it unconditionally,
 	             ; instead of trying to figure it out.
 
+	mov   k0, k2 ; save stack link
+
+	andi  k1, ers,  RS_USER    ; if the code that just got interrupted was kernel code,
+	beq   k1, zero, .waskernel ; don't switch stacks, continue using the kernel mode stacks
+	                           ; for this thread.
+
 	; la    k0, CurrentThread
 	; l.l   k0, k0, zero      ; k0 = [CurrentThread]
-
-	; andi  k1, ers,  RS_USER    ; if the code that just got interrupted was kernel code,
-	; beq   k1, zero, .waskernel ; don't switch stacks, continue using the kernel mode stacks
-	                             ; for this thread.
-
 	; lio.l sp, k0, Thread_KernelStackTop ; load new sp from the current thread's structure
+
+	mov    k0, zero ; this sp is a usermode sp, making it meaningless for stack traces.
+	                ; turn it into a zero link.
 
 .waskernel:
 	subi.i sp, Limn2kContext_SIZEOF   ; reserve space in stack for context save
@@ -42,14 +46,14 @@ HALLimn2kExceptionVector:
 	mov    a1, ecause
 	mov    a0, sp                     ; give HALLimn2kException our context
 
-	subi.i sp, 4
-	s.l    sp, zero, zero             ; put a zero link so that stacktraces dont freak out here
+	push   epc                        ; save epc
+	push   k0                         ; save sp or zero link
 
 	jal    HALLimn2kException         ; call HALLimn2kException, to handle the exception
 
 	li     badaddr, 0                 ; clear badaddr because the processor doesn't do it for us
 
-	addi.i sp, 4
+	addi.i sp, 8                      ; unwind the debug stuff we added
 
 	lgpr  sp                          ; restore general purpose registers
 	lio.l ers, sp, Limn2kContext_ers  ; restore interrupted thread's processor mode
@@ -126,8 +130,35 @@ HALCPUInterruptEnable:
 
 "
 
+const EXCNAMESMAX 13
+
+table ExceptionNames
+	"NOTHING"
+	"INTERRUPT"
+	"SYSCALL"
+	"TLBREFILL"
+	"BUSERROR"
+	"TIMER"
+	"BREAKPOINT"
+	"INVALIDOPCODE"
+	"PRIVILEGEVIOLATION"
+	"UNALIGNEDADDR"
+	"UNALIGNEDPC"
+	"DIVBYZERO"
+	"PAGEFAULT(ACCESS)"
+	"PAGEFAULT(INVALID)"
+endtable
+
 fn HALLimn2kException { badaddr ecause tf -- }
-	ecause@ badaddr@ tf@ Limn2kContext_epc + @ "Unexpected fault: EPC %08x BADADDR %08x ECAUSE %x\n" HALCrash
+	auto excname
+
+	if (ecause@ EXCNAMESMAX >)
+		"UNKNOWN" excname!
+	end else
+		[ecause@]ExceptionNames@ excname!
+	end
+
+	ecause@ excname@ badaddr@ tf@ Limn2kContext_epc + @ "Unexpected fault: EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" HALCrash
 
 	// while (1) end
 end

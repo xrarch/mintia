@@ -21,4 +21,6 @@ extern KeTimerCreate { interval function context1 context2 -- timer ok }
 
 extern KeTimerInitialize { interval function context1 context2 timer -- ok }
 
-extern KeTimerQueue { timer -- ok }
+extern KeTimerDequeue { timer -- ok }
+
+extern KeTimerEnqueue { timer -- ok }

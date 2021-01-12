@@ -14,7 +14,7 @@ endstruct
 const DPCHIGHIMPORTANCE 1
 const DPCLOWIMPORTANCE 2
 
-extern KeDPCQueue { dpc -- }
+extern KeDPCEnqueue { dpc -- }
 
 extern KeDPCDispatchQueue { rs -- }
 

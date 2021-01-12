@@ -73,7 +73,7 @@ fn KeTimeTest { -- }
 end
 
 fn KeTimerCreate { interval function context1 context2 -- timer ok }
-	KeTimer_SIZEOF 'Time' KeMemAllocWithTag ok! timer!
+	KeTimer_SIZEOF 'Timr' KeMemAllocWithTag ok! timer!
 
 	if (ok@) // failed to allocate the timer, return the error code
 		return
@@ -100,7 +100,38 @@ fn KeTimerInitialize { interval function context1 context2 timer -- ok }
 	function@ DPCLOWIMPORTANCE context1@ context2@ timer@ KeTimer_DPC + KeDPCInitialize ok!
 end
 
-fn KeTimerQueue { timer -- ok }
+fn KeTimerDequeue { timer -- ok }
+	0 ok!
+
+	if (timer@ KeTimer_Next + @ timer@ KeTimer_Prev + @ || ~~)
+		"KeTimerDequeue: attempt to dequeue a timer that wasn't queued\n" KeCrash
+	end
+
+	auto ipl
+	IPLCLOCK KeIPLRaise ipl!
+
+	auto n
+	timer@ KeTimer_Next + @ n!
+
+	if (n@)
+		timer@ KeTimer_Prev + @ n@ KeTimer_Prev + !
+	end else // no next means we were the tail
+		timer@ KeTimer_Prev + @ KeTimerListTail!
+	end
+
+	auto p
+	timer@ KeTimer_Prev + @ p!
+
+	if (p@)
+		timer@ KeTimer_Next + @ p@ KeTimer_Next + !
+	end else // no prev means we were the head
+		timer@ KeTimer_Next + @ KeTimerListHead!
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeTimerEnqueue { timer -- ok }
 	0 ok!
 
 	if (timer@ KeTimer_Next + @ timer@ KeTimer_Prev + @ ||)
@@ -118,7 +149,7 @@ fn KeTimerQueue { timer -- ok }
 	if (time@ expirytime@ KeTimeCompare TIMEEQUALTO >=)
 		// timer already expired, just queue its DPC now
 
-		timer@ KeTimer_DPC + KeDPCQueue
+		timer@ KeTimer_DPC + KeDPCEnqueue
 
 		return
 	end

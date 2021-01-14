@@ -14,6 +14,7 @@ HAL_DIR    := $(OS_DIR)/HAL
 DBG_DIR    := $(OS_DIR)/224Debug
 BR_DIR     := $(OS_DIR)/BootResources
 DRIVER_DIR := $(OS_DIR)/BootDrivers
+RTL_DIR    := $(OS_DIR)/RTL
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
@@ -26,13 +27,17 @@ bootable:
 
 kernel:
 	make -C $(KERN_DIR)
-	$(FSTOOL) u /Andromeda/AndromedaKernel.exe $(KERN_DIR)/AndromedaKernel.exe
+	$(FSTOOL) u /Andromeda/OSKernel.exe $(KERN_DIR)/OSKernel.exe
 
 224debug:
 	make -C $(DBG_DIR)
 	$(FSTOOL) u /Andromeda/224Debug.exe $(DBG_DIR)/224Debug.exe
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
+	make -C $(RTL_DIR)
+
+	../sdk/install.sh $(RTL_DIR)
+
 	make -C $(HAL_DIR)
 	$(FSTOOL) u /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
 	make -C $(LIB_DIR)

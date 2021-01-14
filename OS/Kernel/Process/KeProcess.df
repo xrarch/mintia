@@ -6,9 +6,18 @@
 #include "<inc>/KeMemAlloc.h"
 #include "<inc>/KeProcess.h"
 
+#include "<inc>/KeSecurity.h"
+
+#include "<inc>/KeIPL.h"
+
 var KeProcessCurrent 0
 
 var KeProcessListHead 0
+public KeProcessListHead
+
+fn KeProcessCurrentGet { -- current }
+	KeProcessCurrent@ current!
+end
 
 fn KeProcessCreate { user name -- process ok }
 	KeProcess_SIZEOF 'Proc' KeMemAllocWithTag ok! process!
@@ -26,15 +35,49 @@ fn KeProcessInitialize { user name process -- ok }
 	0 process@ KeProcess_ThreadCount + !
 	0 process@ KeProcess_ThreadListHead + !
 
+	0 process@ KeProcess_HeapUsed + !
+
+	0 process@ KeProcess_WorkingSetSize + !
+
+	WORKINGSETDEFAULTMAXIMUM process@ KeProcess_WorkingSetMaximum + !
+	WORKINGSETTHRASHMAXIMUM process@ KeProcess_WorkingSetThrashMaximum + !
+
+	0 process@ KeProcess_PageFaultCount + !
+
+	user@ process@ KeProcess_User + !
+
+	PROCESSSTATUS_INITIALIZED process@ KeProcess_ProcessStatus + !
+
 	// put it on lists
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	// put it on the global process list
 
+	auto h
+
+	KeProcessListHead@ h!
+
+	if (h@)
+		process@ h@ KeProcess_GlobalListPrev + !
+		h@ process@ KeProcess_GlobalListNext + !
+	end
+
+	process@ KeProcessListHead!
+
 	// put it on the user's process list
 
-	0 ok!
-end
+	user@ KeSecurityUser_ProcessListHead + @ h!
 
-fn KeProcessCurrentGet { -- current }
-	KeProcessCurrent@ current!
+	if (h@)
+		process@ h@ KeProcess_UserListPrev + !
+		h@ process@ KeProcess_UserListNext + !
+	end
+
+	process@ user@ KeSecurityUser_ProcessListHead + !
+
+	ipl@ KeIPLLower
+
+	0 ok!
 end

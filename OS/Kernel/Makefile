@@ -10,14 +10,14 @@ LIBDIR  = ../Library
 
 DCFLAGS = incdir=./include/:../HAL/include
 
-all: AndromedaKernel.exe
+all: OSKernel.exe
 
-AndromedaKernel.exe: $(OBJ)
-	$(LD) AndromedaKernel.exe $(OBJ) -d HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
-	$(OBJTOOL) move AndromedaKernel.exe text=0x300000,data=text+text_size+align,bss=data+data_size+align
+OSKernel.exe: $(OBJ)
+	$(LD) OSKernel.exe $(OBJ) -d HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
+	$(OBJTOOL) move OSKernel.exe text=0x300000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ./include/*.h ../HAL/include/*.h
 	$(DC) $(DCFLAGS) $< $@
 
 cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF AndromedaKernel.exe
+	rm -f ${OBJ} *.a3x *.LOFF OSKernel.exe

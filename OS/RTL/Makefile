@@ -11,6 +11,8 @@ all: obj/RTL.dll
 	cp -r obj/RTL.dll ../Library/RTL.dll
 
 obj/RTL.dll: $(OBJ) $(SOBJ)
+	mkdir -p obj
+	mkdir -p src
 	$(LD) obj/RTL.dll $(OBJ) $(SOBJ) -d ../Library/Dragonfruit.dll
 
 %.o: %.df

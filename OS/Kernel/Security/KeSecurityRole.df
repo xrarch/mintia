@@ -5,3 +5,50 @@
 
 #include "<inc>/KeMemAlloc.h"
 #include "<inc>/KeSecurity.h"
+
+#include "<inc>/KeIPL.h"
+
+table KeSecurityRoles[KEROLESMAX]
+public KeSecurityRoles
+
+fn KeSecurityRoleCreate { heapmax pfmax permissions gid name -- role ok }
+	KeSecurityRole_SIZEOF 'Role' KeMemAllocWithTag ok! role!
+
+	if (ok@) // failed to allocate the role, return the error code
+		return
+	end
+
+	heapmax@ pfmax@ permissions@ gid@ name@ role@ KeSecurityRoleInitialize ok!
+end
+
+fn KeSecurityRoleInitialize { heapmax pfmax permissions gid name role -- ok }
+	if (gid@ GID_MAX >)
+		GID_MAX gid@ "KeSecurityRoleInitialize: GID > GID_MAX (%d > %d)\n" KeCrash
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if ([gid@]KeSecurityRoles@)
+		gid@ "KeSecurityRoleInitialize: there already exists a role with GID=%d\n" KeCrash
+	end
+
+	role@ [gid@]KeSecurityRoles!
+
+	ipl@ KeIPLLower
+
+	role@ KeSecurityRole_Name + name@ KEROLENAMELEN 1 - strncpy
+
+	permissions@ role@ KeSecurityRole_Permissions + !
+
+	gid@ role@ KeSecurityRole_GID + !
+
+	heapmax@ role@ KeSecurityRole_DefaultHeapMax + !
+	pfmax@ role@ KeSecurityRole_DefaultPageFramesMax + !
+
+	0 ok!
+end
+
+fn KeSecurityRoleByGID { gid -- role }
+	[gid@]KeSecurityRoles@ role!
+end

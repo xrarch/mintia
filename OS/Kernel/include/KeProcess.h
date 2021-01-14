@@ -40,4 +40,10 @@ struct KeProcess
 	4 PageFaultCount
 endstruct
 
+extern KeProcessCurrentGet { -- current }
+
+extern KeProcessCreate { user name -- process ok }
+
 extern KeProcessInitialize { user name process -- ok }
+
+externptr KeProcessListHead

@@ -5,3 +5,78 @@
 
 #include "<inc>/KeMemAlloc.h"
 #include "<inc>/KeSecurity.h"
+
+#include "<inc>/KeIPL.h"
+
+#include "<ll>/RTL/RTLErrors.h"
+
+var KeSecurityUserListHead 0
+public KeSecurityUserListHead
+
+fn KeSecurityUserCreate { primaryrole uid name -- user ok }
+	KeSecurityUser_SIZEOF 'User' KeMemAllocWithTag ok! user!
+
+	if (ok@) // failed to allocate the user, return the error code
+		return
+	end
+
+	primaryrole@ uid@ name@ user@ KeSecurityUserInitialize ok!
+end
+
+fn KeSecurityUserInitialize { primaryrole uid name user -- ok }
+	if (user@ KeSecurityUser_Next + @ user@ KeSecurityUser_Prev + @ || KeSecurityUserListHead@ user@ == ||)
+		user@ KeSecurityUser_Name + "KeSecurityUserInitialize: user '%s' already on the global list\n" KeCrash
+	end
+
+	user@ KeSecurityUser_Name + name@ KEUSERNAMELEN 1 - strncpy
+
+	user@ KeSecurityUser_RolesBitmap + ROLESBITMAPSIZE 0 memset
+
+	0 user@ KeSecurityUser_RolePrimary + !
+
+	0 user@ KeSecurityUser_ProcessListHead + !
+
+	primaryrole@ user@ KeSecurityUser_RolePrimary + !
+
+	primaryrole@ KeSecurityRole_DefaultHeapMax + @ user@ KeSecurityUser_HeapMax + !
+	primaryrole@ KeSecurityRole_DefaultPageFramesMax + @ user@ KeSecurityUser_PageFramesMax + !
+
+	uid@ user@ KeSecurityUser_UID + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto h
+	KeSecurityUserListHead@ h!
+
+	if (h@)
+		user@ h@ KeSecurityUser_Prev + !
+		h@ user@ KeSecurityUser_Next + !
+	end
+
+	ipl@ KeIPLLower
+
+	user@ KeSecurityUserListHead!
+
+	primaryrole@ user@ KeSecurityUserRoleGrant ok!
+end
+
+// should be called with the user mutex held or when the user object isn't
+// active yet
+
+fn KeSecurityUserRoleGrant { role user -- ok }
+	0 ok!
+
+	auto gid
+	role@ KeSecurityRole_GID + @ gid!
+
+	auto bmp
+	user@ KeSecurityUser_RolesBitmap + gid@ 32 / 4 * + bmp!
+
+	if (bmp@@ gid@ 31 & bitget)
+		ERR_ROLE_ALREADY_HELD ok!
+		return
+	end
+
+	bmp@@ gid@ 31 & bitset bmp@!
+end

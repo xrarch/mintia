@@ -14,7 +14,7 @@ DCFLAGS = incdir=../HAL/include/:../Kernel/include/:./include/
 all: 224Debug.exe
 
 224Debug.exe: $(OBJ)
-	$(LD) 224Debug.exe $(OBJ) -d ../Kernel/AndromedaKernel.exe HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
+	$(LD) 224Debug.exe $(OBJ) -d ../Kernel/OSKernel.exe HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
 	$(OBJTOOL) move 224Debug.exe text=0x100000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ../HAL/include/*.h ../Kernel/include/*.h

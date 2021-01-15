@@ -29,5 +29,11 @@ HALCPUInit:
 	
 	la ev, HALLimn2kExceptionVector
 	la tlbv, HALLimn2kExceptionRefillVector
+
+	mov badaddr, zero
+
+	la t0, -1
+	la t1, -1
+	ftlb t0, t1
 	
 	ret

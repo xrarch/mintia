@@ -5,9 +5,9 @@ struct KeTime
 	4 MsPart
 endstruct
 
-const TIMELESSTHAN 0
+const TIMEEARLIER 0
 const TIMEEQUALTO 1
-const TIMEGREATERTHAN 2
+const TIMELATER 2
 
 extern KeTimeCompare { time1 time2 -- result }
 

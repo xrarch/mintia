@@ -1,4 +1,4 @@
-extern HALInterruptRegister { handler int -- }
+extern HALInterruptRegister { handler int ipl -- }
 
 extern HALInterruptUnregister { int -- }
 

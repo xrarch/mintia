@@ -17,6 +17,57 @@ public KeTimerListHead
 
 var KeTimerListTail 0
 
+buffer KeTimerExpirationEarliest KeTime_SIZEOF
+public KeTimerExpirationEarliest
+
+buffer KeTimerExpirationDPC DPC_SIZEOF
+public KeTimerExpirationDPC
+
+fn (DPCFunction) KeTimerExpiration { context1 context2 -- }
+	auto timeatexpiry
+	KeTime_SIZEOF alloc timeatexpiry!
+
+	context1@ timeatexpiry@ KeTime_SecPart + !
+	context2@ timeatexpiry@ KeTime_MsPart + !
+
+	auto timer
+	KeTimerListHead@ timer!
+
+	auto earliest
+	KeTimerExpirationEarliest earliest!
+
+	while (timer@)
+		auto time
+		timer@ KeTimer_ExpiryTime + time!
+
+		if (time@ timeatexpiry@ KeTimeCompare TIMELATER ==)
+			time@ KeTime_SecPart + @ earliest@ KeTime_SecPart + !
+			time@ KeTime_MsPart + @ earliest@ KeTime_MsPart + !
+
+			return
+		end
+
+		timer@ KeTimer_Context1 + @ timer@ KeTimer_Context2 + @ DPCLOWIMPORTANCE timer@ KeTimer_DPC + KeDPCEnqueue
+
+		auto ntimer
+		timer@ KeTimer_Next + @ ntimer!
+
+		timer@ KeTimerDequeue drop
+
+		ntimer@ timer!
+	end
+
+	-1 earliest@ KeTime_SecPart + !
+	999 earliest@ KeTime_MsPart + !
+end
+
+fn KeTimerInit { -- }
+	pointerof KeTimerExpiration KeTimerExpirationDPC KeDPCInitialize drop
+
+	-1 KeTimerExpirationEarliest KeTime_SecPart + !
+	999 KeTimerExpirationEarliest KeTime_MsPart + !
+end
+
 fn KeTimeCompare { time1 time2 -- result }
 	auto s1
 	auto s2
@@ -25,20 +76,20 @@ fn KeTimeCompare { time1 time2 -- result }
 	time2@ KeTime_SecPart + @ s2!
 
 	if (s1@ s2@ >)
-		TIMEGREATERTHAN result!
+		TIMELATER result!
 		return
 	end elseif (s1@ s2@ <)
-		TIMELESSTHAN result!
+		TIMEEARLIER result!
 		return
 	end else
 		time1@ KeTime_MsPart + @ s1!
 		time2@ KeTime_MsPart + @ s2!
 
 		if (s1@ s2@ >)
-			TIMEGREATERTHAN result!
+			TIMELATER result!
 			return
 		end elseif (s1@ s2@ <)
-			TIMELESSTHAN result!
+			TIMEEARLIER result!
 			return
 		end
 
@@ -72,43 +123,28 @@ fn KeTimeTest { -- }
 	time@ KeTimePrint
 end
 
-fn KeTimerCreate { interval function context1 context2 -- timer ok }
+fn KeTimerCreate { function -- timer ok }
 	KeTimer_SIZEOF 'Timr' KeMemAllocWithTag ok! timer!
 
 	if (ok@) // failed to allocate the timer, return the error code
 		return
 	end
 
-	interval@ function@ context1@ context2@ timer@ KeTimerInitialize ok!
+	function@ timer@ KeTimerInitialize ok!
 end
 
-fn KeTimerInitialize { interval function context1 context2 timer -- ok }
-	if (interval@ 0 ==)
-		"KeTimerInitialize: attempt to initialize with interval of 0ms\n" KeCrash
-	end
-
-	auto time
-	timer@ KeTimer_ExpiryTime + time!
-
-	time@ HALRTCQuery
-
-	interval@ time@ KeTimeAddMs
-
+fn KeTimerInitialize { function timer -- ok }
 	0 timer@ KeTimer_Next + !
 	0 timer@ KeTimer_Prev + !
 
-	function@ DPCLOWIMPORTANCE context1@ context2@ timer@ KeTimer_DPC + KeDPCInitialize ok!
+	function@ timer@ KeTimer_DPC + KeDPCInitialize ok!
 end
 
 fn KeTimerDequeue { timer -- ok }
 	0 ok!
 
-	if (timer@ KeTimer_Next + @ timer@ KeTimer_Prev + @ || ~~)
-		"KeTimerDequeue: attempt to dequeue a timer that wasn't queued\n" KeCrash
-	end
-
 	auto ipl
-	IPLCLOCK KeIPLRaise ipl!
+	IPLDPC KeIPLRaise ipl!
 
 	auto n
 	timer@ KeTimer_Next + @ n!
@@ -128,14 +164,36 @@ fn KeTimerDequeue { timer -- ok }
 		timer@ KeTimer_Next + @ KeTimerListHead!
 	end
 
+	0 timer@ KeTimer_Next + !
+	0 timer@ KeTimer_Prev + !
+
 	ipl@ KeIPLLower
 end
 
-fn KeTimerEnqueue { timer -- ok }
+fn KeTimerEarliestSet { time -- }
+	auto earliest
+	KeTimerExpirationEarliest earliest!
+
+	auto ipl
+	IPLCLOCK KeIPLRaise ipl!
+
+	if (time@ earliest@ KeTimeCompare TIMEEARLIER ==)
+		time@ KeTime_SecPart + @ earliest@ KeTime_SecPart + !
+		time@ KeTime_MsPart + @ earliest@ KeTime_MsPart + !
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeTimerEnqueue { context1 context2 interval timer -- ok }
 	0 ok!
 
 	if (timer@ KeTimer_Next + @ timer@ KeTimer_Prev + @ ||)
 		"KeTimerQueue: attempt to queue an enqueued timer\n" KeCrash
+	end
+
+	if (interval@ 0 ==)
+		"KeTimerQueue: attempt to queue a timer with 0ms interval\n" KeCrash
 	end
 
 	auto time
@@ -146,16 +204,15 @@ fn KeTimerEnqueue { timer -- ok }
 	auto expirytime
 	timer@ KeTimer_ExpiryTime + expirytime!
 
-	if (time@ expirytime@ KeTimeCompare TIMEEQUALTO >=)
-		// timer already expired, just queue its DPC now
+	expirytime@ HALRTCQuery
 
-		timer@ KeTimer_DPC + KeDPCEnqueue
-
-		return
-	end
+	interval@ expirytime@ KeTimeAddMs
 
 	auto ipl
-	IPLCLOCK KeIPLRaise ipl!
+	IPLDPC KeIPLRaise ipl!
+
+	context1@ timer@ KeTimer_Context1 + !
+	context2@ timer@ KeTimer_Context2 + !
 
 	auto t
 	KeTimerListHead@ t!
@@ -163,6 +220,8 @@ fn KeTimerEnqueue { timer -- ok }
 	if (t@ ~~)
 		timer@ KeTimerListHead!
 		timer@ KeTimerListTail!
+
+		expirytime@ KeTimerEarliestSet
 
 		ipl@ KeIPLLower
 
@@ -178,7 +237,7 @@ fn KeTimerEnqueue { timer -- ok }
 		auto res
 		time@ expirytime@ KeTimeCompare res!
 
-		if (res@ TIMEGREATERTHAN ==)
+		if (res@ TIMELATER ==)
 			// this timer expires later than we do, therefore we will insert
 			// ourselves before it on the list
 
@@ -194,6 +253,8 @@ fn KeTimerEnqueue { timer -- ok }
 			t@ timer@ KeTimer_Next + !
 
 			timer@ t@ KeTimer_Prev + !
+
+			expirytime@ KeTimerEarliestSet
 
 			ipl@ KeIPLLower
 			return
@@ -212,12 +273,14 @@ fn KeTimerEnqueue { timer -- ok }
 
 	timer@ KeTimerListTail!
 
+	expirytime@ KeTimerEarliestSet
+
 	ipl@ KeIPLLower
 end
 
 fn KeTimerPrintQueue { -- }
 	auto ipl
-	IPLHIGH KeIPLRaise ipl!
+	IPLDPC KeIPLRaise ipl!
 
 	auto t
 	KeTimerListHead@ t!

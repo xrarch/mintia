@@ -57,7 +57,7 @@ buffer DriverRTCUpdateLast KeTime_SIZEOF
 fn (FDriverInit) DriverInit { -- ok }
 	// start the clock interrupt
 
-	pointerof DriverRTCInterrupt DriverRTCInterruptNumber@ HALInterruptRegister
+	pointerof DriverRTCInterrupt DriverRTCInterruptNumber@ IPLCLOCK HALInterruptRegister
 
 	RTCINTERVAL DriverRTCPortData@ HALLIMNstationCitronOutl
 	RTCCMDINTERVAL DriverRTCPortCmd@ HALLIMNstationCitronCommand
@@ -99,133 +99,41 @@ fn DriverRTCQuerySlow { time -- }
 	ipl@ KeIPLLower
 end
 
-// DriverRTCInterrupt must go through the list of queued timers until it finds
-// one that has not yet expired. For each expired timer, it must place its
-// DPC on the DPC queue, and remove the timer from the head of the list.
-
-// It executes with interrupts disabled on the processor level, so it never
-// has to raise the IPL to IPLCLOCK and do associated logic. However,
-// if the current IPL is below IPLDPC, it will call KeDPCDispatchQueue
-// before returning.
-
-// it is an interrupt handler and therefore must obey the ABI and save any
-// non-temporary registers it uses!!
-
-// written in asm for I AM SPEED purposes
-
-// we can use this directly because we are running with interrupts disabled,
-// at the highest IPL
 externptr KeIPLCurrent
 
 externptr KeDPCListTail
 externptr KeDPCListHead
 
-asm "
+externptr KeTimerExpirationEarliest
+externptr KeTimerExpirationDPC
 
-DriverRTCInterrupt:
-.global DriverRTCInterrupt
-	la  t0, DriverRTCTimeCurrent ; get the address of the current time struct
-	lio.l t1, t0, KeTime_SecPart ; get the second part in t1
-	lio.l t2, t0, KeTime_MsPart  ; get the millisecond part in t2
+fn (HALInterruptHandler) DriverRTCInterrupt { int -- }
+	auto currenttime
 
-	addi  t2, t2, RTCINTERVAL    ; add the RTC interval to the ms part
-	li    t3, 1000
-	blt   t2, t3, .nooverflow    ; did the ms part overflow?
+	DriverRTCTimeCurrent currenttime!
 
-	addi  t1, t1, 1              ; it did, add one to the seconds part
-	sub   t2, t2, t3             ; subtract 1000 from the ms part
+	RTCINTERVAL currenttime@ KeTimeAddMs
 
-	sio.l t0, KeTime_SecPart, t1 ; update the seconds part
+	auto expdpc
+	KeTimerExpirationDPC expdpc!
 
-.nooverflow:
+	if (expdpc@ DPC_Queued + @ ~~)
+		if (KeTimerExpirationEarliest currenttime@ KeTimeCompare TIMEEARLIER ==)
+			auto h
+			KeDPCListHead@ h!
 
-	sio.l t0, KeTime_MsPart,  t2 ; update the ms part
+			currenttime@ KeTime_SecPart + @ expdpc@ DPC_Context1 + !
+			currenttime@ KeTime_MsPart + @ expdpc@ DPC_Context2 + !
 
-	; process the expired timers
+			if (h@ ~~)
+				expdpc@ KeDPCListHead!
+				expdpc@ KeDPCListTail!
+			end else
+				expdpc@ KeDPCListHead!
+				h@ expdpc@ DPC_Next + !
+			end
 
-	la  t0, KeTimerListHead
-	l.l t0, t0, zero
-
-	beq t0, zero, .end
-
-	la  a0, KeDPCListTail
-	l.l a1, a0, zero
-
-.more:
-	
-	lio.l t3, t0, KeTimerH_ExpiryTimeSec ; get the seconds part of the timer's expiry
-	blt   t1, t3, .done                  ; is it expired yet?
-
-	lio.l t3, t0, KeTimerH_ExpiryTimeMs  ; the seconds part is expired. get the ms part
-	blt   t2, t3, .done                  ; is it expired yet?
-
-	; this timer has expired and must be dequeued, and have its DPC enqueued
-
-	; dequeue the timer
-
-	lio.l  t3, t0, KeTimer_Next    ; get the next timer
-	
-	beq    t3, zero, .nonext       ; is there a next timer?
-
-	siio.l t3, KeTimer_Prev, 0     ; yes, set its prev field to 0 to remove
-	                               ; its reference to us
-
-.nonext:
-
-	sio.l  t0, KeTimer_Next, zero  ; set our next field to 0 to remove our
-	                               ; reference to the next timer
-
-	la    t4, KeTimerListHead
-	s.l   t4, zero, t3
-
-	; enqueue the timer DPC. use a0 a1 a2 a3 as scratch registers here
-
-	addi  t4, t0, KeTimer_DPC
-
-	s.l   a0, zero, t4
-
-	bne   a1, zero, .nothead
-
-	; XXX cycle-saving hack that relies on DPC_Next being at offset 0
-
-	la    a1, KeDPCListHead
-
-.nothead:
-
-	sio.l a1, DPC_Next, t4
-
-.next:
-
-	mov   a1, t4
-
-	mov   t0, t3                   ; set ourselves to next timer
-	bne   t0, zero, .more          ; are there more timers to process?
-
-.done:
-
-	la  t0, KeDPCListHead
-	l.l t0, t0, zero
-	beq t0, zero, .end
-
-	la  t0, KeIPLCurrent
-	l.l t0, t0, zero
-
-	li  t1, IPLAPC
-	blt t1, t0, .end
-
-	; IPL < DPC, process DPC queue
-
-	push lr
-	push sp
-
-	li  a0, 2 ; pass in an rs where interrupts are enabled
-	jal KeDPCDispatchQueue
-
-	pop sp
-	pop lr
-
-.end:
-
-	ret
-
-"
+			1 expdpc@ DPC_Queued + !
+		end
+	end
+end

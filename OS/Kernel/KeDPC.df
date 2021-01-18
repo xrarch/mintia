@@ -14,38 +14,31 @@ public KeDPCListHead
 var KeDPCListTail 0
 public KeDPCListTail
 
-fn KeDPCInitialize { function importance context1 context2 dpc -- ok }
+fn KeDPCInitialize { function dpc -- ok }
 	function@ dpc@ DPC_Function + !
-	importance@ dpc@ DPC_Importance + !
 	0 dpc@ DPC_Next + !
-	context1@ dpc@ DPC_Context1 + !
-	context2@ dpc@ DPC_Context2 + !
+	0 dpc@ DPC_Context1 + !
+	0 dpc@ DPC_Context2 + !
 
 	0 ok!
 end
 
-fn KeDPCEnqueue { dpc -- }
+fn KeDPCEnqueue { context1 context2 importance dpc -- }
 	auto ipl
+	IPLHIGH KeIPLRaise ipl!
 
-	if (KeIPLCurrentGet IPLDPC <)
-		// just do it immediately
-
-		IPLDPC KeIPLRaise ipl!
-
-		dpc@ DPC_Context1 + @ dpc@ DPC_Context2 + @ dpc@ DPC_Function + @ DPCFunction
-
-		ipl@ KeIPLLower
-
-		return
+	if (dpc@ DPC_Queued + @)
+		"KeDPCEnqueue: attempt to queue an enqueued DPC\n" KeCrash
 	end
 
-	IPLHIGH KeIPLRaise ipl!
+	context1@ dpc@ DPC_Context1 + !
+	context2@ dpc@ DPC_Context2 + !
 
 	auto dpch
 	KeDPCListHead@ dpch!
 
 	if (dpch@)
-		if (dpc@ DPC_Importance + @ DPCHIGHIMPORTANCE ==) // put it in front
+		if (importance@ DPCHIGHIMPORTANCE ==) // put it in front
 			dpc@ KeDPCListHead!
 			dpch@ dpc@ DPC_Next + !
 		end else // put it in the back
@@ -61,12 +54,14 @@ fn KeDPCEnqueue { dpc -- }
 		dpc@ KeDPCListTail!
 	end
 
+	1 dpc@ DPC_Queued + !
+
 	ipl@ KeIPLLower
 end
 
 var KeDPCActive 0
 
-// must be called with interrupts disabled
+// must be called with interrupts disabled, at IPLDPC
 fn KeDPCDispatchQueue { rs -- }
 	if (KeDPCActive@)
 		return
@@ -87,6 +82,8 @@ fn KeDPCDispatchQueue { rs -- }
 			dpc@ DPC_Context1 + @ dpc@ DPC_Context2 + @ dpc@ DPC_Function + @ DPCFunction
 
 			HALCPUInterruptDisable rs!
+
+			0 dpc@ DPC_Queued + !
 
 			auto ndpc
 			dpc@ DPC_Next + @ ndpc!

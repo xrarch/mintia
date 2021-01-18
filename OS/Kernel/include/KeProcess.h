@@ -3,8 +3,24 @@ const KEPROCESSNAMELEN 128
 const WORKINGSETDEFAULTMAXIMUM 12
 const WORKINGSETTHRASHMAXIMUM (WORKINGSETDEFAULTMAXIMUM 8 +)
 
-const PROCESSSTATUS_INITIALIZED 1
-const PROCESSSTATUS_READY 2
+const PROCESSSTATUS_READY 1
+const PROCESSSTATUS_SUSPENDED 2
+
+const PRIORITY_IDLE 0
+
+const PRIORITY_LOWUSER 1
+
+const PRIORITY_DEFAULT 12
+
+const PRIORITY_HIGHUSER 23
+
+const PRIORITY_LOWREALTIME 24
+
+const PRIORITY_MEDIUMREALTIME 28
+
+const PRIORITY_HIGHREALTIME 31
+
+const PRIORITIES 32
 
 struct KeProcess
 	KEPROCESSNAMELEN Name
@@ -22,6 +38,8 @@ struct KeProcess
 
 	4 ProcessStatus
 
+	4 BasePriority
+
 	// security information
 
 	4 User
@@ -38,6 +56,28 @@ struct KeProcess
 	4 WorkingSetThrashMaximum
 
 	4 PageFaultCount
+endstruct
+
+const THREADSTATUS_INITIALIZED 1
+const THREADSTATUS_READY 2
+const THREADSTATUS_SUSPENDED 3
+
+const KETHREADNAMELEN 128
+
+struct KeThread
+	KETHREADNAMELEN Name
+
+	4 Process
+
+	4 ProcessNext
+	4 ProcessPrev
+
+	4 QueueNext
+	4 QueuePrev
+
+	4 Status
+
+	4 Priority
 endstruct
 
 extern KeProcessCurrentGet { -- current }

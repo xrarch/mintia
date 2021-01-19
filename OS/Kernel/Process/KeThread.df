@@ -1,6 +1,8 @@
 #include "<df>/dragonfruit.h"
 #include "<inc>/HALLog.h"
 
+#include "<inc>/HALCPU.h"
+
 #include "<inc>/KeCrash.h"
 
 #include "<inc>/KeMemAlloc.h"
@@ -8,19 +10,23 @@
 
 #include "<inc>/KeIPL.h"
 
+#include "<ll>/RTL/RTLErrors.h"
+
 table KeThreadPriorityQueues[PRIORITIES]
 
-fn KeThreadCreate { process name -- thread ok }
+// 'context1' and 'context2' are parameters passed to the start function
+
+fn KeThreadCreate { context1 context2 startfunc process name -- thread ok }
 	KeThread_SIZEOF 'Thrd' KeMemAllocWithTag ok! thread!
 
 	if (ok@) // failed to allocate the thread, return the error code
 		return
 	end
 
-	process@ name@ thread@ KeThreadInitialize ok!
+	context1@ context2@ startfunc@ process@ name@ thread@ KeThreadInitialize ok!
 end
 
-fn KeThreadInitialize { process name thread -- ok }
+fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
 	thread@ KeThread_Name + name@ KETHREADNAMELEN 1 - strncpy
 
 	THREADSTATUS_INITIALIZED thread@ KeThread_Status + !
@@ -30,6 +36,40 @@ fn KeThreadInitialize { process name thread -- ok }
 	process@ KeProcess_BasePriority + @ thread@ KeThread_Priority + !
 
 	// add to the process's thread list
+
+	auto kstack
+	KeMemPageAlloc kstack! drop
+
+	if (kstack@ iserr)
+		kstack@ ok!
+		return
+	end
+
+	12 kstack <<=
+
+	kstack@ "kstack = %08x\n" Printf
+
+	context1@ context2@ startfunc@ kstack@ 4096 + HALCPUContextInit thread@ KeThread_Context + !
+
+	kstack@ thread@ KeThread_KernelStackBottom + !
+	kstack@ 4096 + thread@ KeThread_KernelStackTop + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto h
+	process@ KeProcess_ThreadListHead + @ h!
+
+	if (h@)
+		thread@ h@ KeThread_ProcessPrev + !
+		h@ thread@ KeThread_ProcessNext + !
+	end
+
+	thread@ process@ KeProcess_ThreadListHead + !
+
+	1 process@ KeProcess_ThreadCount + +=
+
+	ipl@ KeIPLLower
 
 	0 ok!
 end

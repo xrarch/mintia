@@ -65,6 +65,8 @@ const THREADSTATUS_RUNNING 4
 const THREADSTATUS_WAITINGALERTABLE 5
 const THREADSTATUS_WAITINGUNALERTABLE 6
 
+const THREADDEFAULTQUANTUM 25
+
 const KETHREADNAMELEN 128
 
 struct KeThread
@@ -85,7 +87,11 @@ struct KeThread
 
 	4 Status
 
+	4 Enqueued
+
 	4 Priority
+
+	4 Quantum
 endstruct
 
 extern KeProcessCurrentGet { -- current }
@@ -96,6 +102,34 @@ extern KeProcessInitialize { user name process -- ok }
 
 externptr KeProcessListHead
 
+externptr KeProcessKernelProcess
+
 extern KeThreadCreate { context1 context2 startfunc process name -- thread ok }
 
 extern KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
+
+extern KeThreadWorkerCreate { context1 context2 startfunc name -- thread ok }
+
+extern KeThreadWorkerInitialize { context1 context2 startfunc name thread -- ok }
+
+extern KeThreadEnqueue { thread -- }
+
+extern KeThreadDequeue { thread -- }
+
+extern KeThreadNextPick { -- thread }
+
+extern KeThreadSwitch { thread -- }
+
+extern KeThreadReady { thread -- }
+
+extern KeThreadYield { -- }
+
+extern KeThreadYieldNow { yieldstatus -- }
+
+externptr KeThreadNext
+
+externptr KeThreadCurrent
+
+externptr KeThreadSchedulerDPC
+
+externptr KeThreadQuantumTimer

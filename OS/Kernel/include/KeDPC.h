@@ -19,3 +19,5 @@ extern KeDPCEnqueue { context1 context2 importance dpc -- }
 extern KeDPCDispatchQueue { rs -- }
 
 extern KeDPCInitialize { function dpc -- ok }
+
+externptr KeDPCActive

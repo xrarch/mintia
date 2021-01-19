@@ -61,11 +61,19 @@ endstruct
 const THREADSTATUS_INITIALIZED 1
 const THREADSTATUS_READY 2
 const THREADSTATUS_SUSPENDED 3
+const THREADSTATUS_RUNNING 4
+const THREADSTATUS_WAITINGALERTABLE 5
+const THREADSTATUS_WAITINGUNALERTABLE 6
 
 const KETHREADNAMELEN 128
 
 struct KeThread
+	4 KernelStackBottom
+	4 KernelStackTop
+
 	KETHREADNAMELEN Name
+
+	4 Context
 
 	4 Process
 
@@ -87,3 +95,7 @@ extern KeProcessCreate { user name -- process ok }
 extern KeProcessInitialize { user name process -- ok }
 
 externptr KeProcessListHead
+
+extern KeThreadCreate { context1 context2 startfunc process name -- thread ok }
+
+extern KeThreadInitialize { context1 context2 startfunc process name thread -- ok }

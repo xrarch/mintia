@@ -9,11 +9,22 @@ HALLimn2kSavedTLBV:
 
 HALCPUExit:
 .global HALCPUExit
+	lui rs, 0x80000000
+
 	la t0, HALLimn2kSavedEV
 	l.l ev, t0, zero
 
 	la t0, HALLimn2kSavedTLBV
 	l.l tlbv, t0, zero
+
+	ret
+
+; code sp --
+HALLimn2kExit:
+.global HALLimn2kExit
+	mov v0, a1
+	mov sp, a0
+	pop lr
 
 	ret
 

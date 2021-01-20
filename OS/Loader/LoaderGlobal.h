@@ -6,6 +6,7 @@ const BOOTFBFORMAT_AB5G5R5 1
 struct LoaderInfo
 	4 Major
 	4 Minor
+	4 ReturnSP
 	4 InitMemBmp
 	4 InitMemBmpSz
 	4 DLLListHead

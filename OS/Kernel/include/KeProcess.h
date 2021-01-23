@@ -96,19 +96,13 @@ endstruct
 
 extern KeProcessCurrentGet { -- current }
 
-extern KeProcessCreate { user name -- process ok }
-
 extern KeProcessInitialize { user name process -- ok }
 
 externptr KeProcessListHead
 
 externptr KeProcessKernelProcess
 
-extern KeThreadCreate { context1 context2 startfunc process name -- thread ok }
-
 extern KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
-
-extern KeThreadWorkerCreate { context1 context2 startfunc name -- thread ok }
 
 extern KeThreadWorkerInitialize { context1 context2 startfunc name thread -- ok }
 

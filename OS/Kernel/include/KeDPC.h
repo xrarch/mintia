@@ -8,7 +8,7 @@ struct DPC
 	4 Function
 	4 Context1
 	4 Context2
-	4 Queued
+	4 Enqueued
 endstruct
 
 const DPCHIGHIMPORTANCE 1

@@ -41,6 +41,10 @@ fn (DPCFunction) TestTimerFunction { context1 context2 -- }
 	context1@ context2@ context1@ context2@ KeTimerEnqueue drop
 end
 
+buffer TestThread1 KeThread_SIZEOF
+
+buffer TestThread2 KeThread_SIZEOF
+
 fn KeMain { -- ret }
 	// early init that takes place before there's a process context
 
@@ -66,17 +70,22 @@ fn KeMain { -- ret }
 
 	KeThreadInit
 
-	auto thread
+	0xDEADBEEF 'b' pointerof TestKernelThread "test" TestThread1 KeThreadWorkerInitialize ret!
 
-	0xDEADBEEF 0xABCDEF00 pointerof TestKernelThread "test" KeThreadWorkerCreate ret! thread!
+	TestThread1 KeThreadReady
 
-	thread@ KeThreadReady
+	0xCCCCCCCC 'c' pointerof TestKernelThread "test2" TestThread2 KeThreadWorkerInitialize ret!
+
+	PRIORITY_HIGHUSER TestThread2 KeThread_Priority + !
+
+	TestThread2 KeThreadBigTest!
 
 	KeThreadNextPick KeThreadSwitch
 
 	0 ret!
 end
 
+var KeThreadBigTest 0
 
 fn KeMainInThreadContext { -- }
 	"Hello Andromeda World!\n" "KeMain" HALLog
@@ -84,7 +93,11 @@ fn KeMainInThreadContext { -- }
 	KeMemPageFreeCount@ 12 << 1024 / "%dKB memory available.\n" "KeMain" HALLog
 
 	while (1)
-		'a' Putc
+		"HEY: " Printf
+
+		KeThreadBigTest@ KeThreadReady
+
+		":YAH " Printf
 
 		HALCPUHalt
 	end
@@ -100,7 +113,11 @@ fn TestKernelThread { context1 context2 -- }
 	//500 TestTimer4 500 TestTimer4 KeTimerEnqueue drop
 
 	while (1)
-		'b' Putc
+		context2@ Putc
+
+		if (context1@ 0xDEADBEEF ~=)
+			THREADSTATUS_SUSPENDED KeThreadYieldNow
+		end
 
 		HALCPUHalt
 	end

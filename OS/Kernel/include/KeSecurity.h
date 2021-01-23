@@ -51,13 +51,9 @@ const GID_SYSTEM 0
 
 const UID_SYSTEM 0
 
-extern KeSecurityRoleCreate { heapmax pfmax permissions gid name -- role ok }
-
 extern KeSecurityRoleInitialize { heapmax pfmax permissions gid name role -- ok }
 
 extern KeSecurityRoleByGID { gid -- role }
-
-extern KeSecurityUserCreate { primaryrole uid name -- user ok }
 
 extern KeSecurityUserInitialize { primaryrole uid name user -- ok }
 

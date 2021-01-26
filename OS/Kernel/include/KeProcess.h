@@ -58,14 +58,20 @@ struct KeProcess
 	4 PageFaultCount
 endstruct
 
-const THREADSTATUS_INITIALIZED 1
-const THREADSTATUS_READY 2
-const THREADSTATUS_SUSPENDED 3
-const THREADSTATUS_RUNNING 4
-const THREADSTATUS_WAITINGALERTABLE 5
+const THREADYIELD_PREEMPTED  1
+const THREADYIELD_QUANTUMEND 2
+
+const THREADSTATUS_INITIALIZED        1
+const THREADSTATUS_READY              2
+const THREADSTATUS_SUSPENDED          3
+const THREADSTATUS_RUNNING            4
+const THREADSTATUS_WAITINGALERTABLE   5
 const THREADSTATUS_WAITINGUNALERTABLE 6
 
-const THREADDEFAULTQUANTUM 25
+const QUEUEFRONT 1
+const QUEUEBACK 0
+
+const THREADDEFAULTQUANTUM 30
 
 const KETHREADNAMELEN 128
 
@@ -89,8 +95,10 @@ struct KeThread
 
 	4 Enqueued
 
+	4 BasePriority
 	4 Priority
 
+	4 BaseQuantum
 	4 Quantum
 endstruct
 
@@ -106,7 +114,7 @@ extern KeThreadInitialize { context1 context2 startfunc process name thread -- o
 
 extern KeThreadWorkerInitialize { context1 context2 startfunc name thread -- ok }
 
-extern KeThreadEnqueue { thread -- }
+extern KeThreadEnqueue { front thread -- }
 
 extern KeThreadDequeue { thread -- }
 
@@ -114,16 +122,20 @@ extern KeThreadNextPick { -- thread }
 
 extern KeThreadSwitch { thread -- }
 
-extern KeThreadReady { thread -- }
+extern KeThreadTransition { status thread -- }
 
-extern KeThreadYield { -- }
+extern KeThreadReady { front thread -- }
 
-extern KeThreadYieldNow { yieldstatus -- }
+extern KeThreadYield { yieldstatus -- }
+
+extern KeThreadNextSwitch { -- }
 
 externptr KeThreadNext
 
+externptr KeThreadNextReason
+
 externptr KeThreadCurrent
 
-externptr KeThreadSchedulerDPC
-
 externptr KeThreadQuantumTimer
+
+externptr KeThreadPriorityQueueHeads

@@ -9,7 +9,9 @@
 
 #include "<inc>/KeSecurity.h"
 
-const COMMANDS 6
+#include "../Loader/LoaderGlobal.h"
+
+const COMMANDS 9
 
 table DebugCommands
 	"help"
@@ -35,6 +37,18 @@ table DebugCommands
 	"roles"
 	"Lists the system's registered roles."
 	pointerof DebugCommandRole
+
+	"pcsym"
+	"[pc] Find the function a program counter is part of."
+	pointerof DebugCommandPcsym
+
+	"ready"
+	"Print all of the ready queues."
+	pointerof DebugCommandReady
+
+	"threads"
+	"[proc] Lists the threads of a process."
+	pointerof DebugCommandThread
 endtable
 
 struct Command
@@ -192,9 +206,9 @@ fn DebugCommandProc { p -- halt }
 		proc@ KeProcess_User + @ KeSecurityUser_Name + uname!
 
 		if (name@ ~~)
-			uname@ proc@ KeProcess_Name + proc@ "%010x %22s %8s\n" Printf
+			uname@ proc@ KeProcess_Name + proc@ "0x%08x %22s %8s\n" Printf
 		end elseif (name@ uname@ strcmp)
-			uname@ proc@ KeProcess_Name + proc@ "%010x %22s %8s\n" Printf
+			uname@ proc@ KeProcess_Name + proc@ "0x%08x %22s %8s\n" Printf
 		end
 
 		proc@ KeProcess_GlobalListNext + @ proc!
@@ -229,5 +243,92 @@ fn DebugCommandRole { p -- halt }
 		end
 
 		1 i +=
+	end
+end
+
+fn DebugCommandPcsym { p -- halt }
+	0 halt!
+
+	if (p@ ~~)
+		"please specify a program counter value\n" Printf
+		return
+	end
+
+	1 p +=
+
+	auto pc
+	p@ atoi pc!
+
+	auto dll
+	auto symbase
+	auto symname
+
+	pc@ DebugGetSymDLL symname! symbase! dll!
+
+	if (symbase@ ~~)
+		"UNKNOWN\n" Printf
+	end else
+		pc@ symbase@ - symname@ dll@ DLL_Name + "%s!%s + 0x%x\n" Printf
+	end
+end
+
+fn DebugCommandReady { p -- halt }
+	0 halt!
+
+	auto i
+	PRIORITIES i!
+
+	while (i@)
+		1 i -=
+
+		auto thread
+		[i@]KeThreadPriorityQueueHeads@ thread!
+
+		if (thread@)
+			i@ "[%d] " Printf
+
+			while (thread@)
+				thread@ KeThread_Name + "%s " Printf
+
+				thread@ KeThread_QueueNext + @ thread!
+			end
+
+			'\n' Putc
+		end
+	end
+end
+
+table StatusNames
+	"Zero"
+	"Initial"
+	"Ready"
+	"Suspend"
+	"Running"
+	"WaitAlrt"
+	"WitUAlrt"
+endtable
+
+fn DebugCommandThread { p -- halt }
+	0 halt!
+
+	if (p@ ~~)
+		"please specify a process pointer\n" Printf
+		return
+	end
+
+	1 p +=
+
+	auto proc
+	p@ atoi proc!
+
+	auto thr
+	proc@ KeProcess_ThreadListHead + @ thr!
+
+	"PRI" "STATUS" "NAME" "PTR" "%10s %22s %8s %4s\n" Printf
+
+	while (thr@)
+		thr@ KeThread_Priority + @ [thr@ KeThread_Status + @]StatusNames@ thr@ KeThread_Name + thr@ "0x%08x %22s %8s %4d\n" Printf
+
+		thr@ KeThread_ProcessNext + @ thr!
 	end
 end

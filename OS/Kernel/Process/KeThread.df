@@ -15,6 +15,8 @@
 #include "<ll>/RTL/RTLErrors.h"
 
 table KeThreadPriorityQueueHeads[PRIORITIES]
+public KeThreadPriorityQueueHeads
+
 table KeThreadPriorityQueueTails[PRIORITIES]
 
 var KeThreadCurrent 0
@@ -23,6 +25,9 @@ public KeThreadCurrent
 var KeThreadNext 0
 public KeThreadNext
 
+var KeThreadNextReason 0
+public KeThreadNextReason
+
 // 'context1' and 'context2' are parameters passed to the start function
 
 fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
@@ -30,11 +35,13 @@ fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
 
 	THREADSTATUS_INITIALIZED thread@ KeThread_Status + !
 
+	THREADDEFAULTQUANTUM thread@ KeThread_BaseQuantum + !
 	THREADDEFAULTQUANTUM thread@ KeThread_Quantum + !
 
 	process@ thread@ KeThread_Process + !
 
 	process@ KeProcess_BasePriority + @ thread@ KeThread_Priority + !
+	process@ KeProcess_BasePriority + @ thread@ KeThread_BasePriority + !
 
 	auto kstack
 	KeMemPageAlloc kstack! drop
@@ -82,7 +89,7 @@ fn KeThreadWorkerInitialize { context1 context2 startfunc name thread -- ok }
 	context1@ context2@ startfunc@ KeProcessKernelProcess name@ thread@ KeThreadInitialize ok!
 end
 
-fn KeThreadEnqueue { thread -- }
+fn KeThreadEnqueue { front thread -- }
 	// add thread to the tail of the proper ready queue for its priority level
 
 	auto ipl
@@ -98,19 +105,40 @@ fn KeThreadEnqueue { thread -- }
 	thread@ KeThread_Priority + @ pri!
 
 	auto t
-	[pri@]KeThreadPriorityQueueTails@ t!
 
-	if (t@ ~~)
+	if (front@)
+		[pri@]KeThreadPriorityQueueHeads@ t!
+
+		if (t@ ~~)
+			thread@ [pri@]KeThreadPriorityQueueTails!
+
+			0 thread@ KeThread_QueueNext + !
+			0 thread@ KeThread_QueuePrev + !
+		end else
+			t@ thread@ KeThread_QueueNext + !
+			thread@ t@ KeThread_QueuePrev + !
+
+			0 thread@ KeThread_QueuePrev + !
+		end
+
 		thread@ [pri@]KeThreadPriorityQueueHeads!
-
-		0 thread@ KeThread_QueueNext + !
-		0 thread@ KeThread_QueuePrev + !
 	end else
-		thread@ t@ KeThread_QueueNext + !
-		t@ thread@ KeThread_QueuePrev + !
-	end
+		[pri@]KeThreadPriorityQueueTails@ t!
 
-	thread@ [pri@]KeThreadPriorityQueueTails!
+		if (t@ ~~)
+			thread@ [pri@]KeThreadPriorityQueueHeads!
+
+			0 thread@ KeThread_QueueNext + !
+			0 thread@ KeThread_QueuePrev + !
+		end else
+			thread@ t@ KeThread_QueueNext + !
+			t@ thread@ KeThread_QueuePrev + !
+
+			0 thread@ KeThread_QueueNext + !
+		end
+
+		thread@ [pri@]KeThreadPriorityQueueTails!
+	end
 
 	ipl@ KeIPLLower
 end
@@ -148,12 +176,15 @@ fn KeThreadDequeue { thread -- }
 		thread@ KeThread_QueueNext + @ [pri@]KeThreadPriorityQueueHeads!
 	end
 
+	0 thread@ KeThread_QueueNext + !
+	0 thread@ KeThread_QueuePrev + !
+
 	ipl@ KeIPLLower
 end
 
 // implements the thread transition state machine
 
-fn KeThreadTransition { status thread -- }
+fn KeThreadTransition1 { status thread front -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -175,7 +206,7 @@ fn KeThreadTransition { status thread -- }
 	end elseif (status@ THREADSTATUS_READY ==)
 		// now ready, enqueue
 
-		thread@ KeThreadEnqueue
+		front@ thread@ KeThreadEnqueue
 
 		auto current
 		KeThreadCurrent@ current!
@@ -184,7 +215,7 @@ fn KeThreadTransition { status thread -- }
 			if (thread@ KeThread_Priority + @ current@ KeThread_Priority + @ >)
 				// this thread's priority is greater than the current thread's
 
-				KeThreadYield
+				thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
 			end
 		end
 	end
@@ -194,14 +225,45 @@ fn KeThreadTransition { status thread -- }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadReady { thread -- }
-	THREADSTATUS_READY thread@ KeThreadTransition
+fn KeThreadTransition { status thread -- }
+	status@ thread@ QUEUEBACK KeThreadTransition1
 end
 
-fn (DPCFunction) KeThreadSchedulerDPCFunction { context1 context2 -- }
-	THREADSTATUS_READY KeThreadCurrent@ KeThreadTransition
+fn KeThreadReady { front thread -- }
+	THREADSTATUS_READY thread@ front@ KeThreadTransition1
+end
 
-	KeThreadNextPick KeThreadNext!
+fn KeThreadQuantumEnd { -- }
+	auto current
+	KeThreadCurrent@ current!
+
+	if (current@ KeThread_Status + @ THREADSTATUS_RUNNING ~=)
+		"KeThreadQuantumEnd: current thread isn't RUNNING\n" KeCrash
+	end
+
+	if (current@ KeThread_Enqueued + @)
+		"KeThreadQuantumEnd: current thread is RUNNING yet enqueued\n" KeCrash
+	end
+
+	auto pri
+	current@ KeThread_Priority + @ pri!
+
+	if (pri@ PRIORITY_LOWREALTIME <)
+		auto newpri
+		pri@ 1 - newpri!
+
+		if (newpri@ current@ KeThread_BasePriority + @ <)
+			current@ KeThread_BasePriority + @ newpri!
+		end
+
+		newpri@ current@ KeThread_Priority + !
+	end
+
+	KeThreadNextPick THREADYIELD_QUANTUMEND KeThreadNextSelect
+end
+
+fn (DPCFunction) KeThreadQuantumDPCFunction { context1 context2 -- }
+	KeThreadQuantumEnd
 end
 
 fn KeThreadNextPick { -- thread }
@@ -219,6 +281,8 @@ fn KeThreadNextPick { -- thread }
 				h@ thread!
 
 				return
+			end else
+				"KeThreadNextPick: thread on ready queue but not READY\n" KeCrash
 			end
 
 			h@ KeThread_QueueNext + @ h!
@@ -230,10 +294,14 @@ end
 
 var InitialContext 0
 
-// should be called with interrupts disabled at IPLAPC or IPLLOW.
-// thread should have been transitioned to the proper state beforehand
+// should be called with interrupts disabled at IPLDPC.
+// current thread should have been transitioned to the proper state beforehand
 
 fn KeThreadSwitch { thread -- }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeThreadSwitch: ipl ~= IPLDPC\n" KeCrash
+	end
+
 	auto current
 	KeThreadCurrent@ current!
 
@@ -244,7 +312,14 @@ fn KeThreadSwitch { thread -- }
 		qt@ KeTimerDequeue drop
 	end
 
-	0 0 thread@ KeThread_Quantum + @ qt@ KeTimerEnqueue drop
+	auto quantum
+	thread@ KeThread_Quantum + @ quantum!
+
+	if (quantum@)
+		THREADYIELD_QUANTUMEND 0 quantum@ qt@ KeTimerEnqueue drop
+	end
+
+	THREADSTATUS_RUNNING thread@ KeThreadTransition
 
 	if (thread@ current@ ==)
 		return
@@ -260,48 +335,187 @@ fn KeThreadSwitch { thread -- }
 
 	thread@ KeThreadCurrent!
 
-	THREADSTATUS_RUNNING thread@ KeThreadTransition
+	if (quantum@ ~~)
+		// there's no quantum anymore, this thread has been preempted a lot.
+		// do a quantum end.
+
+		KeThreadQuantumEnd
+	end
 
 	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
 end
 
-// for when you want to yield eventually
-// e.g. when a higher priority thread becomes ready
-
-// called in arbitrary context at IPLDPC
-
-fn KeThreadYield { -- }
+fn KeThreadPrioritySet { priority thread -- }
 	if (KeIPLCurrentGet IPLDPC ~=)
-		"KeThreadYield: ipl != IPLDPC\n" KeCrash
+		"KeThreadPrioritySet: ipl != IPLDPC\n" KeCrash
 	end
 
-	auto schdpc
-	KeThreadSchedulerDPC schdpc!
+	auto pri
+	thread@ KeThread_Priority + @ pri!
 
-	if (schdpc@ DPC_Enqueued + @ ~~)
-		0 0 DPCLOWIMPORTANCE schdpc@ KeDPCEnqueue
+	if (pri@ priority@ ==)
+		return
+	end
+
+	if (priority@ pri@ >)
+		// the priority has been raised. if the thread is running or waiting, do nothing.
+		// however, if the thread is in a ready queue, it must be requeued.
+		// if this action raises its priority above that of the current thread, ask the
+		// scheduler to run.
+
+		if (thread@ KeThread_Status + @ THREADSTATUS_READY ==)
+			thread@ KeThreadDequeue
+
+			priority@ thread@ KeThread_Priority + !
+
+			QUEUEBACK thread@ KeThreadEnqueue
+
+			if (priority@ KeThreadCurrent@ KeThread_Priority + @ >)
+				thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
+			end
+		end else
+			if (thread@ KeThread_Enqueued + @)
+				"KeThreadPrioritySet: thread was enqueued despite not being READY\n" KeCrash
+			end
+
+			priority@ thread@ KeThread_Priority + !
+		end
+	end else
+		// the priority has been lowered. if the thread is in a ready queue, it must be requeued.
+		// if the thread is currently running, see if there is now a higher priority thread that can run.
+		// if so, ask the scheduler to run.
+
+		auto status
+		thread@ KeThread_Status + @ status!
+
+		if (status@ THREADSTATUS_READY ==)
+			thread@ KeThreadDequeue
+
+			priority@ thread@ KeThread_Priority + !
+
+			QUEUEBACK thread@ KeThreadEnqueue
+		end elseif (status@ THREADSTATUS_RUNNING ==)
+			if (thread@ KeThreadCurrent@ ~=)
+				"KeThreadPrioritySet: thread is RUNNING, but is not the current thread\n" KeCrash
+			end
+
+			priority@ thread@ KeThread_Priority + !
+
+			auto i
+			PRIORITIES 1 - i!
+
+			while (i@ priority@ >)
+				auto qh
+				[i@]KeThreadPriorityQueueHeads@ qh!
+
+				if (qh@)
+					qh@ THREADYIELD_PREEMPTED KeThreadNextSelect
+				end
+
+				1 i -=
+			end
+		end
 	end
 end
 
-// for when you want to yield NOW
-// e.g. when waiting on an object
+fn KeThreadNextSelect { next reason -- }
+	auto onext
+	KeThreadNext@ onext!
 
-// only called in normal thread context
+	if (onext@)
+		if (next@ KeThread_Priority + @ onext@ KeThread_Priority + @ >=)
+			next@ KeThreadNext!
+			reason@ KeThreadNextReason!
+		end
+	end else
+		next@ KeThreadNext!
+		reason@ KeThreadNextReason!
+	end
 
-fn KeThreadYieldNow { yieldstatus -- }
+	if (KeThreadNext@ KeThreadCurrent@ ==)
+		0 KeThreadNext!
+	end
+end
+
+fn KeThreadPriorityBoost { boost thread -- }
+	auto pri
+	thread@ KeThread_Priority + @ pri!
+
+	if (pri@ PRIORITY_LOWREALTIME <)
+		auto newpri
+		thread@ KeThread_BasePriority + @ boost@ + newpri!
+
+		if (newpri@ PRIORITY_HIGHUSER >)
+			PRIORITY_HIGHUSER newpri!
+		end
+
+		if (newpri@ pri@ >)
+			newpri@ thread@ KeThreadPrioritySet
+		end
+	end
+end
+
+fn KeThreadNextSwitch { -- }
+	while (KeThreadNext@)
+		auto next
+		KeThreadNext@ next!
+
+		0 KeThreadNext!
+
+		auto current
+		KeThreadCurrent@ current!
+
+		auto cause
+		KeThreadNextReason@ cause!
+
+		0 KeThreadNextReason!
+
+		if (cause@ THREADYIELD_QUANTUMEND ==)
+			// the quantum ended, place it at the back
+
+			current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
+
+			QUEUEBACK current@ KeThreadReady
+		end elseif (cause@ THREADYIELD_PREEMPTED ==)
+			// it was preempted, place it at the front
+
+			if (current@ KeThread_Quantum + @ 5 >)
+				5 current@ KeThread_Quantum + -=
+			end else
+				0 current@ KeThread_Quantum + !
+			end
+
+			QUEUEFRONT current@ KeThreadReady
+		end
+
+		// if a reschedule was deferred, do it here
+
+		// this is done here instead of in a DPC to ensure that the entire
+		// DPC queue is processed before the thread switch occurs.
+
+		next@ KeThreadSwitch
+	end
+end
+
+// for when you want to yield NOW and in a particular state
+// this function is used e.g. when waiting on an object
+
+// only called in normal thread context at IPLDPC
+
+fn KeThreadYield { yieldstatus -- }
 	if (KeDPCActive@)
 		"KeThreadYieldNow: DPC active\n" KeCrash
 	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	auto current
 	KeThreadCurrent@ current!
 
 	yieldstatus@ current@ KeThreadTransition
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	KeThreadNextPick 0 KeThreadNextSelect
 
-	KeThreadNextPick KeThreadSwitch
-
-	rs@ HALCPUInterruptRestore
+	ipl@ KeIPLLower
 end

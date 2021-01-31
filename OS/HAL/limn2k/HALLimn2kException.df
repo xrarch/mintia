@@ -13,109 +13,110 @@ externptr HALLIMNstationLSICClaimComplete
 var HALInterruptFunction 0
 public HALInterruptFunction
 
+var HALThreadCurrentStackTop 0
+public HALThreadCurrentStackTop
+
 asm "
 
 HALLimn2kExceptionVector:
 .global HALLimn2kExceptionVector
-	mov   k2, sp ; save old sp in k2,
-	             ; this could be a usermode sp, in which case it needs saving,
-	             ; or a kernel mode sp, in which case we'll keep using it,
-	             ; but it's much easier and faster to save it unconditionally,
-	             ; instead of trying to figure it out.
+	mov    k2, sp                           ; save old sp in k2,
+	                                        ; this could be a usermode sp, in which case it needs saving,
+	                                        ; or a kernel mode sp, in which case we'll keep using it,
+	                                        ; but it's much easier and faster to save it unconditionally,
+	                                        ; instead of trying to figure it out.
 
-	mov   k0, k2 ; save stack link
+	mov    k0, k2                           ; save stack link
 
-	andi  k1, ers,  RS_USER    ; if the code that just got interrupted was kernel code,
-	beq   k1, zero, .waskernel ; don't switch stacks, continue using the kernel mode stacks
-	                           ; for this thread.
+	andi   k1, ers,  RS_USER                ; if the code that just got interrupted was kernel code,
+	beq    k1, zero, .waskernel             ; don't switch stacks, continue using the kernel mode stacks
+	                                        ; for this thread.
 
-	; la    k0, CurrentThread
-	; l.l   k0, k0, zero      ; k0 = [CurrentThread]
-	; lio.l sp, k0, Thread_KernelStackTop ; load new sp from the current thread's structure
+	la     k0, HALThreadCurrentStackTop
+	l.l    sp, k0, zero                     ; switch to the kernel stack for the current thread
 
-	mov    k0, zero ; this sp is a usermode sp, making it meaningless for stack traces.
-	                ; turn it into a zero link.
+	mov    k0, zero                         ; this sp is a usermode sp, making it meaningless for stack traces.
+	                                        ; turn it into a zero link to stop the debugger from freaking out if
+	                                        ; it tries to trace past this vector.
 
 .waskernel:
 
-	subi.i sp, Limn2kContext_SIZEOF   ; reserve space in stack for context save
-	sio.l  sp, Limn2kContext_sp,  k2  ; store the saved sp from above's longwinded comment
-	sio.l  sp, Limn2kContext_ers, ers ; store the interrupted thread's processor mode
-	sio.l  sp, Limn2kContext_epc, epc ; store the interrupted thread's program counter
-	sio.l  sp, Limn2kContext_lr,  lr  ; store the interrupted thread's return address register
-	sgpr   sp                         ; save the rest of the general purpose registers
-	                                  ; what a convenient instruction sgpr is
+	subi.i sp, Limn2kContext_SIZEOF         ; reserve space in stack for context save
+	sio.l  sp, Limn2kContext_sp,  k2        ; store the saved sp from above's longwinded comment
+	sio.l  sp, Limn2kContext_ers, ers       ; store the interrupted thread's processor mode
+	sio.l  sp, Limn2kContext_epc, epc       ; store the interrupted thread's program counter
+	sio.l  sp, Limn2kContext_lr,  lr        ; store the interrupted thread's return address register
+	sgpr   sp                               ; save the rest of the general purpose registers
+	                                        ; what a convenient instruction sgpr is
 
-	beqi   ecause, ECAUSEINTERRUPT, .interrupt
+	beqi   ecause, ECAUSEINTERRUPT, .interrupt ; if the exception was an interrupt, jump to the fast-track code for that
 
 	mov    a2, badaddr
 	mov    a1, ecause
-	mov    a0, sp                     ; give HALLimn2kException our context
+	mov    a0, sp                           ; give HALLimn2kException our context
 
-	push   epc                        ; save epc
-	push   k0                         ; save sp or zero link
+	push   epc                              ; set up a fake stack frame stub so that the debugger's stack trace doesn't freak out here
+	push   k0
 
-	jal    HALLimn2kException         ; call HALLimn2kException, to handle the exception
+	jal    HALLimn2kException               ; call HALLimn2kException, to handle the exception
 
-	li     badaddr, 0                 ; clear badaddr because the processor doesn't do it for us
+	li     badaddr, 0                       ; clear badaddr because the processor doesn't do it for us
 
-	addi.i sp, 8                      ; unwind the debug stuff we added
+	addi.i sp, 8                            ; unwind the fake stack frame stub we added
 
-	lgpr  sp                          ; restore general purpose registers
-	lio.l ers, sp, Limn2kContext_ers  ; restore interrupted thread's processor mode
-	lio.l epc, sp, Limn2kContext_epc  ; restore interrupted thread's program counter
-	lio.l lr,  sp, Limn2kContext_lr   ; restore interrupted thread's return address register
-	lio.l sp,  sp, Limn2kContext_sp   ; restore interrupted thread's stack pointer, just in case
-	                                  ; it was user code
+	lgpr   sp                               ; restore general purpose registers
+	lio.l  ers, sp, Limn2kContext_ers       ; restore interrupted thread's processor mode
+	lio.l  epc, sp, Limn2kContext_epc       ; restore interrupted thread's program counter
+	lio.l  lr,  sp, Limn2kContext_lr        ; restore interrupted thread's return address register
+	lio.l  sp,  sp, Limn2kContext_sp        ; restore interrupted thread's stack pointer, just in case
+	                                        ; it was user code
 
-	rfe ; give control back to the thread
+	rfe                                     ; give control back to the thread
 
 .interrupt:
 
-	push epc
-	push zero
+	push   epc                              ; set up a fake stack frame stub so that the debugger's stack trace doesn't freak out here
+	push   zero
 
-	la  s2, HALInterruptFunction
-	l.l s2, s2, zero
+	la     s2, HALInterruptFunction         ; get the address of the kernel's interrupt dispatcher
+	l.l    s2, s2, zero
 
-	la  s0, HALLIMNstationLSICClaimComplete
-	l.l s0, s0, zero
+	la     s0, HALLIMNstationLSICClaimComplete ; get the address of the interrupt controller's claim/complete register
+	l.l    s0, s0, zero
 
-	la  s1, HALLIMNstationInterruptHandlers
+	la     s1, HALLIMNstationInterruptHandlers ; get the base address of the interrupt handler table
 
-	l.l t0, s0, zero
+	l.l    t0, s0, zero                     ; get the first interrupt number from the claim/complete register
 
-	beq t0, zero, .interruptsdone
+	beq    t0, zero, .interruptsdone        ; skip to the end if there somehow wasn't one
 
 .nextinterrupt:
 
-	lshi  t1, t0, 3
-	add   t1, s1, t1
-	lio.l t2, t1, 4
-	l.l   t1, t1, zero
+	lshi   t1, t0, 3                        ; multiply the interrupt number by 8 to get a table offset
+	add    t1, s1, t1                       ; add to the interrupt handler table base
+	lio.l  a2, t1, 4                        ; get the interrupt's priority level
+	l.l    a0, t1, zero                     ; get the handler address
 
-	s.l s0, zero, t0
+	s.l    s0, zero, t0                     ; ACK the interrupt by writing it back to the claim/complete register
 
-	mov  a2, t2
-	mov  a1, t0
-	mov  a0, t1
-	jalr s2
+	mov    a1, t0                           ; pass the interrupt number
+	jalr   s2                               ; jump to the kernel's interrupt dispatcher
 
-	l.l t0, s0, zero
-	bne t0, zero, .nextinterrupt
+	l.l    t0, s0, zero                     ; get the next interrupt number
+	bne    t0, zero, .nextinterrupt         ; if there is an interrupt, restart the loop
 
 .interruptsdone:
 
-	addi  sp, sp, 8
+	addi   sp, sp, 8                        ; unwind the fake stack frame stub we added
 
-	lgpr  sp                          ; restore general purpose registers
-	lio.l ers, sp, Limn2kContext_ers  ; restore interrupted thread's processor mode
-	lio.l epc, sp, Limn2kContext_epc  ; restore interrupted thread's program counter
-	lio.l lr,  sp, Limn2kContext_lr   ; restore interrupted thread's return address register
-	lio.l sp,  sp, Limn2kContext_sp   ; restore interrupted thread's stack pointer, just in case
-	                                  ; it was user code
+	lgpr   sp                               ; restore general purpose registers
+	lio.l  ers, sp, Limn2kContext_ers       ; restore interrupted thread's processor mode
+	lio.l  epc, sp, Limn2kContext_epc       ; restore interrupted thread's program counter
+	lio.l  lr,  sp, Limn2kContext_lr        ; restore interrupted thread's return address register
+	lio.l  sp,  sp, Limn2kContext_sp        ; restore interrupted thread's stack pointer, just in case
+	                                        ; it was user code
 
-	rfe ; give control back to the thread
+	rfe                                     ; give control back to the thread
 
 HALLimn2kExceptionRefillVector:
 .global HALLimn2kExceptionRefillVector

@@ -2,6 +2,7 @@
 #include "<inc>/HALLog.h"
 
 #include "<inc>/HALCPU.h"
+#include "<inc>/HALRTC.h"
 
 #include "<inc>/KeCrash.h"
 
@@ -28,6 +29,10 @@ public KeThreadNext
 var KeThreadNextReason 0
 public KeThreadNextReason
 
+externptr HALThreadCurrentStackTop
+
+const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
+
 // 'context1' and 'context2' are parameters passed to the start function
 
 fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
@@ -35,8 +40,9 @@ fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
 
 	THREADSTATUS_INITIALIZED thread@ KeThread_Status + !
 
-	THREADDEFAULTQUANTUM thread@ KeThread_BaseQuantum + !
-	THREADDEFAULTQUANTUM thread@ KeThread_Quantum + !
+
+	THREADDEFAULTQUANTUMUNITS thread@ KeThread_BaseQuantum + !
+	THREADDEFAULTQUANTUMUNITS thread@ KeThread_Quantum + !
 
 	process@ thread@ KeThread_Process + !
 
@@ -233,6 +239,36 @@ fn KeThreadReady { front thread -- }
 	THREADSTATUS_READY thread@ front@ KeThreadTransition1
 end
 
+fn KeThreadQuantumIncrement { inc thread -- qt }
+	auto ipl
+	IPLCLOCK KeIPLRaise ipl!
+
+	thread@ KeThread_Quantum + @ qt!
+
+	inc@ qt +=
+
+	qt@ thread@ KeThread_Quantum + !
+
+	ipl@ KeIPLLower
+end
+
+fn KeThreadQuantumDecrement { dec thread -- qt }
+	auto ipl
+	IPLCLOCK KeIPLRaise ipl!
+
+	thread@ KeThread_Quantum + @ qt!
+
+	if (qt@ dec@ <=)
+		0 qt!
+	end else
+		dec@ qt -=
+	end
+
+	qt@ thread@ KeThread_Quantum + !
+
+	ipl@ KeIPLLower
+end
+
 fn KeThreadQuantumEnd { -- }
 	auto current
 	KeThreadCurrent@ current!
@@ -297,6 +333,8 @@ var InitialContext 0
 // should be called with interrupts disabled at IPLDPC.
 // current thread should have been transitioned to the proper state beforehand
 
+// XXX maybe this function should be rolled into KeThreadNextSwitch?
+
 fn KeThreadSwitch { thread -- }
 	if (KeIPLCurrentGet IPLDPC ~=)
 		"KeThreadSwitch: ipl ~= IPLDPC\n" KeCrash
@@ -305,21 +343,9 @@ fn KeThreadSwitch { thread -- }
 	auto current
 	KeThreadCurrent@ current!
 
-	auto qt
-	KeThreadQuantumTimer qt!
-
-	if (qt@ KeTimer_Enqueued + @)
-		qt@ KeTimerDequeue drop
-	end
-
-	auto quantum
-	thread@ KeThread_Quantum + @ quantum!
-
-	if (quantum@)
-		THREADYIELD_QUANTUMEND 0 quantum@ qt@ KeTimerEnqueue drop
-	end
-
 	THREADSTATUS_RUNNING thread@ KeThreadTransition
+
+	thread@ KeThread_KernelStackTop + @ HALThreadCurrentStackTop!
 
 	if (thread@ current@ ==)
 		return
@@ -335,11 +361,15 @@ fn KeThreadSwitch { thread -- }
 
 	thread@ KeThreadCurrent!
 
-	if (quantum@ ~~)
-		// there's no quantum anymore, this thread has been preempted a lot.
-		// do a quantum end.
+	auto qtm
+	thread@ KeThread_Quantum + @ qtm!
+
+	if (qtm@ ~~)
+		// no more quantum, do a quantum end
 
 		KeThreadQuantumEnd
+
+		thread@ KeThread_BaseQuantum + @ thread@ KeThread_Quantum + !
 	end
 
 	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
@@ -433,6 +463,8 @@ fn KeThreadNextSelect { next reason -- }
 	end
 
 	if (KeThreadNext@ KeThreadCurrent@ ==)
+		// no reschedule required
+
 		0 KeThreadNext!
 	end
 end
@@ -473,15 +505,11 @@ fn KeThreadNextSwitch { -- }
 		if (cause@ THREADYIELD_QUANTUMEND ==)
 			// the quantum ended, place it at the back
 
-			current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
-
 			QUEUEBACK current@ KeThreadReady
 		end elseif (cause@ THREADYIELD_PREEMPTED ==)
 			// it was preempted, place it at the front
 
-			if (current@ KeThread_Quantum + @)
-				1 current@ KeThread_Quantum + -=
-			end
+			1 current@ KeThreadQuantumDecrement drop
 
 			QUEUEFRONT current@ KeThreadReady
 		end

@@ -71,7 +71,9 @@ const THREADSTATUS_WAITINGUNALERTABLE 6
 const QUEUEFRONT 1
 const QUEUEBACK 0
 
-const THREADDEFAULTQUANTUM 30
+const THREADDEFAULTQUANTUM 30 // in milliseconds
+
+const QUANTUMUNITSPERTICK 3
 
 const KETHREADNAMELEN 128
 
@@ -136,6 +138,6 @@ externptr KeThreadNextReason
 
 externptr KeThreadCurrent
 
-externptr KeThreadQuantumTimer
+externptr KeThreadQuantumDPC
 
 externptr KeThreadPriorityQueueHeads

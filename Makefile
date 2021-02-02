@@ -14,7 +14,7 @@ HAL_DIR    := $(OS_DIR)/HAL
 DBG_DIR    := $(OS_DIR)/224Debug
 BR_DIR     := $(OS_DIR)/BootResources
 DRIVER_DIR := $(OS_DIR)/BootDrivers
-RTL_DIR    := $(OS_DIR)/RTL
+RTL_DIR    := $(OS_DIR)/OSDLL
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 

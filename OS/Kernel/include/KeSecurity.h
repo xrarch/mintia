@@ -22,6 +22,8 @@ struct KeSecurityUser
 
 	// resource limits on this user
 
+	4 HeapUsed
+
 	4 HeapMax
 	4 PageFramesMax
 endstruct

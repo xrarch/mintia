@@ -7,13 +7,13 @@ DC  =  ../../../sdk/dragonc.sh
 AS  =  ../../../sdk/asm.sh
 LD  =  ../../../sdk/link.sh link
 
-all: obj/RTL.dll
-	cp -r obj/RTL.dll ../Library/RTL.dll
+all: obj/OSDLL.dll
+	cp -r obj/OSDLL.dll ../Library/OSDLL.dll
 
-obj/RTL.dll: $(OBJ) $(SOBJ)
+obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	mkdir -p obj
 	mkdir -p src
-	$(LD) obj/RTL.dll $(OBJ) $(SOBJ) -d ../Library/Dragonfruit.dll
+	$(LD) obj/OSDLL.dll $(OBJ) $(SOBJ) -d ../Library/Dragonfruit.dll
 
 %.o: %.df
 	$(DC) $< $@ incdir=./headers/
@@ -22,4 +22,4 @@ obj/RTL.dll: $(OBJ) $(SOBJ)
 	$(AS) $< $@
 
 cleanup:
-	rm $(OBJ) $(SOBJ) obj/RTL.dll
+	rm -f $(OBJ) $(SOBJ) obj/*

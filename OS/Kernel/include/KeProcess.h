@@ -1,3 +1,5 @@
+// needs KeTimer
+
 const KEPROCESSNAMELEN 128
 
 const WORKINGSETDEFAULTMAXIMUM 12
@@ -102,6 +104,8 @@ struct KeThread
 
 	4 BaseQuantum
 	4 Quantum
+
+	KeTimer_SIZEOF WakeTimer
 endstruct
 
 extern KeProcessCurrentGet { -- current }
@@ -131,6 +135,8 @@ extern KeThreadReady { front thread -- }
 extern KeThreadYield { yieldstatus -- }
 
 extern KeThreadNextSwitch { -- }
+
+extern KeThreadSleep { ms -- }
 
 externptr KeThreadNext
 

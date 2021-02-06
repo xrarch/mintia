@@ -1,5 +1,4 @@
-#include "<inc>/KeDPC.h"
-#include "<inc>/KeTime.h"
+// needs KeDPC and KeTime
 
 externptr KeTimerListHead
 

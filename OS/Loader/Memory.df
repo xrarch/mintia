@@ -23,7 +23,7 @@ const HEAPMAXDEFAULT (512 1024 *)
 
 const HEAPMINDEFAULT (32 1024 *)
 
-const HEAPSHFDEFAULT 5
+const HEAPSHFDEFAULT 4
 
 fn MemInit { -- }
 	auto bm
@@ -53,6 +53,8 @@ fn MemInit { -- }
 
 	pages@ 32 * rps!
 
+	rps@ "pageframe db is %d bytes" Printf
+
 	auto astart
 
 	auto ok
@@ -63,6 +65,8 @@ fn MemInit { -- }
 	end
 
 	astart@ 12 << MemPageFrameDB!
+
+	MemPageFrameDB@ " at 0x%08x\n" Printf
 
 	// allocate kernel heap
 
@@ -94,6 +98,15 @@ fn MemInit { -- }
 	end
 
 	pages@ heapshf@ >> 12 << rps!
+
+	// round down to nearest power of two
+
+	rps@ 1 >> rps |=
+	rps@ 2 >> rps |=
+	rps@ 4 >> rps |=
+	rps@ 8 >> rps |=
+	rps@ 16 >> rps |=
+	rps@ 1 >> rps -=
 
 	if (rps@ heapmin@ <)
 		heapmin@ rps!
@@ -192,9 +205,6 @@ fn MemAlloc { pages pstart -- astart ok }
 	auto bmp
 	MemBitmap i@ 32 / 4 * + bmp!
 
-	auto word
-	bmp@@ word!
-
 	auto run
 	0 run!
 
@@ -202,14 +212,7 @@ fn MemAlloc { pages pstart -- astart ok }
 	0 mode!
 
 	while (1)
-		if (run@ pages@ >=)
-			1 pages@ astart@ MemSetStatus
-
-			pages@ MemAllocated +=
-
-			0 ok!
-			return
-		end elseif (i@ chend@ >=)
+		if (i@ chend@ >=)
 			if (mode@)
 				-1 ok!
 				return
@@ -219,31 +222,10 @@ fn MemAlloc { pages pstart -- astart ok }
 				0 run!
 				pstart@ chend!
 				MemBitmap bmp!
-				continue
 			end
 		end
 
-		if (i@ 31 & ~~)
-			bmp@@ word!
-
-			4 bmp +=
-
-			if (word@ 0xFFFFFFFF ==)
-				0 run!
-				32 i +=
-				continue
-			end elseif (word@ 0x00000000 ==)
-				if (run@ 0 ==)
-					i@ astart!
-				end
-
-				32 run +=
-				32 i +=
-				continue
-			end
-		end
-
-		if (word@ i@ 31 & bitget)
+		if (bmp@@ i@ 31 & bitget)
 			0 run!
 		end else
 			if (run@ 0 ==)
@@ -251,6 +233,63 @@ fn MemAlloc { pages pstart -- astart ok }
 			end
 
 			1 run +=
+		end
+
+		if (run@ pages@ >=)
+			1 pages@ astart@ MemSetStatus
+
+			pages@ MemAllocated +=
+
+			0 ok!
+			return
+		end 
+
+		1 i +=
+
+		if (i@ 31 & ~~)
+			4 bmp +=
+
+			if (bmp@@ 0xFFFFFFFF ==)
+				32 i +=
+				0 run!
+				4 bmp +=
+			end elseif (bmp@@ 0x00000000 ==)
+				if (run@ 0 ==)
+					i@ astart!
+				end
+
+				32 i +=
+				32 run +=
+				4 bmp +=
+			end
+		end
+	end
+end
+
+fn MemDumpBitmap { -- }
+	auto bmp
+	MemBitmap bmp!
+
+	auto i
+	0 i!
+
+	auto ende
+	MemPages@ 1024 min ende!
+
+	while (i@ ende@ <)
+		auto bit
+		i@ 7 & bit!
+
+		if (bit@ 0 ==)
+			'|' Putc
+		end
+
+		bmp@ i@ 8 / + gb bit@ bitget bit!
+
+		if (bit@)
+			'x' Putc
+		end else
+			' ' Putc
 		end
 
 		1 i +=

@@ -32,6 +32,8 @@ struct PFDBEFree
 	4 R7
 endstruct
 
+extern KeMemUsageDump { -- }
+
 externptr KeMemPageFrameDB
 
 externptr KeMemPageFreeListHead

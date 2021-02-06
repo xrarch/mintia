@@ -7,11 +7,14 @@
 #include "<inc>/KeCrash.h"
 
 #include "<inc>/KeMemAlloc.h"
+
+#include "<inc>/KeDPC.h"
+#include "<inc>/KeTime.h"
+#include "<inc>/KeTimer.h"
+
 #include "<inc>/KeProcess.h"
 
 #include "<inc>/KeIPL.h"
-
-#include "<inc>/KeTimer.h"
 
 table KeThreadPriorityQueueHeads[PRIORITIES]
 public KeThreadPriorityQueueHeads
@@ -85,7 +88,7 @@ fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
 
 	0 thread@ KeThread_Enqueued + !
 
-	0 ok!
+	pointerof KeThreadTimerWake thread@ KeThread_WakeTimer + KeTimerInitialize ok!
 end
 
 fn KeThreadWorkerInitialize { context1 context2 startfunc name thread -- ok }
@@ -281,15 +284,17 @@ fn KeThreadQuantumEnd { -- }
 	auto pri
 	current@ KeThread_Priority + @ pri!
 
-	if (pri@ PRIORITY_LOWREALTIME <)
-		auto newpri
-		pri@ 1 - newpri!
+	if (pri@ PRIORITY_IDLE >)
+		if (pri@ PRIORITY_LOWREALTIME <)
+			auto newpri
+			pri@ 1 - newpri!
 
-		if (newpri@ current@ KeThread_BasePriority + @ <)
-			current@ KeThread_BasePriority + @ newpri!
+			if (newpri@ current@ KeThread_BasePriority + @ <)
+				current@ KeThread_BasePriority + @ newpri!
+			end
+
+			newpri@ current@ KeThread_Priority + !
 		end
-
-		newpri@ current@ KeThread_Priority + !
 	end
 
 	KeThreadNextPick THREADYIELD_QUANTUMEND KeThreadNextSelect
@@ -322,6 +327,7 @@ fn KeThreadNextPick { -- thread }
 		end
 	end
 
+	// must be the idle thread, just continue
 	KeThreadCurrent@ thread!
 end
 
@@ -449,6 +455,13 @@ fn KeThreadNextSelect { next reason -- }
 	auto onext
 	KeThreadNext@ onext!
 
+	if (reason@ THREADYIELD_QUANTUMEND ==)
+		if (KeThreadCurrent@ KeThread_Priority + @ next@ KeThread_Priority + @ >)
+			0 KeThreadNext!
+			return
+		end
+	end
+
 	if (onext@)
 		if (next@ KeThread_Priority + @ onext@ KeThread_Priority + @ >=)
 			next@ KeThreadNext!
@@ -539,6 +552,26 @@ fn KeThreadYield { yieldstatus -- }
 	yieldstatus@ current@ KeThreadTransition
 
 	KeThreadNextPick 0 KeThreadNextSelect
+
+	ipl@ KeIPLLower
+end
+
+fn (DPCFunction) KeThreadTimerWake { context1 context2 -- }
+	// context1 = thread
+
+	QUEUEBACK context1@ KeThreadReady
+end
+
+fn KeThreadSleep { ms -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto current
+	KeThreadCurrent@ current!
+
+	current@ 0 ms@ current@ KeThread_WakeTimer + KeTimerEnqueue drop
+
+	THREADSTATUS_SUSPENDED KeThreadYield
 
 	ipl@ KeIPLLower
 end

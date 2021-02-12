@@ -31,6 +31,8 @@ buffer TestThread1 KeThread_SIZEOF
 
 buffer TestThread2 KeThread_SIZEOF
 
+buffer KeProcessKernelThreadMain KeThread_SIZEOF
+
 fn KeMain { -- ret }
 	// early init that takes place before there's a process context
 
@@ -48,9 +50,13 @@ fn KeMain { -- ret }
 
 	KeThreadInit
 
-	0xBBBBBBBB 'b' pointerof TestKernelThread "bthread" TestThread1 KeThreadWorkerInitialize ret!
+	0 0 pointerof KeMainInThreadContext "main" KeProcessKernelThreadMain KeThreadWorkerInitialize ret!
 
-	QUEUEBACK TestThread1 KeThreadReady
+	if (ret@)
+		ret@ "KeMain: couldn't initialize kernel main thread (%i)\n" KeCrash
+	end
+
+	0xBBBBBBBB 'o' pointerof TestKernelThread "bthread" TestThread1 KeThreadWorkerInitialize ret!
 
 	0xCCCCCCCC 'c' pointerof TestKernelThread "cthread" TestThread2 KeThreadWorkerInitialize ret!
 
@@ -69,6 +75,8 @@ fn KeIdleThread { -- }
 
 	// the idle thread is never ever not ready to run.
 
+	QUEUEBACK KeProcessKernelThreadMain KeThreadReady
+
 	while (1)
 		HALCPUHalt
 	end
@@ -81,6 +89,7 @@ fn KeMainInThreadContext { -- }
 
 	KeMemUsageDump
 
+	QUEUEBACK TestThread1 KeThreadReady
 	QUEUEBACK TestThread2 KeThreadReady
 
 	while (1)
@@ -90,7 +99,7 @@ fn KeMainInThreadContext { -- }
 
 		// "= " Printf
 
-		"o" Printf
+		'x' Putc
 
 		// 600 KeThreadSleep
 		HALCPUHalt
@@ -133,12 +142,13 @@ fn Sierpinski { -- }
 		i@ z@ % y!
 
 		if (x@ y@ & ~~)
-			x@ y@ 2 / ~ - z@ y@ - y@ x@ ^ r@ ^ p
+			x@ y@ 2 / ~ - z@ y@ - y@ r@ * p
 		end
 
 		1 i +=
-		1 r +=
 	end
+
+	1 r +=
 end
 
 fn TestKernelThread { context1 context2 -- }
@@ -146,8 +156,8 @@ fn TestKernelThread { context1 context2 -- }
 
 	while (1)
 		if (context1@ 0xCCCCCCCC ==)
-			500 KeThreadSleep
-			's' Putc
+			// 's' Putc
+			1000 KeThreadSleep
 			Sierpinski
 		end else
 			context2@ Putc

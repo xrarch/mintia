@@ -65,8 +65,7 @@ endstruct
 struct LOFFFixup
 	4 SymbolIndex
 	4 Offset
-	4 Size
-	4 Shift
+	4 Type
 endstruct
 
 const LOFFGLOBAL 1

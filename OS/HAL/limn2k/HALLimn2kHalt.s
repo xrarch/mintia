@@ -1,3 +1,5 @@
+.section text
+
 HALCPUHalt:
 .global HALCPUHalt
 	mov t0, sp

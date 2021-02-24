@@ -1,3 +1,5 @@
+.section text
+
 .ds ANTE
 
 .ds andromeda

@@ -1,6 +1,8 @@
 .extern HALLimn2kExceptionVector
 .extern HALLimn2kExceptionRefillVector
 
+.section text
+
 HALLimn2kSavedEV:
 	.dl 0
 
@@ -12,10 +14,10 @@ HALCPUExit:
 	lui rs, 0x80000000
 
 	la t0, HALLimn2kSavedEV
-	l.l ev, t0, zero
+	mov ev, long [t0]
 
 	la t0, HALLimn2kSavedTLBV
-	l.l tlbv, t0, zero
+	mov tlbv, long [t0]
 
 	ret
 
@@ -31,10 +33,10 @@ HALLimn2kExit:
 HALCPUInit:
 .global HALCPUInit
 	la t0, HALLimn2kSavedEV
-	s.l t0, zero, ev
+	mov long [t0], ev
 
 	la t0, HALLimn2kSavedTLBV
-	s.l t0, zero, tlbv
+	mov long [t0], tlbv
 
 	lui rs, 0x80000000
 	

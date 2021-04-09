@@ -42,6 +42,56 @@ fn KeAPCInitialize { thread exitfunc kernelfunc normalfunc mode apc -- ok }
 	0 ok!
 end
 
+fn KeAPCDequeue { apc -- ok }
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (apc@ KeAPC_Enqueued + @ ~~)
+		"KeAPCDequeue: attempt to dequeue a non-enqueued APC\n" KeCrash
+	end
+
+	auto thread
+	apc@ KeAPC_Thread + @ thread!
+
+	auto mode
+	apc@ KeAPC_Mode + @ mode!
+
+	auto n
+	apc@ KeAPC_APCListNext + @ n!
+
+	if (n@)
+		apc@ KeAPC_APCListPrev + @ n@ KeAPC_APCListPrev + !
+	end else // no next means we were the tail
+		if (mode@ KERNELMODE ==)
+			apc@ KeAPC_APCListPrev + @ thread@ KeThread_APCKernelListTail + !
+		end else
+			apc@ KeAPC_APCListPrev + @ thread@ KeThread_APCUserListTail + !
+		end
+	end
+
+	auto p
+	apc@ KeAPC_APCListPrev + @ p!
+
+	if (p@)
+		apc@ KeAPC_APCListNext + @ p@ KeAPC_APCListNext + !
+	end else // no prev means we were the head
+		if (mode@ KERNELMODE ==)
+			apc@ KeAPC_APCListNext + @ thread@ KeThread_APCKernelListHead + !
+		end else
+			apc@ KeAPC_APCListNext + @ thread@ KeThread_APCUserListHead + !
+		end
+	end
+
+	0 apc@ KeAPC_APCListNext + !
+	0 apc@ KeAPC_APCListPrev + !
+
+	0 apc@ KeAPC_Enqueued + !
+
+	ipl@ KeIPLLower
+end
+
 fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	0 ok!
 
@@ -144,6 +194,106 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	ipl@ KeIPLLower
 end
 
-fn KeAPCDispatchQueue { -- }
-	// TODO
+fn KeAPCDispatchQueue { trapframe lastmode -- }
+	if (KeIPLCurrentGet IPLAPC ~=)
+		"KeAPCDispatchQueue: ipl != IPLAPC\n" KeCrash
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto thread
+	KeThreadCurrent@ thread!
+
+	auto context1
+	4 alloc context1!
+
+	auto context2
+	4 alloc context2!
+
+	auto normalfunc
+	4 alloc normalfunc!
+
+	auto apc
+	thread@ KeThread_APCKernelListHead + @ apc!
+
+	while (apc@)
+		auto napc
+		apc@ KeAPC_APCListNext + @ napc!
+
+		apc@ KeAPC_Context1 + @ context1@!
+		apc@ KeAPC_Context2 + @ context2@!
+
+		apc@ KeAPC_FunctionNormal + @ normalfunc@!
+
+		if (apc@ KeAPC_FunctionNormal + @ ~~)
+			// this is a special kernel APC, it should always be dispatched
+
+			apc@ KeAPCDequeue drop
+
+			ipl@ KeIPLLower
+
+			normalfunc@ context1@ context2@ apc@
+			apc@ KeAPC_FunctionKernel + @ APCFunctionKernel
+
+			IPLDPC KeIPLRaise ipl!
+		end else
+			// this is a normal kernel APC. they are only dispatched if we aren't already
+			// processing an APC, and if APCs aren't disabled.
+
+			if (thread@ KeThread_KernelAPCInProgress + @ ~~
+				thread@ KeThread_KernelAPCDisableCount + @ ~~ &&)
+
+				apc@ KeAPCDequeue drop
+
+				ipl@ KeIPLLower
+
+				normalfunc@ context1@ context2@ apc@
+				apc@ KeAPC_FunctionKernel + @ APCFunctionKernel
+
+				if (normalfunc@@)
+					// there's still a normal function
+
+					1 thread@ KeThread_KernelAPCInProgress + !
+
+					IPLLOW KeIPLLower
+
+					context1@@ context2@@
+					apc@ KeAPC_FunctionNormal + @ APCFunctionNormal
+
+					IPLAPC KeIPLRaise drop
+				end
+
+				IPLDPC KeIPLRaise ipl!
+
+				0 thread@ KeThread_KernelAPCInProgress + !
+			end
+		end
+
+		napc@ apc!
+	end
+
+	if (lastmode@ USERMODE ==)
+		thread@ KeThread_APCUserListHead + @ apc!
+
+		if (apc@)
+			apc@ KeAPC_Context1 + @ context1@!
+			apc@ KeAPC_Context2 + @ context2@!
+
+			apc@ KeAPC_FunctionNormal + @ normalfunc@!
+
+			apc@ KeAPCDequeue drop
+
+			ipl@ KeIPLLower
+
+			normalfunc@ context1@ context2@ apc@
+			apc@ KeAPC_FunctionKernel + @ APCFunctionKernel
+
+			"KeAPCDispatchQueue: TODO usermode APCs\n" KeCrash
+
+			return
+		end
+	end
+
+	ipl@ KeIPLLower
 end

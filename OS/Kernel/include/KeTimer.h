@@ -1,4 +1,4 @@
-// needs KeDPC and KeTime
+// needs KeDPC.h and KeTime.h
 
 externptr KeTimerListHead
 
@@ -9,7 +9,7 @@ struct KeTimer
 	4 Context2
 	4 Enqueued
 	KeTime_SIZEOF ExpiryTime
-	DPC_SIZEOF DPC
+	KeDPC_SIZEOF DPC
 endstruct
 
 struct KeTimerH

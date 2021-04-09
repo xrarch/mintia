@@ -1,4 +1,4 @@
-// needs KeTimer
+// needs KeTimer.h
 
 const KEPROCESSNAMELEN 128
 
@@ -69,6 +69,7 @@ const THREADSTATUS_SUSPENDED          3
 const THREADSTATUS_RUNNING            4
 const THREADSTATUS_WAITINGALERTABLE   5
 const THREADSTATUS_WAITINGUNALERTABLE 6
+const THREADSTATUS_TERMINATED         7
 
 const QUEUEFRONT 1
 const QUEUEBACK 0
@@ -105,6 +106,22 @@ struct KeThread
 	4 BaseQuantum
 	4 Quantum
 
+	4 WaitMode
+	4 WaitStatus
+	4 WaitIPL
+
+	4 APCQueueable
+
+	4 APCUserListHead
+	4 APCUserListTail
+
+	4 APCKernelListHead
+	4 APCKernelListTail
+
+	4 KernelAPCDisableCount
+
+	4 KernelAPCInProgress
+
 	KeTimer_SIZEOF WakeTimer
 endstruct
 
@@ -136,7 +153,9 @@ extern KeThreadYield { yieldstatus -- }
 
 extern KeThreadNextSwitch { -- }
 
-extern KeThreadSleep { ms -- }
+extern KeThreadWakeup { waitstatus priboost thread -- woken }
+
+extern KeThreadSleep { ms waitmode alertable -- ok }
 
 externptr KeThreadNext
 

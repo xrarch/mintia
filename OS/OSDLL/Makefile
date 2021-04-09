@@ -6,6 +6,7 @@ SOBJ   := $(SFILES:.s=.o)
 DC  =  ../../../sdk/dragonc.sh
 AS  =  ../../../sdk/asm.sh
 LD  =  ../../../sdk/link.sh link
+INS =  ../../../sdk/install.sh
 
 all: obj/OSDLL.dll
 	cp -r obj/OSDLL.dll ../Library/OSDLL.dll

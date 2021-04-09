@@ -16,6 +16,8 @@
 
 #include "<inc>/KeIPL.h"
 
+#include "<ll>/OSDLL/OSStatus.h"
+
 table KeThreadPriorityQueueHeads[PRIORITIES]
 public KeThreadPriorityQueueHeads
 
@@ -86,7 +88,21 @@ fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
 	0 thread@ KeThread_QueueNext + !
 	0 thread@ KeThread_QueuePrev + !
 
+	0 thread@ KeThread_APCUserListHead + !
+	0 thread@ KeThread_APCUserListTail + !
+
+	0 thread@ KeThread_APCKernelListHead + !
+	0 thread@ KeThread_APCKernelListTail + !
+
 	0 thread@ KeThread_Enqueued + !
+
+	0 thread@ KeThread_WaitStatus + !
+	0 thread@ KeThread_WaitMode + !
+	0 thread@ KeThread_WaitIPL + !
+
+	0 thread@ KeThread_KernelAPCDisableCount + !
+
+	1 thread@ KeThread_APCQueueable + !
 
 	pointerof KeThreadTimerWake thread@ KeThread_WakeTimer + KeTimerInitialize ok!
 end
@@ -275,8 +291,8 @@ fn KeThreadQuantumEnd { -- }
 	auto current
 	KeThreadCurrent@ current!
 
-	if (current@ KeThread_Status + @ THREADSTATUS_READY ==)
-		"KeThreadQuantumEnd: current thread is READY\n" KeCrash
+	if (current@ KeThread_Status + @ THREADSTATUS_RUNNING ~=)
+		"KeThreadQuantumEnd: current thread isn't RUNNING\n" KeCrash
 	end
 
 	if (current@ KeThread_Enqueued + @)
@@ -291,11 +307,9 @@ fn KeThreadQuantumEnd { -- }
 			auto newpri
 			pri@ 1 - newpri!
 
-			if (newpri@ current@ KeThread_BasePriority + @ <)
-				current@ KeThread_BasePriority + @ newpri!
+			if (newpri@ current@ KeThread_BasePriority + @ >)
+				newpri@ current@ KeThread_Priority + !
 			end
-
-			newpri@ current@ KeThread_Priority + !
 		end
 	end
 
@@ -366,18 +380,16 @@ fn KeThreadSwitch { thread -- }
 
 	thread@ KeThreadCurrent!
 
+	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
+
 	auto qtm
-	thread@ KeThread_Quantum + @ qtm!
+	current@ KeThread_Quantum + @ qtm!
 
 	if (qtm@ ~~)
 		// no more quantum, do a quantum end
 
 		KeThreadQuantumEnd
-
-		thread@ KeThread_BaseQuantum + @ thread@ KeThread_Quantum + !
 	end
-
-	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
 end
 
 fn KeThreadPrioritySet { priority thread -- }
@@ -516,6 +528,8 @@ fn KeThreadNextSwitch { -- }
 		if (cause@ THREADYIELD_QUANTUMEND ==)
 			// the quantum ended, place it at the back
 
+			current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
+
 			QUEUEBACK current@ KeThreadReady
 		end elseif (cause@ THREADYIELD_PREEMPTED ==)
 			// it was preempted, place it at the front
@@ -523,6 +537,8 @@ fn KeThreadNextSwitch { -- }
 			1 current@ KeThreadQuantumDecrement drop
 
 			QUEUEFRONT current@ KeThreadReady
+		end else
+			cause@ "KeThreadNextSwitch: weird cause (0x%x)\n" KeCrash
 		end
 
 		// if a reschedule was deferred, do it here
@@ -560,13 +576,65 @@ fn KeThreadYield { yieldstatus -- }
 	ipl@ KeIPLLower
 end
 
+fn KeThreadWakeup { waitstatus priboost thread -- woken }
+	0 woken!
+
+	auto status
+	thread@ KeThread_Status + @ status!
+
+	if (status@ THREADSTATUS_TERMINATED ==)
+		// XXX is this a necessary/good check to make?
+
+		// don't wake, it is dead
+		return
+	end
+
+	if (status@ THREADSTATUS_WAITINGALERTABLE ~= status@ THREADSTATUS_WAITINGUNALERTABLE ~= &&)
+		// thread isn't waiting
+		return
+	end
+
+	priboost@ thread@ KeThreadPriorityBoost
+	waitstatus@ thread@ KeThread_WaitStatus + !
+	QUEUEBACK thread@ KeThreadReady
+
+	1 woken!
+end
+
+fn KeThreadWait { waitipl waitmode alertable -- ok }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeThreadWait: ipl != IPLDPC\n" KeCrash
+	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	waitmode@ current@ KeThread_WaitMode + !
+
+	waitipl@ current@ KeThread_WaitIPL + !
+
+	0 current@ KeThread_WaitStatus + !
+
+	if (alertable@)
+		THREADSTATUS_WAITINGALERTABLE KeThreadYield
+	end else
+		THREADSTATUS_WAITINGUNALERTABLE KeThreadYield
+	end
+
+	current@ KeThread_WaitStatus + @ ok!
+end
+
 fn (DPCFunction) KeThreadTimerWake { context1 context2 -- }
 	// context1 = thread
 
-	QUEUEBACK context1@ KeThreadReady
+	// XXX what happens if the thread is killed or something before this timer executes?
+
+	// TODO replace with a dispatcher object wait on a KeTimer object
+
+	STATUS_WAIT_TIMEOUT 0 context1@ KeThreadWakeup drop
 end
 
-fn KeThreadSleep { ms -- }
+fn KeThreadSleep { ms waitmode alertable -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -575,7 +643,32 @@ fn KeThreadSleep { ms -- }
 
 	current@ 0 ms@ current@ KeThread_WakeTimer + KeTimerEnqueue drop
 
-	THREADSTATUS_SUSPENDED KeThreadYield
+	while (1)
+		if (current@ KeThread_WakeTimer + KeTimer_Enqueued + @ ~~)
+			// the wake timer expired already, likely while we were processing an APC.
+			// that means we're done waiting.
+
+			STATUS_WAIT_TIMEOUT ok!
+			
+			break
+		end
+
+		ipl@ waitmode@ alertable@ KeThreadWait ok!
+
+		// if we got woken up to deliver an APC, it will be executed here when we
+		// lower the IPL.
+		// our wakeup timer may expire while this occurs, hence the check above.
+
+		ipl@ KeIPLLower
+
+		if (ok@ STATUS_KERNEL_APC ~=)
+			return
+		end
+
+		// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
+
+		IPLDPC KeIPLRaise ipl!
+	end
 
 	ipl@ KeIPLLower
 end

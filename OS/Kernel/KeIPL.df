@@ -12,9 +12,12 @@
 
 #include "<inc>/KeProcess.h"
 
+#include "<inc>/KeAPC.h"
+
 #include "<inc>/HALInterrupt.h"
 
-// XXX this global will NOT work out well if we ever go multiprocessor
+// XXX this global will NOT work out well if we ever go multiprocessor.
+// though, neither will most things that we're doing.
 var KeIPLCurrent IPLHIGH
 public KeIPLCurrent
 
@@ -57,6 +60,7 @@ fn KeIPLLower { newipl -- }
 
 	if (newipl@ oldipl@ ==)
 		rs@ HALCPUInterruptRestore
+
 		return
 	end
 
@@ -64,21 +68,48 @@ fn KeIPLLower { newipl -- }
 		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not less or equal (old=%s new=%s)\n" KeCrash
 	end
 
-	if (oldipl@ IPLDPC >=)
-		if (newipl@ IPLDPC <)
-			// must have been lowered below IPLDPC
-			IPLDPC KeIPLSet
+	if (newipl@ IPLDPC >=)
+		newipl@ KeIPLSet
 
-			rs@ KeDPCDispatchQueue
+		rs@ HALCPUInterruptRestore
 
-			rs@ HALCPUInterruptRestore
+		return
+	end
 
-			if (KeThreadNext@)
-				KeThreadNextSwitch
-			end
+	if (oldipl@ IPLAPC >)
+		// the new IPL isn't >=IPLDPC, and the old IPL was >IPLAPC.
+		// this means that we've dropped below IPLDPC and may have some DPCs
+		// to process.
 
-			HALCPUInterruptDisable rs!
+		IPLDPC KeIPLSet
+
+		rs@ KeDPCDispatchQueue
+
+		rs@ HALCPUInterruptRestore
+
+		if (KeThreadNext@)
+			KeThreadNextSwitch
 		end
+
+		HALCPUInterruptDisable rs!
+	end
+
+	IPLAPC KeIPLSet
+
+	if (newipl@ IPLAPC ==)
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	// we're dropping below IPLAPC. deal with processing APCs.
+
+	if (KeThreadCurrent@)
+		rs@ HALCPUInterruptRestore
+
+		KeAPCDispatchQueue
+
+		HALCPUInterruptDisable rs!
 	end
 
 	newipl@ KeIPLSet

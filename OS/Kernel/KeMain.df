@@ -21,6 +21,8 @@ extern KeMemInit { -- }
 
 extern KeTimerInit { -- }
 
+extern KeObjectInit { -- }
+
 extern KeSecurityInit { -- }
 
 extern KeProcessInit { -- }
@@ -43,6 +45,8 @@ fn KeMain { -- ret }
 	KeTimerInit
 
 	KeMemInit
+
+	KeObjectInit
 
 	KeSecurityInit
 
@@ -75,6 +79,7 @@ fn KeIdleThread { -- }
 
 	// the idle thread is never ever not ready to run.
 
+	// set main thread ready
 	QUEUEBACK KeProcessKernelThreadMain KeThreadReady
 
 	while (1)
@@ -99,6 +104,7 @@ fn KeMainInThreadContext { -- }
 
 		// "= " Printf
 
+		// 20 KERNELMODE 0 KeThreadSleep drop
 		'x' Putc
 
 		// 600 KeThreadSleep
@@ -106,50 +112,93 @@ fn KeMainInThreadContext { -- }
 	end
 end
 
-extern p { x y c -- }
-
 asm "
 
-;a2 - x
-;a1 - y
-;a0 - c
-p:
-	li t0, 640
-	mul t0, a1, t0
+SierpinskiCount:
+	.dl 0
+
+SierpinskiIter:
+	.dl 0
+
+SierpinskiFast:
+.global SierpinskiFast
+	push lr
+	push s0
+	push s1
+	push s2
+	push s3
+	push s4
+	push s5
+	push s6
+	push s7
+
+	li s0, 0
+
+	li s1, 126
+
+	li s5, 15877
+
+	li s7, 640
+
+	la  s2, SierpinskiIter
+	mov s3, long [s2]
+
+	la  t0, SierpinskiCount
+	mov s4, long [t0]
+
+	lui s6, 0xC0100000
+
+.loop:
+	div t1, s0, s1
+	mod t2, s0, s1
+
+	and t3, t1, t2
+	bne t3, zero, .cont
+
+	rsh a2, t2, 1
+	not a2, a2
+	sub a2, t1, a2
+
+	sub a1, s1, t2
+
+	xor a0, t1, s4
+	xor a0, a0, s3
+	xor a0, a0, t2
+
+	mul t0, a1, s7
 	lsh t0, t0, 1
-	lsh t1, a2, 1
-	add t0, t0, t1
-	lui t2, 0xC0100000
-	mov int [t2 + t0], a0
+	lsh a2, a2, 1
+	add t0, t0, a2
+	mov int [s6 + t0], a0
+
+	add s3, s3, 1
+
+.cont:
+	add s0, s0, 1
+
+	blt s0, s5, .loop
+
+	mov long [s2], s3
+
+	add s4, s4, 1
+
+	la  t0, SierpinskiCount
+	mov long [t0], s4
+	
+	pop s7
+	pop s6
+	pop s5
+	pop s4
+	pop s3
+	pop s2
+	pop s1
+	pop s0
+	pop lr
 	ret
 
 "
 
-var r 0
-
-fn Sierpinski { -- }
-	auto i
-	0 i!
-
-	auto z
-	126 z!
-
-	while (i@ 15876 <=)
-		auto x
-		i@ z@ / x!
-
-		auto y
-		i@ z@ % y!
-
-		if (x@ y@ & ~~)
-			x@ y@ 2 / ~ - z@ y@ - y@ r@ * p
-		end
-
-		1 i +=
-	end
-
-	1 r +=
-end
+extern SierpinskiFast { -- }
 
 fn TestKernelThread { context1 context2 -- }
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
@@ -157,10 +206,12 @@ fn TestKernelThread { context1 context2 -- }
 	while (1)
 		if (context1@ 0xCCCCCCCC ==)
 			// 's' Putc
-			1000 KeThreadSleep
-			Sierpinski
+			50 KERNELMODE 0 KeThreadSleep drop
+			SierpinskiFast
 		end else
+			// 20 KERNELMODE 0 KeThreadSleep drop
 			context2@ Putc
+
 			HALCPUHalt
 		end
 	end

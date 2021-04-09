@@ -15,6 +15,8 @@
 
 #include "<inc>/KeProcess.h"
 
+#include "<inc>/KeAPC.h"
+
 extern KeInterruptInit { -- }
 
 extern KeMemInit { -- }
@@ -33,7 +35,18 @@ buffer TestThread1 KeThread_SIZEOF
 
 buffer TestThread2 KeThread_SIZEOF
 
+buffer TestAPC KeAPC_SIZEOF
+
 buffer KeProcessKernelThreadMain KeThread_SIZEOF
+
+fn (APCFunctionKernel) TestKernelFunc { normalfunc context1 context2 apc -- }
+	context2@@ context1@@ KeThreadCurrent@ KeThread_Name + "hi im in %s context. c1=%d c2=%d\n" Printf
+end
+
+fn (APCFunctionNormal) TestNormalFunc { context1 context2 -- }
+	context2@ context1@ KeThreadCurrent@ KeThread_Name + "hi im in %s context! c1=%d c2=%d\n" Printf
+	SierpinskiFast
+end
 
 fn KeMain { -- ret }
 	// early init that takes place before there's a process context
@@ -64,8 +77,8 @@ fn KeMain { -- ret }
 
 	0xCCCCCCCC 'c' pointerof TestKernelThread "cthread" TestThread2 KeThreadWorkerInitialize ret!
 
-	PRIORITY_LOWREALTIME TestThread2 KeThread_BasePriority + !
-	PRIORITY_LOWREALTIME TestThread2 KeThread_Priority + !
+	// PRIORITY_LOWREALTIME TestThread2 KeThread_BasePriority + !
+	// PRIORITY_LOWREALTIME TestThread2 KeThread_Priority + !
 
 	KeThreadNextPick KeThreadSwitch
 
@@ -93,6 +106,14 @@ fn KeMainInThreadContext { -- }
 	"Hello Andromeda World!\n" "KeMain" HALLog
 
 	KeMemUsageDump
+
+	TestThread2    // target thread
+	0              // exit func
+	pointerof TestKernelFunc // kernel func
+	pointerof TestNormalFunc // normal func
+	KERNELMODE     // mode
+	TestAPC
+	KeAPCInitialize drop
 
 	QUEUEBACK TestThread1 KeThreadReady
 	QUEUEBACK TestThread2 KeThreadReady
@@ -138,7 +159,7 @@ SierpinskiFast:
 
 	li s5, 15877
 
-	li s7, 640
+	li s7, 1024
 
 	la  s2, SierpinskiIter
 	mov s3, long [s2]
@@ -205,14 +226,17 @@ fn TestKernelThread { context1 context2 -- }
 
 	while (1)
 		if (context1@ 0xCCCCCCCC ==)
-			// 's' Putc
-			50 KERNELMODE 0 KeThreadSleep drop
-			SierpinskiFast
+			's' Putc
+			4000 KERNELMODE 0 KeThreadSleep drop
 		end else
-			// 20 KERNELMODE 0 KeThreadSleep drop
+			2000 KERNELMODE 0 KeThreadSleep drop
 			context2@ Putc
 
-			HALCPUHalt
+			0x1 // context1
+			0x2 // context2
+			1 // priboost
+			TestAPC
+			KeAPCEnqueue drop
 		end
 	end
 end

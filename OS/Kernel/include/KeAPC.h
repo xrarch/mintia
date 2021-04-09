@@ -1,6 +1,7 @@
 fnptr APCFunctionNormal { context1 context2 -- }
 
-fnptr APCFunctionKernel { apc normalfunc context1 context2 -- }
+// normalfunc, context1, and context2 are passed by ref here!!
+fnptr APCFunctionKernel { normalfunc context1 context2 apc -- }
 
 struct KeAPC
 	4 Thread
@@ -21,4 +22,10 @@ struct KeAPC
 	4 Enqueued
 endstruct
 
-extern KeAPCDispatchQueue { -- }
+extern KeAPCInitialize { thread exitfunc kernelfunc normalfunc mode apc -- ok }
+
+extern KeAPCDequeue { apc -- ok }
+
+extern KeAPCEnqueue { context1 context2 priboost apc -- ok }
+
+extern KeAPCDispatchQueue { trapframe lastmode -- }

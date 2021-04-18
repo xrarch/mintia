@@ -36,6 +36,8 @@ externptr HALThreadCurrentStackTop
 
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
 
+externptr KeThreadTimerWake
+
 // 'context1' and 'context2' are parameters passed to the start function
 
 fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
@@ -103,6 +105,8 @@ fn KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
 	0 thread@ KeThread_KernelAPCDisableCount + !
 
 	1 thread@ KeThread_APCQueueable + !
+
+	KERNELMODE thread@ KeThread_PreviousMode + !
 
 	pointerof KeThreadTimerWake thread@ KeThread_WakeTimer + KeTimerInitialize ok!
 end
@@ -572,103 +576,6 @@ fn KeThreadYield { yieldstatus -- }
 	0 KeThreadNext!
 
 	KeThreadNextPick KeThreadSwitch
-
-	ipl@ KeIPLLower
-end
-
-fn KeThreadWakeup { waitstatus priboost thread -- woken }
-	0 woken!
-
-	auto status
-	thread@ KeThread_Status + @ status!
-
-	if (status@ THREADSTATUS_TERMINATED ==)
-		// XXX is this a necessary/good check to make?
-
-		// don't wake, it is dead
-		return
-	end
-
-	if (status@ THREADSTATUS_WAITINGALERTABLE ~= status@ THREADSTATUS_WAITINGUNALERTABLE ~= &&)
-		// thread isn't waiting
-		return
-	end
-
-	priboost@ thread@ KeThreadPriorityBoost
-	waitstatus@ thread@ KeThread_WaitStatus + !
-	QUEUEBACK thread@ KeThreadReady
-
-	1 woken!
-end
-
-fn KeThreadWait { waitipl waitmode alertable -- ok }
-	if (KeIPLCurrentGet IPLDPC ~=)
-		"KeThreadWait: ipl != IPLDPC\n" KeCrash
-	end
-
-	auto current
-	KeThreadCurrent@ current!
-
-	waitmode@ current@ KeThread_WaitMode + !
-
-	waitipl@ current@ KeThread_WaitIPL + !
-
-	0 current@ KeThread_WaitStatus + !
-
-	if (alertable@)
-		THREADSTATUS_WAITINGALERTABLE KeThreadYield
-	end else
-		THREADSTATUS_WAITINGUNALERTABLE KeThreadYield
-	end
-
-	current@ KeThread_WaitStatus + @ ok!
-end
-
-fn (DPCFunction) KeThreadTimerWake { context1 context2 -- }
-	// context1 = thread
-
-	// XXX what happens if the thread is killed or something before this timer executes?
-
-	// TODO replace with a dispatcher object wait on a KeTimer object
-
-	STATUS_WAIT_TIMEOUT 0 context1@ KeThreadWakeup drop
-end
-
-fn KeThreadSleep { ms waitmode alertable -- ok }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	auto current
-	KeThreadCurrent@ current!
-
-	current@ 0 ms@ current@ KeThread_WakeTimer + KeTimerEnqueue drop
-
-	while (1)
-		if (current@ KeThread_WakeTimer + KeTimer_Enqueued + @ ~~)
-			// the wake timer expired already, likely while we were processing an APC.
-			// that means we're done waiting.
-
-			STATUS_WAIT_TIMEOUT ok!
-			
-			break
-		end
-
-		ipl@ waitmode@ alertable@ KeThreadWait ok!
-
-		// if we got woken up to deliver an APC, it will be executed here when we
-		// lower the IPL.
-		// our wakeup timer may expire while this occurs, hence the check above.
-
-		ipl@ KeIPLLower
-
-		if (ok@ STATUS_KERNEL_APC ~=)
-			return
-		end
-
-		// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
-
-		IPLDPC KeIPLRaise ipl!
-	end
 
 	ipl@ KeIPLLower
 end

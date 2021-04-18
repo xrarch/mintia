@@ -1,5 +1,7 @@
 // needs KeTimer.h
 
+#include "<inc>/KeDispatch.h"
+
 const KEPROCESSNAMELEN 128
 
 const WORKINGSETDEFAULTMAXIMUM 12
@@ -106,6 +108,8 @@ struct KeThread
 	4 BaseQuantum
 	4 Quantum
 
+	4 PreviousMode
+
 	4 WaitMode
 	4 WaitStatus
 	4 WaitIPL
@@ -121,6 +125,8 @@ struct KeThread
 	4 KernelAPCDisableCount
 
 	4 KernelAPCInProgress
+
+	(THREADWAITBLOCKS KeDispatchWaitBlock_SIZEOF *) WaitBlocks
 
 	KeTimer_SIZEOF WakeTimer
 endstruct
@@ -150,6 +156,8 @@ extern KeThreadTransition { status thread -- }
 extern KeThreadReady { front thread -- }
 
 extern KeThreadYield { yieldstatus -- }
+
+extern KeThreadPriorityBoost { boost thread -- }
 
 extern KeThreadNextSwitch { -- }
 

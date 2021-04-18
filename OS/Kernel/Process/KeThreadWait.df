@@ -1,0 +1,119 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALLog.h"
+
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALRTC.h"
+
+#include "<inc>/KeCrash.h"
+
+#include "<inc>/KeMemAlloc.h"
+
+#include "<inc>/KeDPC.h"
+#include "<inc>/KeTime.h"
+#include "<inc>/KeTimer.h"
+
+#include "<inc>/KeProcess.h"
+
+#include "<inc>/KeIPL.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+fn KeThreadWakeup { waitstatus priboost thread -- woken }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeThreadWakeup: ipl != IPLDPC\n" KeCrash
+	end
+
+	0 woken!
+
+	auto status
+	thread@ KeThread_Status + @ status!
+
+	if (status@ THREADSTATUS_TERMINATED ==)
+		// XXX are there legitimate, normal situations where you might try to wake up a dead thread?
+
+		"KeThreadWakeup: thread is already dead\n" KeCrash
+	end
+
+	if (status@ THREADSTATUS_WAITINGALERTABLE ~= status@ THREADSTATUS_WAITINGUNALERTABLE ~= &&)
+		// thread isn't waiting
+		return
+	end
+
+	priboost@ thread@ KeThreadPriorityBoost
+	waitstatus@ thread@ KeThread_WaitStatus + !
+	QUEUEBACK thread@ KeThreadReady
+
+	1 woken!
+end
+
+fn KeThreadWait { waitipl waitmode alertable -- ok }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeThreadWait: ipl != IPLDPC\n" KeCrash
+	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	waitmode@ current@ KeThread_WaitMode + !
+
+	waitipl@ current@ KeThread_WaitIPL + !
+
+	0 current@ KeThread_WaitStatus + !
+
+	if (alertable@)
+		THREADSTATUS_WAITINGALERTABLE KeThreadYield
+	end else
+		THREADSTATUS_WAITINGUNALERTABLE KeThreadYield
+	end
+
+	current@ KeThread_WaitStatus + @ ok!
+end
+
+fn (DPCFunction) KeThreadTimerWake { context1 context2 -- }
+	// context1 = thread
+
+	// XXX what happens if the thread is killed or something before this timer executes?
+
+	// TODO replace with a dispatcher object wait on a KeTimer object
+
+	STATUS_WAIT_TIMEOUT 0 context1@ KeThreadWakeup drop
+end
+
+fn KeThreadSleep { ms waitmode alertable -- ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto current
+	KeThreadCurrent@ current!
+
+	current@ 0 ms@ current@ KeThread_WakeTimer + KeTimerEnqueue drop
+
+	while (1)
+		if (current@ KeThread_WakeTimer + KeTimer_Enqueued + @ ~~)
+			// the wake timer expired already, likely while we were processing an APC.
+			// that means we're done waiting.
+
+			STATUS_WAIT_TIMEOUT ok!
+			
+			break
+		end
+
+		ipl@ waitmode@ alertable@ KeThreadWait ok!
+
+		// if we got woken up to deliver an APC, it will be executed here when we
+		// lower the IPL.
+		// our wakeup timer may expire while this occurs, hence the check above.
+
+		ipl@ KeIPLLower
+
+		if (ok@ STATUS_KERNEL_APC ~=)
+			return
+		end
+
+		// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
+
+		IPLDPC KeIPLRaise ipl!
+	end
+
+	ipl@ KeIPLLower
+end

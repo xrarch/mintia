@@ -8,11 +8,14 @@
 
 #include "<inc>/KeDPC.h"
 #include "<inc>/KeTime.h"
+#include "<inc>/KeDispatch.h"
 #include "<inc>/KeTimer.h"
 
 #include "<inc>/KeMemAlloc.h"
 
 #include "<inc>/HALRTC.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
 
 var KeTimerListHead 0
 public KeTimerListHead
@@ -51,7 +54,16 @@ fn (DPCFunction) KeTimerExpiration { context1 context2 -- }
 			return
 		end
 
-		timer@ KeTimer_Context1 + @ timer@ KeTimer_Context2 + @ DPCLOWIMPORTANCE timer@ KeTimer_DPC + KeDPCEnqueue
+		auto ok
+		STATUS_WAIT_TIMEOUT 0 timer@ KeDispatchSatisfyAll ok! drop
+
+		if (ok@)
+			"KeTimerExpiration: couldn't satisfy timer waits\n" KeCrash
+		end
+
+		if (timer@ KeTimer_DPC + KeDPC_Function + @)
+			timer@ KeTimer_Context1 + @ timer@ KeTimer_Context2 + @ DPCLOWIMPORTANCE timer@ KeTimer_DPC + KeDPCEnqueue
+		end
 
 		auto ntimer
 		timer@ KeTimer_Next + @ ntimer!
@@ -127,17 +139,13 @@ fn KeTimeTest { -- }
 	time@ KeTimePrint
 end
 
-fn KeTimerCreate { function -- timer ok }
-	KeTimer_SIZEOF 'Timr' KeMemAllocWithTag ok! timer!
+fn KeTimerInitialize { function timer -- ok }
+	DISPATCHOBJECT_TIMER timer@ KeDispatchInitialize ok!
 
-	if (ok@) // failed to allocate the timer, return the error code
+	if (ok@)
 		return
 	end
 
-	function@ timer@ KeTimerInitialize ok!
-end
-
-fn KeTimerInitialize { function timer -- ok }
 	0 timer@ KeTimer_Next + !
 	0 timer@ KeTimer_Prev + !
 

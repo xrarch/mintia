@@ -1,6 +1,5 @@
 // needs KeTimer.h
-
-#include "<inc>/KeDispatch.h"
+// needs KeDispatch.h
 
 const KEPROCESSNAMELEN 128
 
@@ -126,9 +125,11 @@ struct KeThread
 
 	4 KernelAPCInProgress
 
+	4 WaitCount
+
 	(THREADWAITBLOCKS KeDispatchWaitBlock_SIZEOF *) WaitBlocks
 
-	KeTimer_SIZEOF WakeTimer
+	KeTimer_SIZEOF Timer
 endstruct
 
 extern KeProcessCurrentGet { -- current }

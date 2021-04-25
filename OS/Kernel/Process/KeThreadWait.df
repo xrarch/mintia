@@ -10,6 +10,7 @@
 
 #include "<inc>/KeDPC.h"
 #include "<inc>/KeTime.h"
+#include "<inc>/KeDispatch.h"
 #include "<inc>/KeTimer.h"
 
 #include "<inc>/KeProcess.h"
@@ -17,6 +18,246 @@
 #include "<inc>/KeIPL.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
+
+// initializes a dispatch object's header
+
+fn KeDispatchInitialize { type dobject -- ok }
+	0 ok!
+
+	0 dobject@ KeDispatchHeader_Signaled + !
+
+	type@ dobject@ KeDispatchHeader_Type + !
+
+	0 dobject@ KeDispatchHeader_WaitBlockListHead + !
+	0 dobject@ KeDispatchHeader_WaitBlockListTail + !
+end
+
+// initializes a WaitBlock
+
+fn KeDispatchWaitBlockInitialize { thread waitblock -- ok }
+	0 ok!
+
+	0 waitblock@ KeDispatchWaitBlock_Prev + !
+	0 waitblock@ KeDispatchWaitBlock_Next + !
+
+	0 waitblock@ KeDispatchWaitBlock_Enqueued + !
+
+	0 waitblock@ KeDispatchWaitBlock_WaitStatusReturn + !
+	0 waitblock@ KeDispatchWaitBlock_WaitType + !
+
+	thread@ waitblock@ KeDispatchWaitBlock_Thread + !
+
+	0 waitblock@ KeDispatchWaitBlock_Object + !
+end
+
+fn KeDispatchWaitBlockDequeue { waitstatus waitblock -- ok }
+	0 ok!
+
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeDispatchWaitBlockDequeue: ipl != IPLDPC\n" KeCrash
+	end
+
+	if (waitblock@ KeDispatchWaitBlock_Object + @ ~~)
+		"KeDispatchWaitBlockDequeue: attempt to dequeue a non-enqueued WaitBlock\n" KeCrash
+	end
+
+	auto object
+	waitblock@ KeDispatchWaitBlock_Object + @ object!
+
+	auto n
+	waitblock@ KeDispatchWaitBlock_Next + @ n!
+
+	if (n@)
+		waitblock@ KeDispatchWaitBlock_Prev + @ n@ KeDispatchWaitBlock_Prev + !
+	end else // no next means we were the tail
+		waitblock@ KeDispatchWaitBlock_Prev + @ object@ KeDispatchHeader_WaitBlockListTail + !
+	end
+
+	auto p
+	waitblock@ KeDispatchWaitBlock_Prev + @ p!
+
+	if (p@)
+		waitblock@ KeDispatchWaitBlock_Next + @ p@ KeDispatchWaitBlock_Next + !
+	end else // no prev means we were the head
+		waitblock@ KeDispatchWaitBlock_Next + @ object@ KeDispatchHeader_WaitBlockListHead + !
+	end
+
+	0 waitblock@ KeDispatchWaitBlock_Next + !
+	0 waitblock@ KeDispatchWaitBlock_Prev + !
+
+	0 waitblock@ KeDispatchWaitBlock_Object + !
+
+	waitstatus@ waitblock@ KeDispatchWaitBlock_WaitStatusReturn + !
+end
+
+// adds a WaitBlock to the tail of a dispatch object's WaitBlockList
+
+fn KeDispatchWaitBlockEnqueue { waittype waitblock object -- ok }
+	0 ok!
+
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeDispatchWaitBlockInsert: ipl != IPLDPC\n" KeCrash
+	end
+
+	if (waitblock@ KeDispatchWaitBlock_Object + @)
+		"KeDispatchWaitBlockEnqueue: attempt to queue an enqueued WaitBlock\n" KeCrash
+	end
+
+	auto t
+	object@ KeDispatchHeader_WaitBlockListTail + @ t!
+
+	if (t@ ~~)
+		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
+	end else
+		waitblock@ t@ KeDispatchWaitBlock_Next + !
+		t@ waitblock@ KeDispatchWaitBlock_Prev + !
+	end
+
+	waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
+
+	object@ waitblock@ KeDispatchWaitBlock_Object + !
+
+	waittype@ waitblock@ KeDispatchWaitBlock_WaitType + !
+end
+
+// satisfies a WaitBlock
+
+fn KeDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- ok }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeDispatchWaitBlockSatisfy: ipl != IPLDPC\n" KeCrash
+	end
+
+	waitstatus@ waitblock@ KeDispatchWaitBlockDequeue ok!
+
+	if (ok@)
+		return
+	end
+
+	auto thread
+	waitblock@ KeDispatchWaitBlock_Thread + @ thread!
+
+	1 thread@ KeThread_WaitCount + -=
+
+	auto wt
+	waitblock@ KeDispatchWaitBlock_WaitType + @ wt!
+
+	if (wt@ THREADWAITANY ==)
+		waitstatus@ priboost@ thread@ KeThreadWakeup drop
+	end elseif (wt@ THREADWAITALL ==)
+		if (thread@ KeThread_WaitCount + @ 0 ==)
+			STATUS_ALL_WAITS_SATISFIED priboost@ thread@ KeThreadWakeup drop
+		end
+	end
+end
+
+// satisfies all waiters on a dispatch object
+
+fn KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
+	0 ok!
+
+	0 count!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 object@ KeDispatchHeader_Signaled + !
+
+	auto h
+	object@ KeDispatchHeader_WaitBlockListHead + @ h!
+
+	auto wb
+
+	while (h@)
+		h@ wb!
+		h@ KeDispatchWaitBlock_Next + @ h!
+
+		if (waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy)
+			"KeDispatchSatisfyAll: couldn't satisfy WaitBlock\n" KeCrash
+		end
+
+		1 count +=
+	end
+
+	ipl@ KeIPLLower
+end
+
+// satisfies the first waiter on a dispatch object
+
+fn KeDispatchSatisfyFirst { waitstatus priboost object -- ok }
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto wb
+	object@ KeDispatchHeader_WaitBlockListHead + @ wb!
+
+	if (wb@)
+		if (waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy)
+			"KeDispatchSatisfyFirst: couldn't satisfy WaitBlock\n" KeCrash
+		end
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeThreadWaitForDispatchObject { waitipl waitmode alertable object -- ok }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeThreadWaitForDispatchObject: ipl != IPLDPC\n" KeCrash
+	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	auto waitblock
+	current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
+
+	if (object@ KeDispatchHeader_Signaled + @)
+		STATUS_ALREADY_SIGNALED ok!
+
+		return
+	end
+
+	1 current@ KeThread_WaitCount + !
+
+	THREADWAITANY waitblock@ object@ KeDispatchWaitBlockEnqueue ok!
+
+	if (ok@)
+		return
+	end
+
+	while (1)
+		if (waitblock@ KeDispatchWaitBlock_Object + @ ~~)
+			// wait was satisfied while we were servicing an APC
+			// that means we are done waiting.
+
+			waitblock@ KeDispatchWaitBlock_WaitStatusReturn + @ ok!
+			break
+		end
+
+		waitipl@ waitmode@ alertable@ KeThreadWait ok!
+
+		// if we got woken up to deliver an APC, it will be executed here when we
+		// lower the IPL.
+		// our wait may satisfy while this occurs, hence the check above.
+
+		waitipl@ KeIPLLower
+
+		if (ok@ STATUS_KERNEL_APC ~=)
+			IPLDPC KeIPLRaise drop
+
+			if (waitblock@ KeDispatchWaitBlock_Object + @)
+				0 waitblock@ KeDispatchWaitBlockDequeue drop
+			end
+
+			break
+		end
+
+		// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
+
+		IPLDPC KeIPLRaise drop
+	end
+end
 
 fn KeThreadWakeup { waitstatus priboost thread -- woken }
 	if (KeIPLCurrentGet IPLDPC ~=)
@@ -36,6 +277,7 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 
 	if (status@ THREADSTATUS_WAITINGALERTABLE ~= status@ THREADSTATUS_WAITINGUNALERTABLE ~= &&)
 		// thread isn't waiting
+
 		return
 	end
 
@@ -69,16 +311,6 @@ fn KeThreadWait { waitipl waitmode alertable -- ok }
 	current@ KeThread_WaitStatus + @ ok!
 end
 
-fn (DPCFunction) KeThreadTimerWake { context1 context2 -- }
-	// context1 = thread
-
-	// XXX what happens if the thread is killed or something before this timer executes?
-
-	// TODO replace with a dispatcher object wait on a KeTimer object
-
-	STATUS_WAIT_TIMEOUT 0 context1@ KeThreadWakeup drop
-end
-
 fn KeThreadSleep { ms waitmode alertable -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -86,34 +318,11 @@ fn KeThreadSleep { ms waitmode alertable -- ok }
 	auto current
 	KeThreadCurrent@ current!
 
-	current@ 0 ms@ current@ KeThread_WakeTimer + KeTimerEnqueue drop
+	0 current@ KeThread_Timer + KeTimerInitialize drop
 
-	while (1)
-		if (current@ KeThread_WakeTimer + KeTimer_Enqueued + @ ~~)
-			// the wake timer expired already, likely while we were processing an APC.
-			// that means we're done waiting.
+	0 0 ms@ current@ KeThread_Timer + KeTimerEnqueue drop
 
-			STATUS_WAIT_TIMEOUT ok!
-			
-			break
-		end
-
-		ipl@ waitmode@ alertable@ KeThreadWait ok!
-
-		// if we got woken up to deliver an APC, it will be executed here when we
-		// lower the IPL.
-		// our wakeup timer may expire while this occurs, hence the check above.
-
-		ipl@ KeIPLLower
-
-		if (ok@ STATUS_KERNEL_APC ~=)
-			return
-		end
-
-		// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
-
-		IPLDPC KeIPLRaise ipl!
-	end
+	ipl@ waitmode@ alertable@ current@ KeThread_Timer + KeThreadWaitForDispatchObject ok!
 
 	ipl@ KeIPLLower
 end

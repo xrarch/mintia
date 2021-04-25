@@ -1,8 +1,9 @@
-// needs KeDPC.h and KeTime.h
+// needs KeDPC.h, KeTime.h, and KeDispatch.h
 
 externptr KeTimerListHead
 
 struct KeTimer
+	KeDispatchHeader_SIZEOF DispatchHeader
 	4 Next
 	4 Prev
 	4 Context1
@@ -11,15 +12,6 @@ struct KeTimer
 	KeTime_SIZEOF ExpiryTime
 	KeDPC_SIZEOF DPC
 endstruct
-
-struct KeTimerH
-	4 Next
-	4 Prev
-	4 ExpiryTimeSec
-	4 ExpiryTimeMs
-endstruct
-
-extern KeTimerCreate { function -- timer ok }
 
 extern KeTimerInitialize { function timer -- ok }
 

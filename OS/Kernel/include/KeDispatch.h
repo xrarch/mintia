@@ -1,4 +1,5 @@
 const DISPATCHOBJECT_TIMER 1
+const DISPATCHOBJECT_MUTEX 2
 
 struct KeDispatchHeader
 	4 Signaled
@@ -7,6 +8,8 @@ struct KeDispatchHeader
 
 	4 WaitBlockListHead
 	4 WaitBlockListTail
+
+	4 Name
 endstruct
 
 // a thread can wait on up to THREADWAITBLOCKS dispatcher objects at a time, and a
@@ -16,8 +19,6 @@ endstruct
 struct KeDispatchWaitBlock
 	4 Prev
 	4 Next
-
-	4 Enqueued
 
 	4 WaitStatusReturn
 	4 WaitType
@@ -31,10 +32,14 @@ const THREADWAITANY 2
 
 const THREADWAITBLOCKS 4
 
-extern KeDispatchInitialize { type dobject -- ok }
+extern KeDispatchInitialize { name type dobject -- ok }
 
 extern KeDispatchWaitBlockInitialize { thread waitblock -- ok }
 
 extern KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 
 extern KeDispatchSatisfyFirst { waitstatus priboost object -- wokenthread ok }
+
+extern KeThreadWaitForMultipleDispatchObjects { waitipl waitmode alertable waittype objectcount objecttable -- ok }
+
+extern KeThreadWaitForDispatchObject { waitipl waitmode alertable object -- ok }

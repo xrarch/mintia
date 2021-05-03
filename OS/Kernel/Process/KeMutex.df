@@ -1,0 +1,140 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALLog.h"
+
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALRTC.h"
+
+#include "<inc>/KeCrash.h"
+
+#include "<inc>/KeDPC.h"
+#include "<inc>/KeTime.h"
+#include "<inc>/KeDispatch.h"
+#include "<inc>/KeTimer.h"
+
+#include "<inc>/KeProcess.h"
+
+#include "<inc>/KeMutex.h"
+
+#include "<inc>/KeIPL.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+// initializes a KeMutex
+
+fn KeMutexInitialize { name apcdisable mutex -- ok }
+	name@ DISPATCHOBJECT_MUTEX mutex@ KeDispatchInitialize ok!
+
+	if (ok@)
+		return
+	end
+
+	0 mutex@ KeMutex_OwningThread + !
+	0 mutex@ KeMutex_Locked + !
+	apcdisable@ mutex@ KeMutex_APCDisable + !
+end
+
+fn KeMutexAcquire { waitmode alertable mutex -- ok }
+	0 ok!
+
+	auto current
+	KeThreadCurrent@ current!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (mutex@ KeMutex_Locked + @ ~~)
+		if (mutex@ KeMutex_OwningThread + @)
+			mutex@ KeMutex_OwningThread + @ KeThread_Name +
+			mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+			"KeMutexAcquire: mutex '%s' wasn't locked but was owned by '%s'\n" KeCrash
+		end
+
+		// not locked, just yoink and return
+
+		current@ mutex@ KeMutex_OwningThread + !
+		1 mutex@ KeMutex_Locked + !
+
+		mutex@ KeMutex_APCDisable + @ current@ KeThread_KernelAPCDisableCount + +=
+	end elseif (mutex@ KeMutex_OwningThread + @ current@ ==)
+		// it is locked, and we own it already, so just increment the lock count
+
+		1 mutex@ KeMutex_Locked + +=
+	end else
+		// it is locked by someone else, we need to wait on it
+
+		ipl@ waitmode@ alertable@ mutex@ KeThreadWaitForDispatchObject ok!
+
+		// by the time we're woken up we should own the mutex unless we got killed or something
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeMutexRelease { mutex -- ok }
+	0 ok!
+
+	auto current
+	KeThreadCurrent@ current!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (mutex@ KeMutex_OwningThread + @ current@ ~=)
+		// we didn't own it...
+
+		mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+		current@ KeThread_Name +
+		"KeMutexRelease: thread '%s' didn't own mutex '%s'\n" KeCrash
+	end
+
+	auto lock
+	mutex@ KeMutex_Locked + @ lock!
+
+	if (lock@ ~~)
+		// it wasn't locked...
+
+		mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+		current@ KeThread_Name +
+		"KeMutexRelease: thread '%s' owns mutex '%s' but lockcount=0\n" KeCrash
+	end
+
+	1 lock -=
+
+	if (lock@ ~~)
+		// just unlocked it, give it away if necessary
+
+		if (mutex@ KeMutex_APCDisable + @)
+			if (current@ KeThread_KernelAPCDisableCount + @ ~~)
+				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+				current@ KeThread_Name +
+				"KeMutexRelease: thread '%s' mutex '%s': APCDisableCount<0\n" KeCrash
+			end
+
+			1 current@ KeThread_KernelAPCDisableCount + -=
+		end
+
+		auto wokenthread
+
+		0 1 mutex@ KeDispatchSatisfyFirst ok! wokenthread!
+
+		if (ok@)
+			"KeMutexRelease: couldn't satisfy first\n" KeCrash
+		end
+
+		if (wokenthread@)
+			// we woke up a thread who was waiting. make him the owner of the mutex
+
+			wokenthread@ mutex@ KeMutex_OwningThread + !
+			1 mutex@ KeMutex_Locked + !
+
+			mutex@ KeMutex_APCDisable + @ wokenthread@ KeThread_KernelAPCDisableCount + +=
+		end else
+			0 mutex@ KeMutex_OwningThread + !
+			0 mutex@ KeMutex_Locked + !
+		end
+	end else
+		lock@ mutex@ KeMutex_Locked + !
+	end
+
+	ipl@ KeIPLLower
+end

@@ -13,7 +13,7 @@ struct KeTimer
 	KeDPC_SIZEOF DPC
 endstruct
 
-extern KeTimerInitialize { function timer -- ok }
+extern KeTimerInitialize { name function timer -- ok }
 
 extern KeTimerDequeue { timer -- ok }
 

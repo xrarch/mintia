@@ -121,6 +121,8 @@ struct KeThread
 	4 APCKernelListHead
 	4 APCKernelListTail
 
+	4 MutexListHead
+
 	4 KernelAPCDisableCount
 
 	4 KernelAPCInProgress

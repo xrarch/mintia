@@ -5,6 +5,8 @@ struct KeMutex
 	4 OwningThread
 	4 Locked
 	4 Mode
+	
+	4 Next
 endstruct
 
 extern KeMutexInitialize { name mode mutex -- ok }

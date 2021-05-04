@@ -31,6 +31,8 @@ fn KeMutexInitialize { name mode mutex -- ok }
 	0 mutex@ KeMutex_OwningThread + !
 	0 mutex@ KeMutex_Locked + !
 	mode@ mutex@ KeMutex_Mode + !
+
+	0 mutex@ KeMutex_Next + !
 end
 
 fn KeMutexOwnerSet { thread mutex -- ok }
@@ -42,6 +44,13 @@ fn KeMutexOwnerSet { thread mutex -- ok }
 	if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
 		1 thread@ KeThread_KernelAPCDisableCount + +=
 	end
+
+	auto h
+	thread@ KeThread_MutexListHead + @ mutex@ KeMutex_Next + !
+
+	mutex@ thread@ KeThread_MutexListHead + !
+
+	0 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 end
 
 fn KeMutexAcquire { alertable mutex -- ok }
@@ -53,23 +62,33 @@ fn KeMutexAcquire { alertable mutex -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (mutex@ KeMutex_Locked + @ ~~)
-		if (mutex@ KeMutex_OwningThread + @)
-			mutex@ KeMutex_OwningThread + @ KeThread_Name +
-			mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
-			"KeMutexAcquire: mutex '%s' wasn't locked but was owned by '%s'\n" KeCrash
+	if (ipl@ IPLDPC >=)
+		"KeMutexAcquire: ipl >= IPLDPC\n" KeCrash
+	end
+
+	while (1)
+		if (mutex@ KeMutex_Locked + @ ~~)
+			if (mutex@ KeMutex_OwningThread + @)
+				mutex@ KeMutex_OwningThread + @ KeThread_Name +
+				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+				"KeMutexAcquire: mutex '%s' wasn't locked but was owned by '%s'\n" KeCrash
+			end
+
+			// not locked, just yoink and return
+
+			if (current@ mutex@ KeMutexOwnerSet)
+				"KeMutexAcquire: couldn't set owner\n" KeCrash
+			end
+
+			break
+		end elseif (mutex@ KeMutex_OwningThread + @ current@ ==)
+			// it is locked, and we own it already, so just increment the lock count
+
+			1 mutex@ KeMutex_Locked + +=
+
+			break
 		end
-
-		// not locked, just yoink and return
-
-		if (current@ mutex@ KeMutexOwnerSet)
-			"KeMutexAcquire: couldn't set owner\n" KeCrash
-		end
-	end elseif (mutex@ KeMutex_OwningThread + @ current@ ==)
-		// it is locked, and we own it already, so just increment the lock count
-
-		1 mutex@ KeMutex_Locked + +=
-	end else
+			
 		// it is locked by someone else, we need to wait on it
 
 		ipl@
@@ -77,7 +96,11 @@ fn KeMutexAcquire { alertable mutex -- ok }
 		alertable@
 		mutex@ KeThreadWaitForDispatchObject ok!
 
-		// by the time we're woken up we should own the mutex unless we got killed or something
+		if (ok@ STATUS_KERNEL_APC ~=)
+			// by the time we're woken up we should own the mutex unless we got killed or something
+
+			break
+		end
 	end
 
 	ipl@ KeIPLLower
@@ -91,6 +114,10 @@ fn KeMutexRelease { mutex -- ok }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	if (ipl@ IPLDPC >=)
+		"KeMutexRelease: ipl >= IPLDPC\n" KeCrash
+	end
 
 	if (mutex@ KeMutex_OwningThread + @ current@ ~=)
 		// we didn't own it...
@@ -116,6 +143,35 @@ fn KeMutexRelease { mutex -- ok }
 	if (lock@ ~~)
 		// just unlocked it, give it away if necessary
 
+		auto h
+		current@ KeThread_MutexListHead + @ h!
+
+		if (h@ mutex@ ~=)
+			// attempting to release mutex in wrong order
+
+			if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+				// its a kernel mode mutex! thats a system software bug!
+
+				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+				current@ KeThread_Name +
+				"KeMutexRelease: thread '%s' mutex '%s': deadlock possible\n" KeCrash
+			end
+
+			// its a usermode mutex, we can just return with an error
+
+			ipl@ KeIPLLower
+
+			STATUS_DEADLOCK_POSSIBLE ok!
+
+			return	
+		end
+
+		mutex@ KeMutex_Next + @ current@ KeThread_MutexListHead + !
+
+		0 mutex@ KeMutex_Next + !
+
+		auto wokenthread
+
 		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
 			if (current@ KeThread_KernelAPCDisableCount + @ ~~)
 				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
@@ -124,11 +180,15 @@ fn KeMutexRelease { mutex -- ok }
 			end
 
 			1 current@ KeThread_KernelAPCDisableCount + -=
+
+			// kernel mode mutex, boost waiter priority by 1
+
+			0 1 mutex@ KeDispatchSatisfyFirst ok! wokenthread!
+		end else
+			// usermode mutex, no priority boost
+
+			0 0 mutex@ KeDispatchSatisfyFirst ok! wokenthread!
 		end
-
-		auto wokenthread
-
-		0 1 mutex@ KeDispatchSatisfyFirst ok! wokenthread!
 
 		if (ok@)
 			"KeMutexRelease: couldn't satisfy first\n" KeCrash

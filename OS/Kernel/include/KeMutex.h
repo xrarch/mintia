@@ -4,11 +4,11 @@ struct KeMutex
 	KeDispatchHeader_SIZEOF DispatchHeader
 	4 OwningThread
 	4 Locked
-	4 APCDisable
+	4 Mode
 endstruct
 
-extern KeMutexInitialize { name apcdisable mutex -- ok }
+extern KeMutexInitialize { name mode mutex -- ok }
 
-extern KeMutexAcquire { waitmode alertable mutex -- ok }
+extern KeMutexAcquire { alertable mutex -- ok }
 
 extern KeMutexRelease { mutex -- ok }

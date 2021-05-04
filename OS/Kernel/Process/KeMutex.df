@@ -21,7 +21,7 @@
 
 // initializes a KeMutex
 
-fn KeMutexInitialize { name apcdisable mutex -- ok }
+fn KeMutexInitialize { name mode mutex -- ok }
 	name@ DISPATCHOBJECT_MUTEX mutex@ KeDispatchInitialize ok!
 
 	if (ok@)
@@ -30,10 +30,21 @@ fn KeMutexInitialize { name apcdisable mutex -- ok }
 
 	0 mutex@ KeMutex_OwningThread + !
 	0 mutex@ KeMutex_Locked + !
-	apcdisable@ mutex@ KeMutex_APCDisable + !
+	mode@ mutex@ KeMutex_Mode + !
 end
 
-fn KeMutexAcquire { waitmode alertable mutex -- ok }
+fn KeMutexOwnerSet { thread mutex -- ok }
+	0 ok!
+
+	thread@ mutex@ KeMutex_OwningThread + !
+	1 mutex@ KeMutex_Locked + !
+
+	if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+		1 thread@ KeThread_KernelAPCDisableCount + +=
+	end
+end
+
+fn KeMutexAcquire { alertable mutex -- ok }
 	0 ok!
 
 	auto current
@@ -51,10 +62,9 @@ fn KeMutexAcquire { waitmode alertable mutex -- ok }
 
 		// not locked, just yoink and return
 
-		current@ mutex@ KeMutex_OwningThread + !
-		1 mutex@ KeMutex_Locked + !
-
-		mutex@ KeMutex_APCDisable + @ current@ KeThread_KernelAPCDisableCount + +=
+		if (current@ mutex@ KeMutexOwnerSet)
+			"KeMutexAcquire: couldn't set owner\n" KeCrash
+		end
 	end elseif (mutex@ KeMutex_OwningThread + @ current@ ==)
 		// it is locked, and we own it already, so just increment the lock count
 
@@ -62,7 +72,10 @@ fn KeMutexAcquire { waitmode alertable mutex -- ok }
 	end else
 		// it is locked by someone else, we need to wait on it
 
-		ipl@ waitmode@ alertable@ mutex@ KeThreadWaitForDispatchObject ok!
+		ipl@
+		mutex@ KeMutex_Mode + @
+		alertable@
+		mutex@ KeThreadWaitForDispatchObject ok!
 
 		// by the time we're woken up we should own the mutex unless we got killed or something
 	end
@@ -103,7 +116,7 @@ fn KeMutexRelease { mutex -- ok }
 	if (lock@ ~~)
 		// just unlocked it, give it away if necessary
 
-		if (mutex@ KeMutex_APCDisable + @)
+		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
 			if (current@ KeThread_KernelAPCDisableCount + @ ~~)
 				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
 				current@ KeThread_Name +
@@ -124,10 +137,9 @@ fn KeMutexRelease { mutex -- ok }
 		if (wokenthread@)
 			// we woke up a thread who was waiting. make him the owner of the mutex
 
-			wokenthread@ mutex@ KeMutex_OwningThread + !
-			1 mutex@ KeMutex_Locked + !
-
-			mutex@ KeMutex_APCDisable + @ wokenthread@ KeThread_KernelAPCDisableCount + +=
+			if (wokenthread@ mutex@ KeMutexOwnerSet)
+				"KeMutexRelease: couldn't set owner\n" KeCrash
+			end
 		end else
 			0 mutex@ KeMutex_OwningThread + !
 			0 mutex@ KeMutex_Locked + !

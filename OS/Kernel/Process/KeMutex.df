@@ -33,6 +33,8 @@ fn KeMutexInitialize { name mode mutex -- ok }
 	mode@ mutex@ KeMutex_Mode + !
 
 	0 mutex@ KeMutex_Next + !
+
+	1 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 end
 
 fn KeMutexOwnerSet { thread mutex -- ok }
@@ -51,59 +53,6 @@ fn KeMutexOwnerSet { thread mutex -- ok }
 	mutex@ thread@ KeThread_MutexListHead + !
 
 	0 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
-end
-
-fn KeMutexAcquire { alertable mutex -- ok }
-	0 ok!
-
-	auto current
-	KeThreadCurrent@ current!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (ipl@ IPLDPC >=)
-		"KeMutexAcquire: ipl >= IPLDPC\n" KeCrash
-	end
-
-	while (1)
-		if (mutex@ KeMutex_Locked + @ ~~)
-			if (mutex@ KeMutex_OwningThread + @)
-				mutex@ KeMutex_OwningThread + @ KeThread_Name +
-				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
-				"KeMutexAcquire: mutex '%s' wasn't locked but was owned by '%s'\n" KeCrash
-			end
-
-			// not locked, just yoink and return
-
-			if (current@ mutex@ KeMutexOwnerSet)
-				"KeMutexAcquire: couldn't set owner\n" KeCrash
-			end
-
-			break
-		end elseif (mutex@ KeMutex_OwningThread + @ current@ ==)
-			// it is locked, and we own it already, so just increment the lock count
-
-			1 mutex@ KeMutex_Locked + +=
-
-			break
-		end
-			
-		// it is locked by someone else, we need to wait on it
-
-		ipl@
-		mutex@ KeMutex_Mode + @
-		alertable@
-		mutex@ KeThreadWaitForDispatchObject ok!
-
-		if (ok@ STATUS_KERNEL_APC ~=)
-			// by the time we're woken up we should own the mutex unless we got killed or something
-
-			break
-		end
-	end
-
-	ipl@ KeIPLLower
 end
 
 fn KeMutexRelease { mutex -- ok }
@@ -191,16 +140,19 @@ fn KeMutexRelease { mutex -- ok }
 		end
 
 		if (ok@)
-			"KeMutexRelease: couldn't satisfy first\n" KeCrash
+			"KeMutexRelease: couldn't KeDispatchSatisfyFirst\n" KeCrash
 		end
 
 		if (wokenthread@)
 			// we woke up a thread who was waiting. make him the owner of the mutex
 
 			if (wokenthread@ mutex@ KeMutexOwnerSet)
-				"KeMutexRelease: couldn't set owner\n" KeCrash
+				"KeMutexRelease: couldn't KeMutexOwnerSet\n" KeCrash
 			end
 		end else
+			// signal the mutex
+			1 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
+
 			0 mutex@ KeMutex_OwningThread + !
 			0 mutex@ KeMutex_Locked + !
 		end

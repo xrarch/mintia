@@ -13,6 +13,8 @@
 #include "<inc>/KeDispatch.h"
 #include "<inc>/KeTimer.h"
 
+#include "<inc>/KeMutex.h"
+
 #include "<inc>/KeProcess.h"
 
 #include "<inc>/KeIPL.h"
@@ -145,7 +147,7 @@ fn KeDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- ok }
 		waitstatus@ priboost@ thread@ KeThreadWakeup drop
 	end elseif (wt@ THREADWAITALL ==)
 		if (thread@ KeThread_WaitCount + @ 0 ==)
-			STATUS_ALL_WAITS_SATISFIED priboost@ thread@ KeThreadWakeup drop
+			0 priboost@ thread@ KeThreadWakeup drop
 		end
 	end
 end
@@ -238,31 +240,111 @@ fn KeDispatchSatisfyFirst { waitstatus priboost object -- wokenthread ok }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadWaitForMultipleDispatchObjects { waitipl waitmode alertable waittype objectcount objecttable -- ok }
-	"KeThreadWaitForMultipleDispatchObjects: not yet implemented\n" KeCrash
-end
+fn KeThreadWaitForMultipleObjects { waitmode alertable waittype objectcount objecttable -- ok }
+	0 ok!
 
-fn KeThreadWaitForDispatchObject { waitipl waitmode alertable object -- ok }
-	if (KeIPLCurrentGet IPLDPC ~=)
-		"KeThreadWaitForDispatchObject: ipl != IPLDPC\n" KeCrash
+	if (objectcount@ 0 ==)
+		return
+	end
+
+	if (objectcount@ THREADWAITBLOCKS >)
+		"KeThreadWaitForMultipleObjects: objectcount>THREADWAITBLOCKS\n" KeCrash
 	end
 
 	auto current
 	KeThreadCurrent@ current!
 
-	auto waitblock
-	current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
+	auto waitipl
+	IPLDPC KeIPLRaise waitipl!
+
+	// do below but like with multiple things
 
 	while (1)
-		if (object@ KeDispatchHeader_Signaled + @)
-			0 ok!
+		auto i
+		0 i!
 
-			return
+		auto waitblock
+		current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
+
+		auto satisfied
+
+		if (waittype@ THREADWAITANY ==)
+			0 satisfied!
+		end else
+			1 satisfied!
 		end
 
-		1 current@ KeThread_WaitCount + !
+		objectcount@ current@ KeThread_WaitCount + !
 
-		THREADWAITANY waitblock@ object@ KeDispatchWaitBlockEnqueue ok!
+		while (i@ objectcount@ <)
+			auto object
+			objecttable@ i@ 4 * + @ object!
+
+			if (waittype@ THREADWAITANY ==)
+				if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+					if (object@ KeMutex_OwningThread + @ current@ ==)
+						1 object@ KeMutex_Locked + +=
+
+						1 satisfied!
+
+						break
+					end elseif (object@ KeDispatchHeader_Signaled + @)
+						if (current@ object@ KeMutexOwnerSet)
+							"KeThreadWaitForMultipleObjects: couldn't KeMutexOwnerSet\n" KeCrash
+						end
+
+						1 satisfied!
+
+						break
+					end
+				end else
+					if (object@ KeDispatchHeader_Signaled + @)
+						1 satisfied!
+
+						break
+					end
+				end
+			end else
+				if (object@ KeDispatchHeader_Signaled + @ ~~)
+					if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+						if (object@ KeMutex_OwningThread + @ current@ ~=)
+							0 satisfied!
+						end
+					end else
+						0 satisfied!
+					end
+				end
+			end
+
+			if (waittype@ waitblock@ object@ KeDispatchWaitBlockEnqueue)
+				"KeThreadWaitForMultipleObjects: couldn't KeDispatchWaitBlockEnqueue\n" KeCrash
+			end
+
+			KeDispatchWaitBlock_SIZEOF waitblock +=
+			1 i +=
+		end
+
+		if (satisfied@)
+			// the wait is already satisfied. dequeue any wait blocks we just enqueued
+			// and then return.
+
+			current@ KeThread_WaitBlocks + waitblock!
+
+			0 i!
+
+			while (i@ objectcount@ <)
+				if (waitblock@ KeDispatchWaitBlock_Object + @)
+					if (0 waitblock@ KeDispatchWaitBlockDequeue)
+						"KeThreadWaitForMultipleObjects: couldn't dequeue WaitBlock\n" KeCrash
+					end
+				end
+
+				1 i +=
+				KeDispatchWaitBlock_SIZEOF waitblock +=
+			end
+
+			break
+		end
 
 		waitipl@ waitmode@ alertable@ KeThreadWait ok!
 
@@ -270,22 +352,29 @@ fn KeThreadWaitForDispatchObject { waitipl waitmode alertable object -- ok }
 		// lower the IPL.
 		// the object may become signaled while this occurs, hence the check above.
 
-		waitipl@ KeIPLLower
+		if (waitipl@ IPLLOW ==)
+			IPLLOW KeIPLLower
 
-		// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
+			// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
 
-		IPLDPC KeIPLRaise drop
+			IPLDPC KeIPLRaise drop
+		end
 
 		if (ok@ STATUS_KERNEL_APC ~=)
 			break
-		end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
-			// this special case is for the situation where a mutex is released while a waiter
-			// is executing an APC. if it weren't for this, and for the code to deal with it in
-			// KeMutexAcquire, it would just keep waiting on a wakeup that would never arrive.
-
-			return
 		end
 	end
+
+	waitipl@ KeIPLLower
+end
+
+fn KeThreadWaitForObject { waitmode alertable object -- ok }
+	auto objecttable
+	4 alloc objecttable!
+
+	object@ objecttable@!
+
+	waitmode@ alertable@ THREADWAITANY 1 objecttable@ KeThreadWaitForMultipleObjects ok!
 end
 
 fn KeThreadWakeup { waitstatus priboost thread -- woken }
@@ -340,6 +429,10 @@ fn KeThreadWait { waitipl waitmode alertable -- ok }
 		"KeThreadWait: ipl != IPLDPC\n" KeCrash
 	end
 
+	if (waitipl@ IPLDPC >=)
+		"KeThreadWait: waitipl >= IPLDPC\n" KeCrash
+	end
+
 	auto current
 	KeThreadCurrent@ current!
 
@@ -359,17 +452,18 @@ fn KeThreadWait { waitipl waitmode alertable -- ok }
 end
 
 fn KeThreadSleep { ms waitmode alertable -- ok }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
 	auto current
 	KeThreadCurrent@ current!
 
-	"KeThreadSleep" 0 current@ KeThread_Timer + KeTimerInitialize drop
+	"KeThreadSleep" 0 current@ KeThread_Timer + KeTimerInitialize ok!
 
-	0 0 ms@ current@ KeThread_Timer + KeTimerEnqueue drop
+	if (ok@)
+		"KeThreadSleep: couldn't initialize timer\n" KeCrash
+	end
 
-	ipl@ waitmode@ alertable@ current@ KeThread_Timer + KeThreadWaitForDispatchObject ok!
+	if (0 0 ms@ current@ KeThread_Timer + KeTimerEnqueue)
+		"KeThreadSleep: couldn't enqueue timer\n" KeCrash
+	end
 
-	ipl@ KeIPLLower
+	waitmode@ alertable@ current@ KeThread_Timer + KeThreadWaitForObject ok!
 end

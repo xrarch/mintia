@@ -32,6 +32,9 @@ const THREADWAITANY 2
 
 const THREADWAITBLOCKS 4
 
+const WAITUNALERTABLE 0
+const WAITALERTABLE 1
+
 extern KeDispatchInitialize { name type dobject -- ok }
 
 extern KeDispatchWaitBlockInitialize { thread waitblock -- ok }
@@ -40,6 +43,6 @@ extern KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 
 extern KeDispatchSatisfyFirst { waitstatus priboost object -- wokenthread ok }
 
-extern KeThreadWaitForMultipleDispatchObjects { waitipl waitmode alertable waittype objectcount objecttable -- ok }
+extern KeThreadWaitForMultipleObjects { waitmode alertable waittype objectcount objecttable -- ok }
 
-extern KeThreadWaitForDispatchObject { waitipl waitmode alertable object -- ok }
+extern KeThreadWaitForObject { waitmode alertable object -- ok }

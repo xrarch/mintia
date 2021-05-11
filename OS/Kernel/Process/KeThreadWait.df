@@ -334,19 +334,8 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype objectcount obje
 			// the wait is already satisfied. dequeue any wait blocks we just enqueued
 			// and then return.
 
-			current@ KeThread_WaitBlocks + waitblock!
-
-			0 i!
-
-			while (i@ objectcount@ <)
-				if (waitblock@ KeDispatchWaitBlock_Object + @)
-					if (0 waitblock@ KeDispatchWaitBlockDequeue)
-						"KeThreadWaitForMultipleObjects: couldn't dequeue WaitBlock\n" KeCrash
-					end
-				end
-
-				1 i +=
-				KeDispatchWaitBlock_SIZEOF waitblock +=
+			if (current@ KeThreadWaitBlocksDequeue)
+				"KeThreadWaitForMultipleObjects: couldn't dequeue all WaitBlocks\n" KeCrash
 			end
 
 			break
@@ -406,6 +395,24 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 		return
 	end
 
+	if (thread@ KeThreadWaitBlocksDequeue)
+		"KeThreadWakeup: couldn't dequeue all WaitBlocks\n" KeCrash
+	end
+
+	priboost@ thread@ KeThreadPriorityBoost
+	waitstatus@ thread@ KeThread_WaitStatus + !
+	QUEUEBACK thread@ KeThreadReady
+
+	1 woken!
+end
+
+fn KeThreadWaitBlocksDequeue { thread -- ok }
+	if (KeIPLCurrentGet IPLDPC ~=)
+		"KeThreadWaitBlocksDequeue: ipl != IPLDPC\n" KeCrash
+	end
+
+	0 ok!
+
 	auto wb
 	thread@ KeThread_WaitBlocks + wb!
 
@@ -415,19 +422,13 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 	while (i@ THREADWAITBLOCKS <)
 		if (wb@ KeDispatchWaitBlock_Object + @)
 			if (0 wb@ KeDispatchWaitBlockDequeue)
-				"KeThreadWakeup: couldn't dequeue WaitBlock\n" KeCrash
+				"KeThreadWaitBlocksDequeue: couldn't dequeue WaitBlock\n" KeCrash
 			end
 		end
 
 		1 i +=
 		KeDispatchWaitBlock_SIZEOF wb +=
 	end
-
-	priboost@ thread@ KeThreadPriorityBoost
-	waitstatus@ thread@ KeThread_WaitStatus + !
-	QUEUEBACK thread@ KeThreadReady
-
-	1 woken!
 end
 
 fn KeThreadWait { waitipl waitmode alertable -- ok }

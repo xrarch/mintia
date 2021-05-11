@@ -14,9 +14,11 @@
 
 #include "<inc>/KeSecurity.h"
 
+#include "<inc>/KeCrash.h"
+
 #include "../Loader/LoaderGlobal.h"
 
-const COMMANDS 9
+const COMMANDS 13
 
 table DebugCommands
 	"help"
@@ -54,6 +56,22 @@ table DebugCommands
 	"threads"
 	"[proc] Lists the threads of a process."
 	pointerof DebugCommandThread
+
+	"wait"
+	"[thread] Prints the wait information of a thread."
+	pointerof DebugCommandWait
+
+	"timers"
+	"Lists all enqueued timers."
+	pointerof DebugCommandTimers
+
+	"dispatch"
+	"[dispatchobject] Prints wait information for a dispatch object."
+	pointerof DebugCommandDispatch
+
+	"crash"
+	"Cause a crash."
+	pointerof DebugCommandCrash
 endtable
 
 struct Command
@@ -336,4 +354,104 @@ fn DebugCommandThread { p -- halt }
 
 		thr@ KeThread_ProcessNext + @ thr!
 	end
+end
+
+fn DebugCommandTimers { p -- halt }
+	0 halt!
+
+	auto timer
+	KeTimerListHead@ timer!
+
+	timer@ "head: 0x%08x\n" Printf
+	KeTimerListTail@ "tail: 0x%08x\n" Printf
+
+	while (timer@)
+		timer@ KeTimer_Next + @ timer@ timer@ KeTimer_Prev + @ "0x%08x <- 0x%08x -> 0x%08x\n" Printf
+
+		timer@ KeTimer_Next + @ timer!
+	end
+end
+
+fn DebugCommandDispatch { p -- halt }
+	0 halt!
+
+	if (p@ ~~)
+		"please specify a dispatch object pointer\n" Printf
+		return
+	end
+
+	1 p +=
+
+	auto object
+	p@ atoi object!
+
+	auto waitblock
+	object@ KeDispatchHeader_WaitBlockListHead + @ waitblock!
+
+	while (waitblock@)
+		auto thread
+		waitblock@ KeDispatchWaitBlock_Thread + @ thread!
+
+		thread@ KeThread_Name + thread@ waitblock@ "(0x%08x) waited on by 0x%08x '%s'\n" Printf
+
+		waitblock@ KeDispatchWaitBlock_Next + @ waitblock!
+	end
+end
+
+fn DebugCommandWait { p -- halt }
+	0 halt!
+
+	if (p@ ~~)
+		"please specify a thread pointer\n" Printf
+		return
+	end
+
+	1 p +=
+
+	auto thread
+	p@ atoi thread!
+
+	auto timer
+	thread@ KeThread_Timer + timer!
+
+	timer@ KeDispatchHeader_Name + @ timer@ "thread timer: 0x%08x '%s'" Printf
+
+	if (timer@ KeTimer_Enqueued + @)
+		" (enqueued)\n" Printf
+	end else
+		"\n" Printf
+	end
+
+	auto waitblock
+	thread@ KeThread_TimeoutWaitBlock + waitblock!
+
+	auto object
+	waitblock@ KeDispatchWaitBlock_Object + @ object!
+
+	if (object@)
+		"wait(timeout)\n" Printf
+	end
+
+	thread@ KeThread_WaitBlocks + waitblock!
+
+	auto i
+	0 i!
+
+	while (i@ THREADWAITBLOCKS <)
+		waitblock@ KeDispatchWaitBlock_Object + @ object!
+
+		if (object@)
+			object@ KeDispatchHeader_Name + @ i@ "wait(%d): %s\n" Printf
+		end
+
+		1 i +=
+		KeDispatchWaitBlock_SIZEOF waitblock +=
+	end
+end
+
+externptr DebugCrashLater
+
+fn DebugCommandCrash { p -- halt }
+	1 DebugCrashLater!
+	1 halt!
 end

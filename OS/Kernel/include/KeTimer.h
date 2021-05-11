@@ -1,6 +1,7 @@
 // needs KeDPC.h, KeTime.h, and KeDispatch.h
 
 externptr KeTimerListHead
+externptr KeTimerListTail
 
 struct KeTimer
 	KeDispatchHeader_SIZEOF DispatchHeader

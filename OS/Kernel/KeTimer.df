@@ -15,12 +15,15 @@
 
 #include "<inc>/HALRTC.h"
 
+#include "<inc>/HALDebug.h"
+
 #include "<ll>/OSDLL/OSStatus.h"
 
 var KeTimerListHead 0
 public KeTimerListHead
 
 var KeTimerListTail 0
+public KeTimerListTail
 
 buffer KeTimerExpirationEarliest KeTime_SIZEOF
 public KeTimerExpirationEarliest
@@ -38,12 +41,14 @@ fn (DPCFunction) KeTimerExpiration { context1 context2 -- }
 	auto timer
 	KeTimerListHead@ timer!
 
-	0 KeTimerListHead!
-
 	auto earliest
 	KeTimerExpirationEarliest earliest!
 
 	while (timer@)
+		if (timer@ KeTimer_Enqueued + @ ~~)
+			"KeTimerExpiration: timer not enqueued\n" KeCrash
+		end
+
 		auto time
 		timer@ KeTimer_ExpiryTime + time!
 
@@ -51,14 +56,10 @@ fn (DPCFunction) KeTimerExpiration { context1 context2 -- }
 			time@ KeTime_SecPart + @ earliest@ KeTime_SecPart + !
 			time@ KeTime_MsPart + @ earliest@ KeTime_MsPart + !
 
+			0 timer@ KeTimer_Prev + !
+			timer@ KeTimerListHead!
+
 			return
-		end
-
-		auto ok
-		0 0 timer@ KeDispatchSatisfyAll ok! drop
-
-		if (ok@)
-			"KeTimerExpiration: couldn't satisfy timer waits\n" KeCrash
 		end
 
 		if (timer@ KeTimer_DPC + KeDPC_Function + @)
@@ -68,13 +69,25 @@ fn (DPCFunction) KeTimerExpiration { context1 context2 -- }
 		auto ntimer
 		timer@ KeTimer_Next + @ ntimer!
 
-		timer@ KeTimerDequeue drop
+		0 timer@ KeTimer_Enqueued + !
+		0 timer@ KeTimer_Next + !
+		0 timer@ KeTimer_Prev + !
+
+		auto ok
+		STATUS_WAIT_TIMEOUT 0 timer@ KeDispatchSatisfyAll ok! drop
+
+		if (ok@)
+			"KeTimerExpiration: couldn't satisfy timer waits\n" KeCrash
+		end
 
 		ntimer@ timer!
 	end
 
 	-1 earliest@ KeTime_SecPart + !
 	999 earliest@ KeTime_MsPart + !
+
+	0 KeTimerListHead!
+	0 KeTimerListTail!
 end
 
 fn KeTimerInit { -- }
@@ -140,6 +153,10 @@ fn KeTimeTest { -- }
 end
 
 fn KeTimerInitialize { name function timer -- ok }
+	if (timer@ KeTimer_Enqueued + @)
+		"KeTimerInitialize: attempt to reinitialize an enqueued timer\n" KeCrash
+	end
+
 	name@ DISPATCHOBJECT_TIMER timer@ KeDispatchInitialize ok!
 
 	if (ok@)
@@ -272,8 +289,8 @@ fn KeTimerEnqueue { context1 context2 interval timer -- ok }
 			end
 
 			p@ timer@ KeTimer_Prev + !
-			t@ timer@ KeTimer_Next + !
 
+			t@ timer@ KeTimer_Next + !
 			timer@ t@ KeTimer_Prev + !
 
 			expirytime@ KeTimerEarliestSet

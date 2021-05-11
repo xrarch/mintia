@@ -131,6 +131,8 @@ struct KeThread
 
 	(THREADWAITBLOCKS KeDispatchWaitBlock_SIZEOF *) WaitBlocks
 
+	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock
+
 	KeTimer_SIZEOF Timer
 endstruct
 

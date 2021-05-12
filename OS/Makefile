@@ -1,5 +1,5 @@
 LOAD_DIR := Loader
-KERN_DIR := Kernel
+KERN_DIR := OSKernel
 HAL_DIR  := HAL
 DBG_DIR  := 224Debug
 DRIVER_DIR := BootDrivers

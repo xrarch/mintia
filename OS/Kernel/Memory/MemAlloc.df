@@ -1,0 +1,235 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALLog.h"
+
+#include "<inc>/KeCrash.h"
+
+#include "<inc>/Mem.h"
+#include "<inc>/MemAlloc.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+#include "<inc>/KeIPL.h"
+
+fn MemPageAlloc { -- pfdbe pfn }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	MemPageFreeListHead@ pfdbe!
+
+	if (pfdbe@)
+		pfdbe@ PFDBE_PFN + @ pfn!
+		pfdbe@ PFDBEFree_Next + @ MemPageFreeListHead!
+		0 pfdbe@ PFDBEFree_Next + !
+
+		1 MemPageFreeCount -=
+	end else
+		STATUS_NO_MEMORY pfn!
+		0 pfdbe!
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn MemDumpBuckets { -- }
+	auto i
+	0 i!
+
+	auto sz
+	1 BUCKETSPO2START << sz!
+
+	while (i@ BUCKETS <)
+		sz@ "[%d]: " Printf
+
+		auto ptr
+		[i@]MemBuckets@ ptr!
+
+		while (ptr@)
+			auto bsz
+			1 ptr@ MemBlock_BucketIndex + @ BUCKETSPO2START + << bsz!
+
+			bsz@ bsz@ ptr@ + 0x4f000 - ptr@ 0x4f000 - "%x-%x (%d) | " Printf
+
+			ptr@ MemBlock_Next + @ ptr!
+		end
+
+		'\n' Putc
+
+		1 sz <<=
+		1 i +=
+	end
+end
+
+fn MemAllocWithTag { bytes tag -- ptr ok }
+	MemBlock_SIZEOF bytes +=
+
+	auto sz
+	1 BUCKETSPO2START << sz!
+
+	auto i
+	0 i!
+
+	auto dist
+	-1 dist!
+
+	STATUS_NO_MEMORY ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	while (i@ BUCKETS <)
+		if (bytes@ sz@ <=)
+			if (dist@ -1 ==)
+				i@ dist!
+			end
+
+			[i@]MemBuckets@ ptr!
+
+			if (ptr@)
+				auto ts
+				sz@ ts!
+
+				auto pt
+				ptr@ MemBlock_Next + @ pt!
+
+				pt@ [i@]MemBuckets!
+
+				if (pt@)
+					0 pt@ MemBlock_Prev + !
+				end
+
+				while (i@ dist@ >)
+					1 i -=
+					1 ts >>=
+
+					auto tp
+					ptr@ ts@ + tp!
+
+					MEMBLOCKMAGIC tp@ MemBlock_Magic + !
+					i@ tp@ MemBlock_BucketIndex + !
+					MEMBLOCKFREE tp@ MemBlock_Tag + !
+
+					[i@]MemBuckets@ pt!
+
+					if (pt@)
+						tp@ pt@ MemBlock_Prev + !
+					end
+
+					pt@ tp@ MemBlock_Next + !
+					tp@ [i@]MemBuckets!
+				end
+
+				MEMBLOCKMAGIC ptr@ MemBlock_Magic + !
+				i@ ptr@ MemBlock_BucketIndex + !
+				tag@ ptr@ MemBlock_Tag + !
+
+				0 ok!
+				MemBlock_SIZEOF ptr +=
+
+				sz@ MemHeapBytesFree -=
+
+				break
+			end
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn MemFree { ptr -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	MemBlock_SIZEOF ptr -=
+
+	if (ptr@ MemBlock_Magic + @ MEMBLOCKMAGIC ~=)
+		ptr@ "MemFree: tried to free corrupted heap block (0x%08x)\n" KeCrash
+	end
+
+	if (ptr@ MemBlock_Tag + @ MEMBLOCKFREE ==)
+		ptr@ "MemFree: tried to free heap block that was free (0x%08x)\n" KeCrash
+	end
+
+	auto hpsz
+	MemHeapSize@ hpsz!
+
+	auto base
+	MemHeap@ base!
+
+	auto i
+	ptr@ MemBlock_BucketIndex + @ i!
+
+	auto sz
+	1 ptr@ MemBlock_BucketIndex + @ BUCKETSPO2START + << sz!
+
+	sz@ MemHeapBytesFree +=
+
+	while (i@ BUCKETS 1 - <)
+		if (sz@ hpsz@ >=)
+			break
+		end
+
+		auto buddy
+		ptr@ base@ - sz@ ^ base@ + buddy!
+
+		if (buddy@ MemBlock_Magic + @ MEMBLOCKMAGIC ~=)
+			buddy@ "MemFree: corrupted buddy (0x%08x)\n" KeCrash
+		end
+
+		if (buddy@ MemBlock_Tag + @ MEMBLOCKFREE == buddy@ MemBlock_BucketIndex + @ i@ == &&)
+			// coalesce
+
+			// remove buddy, who is free, from the bucket he's listed on
+
+			auto l
+			buddy@ MemBlock_Prev + @ l!
+
+			auto n
+			buddy@ MemBlock_Next + @ n!
+
+			if (l@)
+				n@ l@ MemBlock_Next + !
+			end else
+				// no last block means buddy was the bucket list head
+				n@ [i@]MemBuckets!
+			end
+
+			if (n@)
+				l@ n@ MemBlock_Prev + !
+			end
+
+			if (buddy@ ptr@ >)
+				0 buddy@ MemBlock_Magic + !
+				i@ 1 + ptr@ MemBlock_BucketIndex + !
+			end else
+				0 ptr@ MemBlock_Magic + !
+				i@ 1 + buddy@ MemBlock_BucketIndex + !
+				buddy@ ptr!
+			end
+		end else
+			// buddy's not free, can't do any more coalescing
+
+			break
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	MEMBLOCKFREE ptr@ MemBlock_Tag + !
+
+	auto pt
+	[i@]MemBuckets@ pt!
+
+	if (pt@)
+		ptr@ pt@ MemBlock_Prev + !
+	end
+
+	pt@ ptr@ MemBlock_Next + !
+
+	ptr@ [i@]MemBuckets!
+
+	ipl@ KeIPLLower
+end

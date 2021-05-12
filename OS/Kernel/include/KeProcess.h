@@ -31,9 +31,6 @@ struct KeProcess
 	4 GlobalListNext
 	4 GlobalListPrev
 
-	4 UserListNext
-	4 UserListPrev
-
 	// scheduler information
 
 	4 ThreadCount
@@ -42,10 +39,6 @@ struct KeProcess
 	4 ProcessStatus
 
 	4 BasePriority
-
-	// security information
-
-	4 User
 
 	// heap allocator information
 
@@ -80,6 +73,8 @@ const THREADDEFAULTQUANTUM 30 // in milliseconds
 const QUANTUMUNITSPERTICK 3
 
 const KETHREADNAMELEN 128
+
+const KETHREADSTACKSIZE 4096
 
 struct KeThread
 	4 KernelStackBottom
@@ -138,15 +133,13 @@ endstruct
 
 extern KeProcessCurrentGet { -- current }
 
-extern KeProcessInitialize { user name process -- ok }
+extern KeProcessInitialize { name process -- ok }
 
 externptr KeProcessListHead
 
 externptr KeProcessKernelProcess
 
-extern KeThreadInitialize { context1 context2 startfunc process name thread -- ok }
-
-extern KeThreadWorkerInitialize { context1 context2 startfunc name thread -- ok }
+extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
 
 extern KeThreadEnqueue { front thread -- }
 

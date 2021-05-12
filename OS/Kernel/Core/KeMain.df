@@ -4,8 +4,6 @@
 #include "<inc>/KeCrash.h"
 #include "<inc>/KeIPL.h"
 
-#include "<inc>/KeMem.h"
-
 #include "<inc>/HALRTC.h"
 #include "<inc>/HALCPU.h"
 
@@ -25,13 +23,9 @@
 
 extern KeInterruptInit { -- }
 
-extern KeMemInit { -- }
+extern MemInit { -- }
 
 extern KeTimerInit { -- }
-
-extern KeObjectInit { -- }
-
-extern KeSecurityInit { -- }
 
 extern KeProcessInit { -- }
 
@@ -64,6 +58,11 @@ fn (APCFunctionNormal) TestNormalFunc { context1 context2 -- }
 	// 600 KERNELMODE 0 KeThreadSleep drop
 end
 
+buffer KeProcessKernelThreadMainStack KETHREADSTACKSIZE
+
+buffer TestThread1Stack KETHREADSTACKSIZE
+buffer TestThread2Stack KETHREADSTACKSIZE
+
 fn KeMain { -- ret }
 	// early init that takes place before there's a process context
 
@@ -73,25 +72,40 @@ fn KeMain { -- ret }
 
 	KeTimerInit
 
-	KeMemInit
-
-	KeObjectInit
-
-	KeSecurityInit
-
 	KeProcessInit
 
 	KeThreadInit
 
-	0 0 pointerof KeMainInThreadContext "main" KeProcessKernelThreadMain KeThreadWorkerInitialize ret!
+	0 // context1
+	0 // context2
+	pointerof KeMainInThreadContext // startfunc
+	KeProcessKernelProcess // process
+	KeProcessKernelThreadMainStack // kstack
+	"main" // name
+	KeProcessKernelThreadMain // thread
+	KeThreadInitialize ret!
 
 	if (ret@)
 		ret@ "KeMain: couldn't initialize kernel main thread (%i)\n" KeCrash
 	end
 
-	0xBBBBBBBB 'o' pointerof TestKernelThread "bthread" TestThread1 KeThreadWorkerInitialize ret!
+	0xBBBBBBBB
+	'o'
+	pointerof TestKernelThread
+	KeProcessKernelProcess // process
+	TestThread1Stack // kstack
+	"bthread"
+	TestThread1
+	KeThreadInitialize ret!
 
-	0xCCCCCCCC 'c' pointerof TestKernelThread "cthread" TestThread2 KeThreadWorkerInitialize ret!
+	0xCCCCCCCC
+	'c'
+	pointerof TestKernelThread
+	KeProcessKernelProcess // process
+	TestThread2Stack // kstack
+	"cthread"
+	TestThread2
+	KeThreadInitialize ret!
 
 	// PRIORITY_LOWREALTIME TestThread2 KeThread_BasePriority + !
 	// PRIORITY_LOWREALTIME TestThread2 KeThread_Priority + !
@@ -121,8 +135,6 @@ fn KeMainInThreadContext { -- }
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
 	"Hello Andromeda World!\n" "KeMain" HALLog
-
-	KeMemUsageDump
 
 	0 KEEVENT_NOTIF "testevent" TestEvent KeEventInitialize drop
 

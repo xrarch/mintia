@@ -8,7 +8,7 @@ OFFSET     := 2
 
 OS_DIR     := ./OS
 LOAD_DIR   := $(OS_DIR)/Loader
-KERN_DIR   := $(OS_DIR)/Kernel
+KERN_DIR   := $(OS_DIR)/OSKernel
 LIB_DIR    := $(OS_DIR)/Library
 HAL_DIR    := $(OS_DIR)/HAL
 DBG_DIR    := $(OS_DIR)/224Debug

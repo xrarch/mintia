@@ -1,5 +1,6 @@
 all:
 	make -C RTC
+	make -C AnalogClockTest
 	make sysfiles
 
 
@@ -15,3 +16,4 @@ sysfiles:
 
 cleanup:
 	make -C RTC cleanup
+	make -C AnalogClockTest cleanup

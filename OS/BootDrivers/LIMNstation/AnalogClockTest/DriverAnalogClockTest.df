@@ -1,0 +1,318 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/rta3x/a3x.h"
+
+#include "<inc>/HALConsole.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALLIMNstationCitron.h"
+#include "<inc>/HALInterrupt.h"
+
+#include "<inc>/Kernel.h"
+
+const FontWHRatio 1
+
+table cosa
+	0
+	105
+	208
+	309
+	407
+	500
+	588
+	669
+	743
+	809
+	866
+	914
+	951
+	978
+	995
+	1000
+	995
+	978
+	951
+	914
+	866
+	809
+	743
+	669
+	588
+	500
+	407
+	309
+	208
+	105
+	0
+	-105
+	-208
+	-309
+	-407
+	-500
+	-588
+	-669
+	-743
+	-809
+	-866
+	-914
+	-951
+	-978
+	-995
+	-1000
+	-995
+	-978
+	-951
+	-914
+	-866
+	-809
+	-743
+	-669
+	-588
+	-500
+	-407
+	-309
+	-208
+	-105
+endtable
+
+table sina
+	-1000
+	-995
+	-978
+	-951
+	-914
+	-866
+	-809
+	-743
+	-669
+	-588
+	-500
+	-407
+	-309
+	-208
+	-105
+	0
+	105
+	208
+	309
+	407
+	500
+	588
+	669
+	743
+	809
+	866
+	914
+	951
+	978
+	995
+	1000
+	995
+	978
+	951
+	914
+	866
+	809
+	743
+	669
+	588
+	500
+	407
+	309
+	208
+	105
+	0
+	-105
+	-208
+	-309
+	-407
+	-500
+	-588
+	-669
+	-743
+	-809
+	-866
+	-914
+	-951
+	-978
+	-995
+endtable
+
+fn DrawPoint { x y p -- }
+	x@ y@ HALConsoleSetCursor
+	p@ HALPutc
+end
+
+fn DrawText { x y text -- }
+	x@ y@ HALConsoleSetCursor
+	text@ "%s" Printf
+end
+
+asm "
+
+;a1 - dividend
+;a0 - divisor
+signeddiv:
+	blt signed a1, zero, .lt
+	div v0, a1, a0
+	ret
+	
+.lt:
+	not v0, a1
+	add v0, v0, 1
+	div v0, v0, a0
+	not v0, v0
+	add v0, v0, 1
+	ret
+
+"
+
+extern signeddiv { dividend divisor -- res }
+
+fn DrawCircle { handmax sYcen sXcen -- }
+	auto x
+	auto y
+	auto r
+	auto c
+
+	0 r!
+
+	while (r@ 60 <)
+		[r@]cosa@ handmax@ * FontWHRatio * 1000 signeddiv sXcen@ + x!
+		[r@]sina@ handmax@ * 1000 signeddiv sYcen@ + y!
+
+		if (r@ 5 % 0 ==)
+			'o' c!
+		end else
+			'.' c!
+		end
+
+		x@ y@ c@ DrawPoint
+
+		1 r +=
+	end
+end
+
+fn DrawHand { minute hlength c sXcen sYcen -- }
+	auto x
+	auto y
+	auto n
+
+	1 n!
+
+	while (n@ hlength@ <)
+		[minute@]cosa@ n@ * FontWHRatio * 1000 signeddiv sXcen@ + x!
+		[minute@]sina@ n@ * 1000 signeddiv sYcen@ + y!
+
+		x@ y@ c@ DrawPoint
+
+		1 n +=
+	end
+end
+
+fn AnalogClockTest { -- }
+	auto sXmax
+	auto sYmax
+	auto x
+	auto y
+
+	auto smax
+
+	HALConsoleQuery y! x! sYmax! sXmax!
+	"\n" Printf
+
+	if (sXmax@ FontWHRatio / sYmax@ <=)
+		sXmax@ FontWHRatio / smax!
+	end else
+		sYmax@ smax!
+	end
+
+	auto handmax
+	smax@ 2 / 1 - handmax!
+
+	auto sXcen
+	sXmax@ 2 / sXcen!
+
+	auto sYcen
+	sYmax@ 2 / sYcen!
+
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	while (1)
+		time@ HALRTCQuery
+
+		auto second
+		time@ KeTime_SecPart + @ 60 % second!
+
+		auto minute
+		time@ KeTime_SecPart + @ 60 / 60 % minute!
+
+		auto hour
+		time@ KeTime_SecPart + @ 3600 / 6 - 24 % hour!
+
+		handmax@ sYcen@ sXcen@ DrawCircle
+
+		hour@ 12 % 5 * minute@ 12 / +
+		handmax@ 2 * 3 /
+		'h'
+		sXcen@
+		sYcen@
+		DrawHand
+
+		minute@
+		handmax@ 2 -
+		'm'
+		sXcen@
+		sYcen@
+		DrawHand
+
+		second@
+		handmax@ 1 -
+		'.'
+		sXcen@
+		sYcen@
+		DrawHand
+
+		sXcen@ 5 -
+		sYcen@ handmax@ 3 * 5 / -
+		".:ACLOCK:."
+		DrawText
+
+		sXcen@ 5 -
+		sYcen@ handmax@ 3 * 5 / +
+		HALConsoleSetCursor
+		second@ minute@ hour@ "[%02d:%02d:%02d]" Printf
+
+		1000 KERNELMODE 0 KeThreadSleep drop
+
+		hour@ 12 % 5 * minute@ 12 / +
+		handmax@ 2 * 3 /
+		' '
+		sXcen@
+		sYcen@
+		DrawHand
+
+		minute@
+		handmax@ 2 -
+		' '
+		sXcen@
+		sYcen@
+		DrawHand
+
+		second@
+		handmax@ 1 -
+		' '
+		sXcen@
+		sYcen@
+		DrawHand
+	end
+end
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	if (stage@ STAGE_THREAD ==)
+		AnalogClockTest
+	end
+
+	0 ok!
+end

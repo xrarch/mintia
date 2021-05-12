@@ -1,23 +1,12 @@
 #include "<df>/dragonfruit.h"
+
 #include "<inc>/HALLog.h"
-
-#include "<inc>/KeCrash.h"
-#include "<inc>/KeIPL.h"
-
 #include "<inc>/HALRTC.h"
 #include "<inc>/HALCPU.h"
 
-#include "<inc>/KeDPC.h"
-#include "<inc>/KeTime.h"
-#include "<inc>/KeDispatch.h"
-#include "<inc>/KeTimer.h"
+#include "<inc>/Kernel.h"
 
-#include "<inc>/KeMutex.h"
-#include "<inc>/KeEvent.h"
-
-#include "<inc>/KeProcess.h"
-
-#include "<inc>/KeAPC.h"
+#include "<inc>/Executive.h"
 
 #include "<inc>/HALDebug.h"
 
@@ -31,41 +20,13 @@ extern KeProcessInit { -- }
 
 extern KeThreadInit { -- }
 
-buffer TestThread1 KeThread_SIZEOF
-
-buffer TestThread2 KeThread_SIZEOF
-
-buffer TestAPC KeAPC_SIZEOF
-
 buffer KeProcessKernelThreadMain KeThread_SIZEOF
-
-buffer TestMutex KeMutex_SIZEOF
-
-buffer TestMutex2 KeMutex_SIZEOF
-
-buffer TestEvent KeEvent_SIZEOF
-
-fn (APCFunctionKernel) TestKernelFunc { normalfunc context1 context2 apc -- }
-	// context2@@ context1@@ KeThreadCurrent@ KeThread_Name + "hi im in %s context. c1=%d c2=%d\n" Printf
-end
-
-fn (APCFunctionNormal) TestNormalFunc { context1 context2 -- }
-	// context2@ context1@ KeThreadCurrent@ KeThread_Name + "hi im in %s context! c1=%d c2=%d\n" Printf
-
-	// HALDebug drop
-	SierpinskiFast
-
-	// 600 KERNELMODE 0 KeThreadSleep drop
-end
 
 buffer KeProcessKernelThreadMainStack KETHREADSTACKSIZE
 
-buffer TestThread1Stack KETHREADSTACKSIZE
-buffer TestThread2Stack KETHREADSTACKSIZE
-
 fn KeMain { -- ret }
 	// early init that takes place before there's a process context
-
+	// this function is called at IPLHIGH. lower IPL to start interrupts going.
 	IPLDPC KeIPLLower
 
 	KeInterruptInit
@@ -89,33 +50,10 @@ fn KeMain { -- ret }
 		ret@ "KeMain: couldn't initialize kernel main thread (%i)\n" KeCrash
 	end
 
-	0xBBBBBBBB
-	'o'
-	pointerof TestKernelThread
-	KeProcessKernelProcess // process
-	TestThread1Stack // kstack
-	"bthread"
-	TestThread1
-	KeThreadInitialize ret!
-
-	0xCCCCCCCC
-	'c'
-	pointerof TestKernelThread
-	KeProcessKernelProcess // process
-	TestThread2Stack // kstack
-	"cthread"
-	TestThread2
-	KeThreadInitialize ret!
-
-	// PRIORITY_LOWREALTIME TestThread2 KeThread_BasePriority + !
-	// PRIORITY_LOWREALTIME TestThread2 KeThread_Priority + !
-
 	KeThreadNextPick KeThreadSwitch
 
 	0 ret!
 end
-
-var KeThreadBigTest 0
 
 fn KeIdleThread { -- }
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
@@ -136,187 +74,13 @@ fn KeMainInThreadContext { -- }
 
 	"Hello Andromeda World!\n" "KeMain" HALLog
 
-	0 KEEVENT_NOTIF "testevent" TestEvent KeEventInitialize drop
+	// initialize the executive layer
 
-	TestThread2    // target thread
-	0              // exit func
-	pointerof TestKernelFunc // kernel func
-	pointerof TestNormalFunc // normal func
-	KERNELMODE     // mode
-	TestAPC
-	KeAPCInitialize drop
-
-	"testmutex" KERNELMODE TestMutex KeMutexInitialize drop
-
-	"testmutex2" KERNELMODE TestMutex2 KeMutexInitialize drop
-
-	QUEUEBACK TestThread1 KeThreadReady
-	QUEUEBACK TestThread2 KeThreadReady
+	ExInit
 
 	while (1)
-		// "=" Printf
+		1000 KERNELMODE 0 KeThreadSleep drop
 
-		// QUEUEBACK KeThreadBigTest@ KeThreadReady
-
-		// "= " Printf
-
-		// 600 KERNELMODE 0 KeThreadSleep drop
-		// 'x' Putc
-
-		// HALCPUHalt
-
-		// KERNELMODE WAITUNALERTABLE TestMutex KeThreadWaitForObject drop
-
-		// KERNELMODE WAITUNALERTABLE TestMutex KeThreadWaitForObject drop
-
-		// KERNELMODE WAITUNALERTABLE TestMutex2 KeThreadWaitForObject drop
-
-		// "aa" Printf
-
-		// HALCPUHalt
-
-		// TestMutex2 KeMutexRelease drop
-
-		// TestMutex KeMutexRelease drop
-
-		// TestMutex KeMutexRelease drop
-
-		// 4000 KERNELMODE 0 KeThreadSleep drop
-
-		auto ok
-
-		KERNELMODE WAITUNALERTABLE 0 TestEvent KeThreadWaitForObject ok!
-
-		ok@ "%i " Printf
-
-		HALCPUHalt
-	end
-end
-
-asm "
-
-SierpinskiCount:
-	.dl 0
-
-SierpinskiIter:
-	.dl 0
-
-SierpinskiFast:
-.global SierpinskiFast
-	push lr
-	push s0
-	push s1
-	push s2
-	push s3
-	push s4
-	push s5
-	push s6
-	push s7
-
-	li s0, 0
-
-	li s1, 126
-
-	li s5, 15877
-
-	li s7, 640
-
-	la  s2, SierpinskiIter
-	mov s3, long [s2]
-
-	la  t0, SierpinskiCount
-	mov s4, long [t0]
-
-	lui s6, 0xC0100000
-
-.loop:
-	div t1, s0, s1
-	mod t2, s0, s1
-
-	and t3, t1, t2
-	bne t3, zero, .cont
-
-	rsh a2, t2, 1
-	not a2, a2
-	sub a2, t1, a2
-
-	sub a1, s1, t2
-
-	xor a0, t1, s4
-	xor a0, a0, s3
-	xor a0, a0, t2
-
-	mul t0, a1, s7
-	lsh t0, t0, 1
-	lsh a2, a2, 1
-	add t0, t0, a2
-	mov int [s6 + t0], a0
-
-	add s3, s3, 1
-
-.cont:
-	add s0, s0, 1
-
-	blt s0, s5, .loop
-
-	mov long [s2], s3
-
-	add s4, s4, 1
-
-	la  t0, SierpinskiCount
-	mov long [t0], s4
-	
-	pop s7
-	pop s6
-	pop s5
-	pop s4
-	pop s3
-	pop s2
-	pop s1
-	pop s0
-	pop lr
-	ret
-
-"
-
-extern SierpinskiFast { -- }
-
-fn TestKernelThread { context1 context2 -- }
-	IPLLOW KeIPLLower // kernel threads start in IPLDPC
-
-	if (context1@ 0xCCCCCCCC ==)
-		3000 KERNELMODE 0 KeThreadSleep drop
-
-		0 TestEvent KeEventSignal drop
-	end
-
-	while (1)
-		auto ok
-
-		if (context1@ 0xCCCCCCCC ==)
-			3000 KERNELMODE 0 KeThreadSleep drop
-
-			// KERNELMODE WAITUNALERTABLE TestMutex KeThreadWaitForObject drop
-
-			// "cccc" Printf
-
-			// TestMutex KeMutexRelease drop
-
-			// 1000 KERNELMODE 0 KeThreadSleep drop
-		end else
-			3000 KERNELMODE 0 KeThreadSleep drop
-
-			// KERNELMODE WAITUNALERTABLE TestMutex KeThreadWaitForObject drop
-
-			// "bbbb" Printf
-
-			// 600 KERNELMODE 0 KeThreadSleep drop
-
-			// if (TestAPC KeAPC_Enqueued + @ ~~)
-			//	0 0 0 TestAPC KeAPCEnqueue drop
-			// end
-
-			//TestMutex KeMutexRelease drop
-		end
+		"hi " Printf
 	end
 end

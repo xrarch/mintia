@@ -34,6 +34,8 @@ endstruct
 
 extern MemUsageDump { -- }
 
+extern MemInit { -- }
+
 externptr MemPageFrameDB
 
 externptr MemPageFreeListHead

@@ -8,7 +8,17 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-fn MemPageAlloc { -- pfdbe pfn }
+var MemBlockUsedListHead 0
+
+fn MemPageAlloc { -- pfdbe pfn ok }
+	0 ok!
+
+	if (DEBUGCHECKS)
+		if (MemInited@ ~~)
+			"MemPageAlloc: used before MemInit called\n" KeCrash
+		end
+	end
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -21,11 +31,197 @@ fn MemPageAlloc { -- pfdbe pfn }
 
 		1 MemPageFreeCount -=
 	end else
-		STATUS_NO_MEMORY pfn!
-		0 pfdbe!
+		STATUS_NO_MEMORY ok!
 	end
 
 	ipl@ KeIPLLower
+end
+
+fn MemHeapCheck { -- }
+	if (DEBUGCHECKS ~~)
+		"MemHeapCheck: wasn't compiled with DEBUGCHECKS\n" KeCrash
+	end
+
+	auto i
+	0 i!
+
+	auto base
+	MemHeap@ base!
+
+	auto sz
+	1 BUCKETSPO2START << sz!
+
+	while (i@ BUCKETS <)
+		i@ "checking [%d]MemBuckets\n" Printf
+
+		auto block
+		[i@]MemBuckets@ block!
+
+		if (block@)
+			if (block@ MemBlock_Prev + @)
+				block@ MemBlock_Prev + @ "!!! head had a prev 0x%08x\n" Printf
+			end
+		end
+
+		while (block@)
+			if (block@ 0x3 &)
+				block@ "!!!! unaligned block ptr 0x%08x\n" Printf
+				break
+			end
+
+			if (block@ MemBlock_Magic + @ MEMBLOCKMAGIC ~=)
+				"!!!! bad magic:\n" Printf
+				block@ MemDumpBlockInfoHdr
+				break
+			end
+
+			if (block@ MemBlock_Tag + @ MEMBLOCKFREE ~=)
+				"!!! bad tag:\n" Printf
+				block@ MemDumpBlockInfoHdr
+			end
+
+			if (block@ MemBlock_BucketIndex + @ i@ ~=)
+				"!!! bad bucketindex:\n" Printf
+				block@ MemDumpBlockInfoHdr
+			end
+
+			auto buddy
+			block@ base@ - sz@ ^ base@ + buddy!
+
+			if (buddy@ MemBlock_Magic + @ MEMBLOCKMAGIC ~=)
+				"!!! bad buddy. main guy:\n" Printf
+				block@ MemDumpBlockInfoHdr
+				"buddy:\n" Printf
+				buddy@ MemDumpBlockInfoHdr
+			end else
+				if (buddy@ MemBlock_Tag + @ MEMBLOCKFREE ==)
+					// check if buddy is on the proper list
+
+					auto blockb
+					[buddy@ MemBlock_BucketIndex + @]MemBuckets@ blockb!
+
+					auto found
+					0 found!
+
+					while (blockb@)
+						if (blockb@ buddy@ ==)
+							1 found!
+							break
+						end
+
+						blockb@ MemBlock_Next + @ blockb!
+					end
+
+					if (found@ ~~)
+						"!!! buddy was free but not on free list:\n" Printf
+						buddy@ MemDumpBlockInfoHdr
+					end
+				end
+			end
+
+			auto nextblock
+			block@ MemBlock_Next + @ nextblock!
+
+			if (nextblock@)
+				if (nextblock@ 0x3 & ~~)
+					if (nextblock@ MemBlock_Prev + @ block@ ~=)
+						"!!! prev didn't match:\n" Printf
+						block@ MemDumpBlockInfoHdr
+					end
+				end
+			end
+
+			nextblock@ block!
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	"checking used block list\n" Printf
+
+	MemBlockUsedListHead@ block!
+
+	if (block@)
+		if (block@ MemBlock_Prev + @)
+			block@ MemBlock_Prev + @ "!!! head had a prev 0x%08x\n" Printf
+		end
+	end
+
+	while (block@)
+		block@ "checking 0x%08x\n" Printf
+
+		if (block@ 0x3 &)
+			block@ "!!!! unaligned block ptr 0x%08x\n" Printf
+			break
+		end
+
+		if (block@ MemBlock_Magic + @ MEMBLOCKMAGIC ~=)
+			"!!!! bad magic:\n" Printf
+			block@ MemDumpBlockInfoHdr
+			break
+		end
+
+		1 block@ MemBlock_BucketIndex + @ BUCKETSPO2START + << sz!
+
+		block@ base@ - sz@ ^ base@ + buddy!
+
+		if (buddy@ MemBlock_Magic + @ MEMBLOCKMAGIC ~=)
+			"!!! bad buddy. main guy:\n" Printf
+			block@ MemDumpBlockInfoHdr
+			"buddy:\n" Printf
+			buddy@ MemDumpBlockInfoHdr
+		end else
+			if (buddy@ MemBlock_Tag + @ MEMBLOCKFREE ==)
+				// check if buddy is on the proper list
+
+				[buddy@ MemBlock_BucketIndex + @]MemBuckets@ blockb!
+
+				0 found!
+
+				while (blockb@)
+					if (blockb@ buddy@ ==)
+						1 found!
+						break
+					end
+
+					blockb@ MemBlock_Next + @ blockb!
+				end
+
+				if (found@ ~~)
+					"!!! buddy was free but not on free list:\n" Printf
+					buddy@ MemDumpBlockInfoHdr
+				end
+			end
+		end
+
+		block@ MemBlock_Next + @ nextblock!
+
+		if (nextblock@)
+			if (nextblock@ 0x3 & ~~)
+				if (nextblock@ MemBlock_Prev + @ block@ ~=)
+					"!!! prev didn't match:\n" Printf
+					block@ MemDumpBlockInfoHdr
+				end
+			end
+		end
+
+		nextblock@ block!
+	end
+end
+
+fn MemDumpBlockInfoHdr { block -- }
+	block@ "header @ %08x\n" Printf
+
+	block@ MemBlock_Magic + @ "  magic=%08x\n" Printf
+	block@ MemBlock_Next + @ "  next=%08x\n" Printf
+	block@ MemBlock_Prev + @ "  prev=%08x\n" Printf
+	block@ MemBlock_BucketIndex + @ dup BUCKETSPO2START + 1 swap << swap "  bucketindex=%d (%d bytes)\n" Printf
+	block@ MemBlock_Tag + @ "  tag=%08x\n" Printf
+end
+
+fn MemDumpBlockInfo { block -- }
+	block@ MemBlock_SIZEOF - MemDumpBlockInfoHdr
 end
 
 fn MemDumpBuckets { -- }
@@ -45,7 +241,7 @@ fn MemDumpBuckets { -- }
 			auto bsz
 			1 ptr@ MemBlock_BucketIndex + @ BUCKETSPO2START + << bsz!
 
-			bsz@ bsz@ ptr@ + 0x4f000 - ptr@ 0x4f000 - "%x-%x (%d) | " Printf
+			bsz@ bsz@ ptr@ + 0x50000 - ptr@ 0x50000 - "%x-%x (%d) | " Printf
 
 			ptr@ MemBlock_Next + @ ptr!
 		end
@@ -58,6 +254,12 @@ fn MemDumpBuckets { -- }
 end
 
 fn MemAllocWithTag { bytes tag -- ptr ok }
+	if (DEBUGCHECKS)
+		if (MemInited@ ~~)
+			"MemAllocWithTag: used before MemInit called\n" KeCrash
+		end
+	end
+
 	MemBlock_SIZEOF bytes +=
 
 	auto sz
@@ -105,6 +307,7 @@ fn MemAllocWithTag { bytes tag -- ptr ok }
 					MEMBLOCKMAGIC tp@ MemBlock_Magic + !
 					i@ tp@ MemBlock_BucketIndex + !
 					MEMBLOCKFREE tp@ MemBlock_Tag + !
+					0 tp@ MemBlock_Prev + !
 
 					[i@]MemBuckets@ pt!
 
@@ -119,6 +322,22 @@ fn MemAllocWithTag { bytes tag -- ptr ok }
 				MEMBLOCKMAGIC ptr@ MemBlock_Magic + !
 				i@ ptr@ MemBlock_BucketIndex + !
 				tag@ ptr@ MemBlock_Tag + !
+
+				if (DEBUGCHECKS)
+					// add to used block list
+
+					0 ptr@ MemBlock_Prev + !
+
+					MemBlockUsedListHead@ ts!
+
+					if (ts@)
+						ptr@ ts@ MemBlock_Prev + !
+					end
+
+					ptr@ MemBlockUsedListHead!
+
+					ts@ ptr@ MemBlock_Next + !
+				end
 
 				0 ok!
 				MemBlock_SIZEOF ptr +=
@@ -137,6 +356,20 @@ fn MemAllocWithTag { bytes tag -- ptr ok }
 end
 
 fn MemFree { ptr -- }
+	if (DEBUGCHECKS)
+		if (MemInited@ ~~)
+			"MemFree: used before MemInit called\n" KeCrash
+		end
+
+		if (ptr@ -1 ==)
+			"MemFree: tried to free -1 pointer\n" KeCrash
+		end
+	end
+
+	if (ptr@ ~~)
+		"MemFree: tried to free null pointer\n" KeCrash
+	end
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -148,6 +381,26 @@ fn MemFree { ptr -- }
 
 	if (ptr@ MemBlock_Tag + @ MEMBLOCKFREE ==)
 		ptr@ "MemFree: tried to free heap block that was free (0x%08x)\n" KeCrash
+	end
+
+	if (DEBUGCHECKS)
+		// remove from used block list
+
+		ptr@ MemBlock_Prev + @ l!
+
+		ptr@ MemBlock_Next + @ n!
+
+		if (l@)
+			n@ l@ MemBlock_Next + !
+		end else
+			// no last block means was list head
+
+			n@ MemBlockUsedListHead!
+		end
+
+		if (n@)
+			l@ n@ MemBlock_Prev + !
+		end
 	end
 
 	auto hpsz
@@ -176,7 +429,13 @@ fn MemFree { ptr -- }
 			buddy@ "MemFree: corrupted buddy (0x%08x)\n" KeCrash
 		end
 
-		if (buddy@ MemBlock_Tag + @ MEMBLOCKFREE == buddy@ MemBlock_BucketIndex + @ i@ == &&)
+		if (buddy@ MemBlock_Tag + @ MEMBLOCKFREE ==)
+			if (DEBUGCHECKS)
+				if (buddy@ MemBlock_BucketIndex + @ i@ ~=)
+					buddy@ "MemFree: buddy has bad bucket index (0x%08x)\n" KeCrash
+				end
+			end
+
 			// coalesce
 
 			// remove buddy, who is free, from the bucket he's listed on
@@ -226,6 +485,8 @@ fn MemFree { ptr -- }
 	end
 
 	pt@ ptr@ MemBlock_Next + !
+
+	0 ptr@ MemBlock_Prev + !
 
 	ptr@ [i@]MemBuckets!
 

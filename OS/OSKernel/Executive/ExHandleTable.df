@@ -1,0 +1,424 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Mem.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/HALDebug.h"
+
+fn ExHandleTableDelete { func handletable -- ok }
+	if (DEBUGCHECKS)
+		if (handletable@ ExHandleTableHeader_Mutex + KeMutexLocked)
+			"ExHandleTableDelete: attempt to delete handle table while locked\n" KeCrash
+		end
+	end
+
+	auto i
+	0 i!
+
+	auto entries
+	handletable@ ExHandleTableHeader_Entries + @ entries!
+
+	auto entryptr
+
+	while (i@ entries@ <)
+		i@
+		handletable@
+		1 // locked
+		ExHandleLookup
+
+		1 i +=
+	end
+end
+
+fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
+	auto entrysize
+	4 entrysizelog@ << entrysize!
+
+	auto tabsize
+	ExHandleTableHeader_SIZEOF tabsize!
+
+	auto tab0size
+	INITIALENTRIES entrysize@ * tab0size!
+
+	tab0size@ tabsize +=
+
+	tabsize@ 'HnTb' MemAllocWithTag ok! handletable!
+
+	if (ok@)
+		// allocation failed
+
+		return
+	end
+
+	"HandleTableMutex" // name
+	KERNELMODE // mode
+	handletable@ ExHandleTableHeader_Mutex + // mutex
+	KeMutexInitialize ok!
+
+	if (ok@)
+		// mutex initialization failed
+
+		handletable@ MemFree
+
+		return
+	end
+
+	entrysizelog@ handletable@ ExHandleTableHeader_EntrySizeLog + !
+
+	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
+
+	INITIALENTRIES handletable@ ExHandleTableHeader_Entries + !
+	INITIALENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
+
+	0 handletable@ ExHandleTableHeader_RecycleHandle + !
+
+	0 handletable@ ExHandleTableHeader_Table + !
+
+	handletable@ ExHandleTableHeader_SIZEOF +
+	tab0size@
+	0
+	memset
+
+	if (chargedprocess@)
+		"ExHandleTableCreate: process heap charging NYI\n" KeCrash
+	end
+end
+
+fn ExHandleTableLock { handletable -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	TIMEOUTINFINITE // timeout
+	handletable@ ExHandleTableHeader_Mutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn ExHandleTableUnlock { handletable -- }
+	handletable@ ExHandleTableHeader_Mutex + KeMutexRelease drop
+end
+
+fn ExHandleDelete { handle handletable locked -- ok }
+	0 ok!
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableLock ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto entryptr
+
+	handle@ // handle
+	handletable@ // handletable
+	1 // locked
+	ExHandleLookup ok! entryptr!
+
+	if (ok@)
+		if (locked@ ~~)
+			handletable@ ExHandleTableUnlock
+		end
+
+		return
+	end
+
+	0 entryptr@!
+
+	handle@ handletable@ ExHandleTableHeader_RecycleHandle + !
+
+	1 handletable@ ExHandleTableHeader_FreeEntries + +=
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableUnlock
+	end
+end
+
+fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
+	0 ok!
+
+	if (DEBUGCHECKS)
+		if (entryvalue@ ~~)
+			"ExHandleCreate: entryvalue=0\n" KeCrash
+		end
+	end
+
+	// lock handle table mutex
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableLock ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto logsize
+	handletable@ ExHandleTableHeader_EntrySizeLog + @ 2 + logsize!
+
+	auto entries
+	handletable@ ExHandleTableHeader_Entries + @ entries!
+
+	auto tab
+	handletable@ ExHandleTableHeader_Table + @ tab!
+
+	handletable@ ExHandleTableHeader_RecycleHandle + @ handle!
+
+	if (handle@ -1 ~=)
+		// we can reuse the last freed handle instead of searching for one
+
+		if (handle@ INITIALENTRIES <)
+			handletable@ ExHandleTableHeader_SIZEOF +
+			handle@ logsize@ << + entryptr!
+
+			-1 handletable@ ExHandleTableHeader_RecycleHandle + !
+		end else
+			if (DEBUGCHECKS)
+				if (tab@ ~~)
+					"ExHandleCreate: table is null 1\n" KeCrash
+				end
+			end
+
+			tab@ handle@ INITIALENTRIES - logsize@ << + entryptr!
+
+			if (handle@ 1 + entries@ <)
+				// its very common for there to be a free handle here.
+				// if so, save it in RecycleHandle
+
+				if (entryptr@ 1 logsize@ << + @ ~~)
+					handle@ 1 + handletable@ ExHandleTableHeader_RecycleHandle + !
+				end else
+					-1 handletable@ ExHandleTableHeader_RecycleHandle + !
+				end
+			end else
+				-1 handletable@ ExHandleTableHeader_RecycleHandle + !
+			end
+		end
+
+		if (DEBUGCHECKS)
+			if (entryptr@@)
+				"ExHandleCreate: recyclable handle was used\n" KeCrash
+			end
+		end
+
+		entryvalue@ entryptr@!
+
+		1 handletable@ ExHandleTableHeader_FreeEntries + -=
+
+		if (locked@ ~~)
+			handletable@ ExHandleTableUnlock
+		end
+
+		return
+	end
+
+	0 handle!
+
+	auto tabsize
+	EXTENDBYENTRIES logsize@ << tabsize!
+
+	if (handletable@ ExHandleTableHeader_FreeEntries + @ ~~)
+		// create or grow the extended table
+
+		if (tab@ ~~)
+			// create
+
+			tabsize@ 'HnTd' MemAllocWithTag ok! tab!
+
+			if (ok@)
+				// allocation failed
+
+				if (locked@ ~~)
+					handletable@ ExHandleTableUnlock
+				end
+
+				return
+			end
+
+			if (handletable@ ExHandleTableHeader_ChargedProcess + @)
+				"ExHandleCreate: process heap charging NYI 1\n" KeCrash
+			end
+
+			tab@ handletable@ ExHandleTableHeader_Table + !
+
+			tab@
+			tabsize@
+			0
+			memset
+
+			EXTENDBYENTRIES entries +=
+
+			INITIALENTRIES handle! // start search at extended table
+		end else
+			// grow
+
+			entries@ handle! // start search at new entries
+
+			EXTENDBYENTRIES entries +=
+
+			entries@ INITIALENTRIES - logsize@ << tabsize!
+
+			auto newtab
+			tabsize@ 'HnTd' MemAllocWithTag ok! newtab!
+
+			if (ok@)
+				// allocation failed
+
+				if (locked@ ~~)
+					handletable@ ExHandleTableUnlock
+				end
+
+				return
+			end
+
+			if (handletable@ ExHandleTableHeader_ChargedProcess + @)
+				"ExHandleCreate: process heap charging NYI 2\n" KeCrash
+			end
+
+			newtab@
+			tab@
+			entries@ INITIALENTRIES - EXTENDBYENTRIES - logsize@ <<
+			memcpy
+
+			newtab@ entries@ INITIALENTRIES - EXTENDBYENTRIES - logsize@ << +
+			EXTENDBYENTRIES logsize@ <<
+			0
+			memset
+
+			tab@ MemFree
+
+			newtab@ tab!
+
+			tab@ handletable@ ExHandleTableHeader_Table + !
+		end
+
+		EXTENDBYENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
+
+		entries@ handletable@ ExHandleTableHeader_Entries + !
+	end
+
+	auto entrysize
+	1 logsize@ << entrysize!
+
+	if (handle@ INITIALENTRIES <)
+		// search initial table first
+
+		handletable@ ExHandleTableHeader_SIZEOF +
+		handle@ logsize@ << + entryptr!
+
+		while (handle@ INITIALENTRIES <)
+			if (entryptr@@ ~~)
+				entryvalue@ entryptr@!
+
+				1 handletable@ ExHandleTableHeader_FreeEntries + -=
+
+				if (locked@ ~~)
+					handletable@ ExHandleTableUnlock
+				end
+
+				return
+			end
+
+			entrysize@ entryptr +=
+			1 handle +=
+		end
+	end
+
+	if (DEBUGCHECKS)
+		if (tab@ ~~)
+			"ExHandleCreate: table is null 2\n" KeCrash
+		end
+	end
+
+	handle@ INITIALENTRIES - logsize@ << tab@ + entryptr!
+
+	while (handle@ entries@ <)
+		if (entryptr@@ ~~)
+			if (handle@ 1 + entries@ <)
+				// its very common for there to be a free handle here.
+				// if so, save it in RecycleHandle
+
+				if (entryptr@ 1 logsize@ << + @ ~~)
+					handle@ 1 + handletable@ ExHandleTableHeader_RecycleHandle + !
+				end
+			end
+
+			entryvalue@ entryptr@!
+
+			1 handletable@ ExHandleTableHeader_FreeEntries + -=
+
+			if (locked@ ~~)
+				handletable@ ExHandleTableUnlock
+			end
+
+			return
+		end
+
+		entrysize@ entryptr +=
+		1 handle +=
+	end
+
+	"ExHandleCreate: there should have been free entries\n" KeCrash
+end
+
+fn ExHandleLookup { handle handletable locked -- entryptr ok }
+	0 ok!
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableLock ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto logsize
+	handletable@ ExHandleTableHeader_EntrySizeLog + @ 2 + logsize!
+
+	auto entries
+	handletable@ ExHandleTableHeader_Entries + @ entries!
+
+	if (handle@ entries@ >=)
+		if (locked@ ~~)
+			handletable@ ExHandleTableUnlock
+		end
+
+		STATUS_INVALID_HANDLE ok!
+
+		return
+	end
+
+	if (handle@ INITIALENTRIES <)
+		handletable@ ExHandleTableHeader_SIZEOF +
+		handle@ logsize@ << + entryptr!
+	end else
+		auto tab
+		handletable@ ExHandleTableHeader_Table + @ tab!
+
+		if (DEBUGCHECKS)
+			if (tab@ ~~)
+				"ExHandleLookup: table is null\n" KeCrash
+			end
+		end
+
+		INITIALENTRIES handle -=
+
+		tab@ handle@ logsize@ << + entryptr!
+	end
+
+	if (entryptr@@ ~~)
+		STATUS_INVALID_HANDLE ok!
+	end
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableUnlock
+	end
+end

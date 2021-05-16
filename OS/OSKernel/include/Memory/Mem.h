@@ -50,5 +50,7 @@ externptr MemHeapBytesFree
 
 externptr MemHeap
 
+externptr MemInited
+
 const BUCKETSPO2START 5 // start at 2^5=32 bytes
 const BUCKETS 23 // 2^(23+5=28)=256MB heap max

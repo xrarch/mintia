@@ -15,28 +15,62 @@
 #include "<inc>/HALDebug.h"
 
 fn ExHandleTableDelete { func handletable -- ok }
+	0 ok!
+
 	if (DEBUGCHECKS)
-		if (handletable@ ExHandleTableHeader_Mutex + KeMutexLocked)
+		// this check isnt foolproof or anything because nothing stops someone from
+		// locking the mutex between here and the table's destruction,
+		// but its useful anyway
+
+		if (handletable@ ExHandleTableHeader_Mutex + KeMutexIsLocked)
 			"ExHandleTableDelete: attempt to delete handle table while locked\n" KeCrash
 		end
 	end
 
 	auto i
-	0 i!
 
 	auto entries
-	handletable@ ExHandleTableHeader_Entries + @ entries!
 
 	auto entryptr
 
-	while (i@ entries@ <)
-		i@
-		handletable@
-		1 // locked
-		ExHandleLookup
+	if (func@)
+		// call a function for each handle
 
-		1 i +=
+		0 i!
+
+		handletable@ ExHandleTableHeader_Entries + @ entries!
+
+		while (i@ entries@ <)
+			i@
+			handletable@
+			1 // locked
+			ExHandleLookup ok! entryptr!
+
+			if (ok@ 0 ==)
+				entryptr@ handletable@ func@ ExHandleEnumFunction
+			end
+
+			1 i +=
+		end
 	end
+
+	// deallocate handle table structures
+
+	auto chargedprocess
+	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
+
+	if (chargedprocess@)
+		"ExHandleTableDelete: process heap charging NYI\n" KeCrash
+	end
+
+	auto tab
+	handletable@ ExHandleTableHeader_Table + @ tab!
+
+	if (tab@)
+		tab@ MemFree
+	end
+
+	handletable@ MemFree
 end
 
 fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }

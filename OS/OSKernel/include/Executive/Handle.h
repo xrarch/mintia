@@ -17,6 +17,8 @@ struct ExHandleTableHeader
 	4 Table
 endstruct
 
+extern ExHandleTableDelete { func handletable -- ok }
+
 extern ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 
 extern ExHandleTableLock { handletable -- ok }

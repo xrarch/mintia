@@ -1,0 +1,165 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+externptr HALLoaderPFDB
+
+externptr HALLoaderInitialBitmap
+
+externptr HALLoaderInitialBitmapSize
+
+externptr HALLoaderTotalRAM
+
+externptr HALLoaderHeap
+
+externptr HALLoaderHeapSize
+
+var MmPageFrameDatabase 0
+public MmPageFrameDatabase
+
+var MmPageFreeListHead 0
+public MmPageFreeListHead
+
+table MmHeapBuckets[BUCKETS]
+public MmHeapBuckets
+
+var MmPageTotal 0
+public MmPageTotal
+
+var MmPageFreeCount 0
+public MmPageFreeCount
+
+var MmHeapSize 0
+public MmHeapSize
+
+var MmHeapBytesFree 0
+public MmHeapBytesFree
+
+var MmHeap 0
+public MmHeap
+
+var MmInited 0
+public MmInited
+
+fn MmInit { -- }
+	auto ptr
+
+	HALLoaderPFDB@ dup MmPageFrameDatabase! ptr!
+
+	auto i
+	0 i!
+
+	auto pages
+	HALLoaderTotalRAM@ 12 >> pages!
+
+	auto bmp
+	HALLoaderInitialBitmap@ bmp!
+
+	auto sz
+	HALLoaderInitialBitmapSize@ 32 * sz!
+
+	auto word
+
+	auto last
+	0 last!
+
+	// initialize the page DB by linking all of the entries into the
+	// free list, except those marked allocated in the loader bitmap.
+
+	while (i@ pages@ <)
+		if (i@ sz@ <)
+			if (i@ 31 & ~~)
+				bmp@@ word!
+				4 bmp +=
+			end
+
+			if (word@ i@ 31 & bitget ~~)
+				1 MmPageFreeCount +=
+
+				if (last@)
+					ptr@ last@ MmPageFrameEntryFree_Next + !
+				end else
+					ptr@ MmPageFreeListHead!
+				end
+
+				ptr@ last!
+			end
+		end else
+			1 MmPageFreeCount +=
+
+			if (last@)
+				ptr@ last@ MmPageFrameEntryFree_Next + !
+			end else
+				ptr@ MmPageFreeListHead!
+			end
+
+			ptr@ last!
+		end
+
+		i@ ptr@ MmPageFrameEntry_PFN + !
+
+		MmPageFrameEntry_SIZEOF ptr +=
+		1 i +=
+	end
+
+	MmPageFreeCount@ MmPageTotal!
+
+	// initialize the heap as one block on the free list
+
+	HALLoaderHeap@ ptr!
+
+	HEAPBLOCKMAGIC ptr@ MmHeapBlock_Magic + !
+	0 ptr@ MmHeapBlock_Next + !
+	0 ptr@ MmHeapBlock_Prev + !
+	HEAPBLOCKFREE ptr@ MmHeapBlock_Tag + !
+
+	0 i!
+	1 BUCKETSPO2START << sz!
+	0 word!
+
+	while (i@ BUCKETS <)
+		if (HALLoaderHeapSize@ sz@ ==)
+			i@ ptr@ MmHeapBlock_BucketIndex + !
+
+			// found the correct bucket
+			ptr@ [i@]MmHeapBuckets!
+
+			1 word!
+
+			break
+		end
+
+		1 sz <<=
+		1 i +=
+	end
+
+	HALLoaderHeapSize@ MmHeapSize!
+	HALLoaderHeapSize@ MmHeapBytesFree!
+	HALLoaderHeap@ MmHeap!
+
+	if (word@ ~~)
+		"MmInit: couldn't initialize heap bucket\n" KeCrash
+	end
+
+	1 MmInited!
+
+	"Pre-boot memory statistics:\n" "MmInit" HALLog
+
+	MmUsageDump
+end
+
+fn MmUsageDump { -- }
+	"AVAIL" "TOTAL" "MEMORY" "  %12s %12s %12s\n" Printf
+
+	"Page Frames" "  %12s " Printf
+	MmPageTotal@ "%12d " Printf
+	MmPageFreeCount@ "%12d\n" Printf
+
+	"Heap Bytes" "  %12s " Printf
+	MmHeapSize@ "%12d " Printf
+	MmHeapBytesFree@ "%12d\n" Printf
+end

@@ -1,7 +1,5 @@
 struct ExProcess
 	KeProcess_SIZEOF PCB
 
-	// quota
-
-	4 HeapQuota
+	4 QuotaBlock
 endstruct

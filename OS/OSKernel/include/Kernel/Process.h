@@ -118,6 +118,8 @@ struct KeThread
 
 	4 MutexListHead
 
+	4 UserAPCDisableCount
+
 	4 KernelAPCDisableCount
 
 	4 KernelAPCInProgress
@@ -140,6 +142,10 @@ externptr KeProcessListHead
 externptr KeProcessKernelProcess
 
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
+
+extern KeThreadUserAPCDisable { thread -- oldcount }
+
+extern KeThreadUserAPCEnable { thread -- oldcount }
 
 extern KeThreadEnqueue { front thread -- }
 

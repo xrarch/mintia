@@ -38,8 +38,8 @@ end
 fn KeAPCDequeue { apc -- ok }
 	0 ok!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	if (DEBUGCHECKS)
 		if (apc@ KeAPC_Enqueued + @ ~~)
@@ -84,7 +84,7 @@ fn KeAPCDequeue { apc -- ok }
 
 	0 apc@ KeAPC_Enqueued + !
 
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
 fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
@@ -178,10 +178,12 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 
 			if (thread@ KeThread_Status + @ THREADSTATUS_WAITINGALERTABLE ==)
 				if (thread@ KeThread_WaitMode + @ USERMODE ==)
-					// wake thread if it was in an alertable wait on usermode's behalf
+					if (thread@ KeThread_UserAPCDisableCount + @ ~~)
+						// wake thread if it was in an alertable wait on usermode's behalf
 
-					if (STATUS_USER_APC priboost@ thread@ KeThreadWakeup ~~)
-						"KeAPCEnqueue: failed to wake target thread (user APC)\n" KeCrash
+						if (STATUS_USER_APC priboost@ thread@ KeThreadWakeup ~~)
+							"KeAPCEnqueue: failed to wake target thread (user APC)\n" KeCrash
+						end
 					end
 				end
 			end
@@ -273,24 +275,26 @@ fn KeAPCDispatchQueue { trapframe lastmode -- }
 	end
 
 	if (lastmode@ USERMODE ==)
-		thread@ KeThread_APCUserListHead + @ apc!
+		if (thread@ KeThread_UserAPCDisableCount + @ ~~)
+			thread@ KeThread_APCUserListHead + @ apc!
 
-		if (apc@)
-			apc@ KeAPC_Context1 + @ context1@!
-			apc@ KeAPC_Context2 + @ context2@!
+			if (apc@)
+				apc@ KeAPC_Context1 + @ context1@!
+				apc@ KeAPC_Context2 + @ context2@!
 
-			apc@ KeAPC_FunctionNormal + @ normalfunc@!
+				apc@ KeAPC_FunctionNormal + @ normalfunc@!
 
-			apc@ KeAPCDequeue drop
+				apc@ KeAPCDequeue drop
 
-			ipl@ KeIPLLower
+				ipl@ KeIPLLower
 
-			normalfunc@ context1@ context2@ apc@
-			apc@ KeAPC_FunctionKernel + @ APCFunctionKernel
+				normalfunc@ context1@ context2@ apc@
+				apc@ KeAPC_FunctionKernel + @ APCFunctionKernel
 
-			"KeAPCDispatchQueue: TODO usermode APCs\n" KeCrash
+				"KeAPCDispatchQueue: TODO usermode APCs\n" KeCrash
 
-			return
+				return
+			end
 		end
 	end
 

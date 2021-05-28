@@ -86,6 +86,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_KernelAPCDisableCount + !
 
+	0 thread@ KeThread_UserAPCDisableCount + !
+
 	1 thread@ KeThread_APCQueueable + !
 
 	0 thread@ KeThread_WaitCount + !
@@ -118,11 +120,39 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	"NA" 0 thread@ KeThread_Timer + KeTimerInitialize ok!
 end
 
+fn KeThreadUserAPCDisable { thread -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_UserAPCDisableCount + @ oldcount!
+
+	1 thread@ KeThread_UserAPCDisableCount + +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeThreadUserAPCEnable { thread -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_UserAPCDisableCount + @ oldcount!
+
+	if (thread@ KeThread_UserAPCDisableCount + @ 0 ==)
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	1 thread@ KeThread_UserAPCDisableCount + -=
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn KeThreadEnqueue { front thread -- }
 	// add thread to the tail of the proper ready queue for its priority level
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	if (DEBUGCHECKS)
 		if (thread@ KeThread_Enqueued + @)
@@ -171,14 +201,14 @@ fn KeThreadEnqueue { front thread -- }
 		thread@ [pri@]KeThreadPriorityQueueTails!
 	end
 
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
 fn KeThreadDequeue { thread -- }
 	// remove thread from the proper ready queue for its priority level
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	if (DEBUGCHECKS)
 		if (thread@ KeThread_Enqueued + @ ~~)
@@ -212,7 +242,7 @@ fn KeThreadDequeue { thread -- }
 	0 thread@ KeThread_QueueNext + !
 	0 thread@ KeThread_QueuePrev + !
 
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
 // implements the thread transition state machine
@@ -271,8 +301,8 @@ fn KeThreadReady { front thread -- }
 end
 
 fn KeThreadQuantumIncrement { inc thread -- qt }
-	auto ipl
-	IPLCLOCK KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	thread@ KeThread_Quantum + @ qt!
 
@@ -280,12 +310,12 @@ fn KeThreadQuantumIncrement { inc thread -- qt }
 
 	qt@ thread@ KeThread_Quantum + !
 
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
 fn KeThreadQuantumDecrement { dec thread -- qt }
-	auto ipl
-	IPLCLOCK KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	thread@ KeThread_Quantum + @ qt!
 
@@ -297,7 +327,7 @@ fn KeThreadQuantumDecrement { dec thread -- qt }
 
 	qt@ thread@ KeThread_Quantum + !
 
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
 fn KeThreadQuantumEnd { -- }
@@ -522,6 +552,12 @@ fn KeThreadNextSelect { next reason -- }
 end
 
 fn KeThreadPriorityBoost { boost thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KeThreadPriorityBoost: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	auto pri
 	thread@ KeThread_Priority + @ pri!
 

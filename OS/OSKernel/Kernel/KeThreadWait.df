@@ -167,8 +167,12 @@ fn KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 		h@ wb!
 		h@ KeDispatchWaitBlock_Next + @ h!
 
-		if (waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy)
-			"KeDispatchSatisfyAll: couldn't satisfy WaitBlock\n" KeCrash
+		waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy ok!
+		
+		if (DEBUGCHECKS)
+			if (ok@)
+				"KeDispatchSatisfyAll: couldn't satisfy WaitBlock\n" KeCrash
+			end
 		end
 
 		1 count +=
@@ -225,8 +229,12 @@ fn KeDispatchSatisfyFirst { waitstatus priboost object -- wokenthread ok }
 	end
 
 	if (wokewb@)
-		if (waitstatus@ priboost@ wokewb@ KeDispatchWaitBlockSatisfy)
-			"KeDispatchSatisfyFirst: couldn't satisfy WaitBlock\n" KeCrash
+		waitstatus@ priboost@ wokewb@ KeDispatchWaitBlockSatisfy ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"KeDispatchSatisfyFirst: couldn't satisfy WaitBlock\n" KeCrash
+			end
 		end
 	end
 
@@ -284,8 +292,12 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 						1 satisfied!
 						break
 					end elseif (object@ KeDispatchHeader_Signaled + @)
-						if (current@ object@ KeMutexOwnerSet)
-							"KeThreadWaitForMultipleObjects: couldn't KeMutexOwnerSet\n" KeCrash
+						current@ object@ KeMutexOwnerSet ok!
+
+						if (DEBUGCHECKS)
+							if (ok@)
+								"KeThreadWaitForMultipleObjects: couldn't KeMutexOwnerSet\n" KeCrash
+							end
 						end
 
 						i@ ok!
@@ -318,8 +330,12 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 			end
 
 			if (timeout@)
-				if (waittype@ waitblock@ object@ KeDispatchWaitBlockEnqueue)
-					"KeThreadWaitForMultipleObjects: couldn't enqueue WaitBlock\n" KeCrash
+				waittype@ waitblock@ object@ KeDispatchWaitBlockEnqueue ok!
+
+				if (DEBUGCHECKS)
+					if (ok@)
+						"KeThreadWaitForMultipleObjects: couldn't enqueue WaitBlock\n" KeCrash
+					end
 				end
 			end
 
@@ -337,8 +353,12 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 			// the wait is already satisfied. dequeue any wait blocks we just enqueued
 			// and then return.
 
-			if (current@ KeThreadWaitBlocksDequeue)
-				"KeThreadWaitForMultipleObjects: couldn't dequeue all WaitBlocks\n" KeCrash
+			current@ KeThreadWaitBlocksDequeue ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeThreadWaitForMultipleObjects: couldn't dequeue all WaitBlocks\n" KeCrash
+				end
 			end
 
 			break
@@ -347,18 +367,30 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		if (timeout@ TIMEOUTINFINITE ~=)
 			// there's a timeout and its not infinite, set up a timer waitblock
 
-			if ("WaitTimeout" 0 current@ KeThread_Timer + KeTimerInitialize)
-				"KeThreadWaitForMultipleObjects: couldn't initialize timeout timer\n" KeCrash
+			"WaitTimeout" 0 current@ KeThread_Timer + KeTimerInitialize ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeThreadWaitForMultipleObjects: couldn't initialize timeout timer\n" KeCrash
+				end
 			end
 
 			current@ KeThread_TimeoutWaitBlock + waitblock!
 
-			if (THREADWAITANY waitblock@ current@ KeThread_Timer + KeDispatchWaitBlockEnqueue)
-				"KeThreadWaitForMultipleObjects: couldn't initialize timeout WaitBlock\n" KeCrash
+			THREADWAITANY waitblock@ current@ KeThread_Timer + KeDispatchWaitBlockEnqueue ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeThreadWaitForMultipleObjects: couldn't initialize timeout WaitBlock\n" KeCrash
+				end
 			end
 
-			if (0 0 timeout@ current@ KeThread_Timer + KeTimerEnqueue)
-				"KeThreadWaitForMultipleObjects: couldn't enqueue timeout timer\n" KeCrash
+			0 0 timeout@ current@ KeThread_Timer + KeTimerEnqueue ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeThreadWaitForMultipleObjects: couldn't enqueue timeout timer\n" KeCrash
+				end
 			end
 		end
 
@@ -368,15 +400,15 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		// lower the IPL.
 		// the object may become signaled while this occurs, hence the check above.
 
-		if (waitipl@ IPLLOW ==)
-			IPLLOW KeIPLLower
+		if (ok@ STATUS_KERNEL_APC ==)
+			if (waitipl@ IPLLOW ==)
+				IPLLOW KeIPLLower
 
-			// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
+				// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
 
-			IPLDPC KeIPLRaise drop
-		end
-
-		if (ok@ STATUS_KERNEL_APC ~=)
+				IPLDPC KeIPLRaise drop
+			end
+		end else
 			break
 		end
 	end
@@ -418,13 +450,21 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 		return
 	end
 
-	if (thread@ KeThreadWaitBlocksDequeue)
-		"KeThreadWakeup: couldn't dequeue all WaitBlocks\n" KeCrash
+	thread@ KeThreadWaitBlocksDequeue woken!
+
+	if (DEBUGCHECKS)
+		if (woken@)
+			"KeThreadWakeup: couldn't dequeue all WaitBlocks\n" KeCrash
+		end
 	end
 
 	if (thread@ KeThread_Timer + KeTimer_Enqueued + @)
-		if (thread@ KeThread_Timer + KeTimerDequeue)
-			"KeThreadWakeup: couldn't dequeue thread timer\n" KeCrash
+		thread@ KeThread_Timer + KeTimerDequeue woken!
+
+		if (DEBUGCHECKS)
+			if (woken@)
+				"KeThreadWakeup: couldn't dequeue thread timer\n" KeCrash
+			end
 		end
 	end
 
@@ -452,8 +492,12 @@ fn KeThreadWaitBlocksDequeue { thread -- ok }
 
 	while (i@ THREADWAITBLOCKS <)
 		if (wb@ KeDispatchWaitBlock_Object + @)
-			if (0 wb@ KeDispatchWaitBlockDequeue)
-				"KeThreadWaitBlocksDequeue: couldn't dequeue WaitBlock\n" KeCrash
+			0 wb@ KeDispatchWaitBlockDequeue ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeThreadWaitBlocksDequeue: couldn't dequeue WaitBlock\n" KeCrash
+				end
 			end
 		end
 
@@ -464,8 +508,12 @@ fn KeThreadWaitBlocksDequeue { thread -- ok }
 	thread@ KeThread_TimeoutWaitBlock + wb!
 
 	if (wb@ KeDispatchWaitBlock_Object + @)
-		if (0 wb@ KeDispatchWaitBlockDequeue)
-			"KeThreadWaitBlocksDequeue: couldn't dequeue timeout WaitBlock\n" KeCrash
+		0 wb@ KeDispatchWaitBlockDequeue ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"KeThreadWaitBlocksDequeue: couldn't dequeue timeout WaitBlock\n" KeCrash
+			end
 		end
 	end
 end
@@ -517,8 +565,12 @@ fn KeThreadSleep { ms waitmode alertable -- ok }
 		end
 	end
 
-	if (0 0 ms@ current@ KeThread_Timer + KeTimerEnqueue)
-		"KeThreadSleep: couldn't enqueue timer\n" KeCrash
+	0 0 ms@ current@ KeThread_Timer + KeTimerEnqueue ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"KeThreadSleep: couldn't enqueue timer\n" KeCrash
+		end
 	end
 
 	waitmode@ alertable@ TIMEOUTINFINITE current@ KeThread_Timer + KeThreadWaitForObject ok!

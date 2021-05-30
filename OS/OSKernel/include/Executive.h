@@ -1,3 +1,5 @@
 #include "<inc>/Executive/Handle.h"
 
-extern ExInit { -- }
+extern ExInitPhase0 { -- }
+
+extern ExInitPhase1 { -- }

@@ -3,3 +3,7 @@ struct ExProcess
 
 	4 QuotaBlock
 endstruct
+
+extern PsInitPhase0 { -- }
+
+extern PsInitPhase1 { -- }

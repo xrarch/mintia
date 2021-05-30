@@ -37,7 +37,9 @@ endstruct
 
 extern MmUsageDump { -- }
 
-extern MmInit { -- }
+extern MmInitPhase0 { -- }
+
+extern MmInitPhase1 { -- }
 
 extern MmPageAlloc { -- pfdbe pfn ok }
 

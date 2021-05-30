@@ -28,9 +28,6 @@ const PRIORITIES 32
 struct KeProcess
 	KEPROCESSNAMELEN Name
 
-	4 GlobalListNext
-	4 GlobalListPrev
-
 	// scheduler information
 
 	4 ThreadCount
@@ -39,19 +36,6 @@ struct KeProcess
 	4 ProcessStatus
 
 	4 BasePriority
-
-	// heap allocator information
-
-	4 HeapUsed
-
-	// virtual memory information
-
-	4 WorkingSetSize
-	4 WorkingSetMaximum
-
-	4 WorkingSetThrashMaximum
-
-	4 PageFaultCount
 endstruct
 
 const THREADYIELD_PREEMPTED  1
@@ -133,13 +117,13 @@ struct KeThread
 	KeTimer_SIZEOF Timer
 endstruct
 
-extern KeProcessCurrentGet { -- current }
+extern KeProcessCurrent { -- current }
 
 extern KeProcessInitialize { name process -- ok }
 
 externptr KeProcessListHead
 
-externptr KeProcessKernelProcess
+externptr KeProcessIdleProcess
 
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
 

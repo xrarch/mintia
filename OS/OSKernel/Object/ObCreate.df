@@ -1,5 +1,7 @@
 #include "<df>/dragonfruit.h"
+
 #include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
 
 #include "<inc>/Kernel.h"
 
@@ -9,6 +11,176 @@
 
 #include "<inc>/Memory.h"
 
-fn ObObjectCreate { -- object ok }
+#include "<inc>/Security.h"
 
+#include "<ll>/OSDLL/OS.h"
+
+fn ObObjectCreate { name flags permissions owninguser bodysize type -- object ok }
+	0 ok!
+
+	auto tag
+	if (type@)
+		type@ ObType_Tag + @ tag!
+	end else
+		'Objt' tag!
+	end
+
+	bodysize@ ObHeader_SIZEOF +
+	tag@
+	MmAllocWithTag ok! object!
+
+	if (ok@)
+		return
+	end
+
+	auto namebuf
+	0 namebuf!
+
+	if (name@)
+		name@ strlen 1 +
+		'ObNm'
+		MmAllocWithTag ok! namebuf!
+
+		if (ok@)
+			object@ MmFree
+
+			return
+		end
+
+		namebuf@ name@ strcpy
+	end
+
+	auto h
+
+	0 object@ ObHeader_TypeListPrev + !
+	0 object@ ObHeader_TypeListNext + !
+
+	if (type@)
+		// insert in type list
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		type@ ObType_ObjectListHead + @ h!
+
+		if (h@)
+			h@ object@ ObHeader_TypeListNext + !
+			object@ h@ ObHeader_TypeListPrev + !
+		end
+
+		object@ type@ ObType_ObjectListHead + !
+
+		rs@ HALCPUInterruptRestore
+	end
+
+	type@ object@ ObHeader_TypeObject + !
+
+	0 object@ ObHeader_DirectoryListPrev + !
+	0 object@ ObHeader_DirectoryListNext + !
+
+	0 object@ ObHeader_DirectoryObject + !
+
+	flags@ object@ ObHeader_Flags + !
+
+	0 object@ ObHeader_HandleCount + !
+	1 object@ ObHeader_PointerCount + !
+
+	owninguser@ object@ ObHeader_OwningUser + !
+	permissions@ object@ ObHeader_Permissions + !
+
+	object@ MmBlockChargeGet object@ ObHeader_QuotaCharge + !
+
+	namebuf@ object@ ObHeader_Name + !
+
+	ObHeader_SIZEOF object +=
+end
+
+fn ObObjectFree { object -- ok }
+	0 ok!
+
+	ObHeader_SIZEOF object -=
+
+	if (DEBUGCHECKS)
+		if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT &)
+			"ObObjectFree: attempt to free PERMANENT object\n" KeCrash
+		end
+
+		if (object@ ObHeader_HandleCount + @)
+			"ObObjectFree: attempt to free object with nonzero handle count\n" KeCrash
+		end
+
+		if (object@ ObHeader_PointerCount + @)
+			"ObObjectFree: attempt to free object with nonzero pointer count\n" KeCrash
+		end
+	end
+
+	auto type
+	object@ ObHeader_TypeObject + @ type!
+
+	if (type@)
+		// remove from type list
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		auto n
+		object@ ObHeader_TypeListNext + @ n!
+
+		auto l
+		object@ ObHeader_TypeListPrev + @ l!
+
+		if (n@)
+			l@ n@ ObHeader_TypeListPrev + !
+		end
+
+		if (l@)
+			n@ l@ ObHeader_TypeListNext + !
+		end else
+			// no prev means we were the listhead
+
+			n@ type@ ObType_ObjectListHead + !
+		end
+
+		rs@ HALCPUInterruptRestore
+	end
+
+	if (object@ ObHeader_Name + @)
+		object@ ObHeader_Name + @ MmFree
+	end
+
+	object@ MmFree
+end
+
+fn ObTypeCreate { initializer -- type ok }
+	if (initializer@ ObTypeInitializer_Length + @ ObTypeInitializer_SIZEOF ~=)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	auto typetype
+	ObTypeObjectType@ typetype!
+
+	initializer@ ObTypeInitializer_Name + @
+	OBFLAGS_PERMANENT
+	ACCESS_OWNER_ALL ACCESS_GROUP_ALL |
+	SeSystemUserObject@
+	initializer@ ObTypeInitializer_BodySize + @ ObType_SIZEOF +
+	typetype@
+	ObObjectCreate ok! type!
+
+	if (ok@)
+		return
+	end
+
+	if (typetype@ ~~)
+		type@ ObTypeObjectType!
+		type@ type@ ObType_ObjectListHead + !
+
+		auto hdr
+		type@ ObHeader_SIZEOF - hdr!
+		
+		type@ hdr@ ObHeader_TypeObject + !
+	end
+
+	initializer@ ObTypeInitializer_Tag + @ type@ ObType_Tag + !
 end

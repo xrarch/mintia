@@ -26,6 +26,8 @@ struct ObType
 	4 Tag
 
 	4 ObjectListHead
+
+	4 DeleteFunction
 endstruct
 
 struct ObTypeInitializer
@@ -34,7 +36,11 @@ struct ObTypeInitializer
 	4 Name
 	4 Tag
 	4 BodySize
+
+	4 DeleteFunction
 endstruct
+
+fnptr ObTypeDeleteFunction { object -- }
 
 const OBFLAGS_PERMANENT 1
 
@@ -53,3 +59,7 @@ extern ObObjectCreate { name flags permissions owninguser bodysize type -- objec
 extern ObObjectFree { object -- ok }
 
 extern ObTypeCreate { initializer -- type ok }
+
+extern ObObjectReferenceByPointer { object -- oldcount }
+
+extern ObObjectDereferenceByPointer { object -- oldcount }

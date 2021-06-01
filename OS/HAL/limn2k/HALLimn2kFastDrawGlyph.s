@@ -28,7 +28,6 @@ HALCPUFastDrawGlyph:
 	li  t4, 0x7FFF
 
 .nopix:
-
 	mov int [a2], t4
 
 	add a2, a2, 2

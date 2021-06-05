@@ -13,7 +13,219 @@
 
 #include "<inc>/Security.h"
 
+#include "<inc>/Process.h"
+
 #include "<ll>/OSDLL/OS.h"
+
+fn ObObjectClose { handle -- ok }
+	handle@
+	KeThreadCurrent@ KeThread_Process + @
+	ObObjectCloseProcess ok!
+end
+
+fn ObObjectCloseProcess { handle process -- ok }
+	auto handletable
+	process@ PsProcess_HandleTable + @ handletable!
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLLOW ~=)
+			"ObObjectCloseProcess: ipl != IPLLOW\n" KeCrash
+		end
+
+		if (handletable@ ~~)
+			"ObObjectCloseProcess: process has no handle table\n" KeCrash
+		end
+	end
+
+	auto object
+
+	handle@ // handle
+	handletable@ // handletable
+	0 // locked
+	ExHandleDelete ok! object!
+
+	if (ok@)
+		return
+	end
+
+	if (DEBUGCHECKS)
+		if (object@ ~~)
+			"ObObjectCloseProcess: object was null\n" KeCrash
+		end
+	end
+
+	// TODO uncharge quota to process for object
+
+	object@ ObObjectHandleCountDecrement drop
+
+	auto obh
+	object@ ObHeader_SIZEOF - obh!
+
+	auto type
+	obh@ ObHeader_TypeObject + @ type!
+
+	if (type@)
+		auto closefunc
+		type@ ObType_CloseFunction + @ closefunc!
+
+		if (closefunc@)
+			object@ process@ closefunc@ ObTypeCloseFunction
+		end
+	end
+
+	object@ ObObjectDereferenceByPointer drop
+end
+
+fn ObObjectOpen { access object -- handle ok }
+	access@
+	object@
+	KeThreadCurrent@ KeThread_Process + @
+	ObObjectOpenProcess ok! handle!
+end
+
+fn ObObjectOpenProcess { access object process -- handle ok }
+	auto handletable
+	process@ PsProcess_HandleTable + @ handletable!
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLLOW ~=)
+			"ObObjectOpenProcess: ipl != IPLLOW\n" KeCrash
+		end
+
+		if (handletable@ ~~)
+			"ObObjectOpenProcess: process has no handle table\n" KeCrash
+		end
+	end
+
+	auto obh
+	object@ ObHeader_SIZEOF - obh!
+
+	auto type
+	obh@ ObHeader_TypeObject + @ type!
+
+	if (type@)
+		auto openfunc
+		type@ ObType_OpenFunction + @ openfunc!
+
+		if (openfunc@)
+			object@ process@ openfunc@ ObTypeOpenFunction ok!
+
+			if (ok@)
+				return
+			end
+		end
+	end
+
+	handletable@ ExHandleTableLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto entryptr
+
+	object@ // entryvalue
+	handletable@ // handletable
+	1 // locked
+	ExHandleCreate ok! entryptr! handle!
+
+	if (ok@)
+		handletable@ ExHandleTableUnlock
+
+		return
+	end
+
+	access@ entryptr@ ObObjectTableEntry_Access + !
+
+	object@ ObObjectHandleCountIncrement drop
+
+	// TODO charge quota to process for object
+
+	handletable@ ExHandleTableUnlock
+end
+
+fn ObObjectReferenceByHandle { handle -- access object ok }
+	handle@
+	KeThreadCurrent@ KeThread_Process + @
+	ObObjectReferenceByHandleProcess ok! object! access!
+end
+
+fn ObObjectReferenceByHandleProcess { handle process -- access object ok }
+	auto handletable
+	process@ PsProcess_HandleTable + @ handletable!
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLLOW ~=)
+			"ObObjectReferenceByHandleProcess: ipl != IPLLOW\n" KeCrash
+		end
+
+		if (handletable@ ~~)
+			"ObObjectReferenceByHandleProcess: process has no handle table\n" KeCrash
+		end
+	end
+
+	handletable@ ExHandleTableLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto entryptr
+
+	handle@ // handle
+	handletable@ // handletable
+	1 // locked
+	ExHandleLookup ok! entryptr!
+
+	if (ok@)
+		handletable@ ExHandleTableUnlock
+
+		return
+	end
+
+	entryptr@ ObObjectTableEntry_Object + @ object!
+	entryptr@ ObObjectTableEntry_Access + @ access!
+
+	object@ ObObjectReferenceByPointer drop
+
+	handletable@ ExHandleTableUnlock
+end
+
+fn ObObjectHandleCountIncrement { object -- oldcount }
+	ObHeader_SIZEOF object -=
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	object@ ObHeader_HandleCount + @ oldcount!
+
+	oldcount@ 1 + object@ ObHeader_HandleCount + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn ObObjectHandleCountDecrement { object -- oldcount }
+	ObHeader_SIZEOF object -=
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	object@ ObHeader_HandleCount + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"ObObjectHandleCountDecrement: attempt to decrement below 0\n" KeCrash
+		end
+
+		// if (oldcount@ object@ ObHeader_PointerCount + @ ==)
+		// 	"ObObjectHandleCountDecrement: attempt to decrement below pointer count\n" KeCrash
+		// end
+	end
+
+	oldcount@ 1 - object@ ObHeader_HandleCount + !
+
+	rs@ HALCPUInterruptRestore
+end
 
 fn ObObjectReferenceByPointer { object -- oldcount }
 	ObHeader_SIZEOF object -=
@@ -41,9 +253,9 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 			"ObObjectDereferenceByPointer: underflow\n" KeCrash
 		end
 
-		if (oldcount@ 1 - object@ ObHeader_HandleCount + @ <)
-			"ObObjectDereferenceByPointer: pointer count < handle count\n" KeCrash
-		end
+		// if (oldcount@ 1 - object@ ObHeader_HandleCount + @ <)
+		// 	"ObObjectDereferenceByPointer: pointer count < handle count\n" KeCrash
+		// end
 	end
 
 	oldcount@ 1 - object@ ObHeader_PointerCount + !

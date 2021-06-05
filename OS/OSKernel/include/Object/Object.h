@@ -27,6 +27,8 @@ struct ObType
 
 	4 ObjectListHead
 
+	4 OpenFunction
+	4 CloseFunction
 	4 DeleteFunction
 endstruct
 
@@ -37,8 +39,20 @@ struct ObTypeInitializer
 	4 Tag
 	4 BodySize
 
+	4 OpenFunction
+	4 CloseFunction
 	4 DeleteFunction
 endstruct
+
+// modify OBHANDLEENTRYSIZELOG if you change the size of this structure
+struct ObObjectTableEntry
+	4 Object
+	4 Access
+endstruct
+
+fnptr ObTypeOpenFunction { object process -- ok }
+
+fnptr ObTypeCloseFunction { object process -- }
 
 fnptr ObTypeDeleteFunction { object -- }
 
@@ -59,6 +73,22 @@ extern ObObjectCreate { name flags permissions owninguser bodysize type -- objec
 extern ObObjectFree { object -- ok }
 
 extern ObTypeCreate { initializer -- type ok }
+
+extern ObObjectReferenceByHandle { handle -- access object ok }
+
+extern ObObjectReferenceByHandleProcess { handle process -- access object ok }
+
+extern ObObjectClose { handle -- ok }
+
+extern ObObjectCloseProcess { handle process -- ok }
+
+extern ObObjectOpen { access object -- handle ok }
+
+extern ObObjectOpenProcess { access object process -- handle ok }
+
+extern ObObjectHandleCountIncrement { object -- oldcount }
+
+extern ObObjectHandleCountDecrement { object -- oldcount }
 
 extern ObObjectReferenceByPointer { object -- oldcount }
 

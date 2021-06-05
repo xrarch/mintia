@@ -25,7 +25,7 @@ extern ExHandleTableLock { handletable -- ok }
 
 extern ExHandleTableUnlock { handletable -- }
 
-extern ExHandleDelete { handle handletable locked -- ok }
+extern ExHandleDelete { handle handletable locked -- entryvalue ok }
 
 extern ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 

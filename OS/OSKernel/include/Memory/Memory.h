@@ -53,6 +53,8 @@ extern MmAllocWithTag { bytes tag -- ptr ok }
 
 extern MmFree { ptr -- }
 
+extern MmChargeBytesGet { bytes -- charge }
+
 extern MmBlockChargeGet { block -- charge }
 
 externptr MmPageFrameDatabase

@@ -4,13 +4,17 @@ struct PsProcess
 	4 GlobalListNext
 	4 GlobalListPrev
 
-	// object manager
-
-	4 HandleTable
-
 	// memory management
 
 	4 QuotaBlock
+
+	// security
+
+	4 OwningUser
+
+	// object manager
+
+	4 HandleTable
 
 	// virtual memory information
 
@@ -26,8 +30,16 @@ struct PsThread
 	KeThread_SIZEOF TCB
 endstruct
 
+externptr PsProcessObjectType
+
+externptr PsProcessTable
+
 externptr PsProcessListHead
 
 extern PsInitPhase0 { -- }
 
 extern PsInitPhase1 { -- }
+
+extern PsProcessCreate { permissions name -- processhandle ok }
+
+extern PsProcessObjectDelete { object -- }

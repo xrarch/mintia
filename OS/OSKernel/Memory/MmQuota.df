@@ -1,0 +1,144 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+fn MmQuotaBlockCreate { heapmax -- quota ok }
+	MmQuotaBlock_SIZEOF 'Quot' MmAllocWithTag ok! quota!
+
+	if (ok@)
+		return
+	end
+
+	heapmax@ quota@ MmQuotaBlockInitialize ok!
+end
+
+fn MmQuotaBlockInitialize { heapmax quota -- ok }
+	0 ok!
+
+	1 quota@ MmQuotaBlock_References + !
+
+	0 quota@ MmQuotaBlock_HeapUsed + !
+	heapmax@ quota@ MmQuotaBlock_HeapMax + !
+end
+
+fn MmQuotaBlockReference { quota -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	1 quota@ MmQuotaBlock_References + +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaBlockDereference { quota -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcount
+	quota@ MmQuotaBlock_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"MmQuotaBlockDereference: references<0\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - quota@ MmQuotaBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+
+	if (oldcount@ 1 ==)
+		// got dereferenced to 0, delete
+
+		quota@ MmFree
+	end
+end
+
+fn MmQuotaCharge { charge -- ok }
+	charge@
+	KeProcessCurrent PsProcess_QuotaBlock + @
+	MmQuotaBlockCharge ok!
+end
+
+fn MmQuotaChargeProcess { charge process -- ok }
+	charge@
+	process@ PsProcess_QuotaBlock + @
+	MmQuotaBlockCharge ok!
+end
+
+fn MmQuotaBlockCharge { charge quota -- ok }
+	if (charge@ 0 s<)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	0 ok!
+
+	auto heapmax
+	quota@ MmQuotaBlock_HeapMax + @ heapmax!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quota@ MmQuotaBlock_HeapUsed + @ oldcharge!
+
+	if (oldcharge@ charge@ + heapmax@ >)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_QUOTA_EXCEEDED ok!
+
+		return
+	end
+
+	oldcharge@ charge@ + quota@ MmQuotaBlock_HeapUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaUncharge { charge -- }
+	charge@
+	KeProcessCurrent PsProcess_QuotaBlock + @
+	MmQuotaBlockUncharge
+end
+
+fn MmQuotaUnchargeProcess { charge process -- }
+	charge@
+	process@ PsProcess_QuotaBlock + @
+	MmQuotaBlockUncharge
+end
+
+fn MmQuotaBlockUncharge { charge quota -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quota@ MmQuotaBlock_HeapUsed + @ oldcharge!
+
+	if (DEBUGCHECKS)
+		if (charge@ oldcharge@ >)
+			"MmQuotaBlockUncharge: attempt to uncharge more than was charged\n" KeCrash
+		end
+	end
+
+	oldcharge@ charge@ - quota@ MmQuotaBlock_HeapUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaBlockPrint { quota -- }
+	quota@ MmQuotaBlock_HeapUsed + @ "heapused = %d\n" Printf
+	quota@ MmQuotaBlock_HeapMax + @ "heapmax = %d\n" Printf
+	quota@ MmQuotaBlock_References + @ "references = %d\n" Printf
+end

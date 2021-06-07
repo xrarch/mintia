@@ -14,8 +14,8 @@
 
 #include "<inc>/HALDebug.h"
 
-fn ExHandleTableDelete { func handletable -- ok }
-	0 ok!
+fn ExHandleTableDelete { func handletable -- }
+	auto ok
 
 	if (DEBUGCHECKS)
 		// this check isnt foolproof or anything because nothing stops someone from
@@ -47,7 +47,7 @@ fn ExHandleTableDelete { func handletable -- ok }
 			ExHandleLookup ok! entryptr!
 
 			if (ok@ 0 ==)
-				entryptr@ handletable@ func@ ExHandleEnumFunction
+				entryptr@ i@ handletable@ func@ ExHandleEnumFunction
 			end
 
 			1 i +=
@@ -60,13 +60,19 @@ fn ExHandleTableDelete { func handletable -- ok }
 	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
 
 	if (chargedprocess@)
-		"ExHandleTableDelete: process heap charging NYI\n" KeCrash
+		handletable@ MmBlockChargeGet
+		chargedprocess@ MmQuotaUnchargeProcess
 	end
 
 	auto tab
 	handletable@ ExHandleTableHeader_Table + @ tab!
 
 	if (tab@)
+		if (chargedprocess@)
+			tab@ MmBlockChargeGet
+			chargedprocess@ MmQuotaUnchargeProcess
+		end
+
 		tab@ MmFree
 	end
 
@@ -85,10 +91,24 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 
 	tab0size@ tabsize +=
 
+	if (chargedprocess@)
+		tabsize@ MmChargeBytesGet
+		chargedprocess@ MmQuotaChargeProcess ok!
+
+		if (ok@)
+			return
+		end
+	end
+
 	tabsize@ 'HnTb' MmAllocWithTag ok! handletable!
 
 	if (ok@)
 		// allocation failed
+
+		if (chargedprocess@)
+			tabsize@ MmChargeBytesGet
+			chargedprocess@ MmQuotaUnchargeProcess
+		end
 
 		return
 	end
@@ -100,6 +120,11 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 
 	if (ok@)
 		// mutex initialization failed
+
+		if (chargedprocess@)
+			tabsize@ MmChargeBytesGet
+			chargedprocess@ MmQuotaUnchargeProcess
+		end
 
 		handletable@ MmFree
 
@@ -121,15 +146,11 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 	tab0size@
 	0
 	memset
-
-	if (chargedprocess@)
-		"ExHandleTableCreate: process heap charging NYI\n" KeCrash
-	end
 end
 
 fn ExHandleTableLock { handletable -- ok }
 	KERNELMODE // waitmode
-	0 // alertable
+	1 // alertable
 	TIMEOUTINFINITE // timeout
 	handletable@ ExHandleTableHeader_Mutex + // object
 	KeThreadWaitForObject ok!
@@ -196,6 +217,9 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			return
 		end
 	end
+
+	auto chargedprocess
+	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
 
 	auto logsize
 	handletable@ ExHandleTableHeader_EntrySizeLog + @ 2 + logsize!
@@ -267,20 +291,36 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		if (tab@ ~~)
 			// create
 
+			if (chargedprocess@)
+				tabsize@ MmChargeBytesGet
+				chargedprocess@ MmQuotaChargeProcess ok!
+
+				if (ok@)
+					// insufficient quota
+
+					if (locked@ ~~)
+						handletable@ ExHandleTableUnlock
+					end
+
+					return
+				end
+			end
+
 			tabsize@ 'HnTd' MmAllocWithTag ok! tab!
 
 			if (ok@)
 				// allocation failed
+
+				if (chargedprocess@)
+					tabsize@ MmChargeBytesGet
+					chargedprocess@ MmQuotaUnchargeProcess
+				end
 
 				if (locked@ ~~)
 					handletable@ ExHandleTableUnlock
 				end
 
 				return
-			end
-
-			if (handletable@ ExHandleTableHeader_ChargedProcess + @)
-				"ExHandleCreate: process heap charging NYI 1\n" KeCrash
 			end
 
 			tab@ handletable@ ExHandleTableHeader_Table + !
@@ -302,21 +342,54 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 			entries@ INITIALENTRIES - logsize@ << tabsize!
 
+			if (chargedprocess@)
+				// we do this in a weird way.
+				// first we uncharge the quota for the extended table,
+				// then we re-charge the quota for the new size of the extended table.
+
+				tab@ MmBlockChargeGet
+				chargedprocess@ MmQuotaUnchargeProcess
+
+				tabsize@ MmChargeBytesGet
+				chargedprocess@ MmQuotaChargeProcess ok!
+
+				if (ok@)
+					// insufficient quota
+
+					// re-charge the quota for the old size of the extended table.
+
+					tab@ MmBlockChargeGet
+					chargedprocess@ MmQuotaChargeProcess drop
+
+					if (locked@ ~~)
+						handletable@ ExHandleTableUnlock
+					end
+
+					return
+				end
+			end
+
 			auto newtab
 			tabsize@ 'HnTd' MmAllocWithTag ok! newtab!
 
 			if (ok@)
 				// allocation failed
 
+				if (chargedprocess@)
+					// undo the shenanigans we just did with the quota charge
+
+					tabsize@ MmChargeBytesGet
+					chargedprocess@ MmQuotaUnchargeProcess
+
+					tab@ MmBlockChargeGet
+					chargedprocess@ MmQuotaChargeProcess drop
+				end
+
 				if (locked@ ~~)
 					handletable@ ExHandleTableUnlock
 				end
 
 				return
-			end
-
-			if (handletable@ ExHandleTableHeader_ChargedProcess + @)
-				"ExHandleCreate: process heap charging NYI 2\n" KeCrash
 			end
 
 			newtab@

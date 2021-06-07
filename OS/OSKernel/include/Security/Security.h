@@ -8,8 +8,10 @@ struct SeUser
 
 	4 Next
 
-	4 Permissions
+	32 PermissionsBitmap
 endstruct
+
+const SEMAXPERMISSION 256
 
 externptr SeUserListHead
 

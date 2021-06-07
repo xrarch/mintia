@@ -68,15 +68,19 @@ extern ObInitPhase0 { -- }
 
 extern ObInitPhase1 { -- }
 
+extern ObHandleDestroyFunction { entryptr handle handletable -- }
+
 extern ObObjectCreate { name flags permissions owninguser bodysize type -- object ok }
 
 extern ObObjectFree { object -- ok }
 
+extern ObObjectDeallocate { object -- }
+
 extern ObTypeCreate { initializer -- type ok }
 
-extern ObObjectReferenceByHandle { handle -- access object ok }
+extern ObObjectReferenceByHandle { type handle -- access object ok }
 
-extern ObObjectReferenceByHandleProcess { handle process -- access object ok }
+extern ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 
 extern ObObjectClose { handle -- ok }
 

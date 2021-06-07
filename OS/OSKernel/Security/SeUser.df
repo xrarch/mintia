@@ -17,6 +17,198 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn SeUserCreate { permissions gid uid name -- user ok }
+fn SeUserCreate { gid uid username -- user ok }
+	SeUserListLock ok!
 
+	if (ok@)
+		return
+	end
+
+	uid@ 1 SeUserGetByUID ok! user!
+
+	if (ok@ STATUS_SUCCESS ==)
+		// uid already used
+
+		SeUserListUnlock
+
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	username@ 1 SeUserGetByUsername ok! user!
+
+	if (ok@ STATUS_SUCCESS ==)
+		// username already used
+
+		SeUserListUnlock
+
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	SeUser_SIZEOF 'User' MmAllocWithTag ok! user!
+
+	if (ok@)
+		SeUserListUnlock
+
+		return
+	end
+
+	user@ SeUser_Username + username@ SEUSERNAMEMAX 1 - strncpy
+
+	uid@ user@ SeUser_UID + !
+	gid@ user@ SeUser_GID + !
+
+	user@ SeUser_Permissions + SePermissionsInitialize ok!
+
+	if (ok@)
+		user@ MmFree
+
+		SeUserListUnlock
+
+		return
+	end
+
+	SeUserListHead@ user@ SeUser_Next + !
+	user@ SeUserListHead!
+
+	SeUserListUnlock
+end
+
+fn SeUserGetByUsername { username userlistlocked -- user ok }
+	if (userlistlocked@ ~~)
+		SeUserListLock ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	STATUS_NO_SUCH_USER ok!
+
+	SeUserListHead@ user!
+
+	while (user@)
+		if (user@ SeUser_Username + username@ strcmp)
+			if (userlistlocked@ ~~)
+				SeUserListUnlock
+			end
+
+			0 ok!
+
+			return
+		end
+
+		user@ SeUser_Next + @ user!
+	end
+
+	if (userlistlocked@ ~~)
+		SeUserListUnlock
+	end
+end
+
+fn SeUserGetByUID { uid userlistlocked -- user ok }
+	if (userlistlocked@ ~~)
+		SeUserListLock ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	STATUS_NO_SUCH_USER ok!
+
+	SeUserListHead@ user!
+
+	while (user@)
+		if (user@ SeUser_UID + @ uid@ ==)
+			if (userlistlocked@ ~~)
+				SeUserListUnlock
+			end
+
+			0 ok!
+
+			return
+		end
+
+		user@ SeUser_Next + @ user!
+	end
+
+	if (userlistlocked@ ~~)
+		SeUserListUnlock
+	end
+end
+
+fn SePermissionsInitialize { permissions -- ok }
+	0 ok!
+
+	auto p
+	permissions@ SePermissions_PermissionsBitmap + p!
+
+	auto m
+	p@ SEPERMISSIONSBITMAPSIZE + m!
+
+	while (p@ m@ <)
+		0 p@ sb
+
+		1 p +=
+	end
+end
+
+fn SeUserGrantPermission { permission user -- ok }
+	if (permission@ SEMAXPERMISSION >=)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	0 ok!
+
+	auto p
+	user@ SeUser_Permissions + SePermissions_PermissionsBitmap + p!
+
+	permission@ 8 / p +=
+
+	p@ gb 1 permission@ 7 & << | p@ sb
+end
+
+fn SeUserCheckPermission { permission user -- ok }
+	0 ok!
+
+	if (SYSTEMPERMISSION_SYSTEM user@ SeUserCheckPermission1)
+		return
+	end
+
+	if (permission@ user@ SeUserCheckPermission1)
+		return
+	end
+
+	STATUS_PERMISSION_DENIED ok!
+end
+
+fn SeUserCheckPermission1 { permission user -- ok }
+	auto p
+	user@ SeUser_Permissions + SePermissions_PermissionsBitmap + p!
+
+	permission@ 8 / p +=
+
+	p@ gb permission@ 7 & >> 1 & ok!
+end
+
+fn SeUserCurrentGet { -- user }
+	KeProcessCurrent PsProcess_OwningUser + @ user!
+end
+
+fn SeUserListLock { -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	TIMEOUTINFINITE // timeout
+	SeUserListMutex // object
+	KeThreadWaitForObject ok!
+end
+
+fn SeUserListUnlock { -- }
+	SeUserListMutex KeMutexRelease drop
 end

@@ -1,5 +1,13 @@
 const SEUSERNAMEMAX 256
 
+const SEMAXPERMISSION 256
+
+const SEPERMISSIONSBITMAPSIZE (SEMAXPERMISSION 8 /)
+
+struct SePermissions
+	SEPERMISSIONSBITMAPSIZE PermissionsBitmap
+endstruct
+
 struct SeUser
 	SEUSERNAMEMAX Username
 
@@ -8,15 +16,33 @@ struct SeUser
 
 	4 Next
 
-	32 PermissionsBitmap
+	SePermissions_SIZEOF Permissions
 endstruct
-
-const SEMAXPERMISSION 256
 
 externptr SeUserListHead
 
-externptr SeSystemUserObject
+externptr SeSystemUser
+
+externptr SeUserListMutex
 
 extern SeInitPhase0 { -- }
 
 extern SeInitPhase1 { -- }
+
+extern SeUserCreate { gid uid username -- user ok }
+
+extern SeUserGetByUsername { username userlistlocked -- user ok }
+
+extern SeUserGetByUID { uid userlistlocked -- user ok }
+
+extern SePermissionsInitialize { permissions -- ok }
+
+extern SeUserGrantPermission { permission user -- ok }
+
+extern SeUserCheckPermission { permission user -- ok }
+
+extern SeUserCurrentGet { -- user }
+
+extern SeUserListLock { -- ok }
+
+extern SeUserListUnlock { -- }

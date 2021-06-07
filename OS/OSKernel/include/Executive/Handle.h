@@ -1,4 +1,4 @@
-fnptr ExHandleEnumFunction { entryptr handletable -- }
+fnptr ExHandleEnumFunction { entryptr handle handletable -- }
 
 const INITIALENTRIES 16
 
@@ -17,7 +17,7 @@ struct ExHandleTableHeader
 	4 Table
 endstruct
 
-extern ExHandleTableDelete { func handletable -- ok }
+extern ExHandleTableDelete { func handletable -- }
 
 extern ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 

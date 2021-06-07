@@ -19,7 +19,7 @@
 
 fn ObObjectClose { handle -- ok }
 	handle@
-	KeThreadCurrent@ KeThread_Process + @
+	KeProcessCurrent
 	ObObjectCloseProcess ok!
 end
 
@@ -54,12 +54,13 @@ fn ObObjectCloseProcess { handle process -- ok }
 		end
 	end
 
-	// TODO uncharge quota to process for object
-
-	object@ ObObjectHandleCountDecrement drop
-
 	auto obh
 	object@ ObHeader_SIZEOF - obh!
+
+	obh@ ObHeader_QuotaCharge + @
+	process@ MmQuotaUnchargeProcess
+
+	object@ ObObjectHandleCountDecrement drop
 
 	auto type
 	obh@ ObHeader_TypeObject + @ type!
@@ -79,7 +80,7 @@ end
 fn ObObjectOpen { access object -- handle ok }
 	access@
 	object@
-	KeThreadCurrent@ KeThread_Process + @
+	KeProcessCurrent
 	ObObjectOpenProcess ok! handle!
 end
 
@@ -100,23 +101,14 @@ fn ObObjectOpenProcess { access object process -- handle ok }
 	auto obh
 	object@ ObHeader_SIZEOF - obh!
 
-	auto type
-	obh@ ObHeader_TypeObject + @ type!
+	handletable@ ExHandleTableLock ok!
 
-	if (type@)
-		auto openfunc
-		type@ ObType_OpenFunction + @ openfunc!
-
-		if (openfunc@)
-			object@ process@ openfunc@ ObTypeOpenFunction ok!
-
-			if (ok@)
-				return
-			end
-		end
+	if (ok@)
+		return
 	end
 
-	handletable@ ExHandleTableLock ok!
+	obh@ ObHeader_QuotaCharge + @
+	process@ MmQuotaChargeProcess ok!
 
 	if (ok@)
 		return
@@ -130,6 +122,9 @@ fn ObObjectOpenProcess { access object process -- handle ok }
 	ExHandleCreate ok! entryptr! handle!
 
 	if (ok@)
+		obh@ ObHeader_QuotaCharge + @
+		process@ MmQuotaUnchargeProcess
+
 		handletable@ ExHandleTableUnlock
 
 		return
@@ -139,18 +134,29 @@ fn ObObjectOpenProcess { access object process -- handle ok }
 
 	object@ ObObjectHandleCountIncrement drop
 
-	// TODO charge quota to process for object
+	auto type
+	obh@ ObHeader_TypeObject + @ type!
+
+	if (type@)
+		auto openfunc
+		type@ ObType_OpenFunction + @ openfunc!
+
+		if (openfunc@)
+			object@ process@ openfunc@ ObTypeOpenFunction drop
+		end
+	end
 
 	handletable@ ExHandleTableUnlock
 end
 
-fn ObObjectReferenceByHandle { handle -- access object ok }
+fn ObObjectReferenceByHandle { type handle -- access object ok }
+	type@
 	handle@
-	KeThreadCurrent@ KeThread_Process + @
+	KeProcessCurrent
 	ObObjectReferenceByHandleProcess ok! object! access!
 end
 
-fn ObObjectReferenceByHandleProcess { handle process -- access object ok }
+fn ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 	auto handletable
 	process@ PsProcess_HandleTable + @ handletable!
 
@@ -181,6 +187,16 @@ fn ObObjectReferenceByHandleProcess { handle process -- access object ok }
 		handletable@ ExHandleTableUnlock
 
 		return
+	end
+
+	if (type@)
+		if (object@ ObHeader_TypeObject + @ type@ ~=)
+			handletable@ ExHandleTableUnlock
+
+			STATUS_INVALID_OBJECT_TYPE ok!
+
+			return
+		end
 	end
 
 	entryptr@ ObObjectTableEntry_Object + @ object!

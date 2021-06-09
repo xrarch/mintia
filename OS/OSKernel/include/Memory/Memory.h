@@ -43,6 +43,8 @@ extern MmInitPhase1 { -- }
 
 extern MmPageAlloc { -- pfdbe pfn ok }
 
+extern MmPageFree { pfn -- }
+
 extern MmHeapCheck { -- }
 
 extern MmHeapDumpBuckets { -- }
@@ -56,6 +58,10 @@ extern MmFree { ptr -- }
 extern MmChargeBytesGet { bytes -- charge }
 
 extern MmBlockChargeGet { block -- charge }
+
+extern MmKernelStackAlloc { -- kstack ok }
+
+extern MmKernelStackFree { kstack -- }
 
 externptr MmPageFrameDatabase
 

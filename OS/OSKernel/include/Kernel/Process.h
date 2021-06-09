@@ -127,6 +127,8 @@ externptr KeProcessIdleProcess
 
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
 
+extern KeThreadUninitialize { thread -- }
+
 extern KeThreadUserAPCDisable { thread -- oldcount }
 
 extern KeThreadUserAPCEnable { thread -- oldcount }

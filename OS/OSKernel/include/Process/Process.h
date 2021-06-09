@@ -32,6 +32,8 @@ endstruct
 
 externptr PsProcessObjectType
 
+externptr PsThreadObjectType
+
 externptr PsProcessTable
 
 externptr PsProcessListHead
@@ -42,4 +44,8 @@ extern PsInitPhase1 { -- }
 
 extern PsProcessCreate { permissions name -- processhandle ok }
 
+extern PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
+
 extern PsProcessObjectDelete { object -- }
+
+extern PsThreadObjectDelete { object -- }

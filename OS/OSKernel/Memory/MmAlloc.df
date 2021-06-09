@@ -12,7 +12,7 @@
 
 var MmHeapBlockUsedListHead 0
 
-fn MmPageAlloc { -- pfdbe pfn ok }
+fn MmPageAlloc { priority -- pfdbe pfn ok }
 	0 ok!
 
 	if (DEBUGCHECKS)
@@ -22,21 +22,79 @@ fn MmPageAlloc { -- pfdbe pfn ok }
 	end
 
 	auto rs
-	HALCPUInterruptDisable rs!
 
-	MmPageFreeListHead@ pfdbe!
+	if (priority@ FREEFIRST ==)
+		// attempt to get a page from the free list first.
+		// if its empty, try to get one from the zero list.
 
-	if (pfdbe@)
-		pfdbe@ MmPageFrameEntry_PFN + @ pfn!
-		pfdbe@ MmPageFrameEntryFree_Next + @ MmPageFreeListHead!
-		0 pfdbe@ MmPageFrameEntryFree_Next + !
+		HALCPUInterruptDisable rs!
 
-		1 MmPageFreeCount -=
+		MmPageFreeListHead@ pfdbe!
+
+		if (pfdbe@)
+			pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+			pfdbe@ MmPageFrameEntryFree_Next + @ MmPageFreeListHead!
+			0 pfdbe@ MmPageFrameEntryFree_Next + !
+
+			1 MmPageFreeCount -=
+		end else
+			// resort to a zero page
+
+			MmPageZeroListHead@ pfdbe!
+
+			if (pfdbe@)
+				pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+				pfdbe@ MmPageFrameEntryFree_Next + @ MmPageZeroListHead!
+				0 pfdbe@ MmPageFrameEntryFree_Next + !
+
+				1 MmPageFreeCount -=
+			end else
+				STATUS_NO_MEMORY ok!
+			end
+		end
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end elseif (priority@ ZEROMUST ==)
+		// attempt to get one from the zero list first.
+		// if its empty, get one from the free list, and zero it out.
+
+		HALCPUInterruptDisable rs!
+
+		MmPageZeroListHead@ pfdbe!
+
+		if (pfdbe@)
+			pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+			pfdbe@ MmPageFrameEntryFree_Next + @ MmPageZeroListHead!
+			0 pfdbe@ MmPageFrameEntryFree_Next + !
+
+			1 MmPageFreeCount -=
+		end else
+			// resort to a free page
+
+			MmPageFreeListHead@ pfdbe!
+
+			if (pfdbe@)
+				pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+				pfdbe@ MmPageFrameEntryFree_Next + @ MmPageFreeListHead!
+				0 pfdbe@ MmPageFrameEntryFree_Next + !
+
+				1 MmPageFreeCount -=
+
+				pfn@ 12 <<
+				4096
+				0
+				memset
+			end else
+				STATUS_NO_MEMORY ok!
+			end
+		end
+
+		rs@ HALCPUInterruptRestore
 	end else
-		STATUS_NO_MEMORY ok!
+		"ok\n" KeCrash
 	end
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn MmPageFree { pfn -- }
@@ -549,7 +607,7 @@ fn MmBlockChargeGet { block -- charge }
 end
 
 fn MmKernelStackAlloc { -- kstack ok }
-	MmPageAlloc ok! kstack! drop
+	FREEFIRST MmPageAlloc ok! kstack! drop
 
 	if (ok@)
 		return

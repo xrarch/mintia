@@ -41,7 +41,7 @@ extern MmInitPhase0 { -- }
 
 extern MmInitPhase1 { -- }
 
-extern MmPageAlloc { -- pfdbe pfn ok }
+extern MmPageAlloc { priority -- pfdbe pfn ok }
 
 extern MmPageFree { pfn -- }
 
@@ -63,9 +63,13 @@ extern MmKernelStackAlloc { -- kstack ok }
 
 extern MmKernelStackFree { kstack -- }
 
+extern MmZeroPageWorker { -- }
+
 externptr MmPageFrameDatabase
 
 externptr MmPageFreeListHead
+
+externptr MmPageZeroListHead
 
 externptr MmPageFreeCount
 
@@ -78,3 +82,8 @@ externptr MmHeapBytesFree
 externptr MmHeap
 
 externptr MmInited
+
+// page allocation priorities
+
+const ZEROMUST 1
+const FREEFIRST 2

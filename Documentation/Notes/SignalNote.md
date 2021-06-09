@@ -8,7 +8,7 @@ Killing a thread will work more like it does in AISIX than it does in the NT ker
 
 After the `Signalled` flag is set to either SIGNALLED or KILLED, any attempt to perform any usermode wait or any ALERTABLE kernel mode wait will immediately return with STATUS_SIGNALLED or STATUS_KILLED respectively. The exception to this is if the `CleaningUp` flag is set, which indicates the thread is exiting and cleaning up after itself and needs to execute normally.
 
-When `Signalled` is set to SIGNALLED, the thread will be rigged to jump to the OSDLL.dll signal dispatcher upon return to userspace. However, if it is set to KILLED, the thread will exit, performing any cleanup with the `CleaningUp` flag set. It will then ditch existence forever, leaving its corpse to be cleaned up by the reaper thread.
+When `Signalled` is set to SIGNALLED, the thread will be rigged to jump to the OSDLL.dll signal dispatcher upon return to userspace, either through the queuing of a usermode APC or by some specialized mechanism. However, if it is set to KILLED, the thread will exit, performing any cleanup with the `CleaningUp` flag set. It will then ditch existence forever, leaving its corpse to be cleaned up by the reaper thread.
 
 ## Main thread
 

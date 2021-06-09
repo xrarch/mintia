@@ -12,7 +12,7 @@
 
 #include "<inc>/Process.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
+#include "<ll>/OSDLL/OS.h"
 
 #include "<inc>/HALCPU.h"
 
@@ -21,14 +21,17 @@
 var PsProcessObjectType 0
 public PsProcessObjectType
 
+var PsThreadObjectType 0
+public PsThreadObjectType
+
 var PsProcessTable 0
 public PsProcessTable
 
 var PsProcessListHead 0
 public PsProcessListHead
 
-var PsProcessSystemProcess 0
-public PsProcessSystemProcess
+var PsSystemProcess 0
+public PsSystemProcess
 
 fn PsInitPhase0 { -- }
 	auto ok
@@ -51,13 +54,13 @@ fn PsInitPhase0 { -- }
 	ObTypeInitializer_SIZEOF typeinit@ ObTypeInitializer_Length + !
 	0 typeinit@ ObTypeInitializer_OpenFunction + !
 	0 typeinit@ ObTypeInitializer_CloseFunction + !
-	pointerof PsProcessObjectDelete typeinit@ ObTypeInitializer_DeleteFunction + !
 
 	// create Process type
 
 	"Process" typeinit@ ObTypeInitializer_Name + !
 	'ObPs' typeinit@ ObTypeInitializer_Tag + !
 	0 typeinit@ ObTypeInitializer_BodySize + !
+	pointerof PsProcessObjectDelete typeinit@ ObTypeInitializer_DeleteFunction + !
 	typeinit@ ObTypeCreate ok! type!
 
 	if (ok@)
@@ -66,9 +69,23 @@ fn PsInitPhase0 { -- }
 
 	type@ PsProcessObjectType!
 
+	// create Thread type
+
+	"Thread" typeinit@ ObTypeInitializer_Name + !
+	'ObTh' typeinit@ ObTypeInitializer_Tag + !
+	0 typeinit@ ObTypeInitializer_BodySize + !
+	pointerof PsThreadObjectDelete typeinit@ ObTypeInitializer_DeleteFunction + !
+	typeinit@ ObTypeCreate ok! type!
+
+	if (ok@)
+		ok@ "PsInitPhase0: couldn't create Thread type (%i)\n" KeCrash
+	end
+
+	type@ PsThreadObjectType!
+
 	auto handle
 
-	0 "OSKernel.exe" PsProcessCreate ok! handle!
+	ACCESS_OWNER_ALL "OSKernel.exe" PsProcessCreate ok! handle!
 
 	if (ok@)
 		ok@ "PsInitPhase0: couldn't create 'OSKernel.exe' process (%i)\n" KeCrash
@@ -76,15 +93,31 @@ fn PsInitPhase0 { -- }
 
 	PsProcessObjectType@ // type
 	handle@ // handle
-	ObObjectReferenceByHandle ok! PsProcessSystemProcess! drop
+	ObObjectReferenceByHandle ok! PsSystemProcess! drop
 
 	if (ok@)
 		ok@ "PsInitPhase0: couldn't reference system process (%i)\n" KeCrash
 	end
 
-	PsProcessSystemProcess@ handle@ ok@ "ok = %d\nhandle = %d\nptr = %x\n" Printf
+	0 // context1
+	0 // context2
+	pointerof ExInitPhase1 // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"Main" // name
+	0 // processhandle
+	PsSystemProcess@ // processptr
+	PsThreadCreate ok! handle!
 
-	// TODO create 'main' kernel thread, aka phase 1 initialization thread.
+	if (ok@)
+		ok@ "PsInitPhase0: couldn't create 'Main' thread (%i)\n" KeCrash
+	end
+
+	handle@ ObObjectClose drop
+
+	if (ok@)
+		ok@ "PsInitPhase0: couldn't close 'Main' thread (%i)\n" KeCrash
+	end
+
 	// this thread will drop back out into ExInit.df, and then become the idle thread in KeMain.df.
 end
 

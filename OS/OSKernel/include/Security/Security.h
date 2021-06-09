@@ -46,3 +46,9 @@ extern SeUserCurrentGet { -- user }
 extern SeUserListLock { -- ok }
 
 extern SeUserListUnlock { -- }
+
+extern SeAmIAdmin { -- admin }
+
+extern SeCheckAccess { access permission -- ok }
+
+extern SeCheckAccessObjectUser { access object user -- ok }

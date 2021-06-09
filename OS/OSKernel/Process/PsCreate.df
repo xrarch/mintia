@@ -92,7 +92,9 @@ fn PsProcessCreate { permissions name -- processhandle ok }
 
 	rs@ HALCPUInterruptRestore
 
-	ACCESS_ALL process@ ObObjectOpen ok! processhandle!
+	permissions@ 6 >> // permissions. open with maximum permissions that the owner gave themselves.
+	process@ // process
+	ObObjectOpen ok! processhandle!
 
 	if (ok@)
 		// just dereference and let PsProcessObjectDelete take care of the cleanup
@@ -101,4 +103,111 @@ fn PsProcessCreate { permissions name -- processhandle ok }
 
 		return
 	end
+end
+
+fn PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
+	if (processhandle@)
+		if (processptr@)
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+
+		// use threadhandle to contain access bits here
+
+		PsProcessObjectType@ // type
+		processhandle@ // handle
+		ObObjectReferenceByHandle ok! processptr! threadhandle!
+
+		if (ok@)
+			return
+		end
+
+		threadhandle@ ACCESS_WRITE SeCheckAccess ok!
+
+		if (ok@)
+			processptr@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+	end elseif (processptr@ ~~)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	auto threadptr
+
+	name@ // name
+	0 // flags
+	permissions@ // permissions
+	SeUserCurrentGet // owninguser
+	PsThread_SIZEOF // bodysize
+	PsThreadObjectType@ // type
+	ObObjectCreate ok! threadptr!
+
+	if (ok@)
+		if (processhandle@)
+			processptr@ ObObjectDereferenceByPointer drop
+		end
+
+		return
+	end
+
+	auto kstack
+	MmKernelStackAlloc ok! kstack!
+
+	if (ok@)
+		if (processhandle@)
+			processptr@ ObObjectDereferenceByPointer drop
+		end
+
+		threadptr@ ObObjectDeallocate
+
+		return
+	end
+
+	context1@ // context1
+	context2@ // context2
+	startfunc@ // startfunc
+	processptr@ // process
+	kstack@ // kstack
+	name@ // name
+	threadptr@ // thread
+	KeThreadInitialize ok!
+
+	if (ok@)
+		if (processhandle@)
+			processptr@ ObObjectDereferenceByPointer drop
+		end
+
+		kstack@ MmKernelStackFree
+
+		threadptr@ KeThreadUninitialize
+
+		threadptr@ ObObjectDeallocate
+
+		return
+	end
+
+	permissions@ 6 >> // permissions. open with maximum permissions that the owner gave themselves.
+	threadptr@ // thread
+	ObObjectOpen ok! threadhandle!
+
+	if (ok@)
+		// just dereference and let PsThreadObjectDelete take care of the cleanup
+
+		threadptr@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	// bias reference count: this gets decremented when the thread is reaped.
+	// note that the associated process object is also left referenced, either by us via handle,
+	// or by the caller via pointer.
+	// the process is also dereferenced upon reap.
+
+	threadptr@ ObObjectReferenceByPointer drop
+
+	QUEUEBACK threadptr@ KeThreadReady
 end

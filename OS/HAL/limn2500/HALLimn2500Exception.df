@@ -1,0 +1,435 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALLimn2kContext.h"
+#include "<inc>/HALCrash.h"
+
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/HALDebug.h"
+
+const ECAUSEINTERRUPT 1
+
+const ECAUSENMI 6
+
+externptr HALLIMNstationInterruptHandlers
+
+externptr HALLIMNstationLSICClaimComplete
+
+var HALInterruptFunction 0
+public HALInterruptFunction
+
+var HALThreadCurrentStackTop 0
+public HALThreadCurrentStackTop
+
+asm "
+
+HALLimn2500ExceptionVector:
+.global HALLimn2500ExceptionVector
+	mtcr k0, t0 ; save t0 to free it as scratch
+	mtcr k1, t1 ; ditto with t1
+	mtcr k2, sp ; save stack pointer
+	mtcr k3, sp ; save trace link
+
+	mfcr t0, ers
+
+	andi t1, t0, RS_USER
+	beq  t1, zero, .waskernel
+
+	la   t1, HALThreadCurrentStackTop
+	mov  sp, long [t1] ; load new sp for current thread
+
+	mtcr k3, zero ; this was a usermode sp, zero out the trace link
+
+.waskernel:
+	subi sp, sp, Limn2500Context_SIZEOF
+
+	mfcr t1, k2
+	mov  long [sp + Limn2500Context_sp],  t1
+	mov  long [sp + Limn2500Context_ers], t0 ; ers was still in t0
+
+	mfcr t0, epc
+	mov  long [sp + Limn2500Context_epc], t0
+
+	mfcr t1, k0
+	mov  long [sp + Limn2500Context_t0],  t1
+
+	mfcr t1, k1
+	mov  long [sp + Limn2500Context_t1],  t1
+
+	mov  long [sp + Limn2500Context_t2],  t2
+	mov  long [sp + Limn2500Context_t3],  t3
+	mov  long [sp + Limn2500Context_t4],  t4
+	mov  long [sp + Limn2500Context_t5],  t5
+	mov  long [sp + Limn2500Context_a0],  a0
+	mov  long [sp + Limn2500Context_a1],  a1
+	mov  long [sp + Limn2500Context_a2],  a2
+	mov  long [sp + Limn2500Context_a3],  a3
+	mov  long [sp + Limn2500Context_s0],  s0
+	mov  long [sp + Limn2500Context_s1],  s1
+	mov  long [sp + Limn2500Context_s2],  s2
+	mov  long [sp + Limn2500Context_s3],  s3
+	mov  long [sp + Limn2500Context_s4],  s4
+	mov  long [sp + Limn2500Context_s5],  s5
+	mov  long [sp + Limn2500Context_s6],  s6
+	mov  long [sp + Limn2500Context_s7],  s7
+	mov  long [sp + Limn2500Context_s8],  s8
+	mov  long [sp + Limn2500Context_s9],  s9
+	mov  long [sp + Limn2500Context_s10], s10
+	mov  long [sp + Limn2500Context_s11], s11
+	mov  long [sp + Limn2500Context_s12], s12
+	mov  long [sp + Limn2500Context_s13], s13
+	mov  long [sp + Limn2500Context_s14], s14
+	mov  long [sp + Limn2500Context_s15], s15
+	mov  long [sp + Limn2500Context_s16], s16
+	mov  long [sp + Limn2500Context_s17], s17
+	mov  long [sp + Limn2500Context_s18], s18
+	mov  long [sp + Limn2500Context_lr],  lr
+
+	mfcr a1, ecause
+
+	beqi a1, ECAUSEINTERRUPT, .interrupt ; if the exception was an interrupt, jump to the fast-track code for that
+
+	mfcr a2, ebadaddr
+	mov  a0, sp ; give HALLimn2kException our context
+
+	subi sp, sp, 8
+	mfcr t0, epc
+	mov  long [sp + 4], t0
+	mfcr t0, k3
+	mov  long [sp], t0
+
+	jal  HALLimn2500Exception ; call HALLimn2500Exception, to handle the exception
+
+	mtcr ebadaddr, zero ; clear badaddr because the processor doesn't do it for us
+
+	addi sp, sp, 8 ; unwind the fake stack frame stub we added
+
+	mov  t0, long [sp + Limn2500Context_ers]
+	mtcr ers, t0
+
+	mov  t0, long [sp + Limn2500Context_epc]
+	mtcr epc, t0
+
+	mov t0,  long [sp + Limn2500Context_t0]
+	mov t1,  long [sp + Limn2500Context_t1]
+	mov t2,  long [sp + Limn2500Context_t2]
+	mov t3,  long [sp + Limn2500Context_t3]
+	mov t4,  long [sp + Limn2500Context_t4]
+	mov t5,  long [sp + Limn2500Context_t5]
+	mov a0,  long [sp + Limn2500Context_a0]
+	mov a1,  long [sp + Limn2500Context_a1]
+	mov a2,  long [sp + Limn2500Context_a2]
+	mov a3,  long [sp + Limn2500Context_a3]
+	mov s0,  long [sp + Limn2500Context_s0]
+	mov s1,  long [sp + Limn2500Context_s1]
+	mov s2,  long [sp + Limn2500Context_s2]
+	mov s3,  long [sp + Limn2500Context_s3]
+	mov s4,  long [sp + Limn2500Context_s4]
+	mov s5,  long [sp + Limn2500Context_s5]
+	mov s6,  long [sp + Limn2500Context_s6]
+	mov s7,  long [sp + Limn2500Context_s7]
+	mov s8,  long [sp + Limn2500Context_s8]
+	mov s9,  long [sp + Limn2500Context_s9]
+	mov s10, long [sp + Limn2500Context_s10]
+	mov s11, long [sp + Limn2500Context_s11]
+	mov s12, long [sp + Limn2500Context_s12]
+	mov s13, long [sp + Limn2500Context_s13]
+	mov s14, long [sp + Limn2500Context_s14]
+	mov s15, long [sp + Limn2500Context_s15]
+	mov s16, long [sp + Limn2500Context_s16]
+	mov s17, long [sp + Limn2500Context_s17]
+	mov s18, long [sp + Limn2500Context_s18]
+
+	mov  lr, long [sp + Limn2500Context_lr]
+	mov  sp, long [sp + Limn2500Context_sp]
+
+	rfe
+
+.interrupt:
+	subi sp, sp, 8
+	mov  long [sp], zero
+	mov  long [sp + 4], zero
+
+	la   s2, HALInterruptFunction            ; get the address of the kernel's interrupt dispatcher
+	mov  s2, long [s2]
+
+	la   s0, HALLIMNstationLSICClaimComplete ; get the address of the interrupt controller's claim/complete register
+	mov  s0, long [s0]
+
+	la   s1, HALLIMNstationInterruptHandlers ; get the base address of the interrupt handler table
+
+	mov  t0, long [s0]             ; get the first interrupt number from the claim/complete register
+
+	beq  t0, zero, .interruptsdone ; skip to the end if there somehow wasn't one
+
+.nextinterrupt:
+	lshi t1, t0, 3         ; multiply the interrupt number by 8 to get a table offset
+	add  t1, s1, t1        ; add to the interrupt handler table base
+	mov  a2, long [t1 + 4] ; get the interrupt's priority level
+	mov  a0, long [t1]     ; get the handler address
+
+	mov  long [s0], t0 ; ACK the interrupt by writing it back to the claim/complete register
+
+	mov  a1, t0        ; pass the interrupt number
+	jalr lr, s2, 0     ; jump to the kernel's interrupt dispatcher
+
+	mov  t0, long [s0] ; get the next interrupt number
+	bne  t0, zero, .nextinterrupt ; if there is an interrupt, restart the loop
+
+.interruptsdone:
+	addi sp, sp, 8 ; unwind the fake stack frame stub we added
+
+	mov  t0, long [sp + Limn2500Context_ers]
+	mtcr ers, t0
+
+	mov  t0, long [sp + Limn2500Context_epc]
+	mtcr epc, t0
+
+	mov t0,  long [sp + Limn2500Context_t0]
+	mov t1,  long [sp + Limn2500Context_t1]
+	mov t2,  long [sp + Limn2500Context_t2]
+	mov t3,  long [sp + Limn2500Context_t3]
+	mov t4,  long [sp + Limn2500Context_t4]
+	mov t5,  long [sp + Limn2500Context_t5]
+	mov a0,  long [sp + Limn2500Context_a0]
+	mov a1,  long [sp + Limn2500Context_a1]
+	mov a2,  long [sp + Limn2500Context_a2]
+	mov a3,  long [sp + Limn2500Context_a3]
+	mov s0,  long [sp + Limn2500Context_s0]
+	mov s1,  long [sp + Limn2500Context_s1]
+	mov s2,  long [sp + Limn2500Context_s2]
+	mov s3,  long [sp + Limn2500Context_s3]
+	mov s4,  long [sp + Limn2500Context_s4]
+	mov s5,  long [sp + Limn2500Context_s5]
+	mov s6,  long [sp + Limn2500Context_s6]
+	mov s7,  long [sp + Limn2500Context_s7]
+	mov s8,  long [sp + Limn2500Context_s8]
+	mov s9,  long [sp + Limn2500Context_s9]
+	mov s10, long [sp + Limn2500Context_s10]
+	mov s11, long [sp + Limn2500Context_s11]
+	mov s12, long [sp + Limn2500Context_s12]
+	mov s13, long [sp + Limn2500Context_s13]
+	mov s14, long [sp + Limn2500Context_s14]
+	mov s15, long [sp + Limn2500Context_s15]
+	mov s16, long [sp + Limn2500Context_s16]
+	mov s17, long [sp + Limn2500Context_s17]
+	mov s18, long [sp + Limn2500Context_s18]
+
+	mov  lr, long [sp + Limn2500Context_lr]
+	mov  sp, long [sp + Limn2500Context_sp]
+
+	rfe
+
+; -- sp
+HALCPUGetSP:
+.global HALCPUGetSP
+	mov  a0, sp
+	ret
+
+; -- rs
+HALCPUInterruptDisable:
+.global HALCPUInterruptDisable
+	mfcr a0, rs
+	andi t0, a0, RS_INTOFFMASK
+	mtcr rs, t0
+	ret
+
+; rs --
+HALCPUInterruptRestore:
+.global HALCPUInterruptRestore
+	mtcr rs, a0
+	ret
+
+; --
+HALCPUInterruptEnable:
+.global HALCPUInterruptEnable
+	mfcr t0, rs
+	ori  t0, t0, RS_INT
+	mtcr rs, t0
+	ret
+
+; old new -- 
+HALCPUContextSwitch:
+.global HALCPUContextSwitch
+	subi sp, sp, Limn2500Context_SIZEOF
+
+	mov  long [sp + Limn2500Context_sp],  sp
+	mov  long [sp + Limn2500Context_lr],  lr
+	mfcr t0, rs
+	mov  long [sp + Limn2500Context_ers], t0
+
+	mov  long [sp + Limn2500Context_s0],  s0
+	mov  long [sp + Limn2500Context_s1],  s1
+	mov  long [sp + Limn2500Context_s2],  s2
+	mov  long [sp + Limn2500Context_s3],  s3
+	mov  long [sp + Limn2500Context_s4],  s4
+	mov  long [sp + Limn2500Context_s5],  s5
+	mov  long [sp + Limn2500Context_s6],  s6
+	mov  long [sp + Limn2500Context_s7],  s7
+	mov  long [sp + Limn2500Context_s8],  s8
+	mov  long [sp + Limn2500Context_s9],  s9
+	mov  long [sp + Limn2500Context_s10], s10
+	mov  long [sp + Limn2500Context_s11], s11
+	mov  long [sp + Limn2500Context_s12], s12
+	mov  long [sp + Limn2500Context_s13], s13
+	mov  long [sp + Limn2500Context_s14], s14
+	mov  long [sp + Limn2500Context_s15], s15
+	mov  long [sp + Limn2500Context_s16], s16
+	mov  long [sp + Limn2500Context_s17], s17
+	mov  long [sp + Limn2500Context_s18], s18
+
+	mov  long [a1], sp
+	mov  sp, a0
+
+	mov  s0,  long [sp + Limn2500Context_s0]
+	mov  s1,  long [sp + Limn2500Context_s1]
+	mov  s2,  long [sp + Limn2500Context_s2]
+	mov  s3,  long [sp + Limn2500Context_s3]
+	mov  s4,  long [sp + Limn2500Context_s4]
+	mov  s5,  long [sp + Limn2500Context_s5]
+	mov  s6,  long [sp + Limn2500Context_s6]
+	mov  s7,  long [sp + Limn2500Context_s7]
+	mov  s8,  long [sp + Limn2500Context_s8]
+	mov  s9,  long [sp + Limn2500Context_s9]
+	mov  s10, long [sp + Limn2500Context_s10]
+	mov  s11, long [sp + Limn2500Context_s11]
+	mov  s12, long [sp + Limn2500Context_s12]
+	mov  s13, long [sp + Limn2500Context_s13]
+	mov  s14, long [sp + Limn2500Context_s14]
+	mov  s15, long [sp + Limn2500Context_s15]
+	mov  s16, long [sp + Limn2500Context_s16]
+	mov  s17, long [sp + Limn2500Context_s17]
+	mov  s18, long [sp + Limn2500Context_s18]
+
+	mov  lr, long [sp + Limn2500Context_lr]
+	mov  t0, long [sp + Limn2500Context_ers]
+	mtcr rs, t0
+
+	addi sp, sp, Limn2500Context_SIZEOF
+
+	ret
+
+; int handler stack --
+HALCPURunInContext:
+.global HALCPURunInContext
+	mov  t0, sp
+	mov  sp, a0
+
+	subi sp, sp, 8
+	mov  long [sp + 4], lr
+	mov  long [sp], t0
+
+	mfcr t0, rs
+	ori  t0, t0, RS_INT
+	mtcr rs, t0
+
+	mov  a0, a2
+
+	jalr lr, a1, 0
+
+	mfcr t0, rs
+	andi t0, t0, RS_INTOFFMASK
+	mtcr rs, t0
+
+	mov  t0, long [sp]
+	mov  lr, long [sp + 4]
+
+	mov  sp, t0
+
+	ret
+
+; handler stack arg1 arg0 -- ret0 ret1
+HALCPURunInContextNoInterrupts:
+.global HALCPURunInContextNoInterrupts
+	mov  t0, sp
+	mov  sp, a2
+
+	subi sp, sp, 8
+	mov  long [sp + 4], lr
+	mov  long [sp], t0
+
+	jalr lr, a3, 0
+
+	mov  t0, long [sp]
+	mov  lr, long [sp + 4]
+
+	mov  sp, t0
+
+	ret
+
+; MUST BE CALLED WITH INTERRUPTS DISABLED
+; asid pgtb -- oldasid oldpgtb
+HALCPUMapSwitch:
+.global HALCPUMapSwitch
+	mfcr t0, asid
+	mfcr t1, pgtb
+
+	mtcr asid, a1
+	mtcr pgtb, a0
+
+	mov  a0, t0
+	mov  a1, t1
+
+	ret
+
+"
+
+const EXCNAMESMAX 15
+
+table ExceptionNames
+	"EXC0"
+	"INTERRUPT"
+	"SYSCALL"
+	"FWCALL"
+	"BUSERROR"
+	"EXC5"
+	"BREAKPOINT"
+	"INVALIDINSTRUCTION"
+	"PRIVILEGEVIOLATION"
+	"UNALIGNEDADDR"
+	"EXC10"
+	"EXC11"
+	"PAGEFAULT(READ)"
+	"PAGEFAULT(WRITE)"
+	"EXC14"
+	"EXC15"
+endtable
+
+fn HALLimn2500Exception { badaddr ecause tf -- }
+	auto excname
+
+	if (ecause@ EXCNAMESMAX >)
+		"UNKNOWN" excname!
+	end else
+		[ecause@]ExceptionNames@ excname!
+	end
+
+	if (ecause@ ECAUSENMI ==)
+		if (HALDebug)
+			return
+		end
+	end
+	
+	ecause@ excname@ badaddr@ tf@ Limn2500Context_epc + @ tf@ Limn2500Context_ers + @
+	"Fault: ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" HALCrash
+
+	// while (1) end
+end
+
+fn HALCPUContextInit { context1 context2 startfunc kstack -- ctx }
+	8 kstack -=
+
+	0 kstack@!
+	startfunc@ kstack@ 4 + !
+
+	kstack@ Limn2500Context_SIZEOF - ctx!
+
+	ctx@ Limn2500Context_SIZEOF 0 memset
+
+	context1@ ctx@ Limn2500Context_a1 + !
+	context2@ ctx@ Limn2500Context_a0 + !
+
+	// enable interrupts and paging in the thread's context
+	RS_INT RS_MMU | ctx@ Limn2500Context_ers + !
+
+	startfunc@ ctx@ Limn2500Context_lr + !
+end

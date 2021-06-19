@@ -19,6 +19,9 @@ extern AFSINodeSize { ino -- sz }
 extern MemInit { -- }
 extern MemAlloc { pages pstart -- astart ok }
 extern MemFree { pages pstart -- }
+extern MemExit { -- }
+extern MemAllocUpper { pages vstart must -- astart ok }
+extern MemMapIORange { pages phys -- vaddr ok }
 
 extern LOFFLoad { path loff -- ok }
 extern LOFFGetString { loff offset -- str }
@@ -72,7 +75,13 @@ const LOFFGLOBAL 1
 const LOFFEXTERN 3
 const LOFFRESOLVED 256
 
-const INITBITMAPSZ 2048
+const INITBITMAPSZ 8192
+
+const KERNELSPACE 0x80000000
+const KERNELSTRUCTURES 0xC0000000
+const IDENTITYSPACE 0xD0000000
+
+const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 
 extern DLLLoad { name -- dll ok }
 extern DLLResolveAll { -- ok }
@@ -92,6 +101,7 @@ externptr DLLForceRelink
 externptr MemPageFrameDB
 externptr MemHeap
 externptr MemHeapSize
+externptr MemPageDirectory
 
 struct AFSSuperblock
 	4 Version

@@ -14,3 +14,11 @@ extern HALLIMNstationCitronCommand { command port -- }
 
 // doesn't wait for the device to report the operation as completed before returning
 extern HALLIMNstationCitronCommandASync { command port -- }
+
+externptr HALLIMNstationLowBuffer
+
+extern HALLIMNstationDeviceSelectNode { node -- }
+
+extern HALLIMNstationDeviceExit { -- }
+
+extern HALLIMNstationDGetProperty { name -- prop }

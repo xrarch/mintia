@@ -23,6 +23,8 @@ end
 
 buffer LoaderInfoBlock LoaderInfo_SIZEOF
 
+buffer LoaderInfoPlatformBlock LoaderInfoPlatform_SIZEOF
+
 buffer HALNameBuffer 128
 
 const INTERRUPTSTACKPAGES 4
@@ -30,7 +32,7 @@ const INTERRUPTSTACKPAGES 4
 fn Main { args -- ret }
 	0 ret!
 
-	LOADERMINOR LOADERMAJOR "\nM31Loader %d.%d - loader for andromeda\n" Printf
+	LOADERMINOR LOADERMAJOR "\nM31Loader %d.%d - loader for andromeda on LIMNstation\n" Printf
 
 	// clear BSS section
 
@@ -87,6 +89,8 @@ fn Main { args -- ret }
 		0 warned!
 
 		while (desc@)
+			desc@ "0x%08x\n" Printf
+
 			auto dtype
 			auto dsize
 
@@ -176,25 +180,81 @@ fn Main { args -- ret }
 
 	ResourceLoadAll ret!
 
-	auto screen
-	"/screen" a3xDevTreeWalk screen!
+	auto devaddr
 
-	if (screen@)
-		screen@ a3xDeviceSelectNode
+	auto devnode
+	"/screen" a3xDevTreeWalk devnode!
+
+	if (devnode@)
+		devnode@ a3xDeviceSelectNode
 			auto format
 			"model" a3xDGetProperty LoaderBootFBMatch format!
 
 			if (format@)
-				"framebuffer" a3xDGetProperty LoaderInfoBlock LoaderInfo_HALConsoleFBAddr + !
-				"width"       a3xDGetProperty LoaderInfoBlock LoaderInfo_HALConsoleFBWidth + !
-				"height"      a3xDGetProperty LoaderInfoBlock LoaderInfo_HALConsoleFBHeight + !
-				format@                       LoaderInfoBlock LoaderInfo_HALConsoleFBFormat + !
+				"vram" a3xDGetProperty devaddr!
+
+				"vramSize" a3xDGetProperty 4095 + 12 >> devaddr@ MemMapIORange ret! devaddr!
+
+				if (ret@ 0 ==)
+					devaddr@ "boot framebuffer at 0x%08x\n" Printf
+
+					"width"  a3xDGetProperty LoaderInfoBlock LoaderInfo_HALConsoleFBWidth + !
+					"height" a3xDGetProperty LoaderInfoBlock LoaderInfo_HALConsoleFBHeight + !
+					format@                  LoaderInfoBlock LoaderInfo_HALConsoleFBFormat + !
+					devaddr@                 LoaderInfoBlock LoaderInfo_HALConsoleFBAddr + !
+				end
 			end
 		a3xDeviceExit
 	end
 
+	"/bus/pboard/citron" a3xDevTreeWalk devnode!
+
+	if (devnode@)
+		devnode@ a3xDeviceSelectNode
+			"address" a3xDGetProperty devaddr!
+
+			1 devaddr@ MemMapIORange ret! devaddr!
+
+			if (ret@ 0 ==)
+				devaddr@ "citron at 0x%08x\n" Printf
+
+				devaddr@ LoaderInfoPlatformBlock LoaderInfoPlatform_CitronBase + !
+			end
+		a3xDeviceExit
+	end
+
+	"/platform/lsic" a3xDevTreeWalk devnode!
+
+	if (devnode@)
+		devnode@ a3xDeviceSelectNode
+			"address" a3xDGetProperty devaddr!
+
+			1 devaddr@ MemMapIORange ret! devaddr!
+
+			if (ret@ 0 ==)
+				devaddr@ "LSIC at 0x%08x\n" Printf
+
+				devaddr@ LoaderInfoPlatformBlock LoaderInfoPlatform_LSICBase + !
+			end
+		a3xDeviceExit
+	end
+
+	"/platform" a3xDeviceSelect
+		"model" a3xDGetProperty IDENTITYSPACE | LoaderInfoPlatformBlock LoaderInfoPlatform_PlatformModel + !
+	a3xDeviceExit
+
+	"/bus" a3xDeviceSelect
+		"model" a3xDGetProperty IDENTITYSPACE | LoaderInfoPlatformBlock LoaderInfoPlatform_BusModel + !
+
+		"reset" a3xDCallMethod drop drop drop drop
+	a3xDeviceExit
+
+	"/cpu" a3xDeviceSelect
+		"model" a3xDGetProperty IDENTITYSPACE | LoaderInfoPlatformBlock LoaderInfoPlatform_CPUModel + !
+	a3xDeviceExit
+
 	auto istack
-	INTERRUPTSTACKPAGES 0 MemAlloc ret! istack!
+	INTERRUPTSTACKPAGES KERNELSTRUCTURES 12 >> 0 MemAllocUpper ret! istack!
 
 	if (ret@ 0 ~=)
 		"couldn't allocate interrupt stack\n" LoaderPanic
@@ -211,11 +271,11 @@ fn Main { args -- ret }
 	LOADERMAJOR         LoaderInfoBlock LoaderInfo_Major + !
 	LOADERMINOR         LoaderInfoBlock LoaderInfo_Minor + !
 
-	MemBitmap           LoaderInfoBlock LoaderInfo_InitMemBmp + !
+	MemBitmap           IDENTITYSPACE | LoaderInfoBlock LoaderInfo_InitMemBmp + !
 	INITBITMAPSZ        LoaderInfoBlock LoaderInfo_InitMemBmpSz + !
 	DLLListHead@        LoaderInfoBlock LoaderInfo_DLLListHead + !
 	ResourceListHead@   LoaderInfoBlock LoaderInfo_ResourceListHead + !
-	ArgsBuffer          LoaderInfoBlock LoaderInfo_ArgsBuffer + !
+	ArgsBuffer          IDENTITYSPACE | LoaderInfoBlock LoaderInfo_ArgsBuffer + !
 	kemain@             LoaderInfoBlock LoaderInfo_KeMain + !
 	LoaderTotalRAM@     LoaderInfoBlock LoaderInfo_TotalRAM + !
 	istack@             LoaderInfoBlock LoaderInfo_InterruptStack + !
@@ -224,6 +284,12 @@ fn Main { args -- ret }
 	MemPageFrameDB@     LoaderInfoBlock LoaderInfo_PageFrameDB + !
 	MemHeap@            LoaderInfoBlock LoaderInfo_Heap + !
 	MemHeapSize@        LoaderInfoBlock LoaderInfo_HeapSize + !
+	MemPageDirectory@   LoaderInfoBlock LoaderInfo_PageDirectory + !
+
+
+	HALNameBuffer       LoaderInfoPlatformBlock LoaderInfoPlatform_LowBuffer + !
+
+	LoaderInfoPlatformBlock IDENTITYSPACE | LoaderInfoBlock LoaderInfo_PlatformInfo + !
 
 	StandaloneEntry ret!
 
@@ -254,44 +320,49 @@ SavedSP:
 	.dl 0
 
 StandaloneEntry:
-	push lr
+	subi sp, sp, 4
+	mov  long [sp], lr
 
-	mov t2, sp
+	mov  t2, sp
 
-	la  t0, SavedSP
-	mov long [t0], t2
+	la   t0, SavedSP
+	mov  long [t0], t2
 
-	la  t0, LoaderInterruptStackTop
-	mov sp, long [t0]
+	la   t0, LoaderInterruptStackTop
+	mov  sp, long [t0]
 
-	sub sp, sp, 8
-	mov long [sp], 0
-	mov long [sp + 4], 0
+	subi sp, sp, 8
+	mov  long [sp], 0
+	mov  long [sp + 4], 0
 
-	la  t0, LoaderEntrypoint
-	mov t0, long [t0]
+	la   t0, LoaderEntrypoint
+	mov  t0, long [t0]
 
-	la  t1, a3xMyDevice
-	mov a1, long [t1]
+	la   t1, a3xMyDevice
+	mov  a1, long [t1]
 
-	la  t1, a3xCIPtr
-	mov a2, long [t1]
+	la   t1, a3xCIPtr
+	mov  a2, long [t1]
 
-	la  a3, LoaderInfoBlock
-	mov long [a3 + LoaderInfo_ReturnSP], t2
+	la   a3, LoaderInfoBlock
+	mov  long [a3 + LoaderInfo_ReturnSP], t2
 
-	jal t0
+	la   t1, IDENTITYSPACE
+	or   a3, a3, t1
 
-	la  t0, SavedSP
-	mov sp, long [t0]
+	jalr lr, t0, 0
 
-	pop lr
+	la   t0, SavedSP
+	mov  sp, long [t0]
 
+	mov  lr, long [sp]
 	ret
 
 "
 
 fn LoaderExit { ret -- }
+	MemExit
+
 	AFSExit
 
 	ret@ a3xReturn

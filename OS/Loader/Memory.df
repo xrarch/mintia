@@ -104,7 +104,7 @@ fn MemInit { -- }
 
 	rps@ "pageframe db is %d bytes" Printf
 
-	rps@ 4095 + 12 >> KERNELSTRUCTURES 12 >> 0 MemAllocUpper ok! astart!
+	rps@ 4095 + 12 >> PFDBBASE 12 >> 0 MemAllocUpper ok! astart!
 
 	if (ok@)
 		"couldn't allocate pageframe db\n" LoaderPanic
@@ -165,7 +165,7 @@ fn MemInit { -- }
 
 	rps@ 12 << "heap is %d bytes" Printf
 
-	rps@ KERNELSTRUCTURES 12 >> 0 MemAllocUpper ok! astart!
+	rps@ HEAPBASE 12 >> 0 MemAllocUpper ok! astart!
 
 	if (ok@)
 		"\ncouldn't allocate kernel heap\n" LoaderPanic
@@ -457,11 +457,80 @@ fn MemFree { pages pstart -- }
 	0 pages@ pstart@ MemSetStatus
 end
 
+var MemLastAlloc 0
+
+fn MemAllocSinglePage { pstart -- astart ok }
+	if (pstart@ 0 ==)
+		MemLastAlloc@ pstart!
+	end
+
+	auto chend
+	MemPages@ chend!
+
+	if (pstart@ chend@ >=)
+		0 pstart!
+	end
+
+	auto i
+	pstart@ i!
+
+	auto bmp
+	MemBitmap i@ 32 / 4 * + bmp!
+
+	auto mode
+	0 mode!
+
+	while (bmp@@ 0xFFFFFFFF ==)
+		4 bmp +=
+		32 i +=
+
+		if (i@ chend@ >=)
+			if (mode@)
+				-1 ok!
+				return
+			end else
+				0 i!
+				1 mode!
+				pstart@ chend!
+				MemBitmap bmp!
+			end
+		end
+	end
+
+	auto word
+	bmp@@ word!
+
+	auto j
+	0 j!
+
+	while (j@ 32 <)
+		if (word@ j@ bitget ~~)
+			word@ j@ bitset bmp@!
+
+			i@ 31 ~ & j@ | astart!
+			astart@ 1 + MemLastAlloc!
+
+			0 ok!
+			return
+		end
+
+		1 i +=
+		1 j +=
+	end
+
+	"MemAllocSinglePage\n" LoaderPanic
+end
+
 fn MemAlloc { pages pstart -- astart ok }
 	-1 ok!
 
 	if (pages@ 0 ==)
 		"tried to allocate 0 pages\n" LoaderPanic
+	end
+
+	if (pages@ 1 ==)
+		pstart@ MemAllocSinglePage ok! astart!
+		return
 	end
 
 	auto chend

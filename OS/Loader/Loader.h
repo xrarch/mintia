@@ -83,6 +83,9 @@ const IDENTITYSPACE 0xD0000000
 
 const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 
+const PFDBBASE (KERNELSTRUCTURES 0x200000 +)
+const HEAPBASE (KERNELSTRUCTURES 0x400000 +)
+
 extern DLLLoad { name -- dll ok }
 extern DLLResolveAll { -- ok }
 extern DLLRelocateAll { -- ok }

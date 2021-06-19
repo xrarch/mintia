@@ -8,6 +8,8 @@
 
 #include "<inc>/HALCPU.h"
 
+#include "<inc>/HALMap.h"
+
 #include "<inc>/HALCrash.h"
 
 extern HALMain { ldrinfo -- ret }
@@ -21,29 +23,73 @@ end
 
 var InfoTotalRAM 0
 
+var HALLIMNstationLowBuffer 0
+public HALLIMNstationLowBuffer
+
+var HALPlatformKernelPageDirectory 0
+public HALPlatformKernelPageDirectory
+
 fn HALPlatformInfo { -- }
 	// we're supposed to print platform info in this function
-	"/platform" a3xDeviceSelect
-		InfoTotalRAM@ 1048576 / "model" a3xDGetProperty "%s (%dMB) " Printf
-	a3xDeviceExit
 
-	"/bus" a3xDeviceSelect
-		"model" a3xDGetProperty "%s " Printf
-	a3xDeviceExit
+	InfoTotalRAM@ 1048576 / HALLoaderInfo@ LoaderInfo_PlatformInfo + @ LoaderInfoPlatform_PlatformModel + @ "%s (%dMB) " Printf
+	HALLoaderInfo@ LoaderInfo_PlatformInfo + @ LoaderInfoPlatform_BusModel + @ "%s " Printf
+	HALLoaderInfo@ LoaderInfo_PlatformInfo + @ LoaderInfoPlatform_CPUModel + @ "%s " Printf
+end
 
-	"/cpu" a3xDeviceSelect
-		"model" a3xDGetProperty "%s" Printf
-	a3xDeviceExit
+fn HALLIMNstationDeviceSelectNode { node -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	pointerof a3xDeviceSelectNode
+	HALLoaderInfo@ LoaderInfo_ReturnSP + @
+	0
+	node@
+	HALCPURunInContextNoInterrupts drop drop
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn HALLIMNstationDeviceExit { -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	pointerof a3xDeviceExit
+	HALLoaderInfo@ LoaderInfo_ReturnSP + @
+	0
+	0
+	HALCPURunInContextNoInterrupts drop drop
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn HALLIMNstationDGetProperty { name -- prop }
+	HALLIMNstationLowBuffer@ name@ strcpy
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	pointerof a3xDGetProperty
+	HALLoaderInfo@ LoaderInfo_ReturnSP + @
+	0
+	HALLIMNstationLowBuffer@
+	HALCPURunInContextNoInterrupts drop prop!
+
+	rs@ HALCPUInterruptRestore
 end
 
 extern HALCPUInit { -- }
 
-extern HALLIMNstationCitronInit { -- }
+extern HALLIMNstationCitronInit { ldrinfo -- }
 
-extern HALLIMNstationLSICInit { -- }
+extern HALLIMNstationLSICInit { ldrinfo -- }
 
 fn HALPlatformInit { ldrinfo -- ret }
 	0 ret!
+
+	ldrinfo@ LoaderInfo_PlatformInfo + @ LoaderInfoPlatform_LowBuffer + @ HALLIMNstationLowBuffer!
+
+	ldrinfo@ LoaderInfo_PageDirectory + @ HALPlatformKernelPageDirectory!
 
 	ldrinfo@ LoaderInfo_TotalRAM + @ InfoTotalRAM!
 
@@ -51,9 +97,9 @@ fn HALPlatformInit { ldrinfo -- ret }
 
 	HALCPUInit
 
-	HALLIMNstationCitronInit
+	ldrinfo@ HALLIMNstationCitronInit
 
-	HALLIMNstationLSICInit
+	ldrinfo@ HALLIMNstationLSICInit
 
 	auto dll
 	ldrinfo@ LoaderInfo_DLLListHead + @ dll!
@@ -63,9 +109,9 @@ fn HALPlatformInit { ldrinfo -- ret }
 			if (dll@ DLL_DriverInitEarly + @)
 				auto ok
 
-				dll@ DLL_DriverDeviceNode + @ a3xDeviceSelectNode
+				dll@ DLL_DriverDeviceNode + @ HALLIMNstationDeviceSelectNode
 					0 0 0 0 dll@ DLL_DriverInitEarly + @ FDriverInitEarly ok!
-				a3xDeviceExit
+				HALLIMNstationDeviceExit
 
 				if (ok@)
 					ok@ dll@ DLL_Name + "HALPlatformInit: driver '%s' failed early initialization (%i)\n" HALCrash
@@ -75,26 +121,45 @@ fn HALPlatformInit { ldrinfo -- ret }
 
 		dll@ DLL_Next + @ dll!
 	end
+
+	// auto i
+	// 0 i!
+
+	// auto pde
+	// HALPlatformKernelPageDirectory@ pde!
+
+	// while (i@ 512 <)
+	// 	0 pde@!
+
+	// 	1 i +=
+	// 	4 pde +=
+	// end
 end
 
-extern HALLimn2kExit { code sp -- }
+fn HALPlatformCrash { -- }
+	HALPlatformMapKernelSwitch drop drop
+end
+
+extern HALLimn2500Exit { code sp -- }
+
+extern HALLimn2500Reset { -- }
 
 extern HALCPUExit { -- }
 
 fn HALPlatformExit { ret mode -- }
+	// MUST BE CALLED WITH INTERRUPTS DISABLED
+
+	HALPlatformMapKernelSwitch drop drop
+
 	HALCPUExit
 
 	if (mode@ HALEXIT_SHUTDOWN ==)
-		ret@ HALLoaderInfo@ LoaderInfo_ReturnSP + @ HALLimn2kExit
+		ret@ HALLoaderInfo@ LoaderInfo_ReturnSP + @ HALLimn2500Exit
 	end elseif (mode@ HALEXIT_REBOOT ==)
-		"/cpu" a3xDeviceSelect
-			"reset" a3xDCallMethod drop drop drop drop
-		a3xDeviceExit
+		HALLimn2500Reset
 	end else
 		"?" Printf
 
-		"/cpu" a3xDeviceSelect
-			"reset" a3xDCallMethod drop drop drop drop
-		a3xDeviceExit
+		HALLimn2500Reset
 	end
 end

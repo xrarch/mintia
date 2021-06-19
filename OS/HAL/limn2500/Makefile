@@ -9,10 +9,10 @@ LD      =  $(OBJTOOL) link
 
 DCFLAGS = incdir=./include/:../include/
 
-all: HALlimn2k.o
+all: HALlimn2500.o
 
-HALlimn2k.o: $(OBJ)
-	$(LD) -f HALlimn2k.o $(OBJ)
+HALlimn2500.o: $(OBJ)
+	$(LD) -f HALlimn2500.o $(OBJ)
 
 %.o: %.df ./include/*.h ../include/*.h
 	$(DC) $(DCFLAGS) $< $@
@@ -21,4 +21,4 @@ HALlimn2k.o: $(OBJ)
 	$(AS) $< $@
 
 cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF HALlimn2k.o
+	rm -f ${OBJ} *.a3x *.LOFF HALlimn2500.o

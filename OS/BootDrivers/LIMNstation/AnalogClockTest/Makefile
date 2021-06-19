@@ -15,7 +15,7 @@ all: AnalogClockTest.sys
 
 AnalogClockTest.sys: $(OBJ)
 	$(LD) AnalogClockTest.sys $(OBJ) -d ../../../OSKernel/OSKernel.exe HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
-	$(OBJTOOL) move AnalogClockTest.sys text=0x100000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move AnalogClockTest.sys text=0x80500000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

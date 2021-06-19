@@ -24,6 +24,17 @@ struct LoaderInfo
 	4 PageFrameDB
 	4 Heap
 	4 HeapSize
+	4 PageDirectory
+	4 PlatformInfo
+endstruct
+
+struct LoaderInfoPlatform
+	4 LowBuffer
+	4 CitronBase
+	4 LSICBase
+	4 PlatformModel
+	4 BusModel
+	4 CPUModel
 endstruct
 
 struct BootResource

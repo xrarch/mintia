@@ -15,7 +15,7 @@ all: RTC.sys
 
 RTC.sys: $(OBJ)
 	$(LD) RTC.sys $(OBJ) -d ../../../OSKernel/OSKernel.exe HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
-	$(OBJTOOL) move RTC.sys text=0x100000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move RTC.sys text=0x80400000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

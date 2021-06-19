@@ -15,7 +15,7 @@ all: OSKernel.exe
 
 OSKernel.exe: $(OBJ)
 	$(LD) OSKernel.exe $(OBJ) -d HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
-	$(OBJTOOL) move OSKernel.exe text=0x300000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move OSKernel.exe text=0x80001000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df $(HFILES) ../HAL/include/*.h
 	$(DC) $(DCFLAGS) $< $@

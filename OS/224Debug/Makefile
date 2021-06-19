@@ -15,7 +15,7 @@ all: 224Debug.exe
 
 224Debug.exe: $(OBJ)
 	$(LD) 224Debug.exe $(OBJ) -d ../OSKernel/OSKernel.exe HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
-	$(OBJTOOL) move 224Debug.exe text=0x100000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move 224Debug.exe text=0x80600000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ../HAL/include/*.h ../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

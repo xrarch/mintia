@@ -13,6 +13,9 @@ public MemPages
 var MemPageFrameDB 0
 public MemPageFrameDB
 
+var MemPageDirectory 0
+public MemPageDirectory
+
 var MemHeap 0
 public MemHeap
 
@@ -25,6 +28,8 @@ const HEAPMINDEFAULT (32 1024 *)
 
 const HEAPSHFDEFAULT 4
 
+extern MemEnablePaging { -- }
+
 fn MemInit { -- }
 	auto bm
 	MemBitmap bm!
@@ -32,8 +37,9 @@ fn MemInit { -- }
 	auto pages
 	LoaderTotalRAM@ 12 >> pages!
 
-	// limit to first 64MB as thats the size of a limn2k jump segment
-	pages@ 16384 min MemPages!
+	// limit to first 256MB as thats all we have bitmap space for.
+	// (LIMNstation only supports this much RAM anyway)
+	pages@ 65536 min MemPages!
 
 	// reserve loader code and data
 
@@ -45,6 +51,49 @@ fn MemInit { -- }
 
 	1 ldrtop@ 4095 + 12 >> 0 MemSetStatus
 
+	auto astart
+
+	auto ok
+
+	1 0 MemAlloc ok! astart!
+
+	if (ok@)
+		"couldn't allocate kernel page directory\n" LoaderPanic
+	end
+
+	astart@ 12 << MemPageDirectory!
+
+	MemPageDirectory@
+	4096
+	0
+	memset
+
+	// identity map physical memory at 0x00000000
+
+	auto kspc
+	IDENTITYSPACE kspc!
+
+	0 astart!
+
+	while (astart@ LoaderTotalRAM@ <)
+		astart@ astart@ 0 MemMapPage ok!
+
+		if (ok@)
+			"couldn't identity map memory\n" LoaderPanic
+		end
+
+		astart@ kspc@ 0 MemMapPage ok!
+
+		if (ok@)
+			"couldn't identity map kernel space\n" LoaderPanic
+		end
+
+		4096 kspc +=
+		4096 astart +=
+	end
+
+	MemEnablePaging
+
 	// allocate these before we fragment physical memory by loading OS modules
 
 	auto rps
@@ -55,10 +104,7 @@ fn MemInit { -- }
 
 	rps@ "pageframe db is %d bytes" Printf
 
-	auto astart
-
-	auto ok
-	rps@ 4095 + 12 >> 0 MemAlloc ok! astart!
+	rps@ 4095 + 12 >> KERNELSTRUCTURES 12 >> 0 MemAllocUpper ok! astart!
 
 	if (ok@)
 		"couldn't allocate pageframe db\n" LoaderPanic
@@ -119,7 +165,7 @@ fn MemInit { -- }
 
 	rps@ 12 << "heap is %d bytes" Printf
 
-	rps@ 0 MemAlloc ok! astart!
+	rps@ KERNELSTRUCTURES 12 >> 0 MemAllocUpper ok! astart!
 
 	if (ok@)
 		"\ncouldn't allocate kernel heap\n" LoaderPanic
@@ -182,6 +228,227 @@ fn MemSetStatus { with pages start -- }
 	end
 
 	word@ bmp@!
+end
+
+const PTE_V  1
+const PTE_W  2
+const PTE_K  4
+const PTE_NC 8
+const PTE_G  16
+
+const PTE_KPAGE (PTE_V PTE_W | PTE_K |)
+
+fn MemMapPage { phys virt nc -- ok }
+	0 ok!
+
+	auto pdi
+	virt@ 22 >> 2 << MemPageDirectory@ + pdi!
+
+	auto pt
+	pdi@@ 5 >> 12 << pt!
+
+	if (pt@ 0 ==)
+		1 0 MemAlloc ok! pt!
+
+		if (ok@)
+			return
+		end
+
+		12 pt <<=
+
+		pt@ 4096 0 memset
+
+		pt@ 12 >> 5 << pdi@!
+	end
+
+	virt@ 12 >> 1023 & 2 << pt@ + pdi!
+
+	if (pdi@@ PTE_V &)
+		virt@ 12 >> "MemMapPage: vpn %x is already mapped!\n" LoaderPanic
+	end
+
+	auto flags
+	PTE_KPAGE flags!
+
+	if (virt@ KERNELSPACE &)
+		PTE_G flags |=
+	end
+
+	if (nc@)
+		PTE_NC flags |=
+	end
+
+	phys@ 12 >> 5 << flags@ | pdi@!
+end
+
+const PAGEMAX 1048576
+
+fn MemFindEmptyRow { length start must -- ok ava }
+	if (start@ KERNELSPACE <)
+		"MemFindEmptyRow: start was below kernelspace\n" LoaderPanic
+	end
+
+	auto i
+	start@ 12 >> i!
+
+	auto pd
+	MemPageDirectory@ start@ 22 >> 2 << + pd!
+
+	auto pt
+	pd@@ 5 >> 12 << pt!
+
+	auto max
+	PAGEMAX max!
+
+	auto r
+	0 r!
+
+	auto row
+	0 row!
+
+	auto cv
+	start@ cv!
+	start@ ava!
+
+	auto rmnd
+	i@ 1023 & rmnd!
+
+	if (rmnd@)
+		if (pt@ 0 ==)
+			1024 rmnd@ - row!
+			1024 rmnd@ - i +=
+			0x400000 rmnd@ 12 << - cv +=
+		end else
+			rmnd@ 2 << pt +=
+		end
+
+		4 pd +=
+	end
+
+	while (1)
+		if (row@ length@ >=)
+			0 ok!
+			return
+		end
+
+		if (i@ max@ >=)
+			if (start@ KERNELSPACE ==)
+				(* already searched the whole thing *)
+				break
+			end
+
+			if (r@)
+				break
+			end
+
+			1 r!
+			KERNELSPACE 12 >> i!
+			0 row!
+			start@ 12 >> max!
+			KERNELSPACE ava!
+			KERNELSPACE cv!
+			MemPageDirectory@ KERNELSPACE 22 >> 2 << + pd!
+		end
+
+		if (i@ 1023 & 0 ==)
+			pd@@ 5 >> 12 << pt!
+
+			4 pd +=
+		end
+
+		if (pt@ 0 ==)
+			1024 row +=
+			1024 i +=
+			0x400000 cv +=
+
+			continue
+		end
+
+		if (pt@@)
+			if (must@)
+				break
+			end
+
+			0 row!
+			cv@ 0x1000 + ava!
+		end else
+			1 row +=
+		end
+		
+		1 i +=
+		4 pt +=
+		0x1000 cv +=
+	end
+
+	ERR ok!
+end
+
+fn MemMapIORange { pages phys -- vaddr ok }
+	pages@ KERNELSTRUCTURES 0 MemFindEmptyRow vaddr! ok!
+
+	if (ok@)
+		return
+	end
+
+	auto i
+	0 i!
+
+	auto vptr
+	vaddr@ vptr!
+
+	while (i@ pages@ <)
+		phys@ vptr@ 1 MemMapPage ok!
+
+		if (ok@)
+			return
+		end
+
+		4096 vptr +=
+		4096 phys +=
+		1 i +=
+	end
+end
+
+fn MemAllocUpper { pages vstart must -- astart ok }
+	pages@ vstart@ 12 << must@ MemFindEmptyRow astart! ok!
+
+	if (ok@)
+		-1 astart!
+
+		return
+	end
+
+	// astart@ ok@ "ok=%08x astart=%08x\n" Printf
+
+	auto pptr
+
+	auto vptr
+	astart@ vptr!
+
+	auto i
+	0 i!
+
+	while (i@ pages@ <)
+		1 0 MemAlloc ok! pptr!
+
+		if (ok@)
+			// XXX doesn't free everything it just allocated...
+			return
+		end
+
+		pptr@ 12 << vptr@ 0 MemMapPage ok!
+
+		if (ok@)
+			return
+		end
+
+		4096 vptr +=
+		1 i +=
+	end 
+
+	12 astart >>=
+
+	0 ok!
 end
 
 fn MemFree { pages pstart -- }
@@ -296,3 +563,29 @@ fn MemDumpBitmap { -- }
 		1 i +=
 	end
 end
+
+const RS_MMU 4
+
+asm "
+
+MemExit:
+.global MemExit
+	mtcr rs, zero
+	ret
+
+MemEnablePaging:
+.global MemEnablePaging
+	subi t0, zero, 1
+	ftlb t0, t0
+
+	mtcr asid, zero
+
+	la   t0, MemPageDirectory
+	mov  t0, long [t0]
+	mtcr pgtb, t0
+	mfcr t0, rs
+	ori  t0, t0, RS_MMU
+	mtcr rs, t0
+	ret
+
+"

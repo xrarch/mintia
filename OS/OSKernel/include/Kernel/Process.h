@@ -52,7 +52,7 @@ const THREADSTATUS_TERMINATED         7
 const QUEUEFRONT 1
 const QUEUEBACK 0
 
-const THREADDEFAULTQUANTUM 30 // in milliseconds
+const THREADDEFAULTQUANTUM 50 // in milliseconds
 
 const QUANTUMUNITSPERTICK 3
 
@@ -154,6 +154,8 @@ extern KeThreadNextSwitch { -- }
 extern KeThreadWakeup { waitstatus priboost thread -- woken }
 
 extern KeThreadSleep { ms waitmode alertable -- ok }
+
+extern KeThreadPrioritySet { priority thread -- }
 
 externptr KeThreadNext
 

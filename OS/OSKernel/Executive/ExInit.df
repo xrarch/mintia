@@ -18,7 +18,7 @@
 
 #include "<inc>/Process.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
+#include "<ll>/OSDLL/OS.h"
 
 buffer TestThread1Stack KETHREADSTACKSIZE
 buffer TestThread2Stack KETHREADSTACKSIZE
@@ -77,10 +77,6 @@ fn ExInitPhase1 { context1 context2 -- }
 
 	// initialize components ...
 
-	// initialize drivers
-
-	STAGE_THREAD HALLoaderInfo@ HALDriverInit
-
 	// do some random tests
 
 	0xBBBBBBBB
@@ -121,8 +117,52 @@ fn ExInitPhase1 { context1 context2 -- }
 	// QUEUEBACK TestThread1 KeThreadReady
 	// QUEUEBACK TestThread2 KeThreadReady
 
+	auto ok
+	auto handle
+	auto sierp
+
+	0 // context1
+	0 // context2
+	pointerof TestKernelThread // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"Sierpinski" // name
+	0 // processhandle
+	PsSystemProcess@ // processptr
+	PsThreadCreate ok! handle!
+
+	if (ok@)
+		ok@ "couldn't create sierpinski thread (%i)\n" KeCrash
+	end
+
+	handle@ "sierpinski thread handle = %d\n" "ExInitPhase1" HALLog
+
+	PsThreadObjectType@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! sierp! drop
+
+	if (ok@)
+		ok@ "couldn't reference sierpinski thread (%i)\n" KeCrash
+	end
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "couldn't close sierpinski thread (%i)\n" KeCrash
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	PRIORITY_LOWREALTIME sierp@ KeThreadPrioritySet
+
+	ipl@ KeIPLLower
+
+	// initialize drivers
+
+	STAGE_THREAD HALLoaderInfo@ HALDriverInit
+
 	while (1)
-		HALCPUHalt
+		1000 KERNELMODE 0 KeThreadSleep drop
 	end
 end
 
@@ -156,7 +196,9 @@ SierpinskiFast:
 
 	li   s5, 15877
 
-	li   s7, 640
+	la   s7, HALLoaderInfo
+	mov  s7, long [s7]
+	mov  s7, long [s7 + LoaderInfo_HALConsoleFBWidth]
 
 	la   s2, SierpinskiIter
 	mov  s3, long [s2]
@@ -167,6 +209,14 @@ SierpinskiFast:
 	la   s6, HALLoaderInfo
 	mov  s6, long [s6]
 	mov  s6, long [s6 + LoaderInfo_HALConsoleFBAddr]
+
+	la   t0, HALLoaderInfo
+	mov  t0, long [t0]
+	mov  t1, long [t0 + LoaderInfo_HALConsoleFBHeight]
+
+	rshi t0, t1, 1
+	mul  t0, s7, t0
+	add  s6, s6, t0
 
 .loop:
 	div  t1, s0, s1
@@ -214,6 +264,8 @@ SierpinskiFast:
 	mov  s5, long [sp + 24]
 	mov  s6, long [sp + 28]
 	mov  s7, long [sp + 32]
+
+	addi sp, sp, 36
 	ret
 
 "
@@ -223,43 +275,9 @@ extern SierpinskiFast { -- }
 fn TestKernelThread { context1 context2 -- }
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
-	if (context1@ 0xCCCCCCCC ==)
-		3000 KERNELMODE 0 KeThreadSleep drop
-
-		0 TestEvent KeEventSignal drop
-	end
-
 	while (1)
-		auto ok
+		100 KERNELMODE 0 KeThreadSleep drop
 
-		if (context1@ 0xCCCCCCCC ==)
-			// 3000 KERNELMODE 0 KeThreadSleep drop
-
-			KERNELMODE WAITUNALERTABLE TIMEOUTINFINITE TestMutex KeThreadWaitForObject drop
-
-			"cccc" Printf
-
-			HALCPUHalt
-
-			TestMutex KeMutexRelease drop
-
-			// 1000 KERNELMODE 0 KeThreadSleep drop
-		end else
-			// 3000 KERNELMODE 0 KeThreadSleep drop
-
-			KERNELMODE WAITUNALERTABLE TIMEOUTINFINITE TestMutex KeThreadWaitForObject drop
-
-			"bbbb" Printf
-
-			// 600 KERNELMODE 0 KeThreadSleep drop
-
-			// if (TestAPC KeAPC_Enqueued + @ ~~)
-			//	0 0 0 TestAPC KeAPCEnqueue drop
-			// end
-
-			HALCPUHalt
-
-			TestMutex KeMutexRelease drop
-		end
+		SierpinskiFast
 	end
 end

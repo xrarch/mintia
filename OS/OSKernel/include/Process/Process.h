@@ -38,6 +38,8 @@ externptr PsProcessTable
 
 externptr PsProcessListHead
 
+externptr PsSystemProcess
+
 extern PsInitPhase0 { -- }
 
 extern PsInitPhase1 { -- }

@@ -44,6 +44,10 @@ struct ObTypeInitializer
 	4 DeleteFunction
 endstruct
 
+struct ObDirectory
+	4 ObjectListHead
+endstruct
+
 // modify OBHANDLEENTRYSIZELOG if you change the size of this structure
 struct ObObjectTableEntry
 	4 Object

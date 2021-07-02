@@ -16,6 +16,18 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+fn ObRootDirectoryLock { -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	TIMEOUTINFINITE // timeout
+	ObRootMutex // object
+	KeThreadWaitForObject ok!
+end
+
+fn ObRootDirectoryUnlock { -- }
+	ObRootMutex KeMutexRelease drop
+end
+
 fn ObDirectoryCreate { permissions name -- dirhandle ok }
 	auto dir
 
@@ -47,11 +59,16 @@ end
 fn ObDirectoryInsertPointer { object directory -- ok }
 	0 ok!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	ObRootDirectoryLock ok!
+
+	if (ok@)
+		return
+	end
 
 	if (object@ ObHeader_DirectoryObject + @)
-		rs@ HALCPUInterruptRestore
+		// object was already inserted in a directory
+
+		ObRootDirectoryUnlock
 
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -71,18 +88,23 @@ fn ObDirectoryInsertPointer { object directory -- ok }
 
 	directory@ object@ ObHeader_DirectoryObject + !
 
-	rs@ HALCPUInterruptRestore
+	ObRootDirectoryUnlock
 end
 
 fn ObDirectoryRemovePointer { object -- ok }
-	auto rs
-	HALCPUInterruptDisable rs!
+	ObRootDirectoryLock ok!
+
+	if (ok@)
+		return
+	end
 
 	auto dir
 	object@ ObHeader_DirectoryObject + @ dir!
 
 	if (dir@ ~~)
-		rs@ HALCPUInterruptRestore
+		// object was not in a directory
+
+		ObRootDirectoryUnlock
 
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -107,5 +129,5 @@ fn ObDirectoryRemovePointer { object -- ok }
 		n@ dir@ ObDirectory_ObjectListHead + !
 	end
 
-	rs@ HALCPUInterruptRestore
+	ObRootDirectoryUnlock
 end

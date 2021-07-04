@@ -16,6 +16,22 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+fn ObRootDirectoryLockUnalertable { -- }
+	auto ok
+
+	KERNELMODE // waitmode
+	0 // alertable
+	TIMEOUTINFINITE // timeout
+	ObRootMutex // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "ObRootDirectoryLockUnalertable: lock was unalertable but failed (%i)\n" KeCrash
+		end
+	end
+end
+
 fn ObRootDirectoryLock { -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
@@ -29,10 +45,18 @@ fn ObRootDirectoryUnlock { -- }
 end
 
 fn ObDirectoryCreate { permissions name -- dirhandle ok }
+	permissions@ name@ 0 ObDirectoryCreateFlags ok! dirhandle!
+end
+
+fn ObDirectoryCreatePermanent { permissions name -- dirhandle ok }
+	permissions@ name@ OBFLAGS_PERMANENT ObDirectoryCreateFlags ok! dirhandle!
+end
+
+fn ObDirectoryCreateFlags { permissions name flags -- dirhandle ok }
 	auto dir
 
 	name@ // name
-	0 // flags
+	flags@ // flags
 	permissions@ // permissions
 	SeUserCurrentGet // owninguser
 	ObDirectory_SIZEOF // bodysize
@@ -56,7 +80,84 @@ fn ObDirectoryCreate { permissions name -- dirhandle ok }
 	end
 end
 
-fn ObDirectoryInsertPointer { object directory -- ok }
+fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
+	auto dir
+	auto obj
+	auto access
+
+	ObTypeDirectoryType@ // type
+	directoryhandle@ // handle
+	ObObjectReferenceByHandle ok! dir! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		dir@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	0 // type (any)
+	objecthandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		dir@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		dir@ ObObjectDereferenceByPointer drop
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	obj@ ObHeader_SIZEOF - // object
+	dir@ // directory
+	ObDirectoryInsertByPointers ok!
+
+	dir@ ObObjectDereferenceByPointer drop
+	obj@ ObObjectDereferenceByPointer drop
+end
+
+fn ObDirectoryRemove { objecthandle -- ok }
+	auto obj
+	auto access
+
+	0 // type (any)
+	objecthandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	0 // locked
+	obj@ ObHeader_SIZEOF - // object
+	ObDirectoryRemoveByPointer ok!
+
+	obj@ ObObjectDereferenceByPointer drop
+end
+
+fn ObDirectoryInsertByPointers { object directory -- ok }
+	// must be passed the object's header'
+
 	0 ok!
 
 	ObRootDirectoryLock ok!
@@ -67,6 +168,16 @@ fn ObDirectoryInsertPointer { object directory -- ok }
 
 	if (object@ ObHeader_DirectoryObject + @)
 		// object was already inserted in a directory
+
+		ObRootDirectoryUnlock
+
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	if (object@ ObHeader_Name + @ ~~)
+		// no name! no bueno
 
 		ObRootDirectoryUnlock
 
@@ -89,13 +200,27 @@ fn ObDirectoryInsertPointer { object directory -- ok }
 	directory@ object@ ObHeader_DirectoryObject + !
 
 	ObRootDirectoryUnlock
+
+	directory@ ObObjectReferenceByPointer drop
 end
 
-fn ObDirectoryRemovePointer { object -- ok }
-	ObRootDirectoryLock ok!
+fn ObDirectoryRemoveByPointer { locked object -- ok }
+	// must be passed the object's header
 
-	if (ok@)
+	if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT &)
+		// don't remove from directory if permanent
+
+		STATUS_FORBIDDEN_OPERATION ok!
+
 		return
+	end
+
+	if (locked@ ~~)
+		ObRootDirectoryLock ok!
+
+		if (ok@)
+			return
+		end
 	end
 
 	auto dir
@@ -104,7 +229,9 @@ fn ObDirectoryRemovePointer { object -- ok }
 	if (dir@ ~~)
 		// object was not in a directory
 
-		ObRootDirectoryUnlock
+		if (locked@ ~~)
+			ObRootDirectoryUnlock
+		end
 
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -129,5 +256,51 @@ fn ObDirectoryRemovePointer { object -- ok }
 		n@ dir@ ObDirectory_ObjectListHead + !
 	end
 
-	ObRootDirectoryUnlock
+	0 object@ ObHeader_DirectoryObject + !
+
+	if (locked@ ~~)
+		ObRootDirectoryUnlock
+	end
+
+	dir@ ObObjectDereferenceByPointer drop
+end
+
+fn ObDirectoryDumpTree { directory spaces -- }
+	auto i
+	spaces@ i!
+
+	while (i@)
+		' ' Putc
+		1 i -=
+	end
+
+	directory@ ObHeader_Name + @ "%s/\n" Printf
+
+	auto obj
+	directory@ ObHeader_SIZEOF + ObDirectory_ObjectListHead + @ obj!
+
+	while (obj@)
+		if (obj@ ObHeader_TypeObject + @ ObTypeDirectoryType@ ==)
+			obj@ spaces@ 4 + ObDirectoryDumpTree
+		end else
+			spaces@ 4 + i!
+
+			while (i@)
+				' ' Putc
+				1 i -=
+			end
+
+			if (obj@ ObHeader_Name + @)
+				obj@ ObHeader_Name + @ "%s\n" Printf
+			end else
+				obj@ "UNNAMED [0x%08x]\n" Printf
+			end
+		end
+
+		obj@ ObHeader_DirectoryListNext + @ obj!
+	end
+end
+
+fn ObObjectReferenceByPath { path -- object }
+	
 end

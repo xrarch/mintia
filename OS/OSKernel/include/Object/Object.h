@@ -68,6 +68,10 @@ externptr ObTypeObjectType
 
 externptr ObTypeDirectoryType
 
+externptr ObRootDirectoryObject
+
+externptr ObObjectTypesDirectoryObject
+
 externptr ObRootMutex
 
 extern ObInitPhase0 { -- }

@@ -11,11 +11,19 @@
 
 #include "<inc>/Process.h"
 
+#include "<ll>/OSDLL/OS.h"
+
 var ObTypeObjectType 0
 public ObTypeObjectType
 
 var ObTypeDirectoryType 0
 public ObTypeDirectoryType
+
+var ObRootDirectoryObject 0
+public ObRootDirectoryObject
+
+var ObObjectTypesDirectoryObject 0
+public ObObjectTypesDirectoryObject
 
 buffer ObRootMutex KeMutex_SIZEOF
 public ObRootMutex
@@ -91,7 +99,83 @@ fn ObInitPhase0 { -- }
 end
 
 fn ObInitPhase1 { -- }
+	auto handle
+	auto ok
 
+	// create root directory object
+
+	ACCESS_OWNER_ALL ACCESS_GROUP_ALL | ACCESS_WORLD_READ | // permissions
+	"OSRoot" // name
+	ObDirectoryCreatePermanent ok! handle!
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't create root directory object (%i)\n" KeCrash
+	end
+
+	ObTypeDirectoryType@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! ObRootDirectoryObject! drop
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't reference root directory object (%i)\n" KeCrash
+	end
+
+	ObRootDirectoryObject@ ObRootDirectoryObject@ ObHeader_SIZEOF - ObHeader_DirectoryObject + !
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't close root directory object (%i)\n" KeCrash
+	end
+
+	// create type directory object
+
+	ACCESS_OWNER_ALL ACCESS_GROUP_ALL | ACCESS_WORLD_READ | // permissions
+	"ObjectTypes" // name
+	ObDirectoryCreatePermanent ok! handle!
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't create /ObjectTypes directory object (%i)\n" KeCrash
+	end
+
+	ObTypeDirectoryType@
+	handle@
+	ObObjectReferenceByHandle ok! ObObjectTypesDirectoryObject! drop
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't reference /ObjectTypes directory object (%i)\n" KeCrash
+	end
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't close /ObjectTypes directory object (%i)\n" KeCrash
+	end
+
+	ObObjectTypesDirectoryObject@ ObHeader_SIZEOF - // object
+	ObRootDirectoryObject@ // directory
+	ObDirectoryInsertByPointers ok!
+
+	if (ok@)
+		ok@ "ObInitPhase1: couldn't insert /ObjectTypes directory object into root directory (%i)\n" KeCrash
+	end
+
+	auto typeobj
+	ObTypeObjectType@ ObType_ObjectListHead + @ typeobj!
+
+	while (typeobj@)
+		typeobj@ // object
+		ObObjectTypesDirectoryObject@ // directory
+		ObDirectoryInsertByPointers ok!
+
+		if (ok@)
+			ok@ typeobj@ ObHeader_Name + @ "ObInitPhase1: couldn't insert type '%s' into /ObjectTypes (%i)\n" KeCrash
+		end
+
+		typeobj@ ObHeader_TypeListNext + @ typeobj!
+	end
+
+	// ObRootDirectoryObject@ ObHeader_SIZEOF - 0 ObDirectoryDumpTree
 end
 
 fn (ExHandleEnumFunction) ObHandleDestroyFunction { entryptr handle handletable -- }

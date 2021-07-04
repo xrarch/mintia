@@ -260,13 +260,20 @@ fn ObObjectHandleCountDecrement { object -- oldcount }
 	if (oldcount@ 1 ==)
 		ObRootDirectoryLockUnalertable
 
-		// test again to make sure it's still 0
+		// test the handle count again to make sure it's still 0.
+
+		// locking the root directory successfully serializes this case because
+		// it is also acquired during any attempt to open an object via namespace path,
+		// which is the ONLY time (other than object creation and handle inheritance)
+		// that the handle count is incremented.
 
 		if (object@ ObHeader_HandleCount + @ 0 ==)
 			if (object@ ObHeader_DirectoryObject + @)
-				1 // locked
-				object@ // object
-				ObDirectoryRemoveByPointer drop
+				if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
+					1 // locked
+					object@ // object
+					ObDirectoryRemoveByPointer drop
+				end
 			end
 		end
 
@@ -313,6 +320,12 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 
 	if (oldcount@ 1 ==)
 		// just decremented the pointer count to zero. delete the object
+
+		if (DEBUGCHECKS)
+			if (object@ ObHeader_DirectoryObject + @)
+				"ObObjectDereferenceByPointer: object was still linked into a directory\n" KeCrash
+			end
+		end
 
 		if (KeIPLCurrentGet IPLLOW ==)
 			// delete immediately

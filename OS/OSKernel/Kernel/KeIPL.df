@@ -16,8 +16,16 @@ fn KeIPLCurrentGet { -- ipl }
 	KeIPLCurrent@ ipl!
 end
 
-fn KeIPLSet { ipl -- }
-	ipl@ HALPlatformIPLSet
+fn KeIPLSet { old ipl -- }
+	// only call into the HAL if hardware interrupt level changed.
+	// no need to call in for software interrupt levels IPLLOW-IPLDPC.
+	// XXX ...or is there?
+
+	if (ipl@ IPLDPC >)
+		ipl@ HALPlatformIPLSet
+	end elseif (old@ IPLDPC >)
+		ipl@ HALPlatformIPLSet
+	end
 
 	ipl@ KeIPLCurrent!
 end
@@ -37,7 +45,7 @@ fn KeIPLRaise { newipl -- oldipl }
 		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not greater or equal (old=%s new=%s)\n" KeCrash
 	end
 
-	newipl@ KeIPLSet
+	oldipl@ newipl@ KeIPLSet
 
 	rs@ HALCPUInterruptRestore
 end
@@ -60,7 +68,7 @@ fn KeIPLLower { newipl -- }
 	end
 
 	if (newipl@ IPLDPC >=)
-		newipl@ KeIPLSet
+		oldipl@ newipl@ KeIPLSet
 
 		rs@ HALCPUInterruptRestore
 
@@ -72,7 +80,9 @@ fn KeIPLLower { newipl -- }
 		// this means that we've dropped below IPLDPC and may have some DPCs
 		// to process.
 
-		IPLDPC KeIPLSet
+		oldipl@ IPLDPC KeIPLSet
+
+		IPLDPC oldipl!
 
 		rs@ KeDPCDispatchQueue
 
@@ -85,7 +95,7 @@ fn KeIPLLower { newipl -- }
 		HALCPUInterruptDisable rs!
 	end
 
-	IPLAPC KeIPLSet
+	oldipl@ IPLAPC KeIPLSet
 
 	if (newipl@ IPLAPC ==)
 		rs@ HALCPUInterruptRestore
@@ -103,7 +113,7 @@ fn KeIPLLower { newipl -- }
 		HALCPUInterruptDisable rs!
 	end
 
-	newipl@ KeIPLSet
+	IPLAPC newipl@ KeIPLSet
 
 	rs@ HALCPUInterruptRestore
 end

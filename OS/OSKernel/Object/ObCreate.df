@@ -55,30 +55,6 @@ fn ObObjectCreate { name flags permissions owninguser bodysize type -- object ok
 		namebuf@ MmBlockChargeGet qcharge +=
 	end
 
-	auto h
-
-	0 object@ ObHeader_TypeListPrev + !
-	0 object@ ObHeader_TypeListNext + !
-
-	if (type@)
-		// insert in type list
-
-		auto rs
-		HALCPUInterruptDisable rs!
-
-		type@ ObType_ObjectListHead + @ h!
-
-		h@ object@ ObHeader_TypeListNext + !
-
-		if (h@)
-			object@ h@ ObHeader_TypeListPrev + !
-		end
-
-		object@ type@ ObType_ObjectListHead + !
-
-		rs@ HALCPUInterruptRestore
-	end
-
 	type@ object@ ObHeader_TypeObject + !
 
 	0 object@ ObHeader_DirectoryListPrev + !
@@ -97,6 +73,29 @@ fn ObObjectCreate { name flags permissions owninguser bodysize type -- object ok
 	qcharge@ object@ ObHeader_QuotaCharge + !
 
 	namebuf@ object@ ObHeader_Name + !
+
+	auto h
+
+	0 object@ ObHeader_TypeListPrev + !
+	0 object@ ObHeader_TypeListNext + !
+
+	if (type@)
+		// insert in type list
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		type@ ObType_ObjectListHead + @ h!
+
+		if (h@)
+			h@ object@ ObHeader_TypeListNext + !
+			object@ h@ ObHeader_TypeListPrev + !
+		end
+
+		object@ type@ ObType_ObjectListHead + !
+
+		rs@ HALCPUInterruptRestore
+	end
 
 	ObHeader_SIZEOF object +=
 end
@@ -201,20 +200,28 @@ fn ObTypeCreate { initializer -- type ok }
 		return
 	end
 
-	if (typetype@ ~~)
-		type@ ObTypeObjectType!
-		type@ type@ ObType_ObjectListHead + !
-
-		auto hdr
-		type@ ObHeader_SIZEOF - hdr!
-		
-		type@ hdr@ ObHeader_TypeObject + !
-	end
-
 	initializer@ ObTypeInitializer_Tag + @ type@ ObType_Tag + !
 
 	// initialize function fields
 	initializer@ ObTypeInitializer_OpenFunction + @ type@ ObType_OpenFunction + !
 	initializer@ ObTypeInitializer_CloseFunction + @ type@ ObType_CloseFunction + !
 	initializer@ ObTypeInitializer_DeleteFunction + @ type@ ObType_DeleteFunction + !
+
+	if (typetype@ ~~)
+		type@ ObTypeObjectType!
+		type@ ObHeader_SIZEOF - type@ ObType_ObjectListHead + !
+
+		auto hdr
+		type@ ObHeader_SIZEOF - hdr!
+
+		type@ hdr@ ObHeader_TypeObject + !
+	end elseif (ObObjectTypesDirectoryObject@)
+		type@ ObHeader_SIZEOF - // object
+		ObObjectTypesDirectoryObject@ // directory
+		ObDirectoryInsertByPointers ok!
+
+		if (ok@)
+			ok@ type@ ObHeader_SIZEOF - ObHeader_Name + @ "ObTypeCreate: couldn't insert type '%s' into /ObjectTypes (%i)\n" KeCrash
+		end
+	end
 end

@@ -264,8 +264,12 @@ fn ObObjectHandleCountDecrement { object -- oldcount }
 
 		// locking the root directory successfully serializes this case because
 		// it is also acquired during any attempt to open an object via namespace path,
-		// which is the ONLY time (other than object creation and handle inheritance)
+		// which is the ONLY time (other than object creation, handle inheritance, and handle duplication)
 		// that the handle count is incremented.
+
+		// XXX does it successfully serialize this case? seems a bit race-y but I can't tell for sure.
+		// if there is a race condition then the result is corruption of the directory structure;
+		// directories can contain objects which have a handle count of 0 (and therefore may have been deallocated...)
 
 		if (object@ ObHeader_HandleCount + @ 0 ==)
 			if (object@ ObHeader_DirectoryObject + @)
@@ -330,6 +334,8 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 		if (KeIPLCurrentGet IPLLOW ==)
 			// delete immediately
 
+			KeThreadCurrent@ KeThreadIgnoreKill drop
+
 			object@ ObHeader_SIZEOF + ObObjectFree ok!
 
 			if (DEBUGCHECKS)
@@ -337,6 +343,8 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 					"ObObjectDereferenceByPointer: failed to free object\n" KeCrash
 				end
 			end
+
+			KeThreadCurrent@ KeThreadAcceptKill drop
 		end else
 			// can't delete objects at >=IPLAPC, queue a work item
 

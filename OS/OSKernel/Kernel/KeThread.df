@@ -94,7 +94,11 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_WaitCount + !
 
-	KERNELMODE thread@ KeThread_PreviousMode + !
+	0 thread@ KeThread_IgnoreKill + !
+
+	if (process@ KeProcess_MainThread + @ ~~)
+		thread@ process@ KeProcess_MainThread + !
+	end
 
 	auto i
 	0 i!
@@ -152,6 +156,34 @@ fn KeThreadUninitialize { thread -- }
 	rs@ HALCPUInterruptRestore
 end
 
+fn KeThreadIgnoreKill { thread -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_IgnoreKill + @ oldcount!
+
+	1 thread@ KeThread_IgnoreKill + +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeThreadAcceptKill { thread -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_IgnoreKill + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"KeThreadAcceptKill: attempt to accept kill more than kill was ignored\n" KeCrash
+		end
+	end
+
+	1 thread@ KeThread_IgnoreKill + -=
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn KeThreadUserAPCDisable { thread -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -169,7 +201,7 @@ fn KeThreadUserAPCEnable { thread -- oldcount }
 
 	thread@ KeThread_UserAPCDisableCount + @ oldcount!
 
-	if (thread@ KeThread_UserAPCDisableCount + @ 0 ==)
+	if (oldcount@ 0 ==)
 		rs@ HALCPUInterruptRestore
 
 		return

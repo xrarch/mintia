@@ -4,6 +4,8 @@ struct PsProcess
 	4 GlobalListNext
 	4 GlobalListPrev
 
+	4 PID
+
 	// memory management
 
 	4 QuotaBlock
@@ -44,7 +46,7 @@ extern PsInitPhase0 { -- }
 
 extern PsInitPhase1 { -- }
 
-extern PsProcessCreate { permissions name -- processhandle ok }
+extern PsProcessCreate { inherithandles owninguser parentprocess permissions name -- processhandle ok }
 
 extern PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
 

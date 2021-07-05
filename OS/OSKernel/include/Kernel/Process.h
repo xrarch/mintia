@@ -36,6 +36,8 @@ struct KeProcess
 	4 ProcessStatus
 
 	4 BasePriority
+
+	4 MainThread
 endstruct
 
 const THREADYIELD_PREEMPTED  1
@@ -86,7 +88,7 @@ struct KeThread
 	4 BaseQuantum
 	4 Quantum
 
-	4 PreviousMode
+	4 IgnoreKill
 
 	4 WaitMode
 	4 WaitStatus
@@ -128,6 +130,10 @@ externptr KeProcessIdleProcess
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
 
 extern KeThreadUninitialize { thread -- }
+
+extern KeThreadIgnoreKill { thread -- oldcount }
+
+extern KeThreadAcceptKill { thread -- oldcount }
 
 extern KeThreadUserAPCDisable { thread -- oldcount }
 

@@ -64,6 +64,8 @@ const OBFLAGS_PERMANENT 1
 
 const OBHANDLEENTRYSIZELOG 1 // 4<<1 = 8 bytes
 
+const OBNAMEMAX 64
+
 externptr ObTypeObjectType
 
 externptr ObTypeDirectoryType

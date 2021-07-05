@@ -80,6 +80,8 @@ extern ObInitPhase1 { -- }
 
 extern ObHandleDestroyFunction { entryptr handle handletable -- }
 
+extern ObHandleInheritFunction { entryptr handle handletable -- }
+
 extern ObObjectCreate { name flags permissions owninguser bodysize type -- object ok }
 
 extern ObObjectFree { object -- ok }

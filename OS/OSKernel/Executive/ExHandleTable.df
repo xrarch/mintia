@@ -18,9 +18,9 @@ fn ExHandleTableDelete { func handletable -- }
 	auto ok
 
 	if (DEBUGCHECKS)
-		// this check isnt foolproof or anything because nothing stops someone from
-		// locking the mutex between here and the table's destruction,
-		// but its useful anyway
+		// this check isnt foolproof or anything because nothing stops
+		// someone with a stray pointer from locking the mutex between
+		// here and the table's destruction, but its useful anyway
 
 		if (handletable@ ExHandleTableHeader_Mutex + KeMutexIsLocked)
 			"ExHandleTableDelete: attempt to delete handle table while locked\n" KeCrash
@@ -79,8 +79,131 @@ fn ExHandleTableDelete { func handletable -- }
 	handletable@ MmFree
 end
 
-fn ExHandleTableDuplicate { handletablesrc -- handletable ok }
-	"ExHandleTableDuplicate: NYI\n" KeCrash
+fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok }
+	"ExHandleTableDuplicate: please review me\n" KeCrash
+
+	handletablesrc@ ExHandleTableLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto entrysizelog
+	handletablesrc@ ExHandleTableHeader_EntrySizeLog + @ entrysizelog!
+
+	chargedprocess@ // chargedprocess
+	entrysizelog@ // entrysizelog
+	ExHandleTableCreate ok! handletable!
+
+	if (ok@)
+		handletablesrc@ ExHandleTableUnlock
+
+		return
+	end
+
+	auto entrysize
+	4 entrysizelog@ << entrysize!
+
+	auto entries
+	handletablesrc@ ExHandleTableHeader_Entries + @ entries!
+
+	entries@ handletable@ ExHandleTableHeader_Entries + !
+	handletablesrc@ ExHandleTableHeader_FreeEntries + @ handletable@ ExHandleTableHeader_FreeEntries + !
+
+	// copy initial table
+
+	auto tabsize
+	INITIALENTRIES entrysize@ * tabsize!
+
+	handletable@ ExHandleTableHeader_SIZEOF + // dest
+	handletablesrc@ ExHandleTableHeader_SIZEOF + // src
+	tabsize@ // size
+	memcpy
+
+	auto tab
+	handletablesrc@ ExHandleTableHeader_Table + @ tab!
+
+	if (tab@)
+		// we need to allocate and copy the extended table
+
+		if (chargedprocess@)
+			tab@ MmBlockChargeGet
+			chargedprocess@ MmQuotaChargeProcess ok!
+
+			if (ok@)
+				// process does not have enough quota
+
+				handletablesrc@ ExHandleTableUnlock
+
+				// XXX careful with this call. the handle table is actually inconsistent here,
+				// but this happens to work anyway without breaking ExHandleTableDelete. for now.
+				0 handletable@ ExHandleTableDelete
+
+				return
+			end
+		end
+
+		INITIALENTRIES entries -=
+
+		if (DEBUGCHECKS)
+			if (entries@ 0 s<=)
+				"ExHandleTableDuplicate: bad number of extended entries (0x%08x)\n" KeCrash
+			end
+		end
+
+		entries@ entrysize@ * tabsize!
+
+		auto newtab
+		tabsize@ 'HnTd' MmAllocWithTag ok! newtab!
+
+		if (ok@)
+			if (chargedprocess@)
+				tab@ MmBlockChargeGet
+				chargedprocess@ MmQuotaUnchargeProcess
+			end
+
+			handletablesrc@ ExHandleTableUnlock
+
+			// XXX careful with this call. the handle table is actually inconsistent here,
+			// but this happens to work anyway without breaking ExHandleTableDelete. for now.
+			0 handletable@ ExHandleTableDelete
+
+			return
+		end
+
+		newtab@ // dest
+		tab@ // src
+		tabsize@ // size
+		memcpy
+
+		newtab@ handletable@ ExHandleTableHeader_Table + !		
+	end
+
+	auto i
+	auto entryptr
+
+	if (func@)
+		// call a function for each handle
+
+		0 i!
+
+		handletable@ ExHandleTableHeader_Entries + @ entries!
+
+		while (i@ entries@ <)
+			i@
+			handletable@
+			1 // locked
+			ExHandleLookup ok! entryptr!
+
+			if (ok@ 0 ==)
+				entryptr@ i@ handletable@ func@ ExHandleEnumFunction
+			end
+
+			1 i +=
+		end
+	end
+
+	handletablesrc@ ExHandleTableUnlock
 end
 
 fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
@@ -142,7 +265,7 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 	INITIALENTRIES handletable@ ExHandleTableHeader_Entries + !
 	INITIALENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
 
-	0 handletable@ ExHandleTableHeader_RecycleHandle + !
+	-1 handletable@ ExHandleTableHeader_RecycleHandle + !
 
 	0 handletable@ ExHandleTableHeader_Table + !
 
@@ -347,6 +470,11 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			entries@ INITIALENTRIES - logsize@ << tabsize!
 
 			if (chargedprocess@)
+				// BUGBUG there is a race condition here where the process's quota
+				// may become inconsistent if a charge is allowed to succeed in the middle
+				// of this operation!! should be reworked so that we only ever charge & uncharge
+				// the whole new chunk at once
+
 				// we do this in a weird way.
 				// first we uncharge the quota for the extended table,
 				// then we re-charge the quota for the new size of the extended table.

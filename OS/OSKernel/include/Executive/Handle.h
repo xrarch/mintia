@@ -25,7 +25,7 @@ extern ExHandleTableLock { handletable -- ok }
 
 extern ExHandleTableUnlock { handletable -- }
 
-extern ExHandleTableDuplicate { handletablesrc -- handletable ok }
+extern ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok }
 
 extern ExHandleDelete { handle handletable locked -- entryvalue ok }
 

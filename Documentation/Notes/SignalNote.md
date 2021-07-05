@@ -12,4 +12,4 @@ When `Signalled` is set to SIGNALLED, the thread will be rigged to jump to the O
 
 ## Main thread
 
-Processes will have a concept of "main thread". Threads will be signal-able on their own once you have acquired a handle to one with the EXEC permission, but processes themselves also need to be signalled. This will be accomplished by delivering the signal to the "main thread". If the main thread of a process terminates, its main-ness transfers to the first thread in the process thread list. If there are no threads in the process thread list, the process is obviously dead and doesn't need to be signalled anyway.
+Processes will have a "main thread". Threads will be signal-able on their own once you have acquired a handle to one with the EXEC permission, but processes themselves also need to be signalled. This will be accomplished by delivering the signal to the "main thread", which is just the initial thread the process is created with. If the main thread of a process terminates, all other threads in the process are terminated and the process exits.

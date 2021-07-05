@@ -20,16 +20,26 @@
 
 #include "<inc>/HALDebug.h"
 
-fn PsProcessCreate { permissions name -- processhandle ok }
-	auto current
-	KeProcessCurrent current!
+fn PsProcessCreate { inherithandles owninguser parentprocess permissions name -- processhandle ok }
+	auto initial
+	0 initial!
+
+	if (parentprocess@ ~~)
+		if (KeProcessCurrent KeProcessIdleProcess ~=)
+			"PsProcessCreate: no parent process specified but not the idle process\n" KeCrash
+		end
+
+		KeProcessIdleProcess parentprocess!
+
+		1 initial!
+	end
 
 	auto process
 
 	name@ // name
 	0 // flags
 	permissions@ // permissions
-	SeUserCurrentGet // owninguser
+	owninguser@ // owninguser
 	PsProcess_SIZEOF // bodysize
 	PsProcessObjectType@ // type
 	ObObjectCreate ok! process!
@@ -38,26 +48,45 @@ fn PsProcessCreate { permissions name -- processhandle ok }
 		return
 	end
 
-	current@ PsProcess_OwningUser + @ process@ PsProcess_OwningUser + !
+	owninguser@ process@ PsProcess_OwningUser + !
 
 	auto quotablock
-	current@ PsProcess_QuotaBlock + @ quotablock!
+	parentprocess@ PsProcess_QuotaBlock + @ quotablock!
 
 	quotablock@ MmQuotaBlockReference
 	quotablock@ process@ PsProcess_QuotaBlock + !
 
 	auto handletable
 
-	process@ // chargedprocess
-	OBHANDLEENTRYSIZELOG // entrysizelog
-	ExHandleTableCreate ok! handletable!
+	if (initial@ ~~)
+		if (inherithandles@)
+			parentprocess@ PsProcess_HandleTable + @ // handletable
+			ExHandleTableDuplicate ok! handletable!
 
-	if (ok@)
-		quotablock@ MmQuotaBlockDereference
+			if (ok@)
+				quotablock@ MmQuotaBlockDereference
 
-		process@ ObObjectDeallocate
+				process@ ObObjectDeallocate
 
-		return
+				return
+			end
+		end else
+			process@ // chargedprocess
+			OBHANDLEENTRYSIZELOG // entrysizelog
+			ExHandleTableCreate ok! handletable!
+
+			if (ok@)
+				quotablock@ MmQuotaBlockDereference
+
+				process@ ObObjectDeallocate
+
+				return
+			end
+		end
+	end else
+		// save some heap and reuse the idle process handle table
+
+		parentprocess@ PsProcess_HandleTable + @ handletable!
 	end
 
 	handletable@ process@ PsProcess_HandleTable + !
@@ -67,12 +96,35 @@ fn PsProcessCreate { permissions name -- processhandle ok }
 	if (ok@)
 		quotablock@ MmQuotaBlockDereference
 
-		0 handletable@ ExHandleTableDelete
+		if (initial@ ~~)
+			0 handletable@ ExHandleTableDelete
+		end
 
 		process@ ObObjectDeallocate
 
 		return
 	end
+
+	auto pid
+
+	process@ // entryvalue
+	PsProcessTable@ // handletable
+	0 // locked
+	ExHandleCreate ok! drop pid!
+
+	if (ok@)
+		quotablock@ MmQuotaBlockDereference
+
+		if (initial@ ~~)
+			0 handletable@ ExHandleTableDelete
+		end
+
+		process@ ObObjectDeallocate
+
+		return
+	end
+
+	pid@ process@ PsProcess_PID + !
 
 	// put it on the global process list
 
@@ -92,7 +144,7 @@ fn PsProcessCreate { permissions name -- processhandle ok }
 
 	rs@ HALCPUInterruptRestore
 
-	permissions@ 6 >> // permissions. open with maximum permissions that the owner gave themselves.
+	permissions@ 6 >> // permissions. open with maximum owner permissions (even if caller isn't the specified owner.)
 	process@ // process
 	ObObjectOpen ok! processhandle!
 

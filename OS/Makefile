@@ -1,4 +1,4 @@
-LOAD_DIR := Loader
+LOAD_DIR := Loader/LIMNstation
 KERN_DIR := OSKernel
 HAL_DIR  := HAL
 DBG_DIR  := 224Debug

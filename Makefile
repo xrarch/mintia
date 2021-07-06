@@ -7,7 +7,7 @@ DISKLABEL  := ./Distribution/DiskLabel.vh
 OFFSET     := 2
 
 OS_DIR     := ./OS
-LOAD_DIR   := $(OS_DIR)/Loader
+LOAD_DIR   := $(OS_DIR)/Loader/LIMNstation
 KERN_DIR   := $(OS_DIR)/OSKernel
 LIB_DIR    := $(OS_DIR)/Library
 HAL_DIR    := $(OS_DIR)/HAL

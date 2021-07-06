@@ -1,4 +1,4 @@
-#include "LoaderGlobal.h"
+#include "../LoaderGlobal.h"
 
 extern ArgsInit { argp -- }
 extern ArgsValue { arg -- out }

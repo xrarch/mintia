@@ -1,4 +1,4 @@
-fnptr ExHandleEnumFunction { entryptr handle handletable -- }
+fnptr ExHandleEnumFunction { entryptr handle handletable -- ok }
 
 const INITIALENTRIES 16
 

@@ -30,6 +30,7 @@ struct ObType
 	4 OpenFunction
 	4 CloseFunction
 	4 DeleteFunction
+	4 ParseFunction
 endstruct
 
 struct ObTypeInitializer
@@ -42,6 +43,7 @@ struct ObTypeInitializer
 	4 OpenFunction
 	4 CloseFunction
 	4 DeleteFunction
+	4 ParseFunction
 endstruct
 
 struct ObDirectory
@@ -59,6 +61,8 @@ fnptr ObTypeOpenFunction { object process -- ok }
 fnptr ObTypeCloseFunction { object process -- }
 
 fnptr ObTypeDeleteFunction { object -- }
+
+fnptr ObTypeParseFunction { -- }
 
 const OBFLAGS_PERMANENT 1
 

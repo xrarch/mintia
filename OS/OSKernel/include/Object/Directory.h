@@ -19,3 +19,9 @@ extern ObDirectoryRemoveByPointer { locked object -- ok }
 extern ObDirectoryInsertByPointers { object directory -- ok }
 
 extern ObDirectoryDumpTree { directory spaces -- }
+
+extern ObObjectReferenceByPath { path initialobject process -- object ok }
+
+extern ObObjectOpenByPath { access initialobjecthandle path -- handle ok }
+
+extern ObObjectOpenByPathProcess { access initialobject path process -- handle ok }

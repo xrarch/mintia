@@ -14,6 +14,8 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Process.h"
+
 #include "<ll>/OSDLL/OS.h"
 
 fn ObRootDirectoryLockUnalertable { -- }
@@ -213,9 +215,9 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 
 	directory@ object@ ObHeader_DirectoryObject + !
 
-	ObRootDirectoryUnlock
-
 	directory@ ObObjectReferenceByPointer drop
+
+	ObRootDirectoryUnlock
 end
 
 fn ObDirectoryRemoveByPointer { locked object -- ok }
@@ -272,11 +274,11 @@ fn ObDirectoryRemoveByPointer { locked object -- ok }
 
 	0 object@ ObHeader_DirectoryObject + !
 
+	dir@ ObObjectDereferenceByPointer drop
+
 	if (locked@ ~~)
 		ObRootDirectoryUnlock
 	end
-
-	dir@ ObObjectDereferenceByPointer drop
 end
 
 fn ObDirectoryDumpTree { directory spaces -- }
@@ -315,6 +317,213 @@ fn ObDirectoryDumpTree { directory spaces -- }
 	end
 end
 
-fn ObObjectReferenceByPath { path -- object }
-	
+fn ObObjectReferenceByPath { path initialobject process -- object ok }
+	if (initialobject@ ~~)
+		ObRootDirectoryObject@ object!
+	end else
+		initialobject@ object!
+	end
+
+	auto pcomp
+	OBNAMEMAX alloc pcomp!
+
+	ObRootDirectoryLock ok!
+
+	if (ok@)
+		return
+	end
+
+	while (1)
+		auto obh
+		object@ ObHeader_SIZEOF - obh!
+
+		auto typeobj
+		obh@ ObHeader_TypeObject + @ typeobj!
+
+		while (path@ gb '/' ==)
+			1 path +=
+		end
+
+		if (path@ gb 0 ~=)
+			if (typeobj@ ObTypeDirectoryType@ ==)
+				if (process@)
+					// check traverse rights
+
+					ACCESS_EXEC // access
+					object@ // object
+					process@ PsProcess_OwningUser + @ // user
+					SeCheckAccessObjectUser ok!
+
+					if (ok@)
+						ObRootDirectoryUnlock
+
+						return
+					end
+				end
+
+				auto len
+				0 len!
+
+				while (1)
+					if (path@ gb '/' ==)
+						break
+					end
+
+					if (path@ gb 0 ==)
+						break
+					end
+
+					if (len@ OBNAMEMAX 1 - >=)
+						ObRootDirectoryUnlock
+
+						STATUS_NAME_TOO_LONG ok!
+
+						return
+					end
+
+					path@ gb pcomp@ len@ + sb
+
+					1 len +=
+					1 path +=
+				end
+
+				0 pcomp@ len@ + sb
+
+				if (pcomp@ "." strcmp)
+					continue
+				end
+
+				if (pcomp@ ".." strcmp)
+					if (obh@ ObHeader_DirectoryObject + @)
+						obh@ ObHeader_DirectoryObject + @ object!
+
+						continue
+					end else
+						continue
+					end
+				end
+
+				auto searchobj
+				object@ ObDirectory_ObjectListHead + @ searchobj!
+
+				0 object!
+
+				while (searchobj@)
+					if (DEBUGCHECKS)
+						if (searchobj@ ObHeader_Name + @ ~~)
+							"ObObjectReferenceByPath: object was in a directory but had no name\n" KeCrash
+						end
+					end
+
+					if (searchobj@ ObHeader_Name + @ pcomp@ strcmp)
+						// found it !!!
+
+						searchobj@ ObHeader_SIZEOF + object!
+
+						break
+					end
+
+					searchobj@ ObHeader_DirectoryListNext + @ searchobj!
+				end
+
+				if (object@ ~~)
+					ObRootDirectoryUnlock
+
+					STATUS_NOT_FOUND ok!
+
+					return
+				end
+			end else
+				object@ ObObjectReferenceByPointer drop
+
+				ObRootDirectoryUnlock
+
+				// not a directory. call the parse method for this object and return whatever it gives.
+				// if this is a device object, this is interesting for the filesystem, since this is
+				// the source of all file objects when performing an open operation.
+
+				auto parsefunc
+				0 parsefunc!
+
+				if (typeobj@)
+					typeobj@ ObType_ParseFunction + @ parsefunc!
+				end
+
+				if (parsefunc@ ~~)
+					object@ ObObjectDereferenceByPointer drop
+
+					STATUS_NOT_A_DIRECTORY ok!
+
+					return
+				end
+
+				path@ // path
+				object@ // initialobject
+				process@ // process
+				parsefunc@ ObTypeParseFunction ok! initialobject!
+
+				object@ ObObjectDereferenceByPointer drop
+
+				initialobject@ object!
+
+				return
+			end
+		end else
+			// no more path components, return object
+
+			object@ ObObjectReferenceByPointer drop
+
+			ObRootDirectoryUnlock
+
+			0 ok!
+
+			return
+		end
+	end
+
+	ObRootDirectoryUnlock
+end
+
+fn ObObjectOpenByPath { access initialobjecthandle path -- handle ok }
+	auto initialobject
+
+	if (initialobjecthandle@ -1 ==)
+		0 initialobject!
+	end else
+		0 // type
+		initialobjecthandle@ // handle
+		ObObjectReferenceByHandle ok! initialobject! drop // just drop the access bits, ObObjectReferenceByPath will take care of that
+
+		if (ok@)
+			return
+		end
+	end
+
+	access@ // access
+	initialobject@ // initialobject
+	path@ // path
+	KeProcessCurrent // process
+	ObObjectOpenByPathProcess ok! handle!
+
+	if (initialobject@)
+		initialobject@ ObObjectDereferenceByPointer drop
+	end
+end
+
+fn ObObjectOpenByPathProcess { access initialobject path process -- handle ok }
+	auto object
+
+	path@ // path
+	initialobject@ // initialobject
+	process@  // process
+	ObObjectReferenceByPath ok! object!
+
+	if (ok@)
+		return
+	end
+
+	access@ // access
+	object@ // object
+	process@ // process
+	ObObjectOpenProcess ok! handle!
 end

@@ -62,7 +62,7 @@ fnptr ObTypeCloseFunction { object process -- }
 
 fnptr ObTypeDeleteFunction { object -- }
 
-fnptr ObTypeParseFunction { path initialobject process -- object ok }
+fnptr ObTypeParseFunction { flags path initialobject process -- reparsepath object ok }
 
 const OBFLAGS_PERMANENT 1
 

@@ -317,12 +317,15 @@ fn ObDirectoryDumpTree { directory spaces -- }
 	end
 end
 
-fn ObObjectReferenceByPath { path initialobject process -- object ok }
+fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 	if (initialobject@ ~~)
 		ObRootDirectoryObject@ object!
 	end else
 		initialobject@ object!
 	end
+
+	auto heapcookie
+	0 heapcookie!
 
 	auto pcomp
 	OBNAMEMAX alloc pcomp!
@@ -340,151 +343,218 @@ fn ObObjectReferenceByPath { path initialobject process -- object ok }
 		auto typeobj
 		obh@ ObHeader_TypeObject + @ typeobj!
 
-		while (path@ gb '/' ==)
-			1 path +=
-		end
-
-		if (path@ gb 0 ~=)
-			if (typeobj@ ObTypeDirectoryType@ ==)
-				if (process@)
-					// check traverse rights
-
-					ACCESS_EXEC // access
-					object@ // object
-					process@ PsProcess_OwningUser + @ // user
-					SeCheckAccessObjectUser ok!
-
-					if (ok@)
-						ObRootDirectoryUnlock
-
-						return
-					end
-				end
-
-				auto len
-				0 len!
-
-				while (1)
-					if (path@ gb '/' ==)
-						break
-					end
-
-					if (path@ gb 0 ==)
-						break
-					end
-
-					if (len@ OBNAMEMAX 1 - >=)
-						ObRootDirectoryUnlock
-
-						STATUS_NAME_TOO_LONG ok!
-
-						return
-					end
-
-					path@ gb pcomp@ len@ + sb
-
-					1 len +=
-					1 path +=
-				end
-
-				0 pcomp@ len@ + sb
-
-				if (pcomp@ "." strcmp)
-					continue
-				end
-
-				if (pcomp@ ".." strcmp)
-					if (obh@ ObHeader_DirectoryObject + @)
-						obh@ ObHeader_DirectoryObject + @ object!
-
-						continue
-					end else
-						continue
-					end
-				end
-
-				auto searchobj
-				object@ ObDirectory_ObjectListHead + @ searchobj!
-
-				0 object!
-
-				while (searchobj@)
-					if (DEBUGCHECKS)
-						if (searchobj@ ObHeader_Name + @ ~~)
-							"ObObjectReferenceByPath: object was in a directory but had no name\n" KeCrash
-						end
-					end
-
-					if (searchobj@ ObHeader_Name + @ pcomp@ strcmp)
-						// found it !!!
-
-						searchobj@ ObHeader_SIZEOF + object!
-
-						break
-					end
-
-					searchobj@ ObHeader_DirectoryListNext + @ searchobj!
-				end
-
-				if (object@ ~~)
-					ObRootDirectoryUnlock
-
-					STATUS_NOT_FOUND ok!
-
-					return
-				end
-			end else
-				object@ ObObjectReferenceByPointer drop
-
-				ObRootDirectoryUnlock
-
-				// not a directory. call the parse method for this object and return whatever it gives.
-				// if this is a device object, this is interesting for the filesystem, since this is
-				// the source of all file objects when performing an open operation.
-
-				auto parsefunc
-				0 parsefunc!
-
-				if (typeobj@)
-					typeobj@ ObType_ParseFunction + @ parsefunc!
-				end
-
-				if (parsefunc@ ~~)
-					object@ ObObjectDereferenceByPointer drop
-
-					STATUS_NOT_A_DIRECTORY ok!
-
-					return
-				end
-
-				path@ // path
-				object@ // initialobject
-				process@ // process
-				parsefunc@ ObTypeParseFunction ok! initialobject!
-
-				object@ ObObjectDereferenceByPointer drop
-
-				initialobject@ object!
-
-				return
-			end
-		end else
-			// no more path components, return object
-
+		if (typeobj@ ObTypeDirectoryType@ ~=)
 			object@ ObObjectReferenceByPointer drop
 
 			ObRootDirectoryUnlock
 
-			0 ok!
+			// not a directory. call the parse method for this object and return whatever it gives.
+			// if this is a device object, this is interesting for the filesystem, since this is
+			// the source of all file objects when performing an open operation.
+
+			auto parsefunc
+			0 parsefunc!
+
+			if (typeobj@)
+				typeobj@ ObType_ParseFunction + @ parsefunc!
+			end
+
+			if (parsefunc@ ~~)
+				if (path@ gb 0 ~=)
+					// there's more path left but no parse method
+
+					object@ ObObjectDereferenceByPointer drop
+
+					STATUS_NOT_A_DIRECTORY ok!
+				end else
+					// no more path left, return object as-is
+
+					0 ok!
+				end
+
+				if (heapcookie@)
+					heapcookie@ MmFree
+					0 heapcookie!
+				end
+
+				return
+			end
+
+			auto reparsepath
+
+			flags@ // flags
+			path@ // path
+			object@ // initialobject
+			process@ // process
+			parsefunc@ ObTypeParseFunction ok! initialobject! reparsepath!
+
+			object@ ObObjectDereferenceByPointer drop
+
+			initialobject@ object!
+
+			if (reparsepath@)
+				// start over
+
+				if (heapcookie@)
+					heapcookie@ MmFree
+					0 heapcookie!
+				end
+
+				// the reparsepath will always be on the heap
+				reparsepath@ heapcookie!
+				reparsepath@ path!
+
+				ObRootDirectoryLockUnalertable
+
+				ObRootDirectoryObject object!
+
+				continue
+			end
+
+			if (heapcookie@)
+				heapcookie@ MmFree
+				0 heapcookie!
+			end
 
 			return
+		end else
+			while (path@ gb '/' ==)
+				1 path +=
+			end
+
+			if (path@ gb 0 ==)
+				// no more path, return directory object itself
+
+				object@ ObObjectReferenceByPointer drop
+
+				ObRootDirectoryUnlock
+
+				if (heapcookie@)
+					heapcookie@ MmFree
+					0 heapcookie!
+				end
+
+				return
+			end
+
+			// more path, traverse
+
+			if (process@)
+				// check traverse rights
+
+				ACCESS_EXEC // access
+				object@ // object
+				process@ PsProcess_OwningUser + @ // user
+				SeCheckAccessObjectUser ok!
+
+				if (ok@)
+					// no rights
+
+					ObRootDirectoryUnlock
+
+					if (heapcookie@)
+						heapcookie@ MmFree
+						0 heapcookie!
+					end
+
+					return
+				end
+			end
+
+			auto len
+			0 len!
+
+			while (1)
+				if (path@ gb '/' ==)
+					break
+				end
+
+				if (path@ gb 0 ==)
+					break
+				end
+
+				if (len@ OBNAMEMAX 1 - >=)
+					ObRootDirectoryUnlock
+
+					if (heapcookie@)
+						heapcookie@ MmFree
+						0 heapcookie!
+					end
+
+					STATUS_NAME_TOO_LONG ok!
+
+					return
+				end
+
+				path@ gb pcomp@ len@ + sb
+
+				1 len +=
+				1 path +=
+			end
+
+			0 pcomp@ len@ + sb
+
+			if (pcomp@ "." strcmp)
+				continue
+			end
+
+			if (pcomp@ ".." strcmp)
+				if (obh@ ObHeader_DirectoryObject + @)
+					obh@ ObHeader_DirectoryObject + @ object!
+
+					continue
+				end else
+					continue
+				end
+			end
+
+			auto searchobj
+			object@ ObDirectory_ObjectListHead + @ searchobj!
+
+			0 object!
+
+			while (searchobj@)
+				if (DEBUGCHECKS)
+					if (searchobj@ ObHeader_Name + @ ~~)
+						"ObObjectReferenceByPath: object was in a directory but had no name\n" KeCrash
+					end
+				end
+
+				if (searchobj@ ObHeader_Name + @ pcomp@ strcmp)
+					// found it !!!
+
+					searchobj@ ObHeader_SIZEOF + object!
+
+					break
+				end
+
+				searchobj@ ObHeader_DirectoryListNext + @ searchobj!
+			end
+
+			if (object@ ~~)
+				ObRootDirectoryUnlock
+
+				if (heapcookie@)
+					heapcookie@ MmFree
+					0 heapcookie!
+				end
+
+				STATUS_NOT_FOUND ok!
+
+				return
+			end
 		end
 	end
 
 	ObRootDirectoryUnlock
+
+	if (heapcookie@)
+		heapcookie@ MmFree
+		0 heapcookie!
+	end
 end
 
-fn ObObjectOpenByPath { access initialobjecthandle path -- handle ok }
+fn ObObjectOpenByPath { flags access initialobjecthandle path -- handle ok }
 	auto initialobject
 
 	if (initialobjecthandle@ -1 ==)
@@ -499,6 +569,7 @@ fn ObObjectOpenByPath { access initialobjecthandle path -- handle ok }
 		end
 	end
 
+	flags@ // flags
 	access@ // access
 	initialobject@ // initialobject
 	path@ // path
@@ -510,9 +581,10 @@ fn ObObjectOpenByPath { access initialobjecthandle path -- handle ok }
 	end
 end
 
-fn ObObjectOpenByPathProcess { access initialobject path process -- handle ok }
+fn ObObjectOpenByPathProcess { flags access initialobject path process -- handle ok }
 	auto object
 
+	flags@ // flags
 	path@ // path
 	initialobject@ // initialobject
 	process@  // process
@@ -526,4 +598,8 @@ fn ObObjectOpenByPathProcess { access initialobject path process -- handle ok }
 	object@ // object
 	process@ // process
 	ObObjectOpenProcess ok! handle!
+
+	if (ok@)
+		object@ ObObjectDereferenceByPointer drop
+	end
 end

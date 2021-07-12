@@ -22,9 +22,19 @@ extern IOFileClose { object process -- }
 extern IOFileDelete { object -- }
 
 struct IOFile
-	4 ReadOffset
-	4 WriteOffset
+	4 FileControlBlock
+	4 Offset
 	4 DeviceObject
 	4 Flags
 	4 Type
 endstruct
+
+struct IOFileControlBlock
+	4 Flags
+	4 CacheInfoBlock
+	4 References
+endstruct
+
+extern IOFileControlBlockReference { fcb -- oldcount }
+
+extern IOFileControlBlockDereference { fcb -- oldcount }

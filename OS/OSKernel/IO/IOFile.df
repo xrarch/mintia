@@ -33,8 +33,7 @@ fn IOFileCreateObject { flags owninguser -- fileobject ok }
 	IOFileTypeObject@ // type
 	ObObjectCreate ok! fileobject!
 
-	0 fileobject@ IOFile_ReadOffset + !
-	0 fileobject@ IOFile_WriteOffset + !
+	0 fileobject@ IOFile_Offset + !
 
 	flags@ fileobject@ IOFile_Flags + !
 end
@@ -54,6 +53,8 @@ fn (ObTypeOpenFunction) IOFileOpen { object process -- ok }
 
 		return
 	end else
+		// dispatch to filesystem driver
+
 		"IOFileOpen: NYI\n" KeCrash
 	end
 end
@@ -81,6 +82,8 @@ fn (ObTypeCloseFunction) IOFileClose { object process -- }
 
 		return
 	end else
+		// dispatch to filesystem driver
+
 		"IOFileClose: NYI\n" KeCrash
 	end
 end
@@ -108,6 +111,62 @@ fn (ObTypeDeleteFunction) IOFileDelete { object -- }
 
 		return
 	end else
+		// dispatch to filesystem driver
+
 		"IOFileDelete: NYI\n" KeCrash
+	end
+end
+
+fn IOFileControlBlockCreate { flags -- fcb ok }
+	IOFileControlBlock_SIZEOF // bytes
+	'IOFC' // tag
+	MmAllocWithTag ok! fcb!
+
+	if (ok@)
+		return
+	end
+
+	flags@ fcb@ IOFileControlBlock_Flags + !
+
+	0 fcb@ IOFileControlBlock_CacheInfoBlock + !
+
+	1 fcb@ IOFileControlBlock_References + !
+end
+
+fn IOFileControlBlockReference { fcb -- oldcount }
+	// should be called by filesystem driver in its parse method, if needed
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	fcb@ IOFileControlBlock_References + @ oldcount!
+
+	oldcount@ 1 + fcb@ IOFileControlBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOFileControlBlockDereference { fcb -- oldcount }
+	// should be called by filesystem driver in its delete method, if needed
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	fcb@ IOFileControlBlock_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"IOFileControlBlockDereference: refcount underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - fcb@ IOFileControlBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+
+	if (oldcount@ 1 ==)
+		// just killed it, deallocate
+
+		fcb@ MmFree
 	end
 end

@@ -1,3 +1,7 @@
+const MMHIGHESTUSERADDRESS  0x7FFEFFFF
+// 64kb no-mans-land
+const MMLOWESTSYSTEMADDRESS 0x80000000
+
 struct MmHeapBlock
 	4 Magic
 	4 Next

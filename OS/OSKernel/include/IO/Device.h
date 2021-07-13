@@ -11,4 +11,5 @@ endstruct
 struct IODevice
 	4 Driver
 	4 Extension
+	4 FileControlBlock
 endstruct

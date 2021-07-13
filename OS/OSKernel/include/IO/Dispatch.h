@@ -4,9 +4,9 @@ fnptr IODispatchCloseFunction { object -- ok }
 
 fnptr IODispatchIOControlFunction { arg1 arg2 arg3 arg4 object -- ok }
 
-fnptr IODispatchReadFunction { flags length bufsize offset buffer object -- bytesread ok }
+fnptr IODispatchReadFunction { flags length bufsize offset buffer object lastmode -- bytesread ok }
 
-fnptr IODispatchWriteFunction { flags length bufsize offset buffer object -- byteswritten ok }
+fnptr IODispatchWriteFunction { flags length bufsize offset buffer object lastmode -- byteswritten ok }
 
 fnptr IODispatchParseFunction { flags path initialobject process -- reparsepath object ok }
 

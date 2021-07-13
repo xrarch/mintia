@@ -22,8 +22,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn IOFileCreateObject { flags owninguser -- fileobject ok }
-	// just shorthand for creating a file object, doesn't open it
+fn IOFileCreateObject { flags owninguser fcb -- fileobject ok }
+	// just shorthand for creating a file object, doesn't open it.
+	// also does NOT ref the FCB -- caller must do that.
 
 	0 // name
 	0 // flags
@@ -33,16 +34,19 @@ fn IOFileCreateObject { flags owninguser -- fileobject ok }
 	IOFileTypeObject@ // type
 	ObObjectCreate ok! fileobject!
 
-	0 fileobject@ IOFile_Offset + !
-
+	fcb@   fileobject@ IOFile_FileControlBlock + !
+	0      fileobject@ IOFile_Offset + !
 	flags@ fileobject@ IOFile_Flags + !
 end
 
 fn (ObTypeOpenFunction) IOFileOpen { object process -- ok }
 	auto openfunc
 
-	if (object@ IOFile_Type + @ OSFILETYPE_DEVICE ==)
-		object@ IOFile_DeviceObject + @ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_Open + @ openfunc!
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DEVICE ==)
+		fcb@ IOFileControlBlock_DeviceObject + @ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_Open + @ openfunc!
 
 		if (openfunc@)
 			object@ // object
@@ -64,8 +68,11 @@ fn (ObTypeCloseFunction) IOFileClose { object process -- }
 
 	auto closefunc
 
-	if (object@ IOFile_Type + @ OSFILETYPE_DEVICE ==)
-		object@ IOFile_DeviceObject + @ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_Close + @ closefunc!
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DEVICE ==)
+		fcb@ IOFileControlBlock_DeviceObject + @ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_Close + @ closefunc!
 
 		if (closefunc@)
 			object@ // object
@@ -93,8 +100,11 @@ fn (ObTypeDeleteFunction) IOFileDelete { object -- }
 
 	auto deletefunc
 
-	if (object@ IOFile_Type + @ OSFILETYPE_DEVICE ==)
-		object@ IOFile_DeviceObject + @ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_DeleteObject + @ deletefunc!
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DEVICE ==)
+		fcb@ IOFileControlBlock_DeviceObject + @ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_DeleteObject + @ deletefunc!
 
 		if (deletefunc@)
 			object@ // object
@@ -117,7 +127,7 @@ fn (ObTypeDeleteFunction) IOFileDelete { object -- }
 	end
 end
 
-fn IOFileControlBlockCreate { flags -- fcb ok }
+fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 	IOFileControlBlock_SIZEOF // bytes
 	'IOFC' // tag
 	MmAllocWithTag ok! fcb!
@@ -126,11 +136,13 @@ fn IOFileControlBlockCreate { flags -- fcb ok }
 		return
 	end
 
+	devobj@ fcb@ IOFileControlBlock_DeviceObject + !
+	filetype@ fcb@ IOFileControlBlock_FileType + !
+
 	flags@ fcb@ IOFileControlBlock_Flags + !
-
 	0 fcb@ IOFileControlBlock_CacheInfoBlock + !
-
 	1 fcb@ IOFileControlBlock_References + !
+	dispatchtable@ fcb@ IOFileControlBlock_DispatchTable + !
 end
 
 fn IOFileControlBlockReference { fcb -- oldcount }
@@ -165,7 +177,7 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 	rs@ HALCPUInterruptRestore
 
 	if (oldcount@ 1 ==)
-		// just killed it, deallocate
+		// just lowered the refcount to 0, deallocate
 
 		fcb@ MmFree
 	end

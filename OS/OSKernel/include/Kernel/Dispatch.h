@@ -45,7 +45,7 @@ extern KeDispatchWaitBlockInitialize { thread waitblock -- ok }
 
 extern KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 
-extern KeDispatchSatisfyFirst { waitstatus priboost object -- wokenthread ok }
+extern KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok }
 
 extern KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable -- ok }
 

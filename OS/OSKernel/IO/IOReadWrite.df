@@ -57,15 +57,52 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 		0 process!
 	end
 
+	auto fcb
+	auto dispatchtable
+
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	if (DEBUGCHECKS)
+		if (fcb@ 0 ==)
+			"IOFileReadProcess: file object had no FCB\n" KeCrash
+		end
+	end
+
+	fcb@ IOFileControlBlock_DispatchTable + @ dispatchtable!
+
+	if (DEBUGCHECKS)
+		if (dispatchtable@ 0 ==)
+			"IOFileReadProcess: file object had no dispatch table\n" KeCrash
+		end
+	end
+
+	auto readfunc
+	dispatchtable@ IODispatchTable_Read + @ readfunc!
+
+	if (readfunc@ ~~)
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	0 bytesread!
+
 	if (process@ ~~)
-		// no process provided to read into.
-		// buffer must be in system space.
+		// no process provided to read into. therefore, we must be reading directly into
+		// system space.
 
 		if (buffer@ MMLOWESTSYSTEMADDRESS <)
 			"IOFileReadProcess: buffer was not in system space\n" KeCrash
 		end
 
-		"IOFileReadProcess: TODO system space reads\n" KeCrash
+		flags@ // flags
+		length@ // length
+		length@ // bufsize (same as length since system is trusted)
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fileobject@ // object
+		KERNELMODE // lastmode
+		readfunc@ IODispatchReadFunction ok! bytesread!
 	end else
 		// translate and lock each buffer page into memory.
 		// (this may incur page fault logic (but never a page fault exception)).
@@ -82,4 +119,11 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 
 		"IOFileReadProcess: TODO userspace reads\n" KeCrash
 	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	bytesread@ fileobject@ IOFile_Offset + +=
+
+	rs@ HALCPUInterruptRestore
 end

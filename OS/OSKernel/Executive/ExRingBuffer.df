@@ -1,0 +1,288 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/HALDebug.h"
+
+// general purpose ring buffer implementation
+
+// this one's actually my own idea for once,
+// these are really useful and I'm just adapting the concept from AISIX
+
+fn ExRingBufferCreate { sizelog valuesizelog synchipl -- ringbuffer ok }
+	// size parameter is in units of values,
+	// NOT in units of bytes
+
+	auto size
+	1 sizelog@ << size!
+
+	ExRingBuffer_SIZEOF size@ valuesizelog@ << + // bytes
+	'Ring' // tag
+	MmAllocWithTag ok! ringbuffer!
+
+	if (ok@)
+		return
+	end
+
+	size@ ringbuffer@ ExRingBuffer_Size + !
+	ringbuffer@ ExRingBuffer_SIZEOF + ringbuffer@ ExRingBuffer_BufferData + !
+
+	0 ringbuffer@ ExRingBuffer_ReadPointer + !
+	0 ringbuffer@ ExRingBuffer_WritePointer + !
+
+	synchipl@ ringbuffer@ ExRingBuffer_SynchIPL + !
+
+	valuesizelog@ ringbuffer@ ExRingBuffer_ValueSizeLog + !
+
+	0 // signaled
+	KEEVENT_SYNCH // type
+	"ExRingBufferWriterEvent" // name
+	ringbuffer@ ExRingBuffer_WriterEvent + // event
+	KeEventInitialize ok!
+
+	if (ok@)
+		"ExRingBufferCreate: failed to initialize writer event\n" KeCrash
+	end
+
+	0 // signaled
+	KEEVENT_SYNCH // type
+	"ExRingBufferReaderEvent" // name
+	ringbuffer@ ExRingBuffer_ReaderEvent + // event
+	KeEventInitialize ok!
+
+	if (ok@)
+		"ExRingBufferCreate: failed to initialize reader event\n" KeCrash
+	end
+end
+
+fn ExRingBufferWakeReader { priboost ringbuffer -- }
+	priboost@ // priboost
+	ringbuffer@ ExRingBuffer_ReaderEvent + // event
+	KeEventSignal drop
+end
+
+fn ExRingBufferWakeWriter { priboost ringbuffer -- }
+	priboost@ // priboost
+	ringbuffer@ ExRingBuffer_WriterEvent + // event
+	KeEventSignal drop
+end
+
+// waitonfull can be:
+// EXRINGDONTWAIT - dont wait on full
+// EXRINGWAIT     - wait alertably on full
+// EXRINGWITUALRT - wait unalertably on full
+
+fn ExRingBufferWriteValue { value overwrite lastmode waitonfull priboost ringbuffer -- valueptr ok }
+	auto ipl
+	ringbuffer@ ExRingBuffer_SynchIPL + @ ipl!
+
+	auto valuesizelog
+	ringbuffer@ ExRingBuffer_ValueSizeLog + @ valuesizelog!
+
+	auto size
+	ringbuffer@ ExRingBuffer_Size + @ size!
+
+	auto offmask
+	size@ 1 - offmask!
+
+	auto bufdata
+	ringbuffer@ ExRingBuffer_BufferData + @ bufdata!
+
+	auto oldipl
+
+	ipl@ KeIPLRaise oldipl!
+
+	auto rp
+	ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
+
+	auto wp
+	ringbuffer@ ExRingBuffer_WritePointer + @ wp!
+
+	if (wp@ 0xFFFFFFFF ==)
+		"ExRingBufferWriteValue: rp overflow\n" KeCrash
+	end
+
+	if (wp@ rp@ - size@ >=)
+		if (waitonfull@)
+			auto alertable
+			waitonfull@ EXRINGWAIT == alertable!
+
+			while (wp@ rp@ - size@ >=)
+				// wait while full
+
+				oldipl@ KeIPLLower
+
+				lastmode@ // waitmode
+				alertable@ // alertable
+				TIMEOUTINFINITE // timeout
+				ringbuffer@ ExRingBuffer_WriterEvent + // object
+				KeThreadWaitForObject ok!
+
+				if (ok@)
+					return
+				end
+
+				ipl@ KeIPLRaise oldipl!
+
+				// it changed since we slept, so, update these
+
+				ringbuffer@ ExRingBuffer_WritePointer + @ wp!
+				ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
+			end
+		end else
+			if (overwrite@)
+				1 rp +=
+
+				rp@ ringbuffer@ ExRingBuffer_ReadPointer + !
+			end else
+				oldipl@ KeIPLLower
+
+				STATUS_IO_NOT_AVAILABLE ok!
+
+				return
+			end
+		end
+	end
+
+	wp@ offmask@ & valuesizelog@ << bufdata@ + valueptr!
+
+	if (valuesizelog@ 0 ==)
+		value@ valueptr@ sb
+	end elseif (valuesizelog@ 1 ==)
+		value@ valueptr@ si
+	end else
+		value@ valueptr@ !
+	end
+
+	wp@ 1 + ringbuffer@ ExRingBuffer_WritePointer + !
+
+	oldipl@ KeIPLLower
+
+	if (oldipl@ IPLDPC <=)
+		// if it was >IPLDPC, it was an interrupt handler, and its up to him to
+		// queue a DPC to actually do the wakeup using ExRingBufferWakeReader.
+
+		// signal a reader waiting on a value
+
+		priboost@ // priboost
+		ringbuffer@ ExRingBuffer_ReaderEvent + // event
+		KeEventSignal drop
+	end
+
+	0 ok!
+end
+
+// waitonempty can be:
+// EXRINGDONTWAIT - dont wait on empty
+// EXRINGWAIT     - wait alertably on empty
+// EXRINGWITUALRT - wait unalertably on empty
+
+fn ExRingBufferReadValue { lastmode waitonempty priboost ringbuffer -- value valueptr ok }
+	auto ipl
+	ringbuffer@ ExRingBuffer_SynchIPL + @ ipl!
+
+	auto valuesizelog
+	ringbuffer@ ExRingBuffer_ValueSizeLog + @ valuesizelog!
+
+	auto size
+	ringbuffer@ ExRingBuffer_Size + @ size!
+
+	auto offmask
+	// this always works because the size is defined by a log value
+	// (so its always a power of two)
+	size@ 1 - offmask!
+
+	auto bufdata
+	ringbuffer@ ExRingBuffer_BufferData + @ bufdata!
+
+	auto oldipl
+
+	ipl@ KeIPLRaise oldipl!
+
+	auto rp
+	ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
+
+	if (rp@ 0xFFFFFFFF ==)
+		"ExRingBufferReadValue: rp overflow\n" KeCrash
+	end
+
+	auto wp
+	ringbuffer@ ExRingBuffer_WritePointer + @ wp!
+
+	if (wp@ rp@ ==)
+		// buffer is empty. take this opportunity to help prevent these pointers from overflowing...
+		0 wp!
+		0 rp!
+		0 ringbuffer@ ExRingBuffer_WritePointer + !
+		0 ringbuffer@ ExRingBuffer_ReadPointer + !
+
+		if (waitonempty@)
+			auto alertable
+			waitonempty@ EXRINGWAIT == alertable!
+
+			while (wp@ rp@ ==)
+				oldipl@ KeIPLLower
+
+				lastmode@ // waitmode
+				alertable@ // alertable
+				TIMEOUTINFINITE // timeout
+				ringbuffer@ ExRingBuffer_ReaderEvent + // object
+				KeThreadWaitForObject ok!
+
+				if (ok@)
+					return
+				end
+
+				ipl@ KeIPLRaise oldipl!
+
+				// it changed since we slept, so, update these
+
+				ringbuffer@ ExRingBuffer_WritePointer + @ wp!
+				ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
+			end
+		end else
+			oldipl@ KeIPLLower
+
+			STATUS_IO_NOT_AVAILABLE ok!
+
+			return
+		end
+	end
+
+	rp@ offmask@ & valuesizelog@ << bufdata@ + valueptr!
+
+	if (valuesizelog@ 0 ==)
+		valueptr@ gb value!
+	end elseif (valuesizelog@ 1 ==)
+		valueptr@ gi value!
+	end else
+		valueptr@ @ value!
+	end
+
+	rp@ 1 + ringbuffer@ ExRingBuffer_ReadPointer + !
+
+	oldipl@ KeIPLLower
+
+	if (oldipl@ IPLDPC <=)
+		// if it was >IPLDPC, it was an interrupt handler, and its up to him to
+		// queue a DPC to actually do the wakeup using ExRingBufferWakeWriter.
+
+		// signal a writer waiting on the buffer to have more room
+
+		priboost@ // priboost
+		ringbuffer@ ExRingBuffer_WriterEvent + // event
+		KeEventSignal drop
+	end
+
+	0 ok!
+end

@@ -1,4 +1,5 @@
 #include "<inc>/Executive/Handle.h"
+#include "<inc>/Executive/RingBuffer.h"
 
 extern ExInitPhase0 { -- }
 

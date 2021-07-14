@@ -69,7 +69,7 @@ table DriverSerial
 	IOVERSION_MINOR                      // ioversion minor
 
 	"serial"                             // name
-	OSDEVICE_CHAR                        // type
+	OSFILETYPE_CHARDEVICE                // type
 	pointerof DriverSerialDispatch       // dispatch table
 	SerialPort_SIZEOF                    // extension size
 endtable
@@ -188,12 +188,6 @@ fn SerialGetc { s -- c }
 	end
 end
 
-fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
-	IOBOOSTSERIAL // priboost
-	context1@ // ringbuffer
-	ExRingBufferWakeReader
-end
-
 fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
 	auto serialport
 
@@ -210,6 +204,9 @@ fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
 	auto ringbuf
 	serialport@ SerialPort_RingBuffer + @ ringbuf!
 
+	auto left
+	64 left! // only read 64 characters in a single interrupt
+
 	auto c
 	serialport@ SerialGetc c!
 
@@ -218,17 +215,26 @@ fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
 		1  // overwrite
 		KERNELMODE // lastmode
 		EXRINGDONTWAIT // waitonfull
-		IOBOOSTSERIAL  // priboost
+		0  // priboost (none, we're >IPLDPC so we don't wake up blocked readers here)
 		ringbuf@ // ringbuffer
 		ExRingBufferWriteValue drop drop
 
+		if (left@ ~~)
+			break
+		end
+
 		serialport@ SerialGetc c!
+
+		1 left -=
 	end
 
 	auto dpc
 	serialport@ SerialPort_DPC + dpc!
 
 	if (dpc@ KeDPC_Enqueued + @ ~~)
+		// defer waking up any blocked readers til later,
+		// otherwise we will BSOD since we're at IPLSERIAL
+
 		ringbuf@ // context1
 		0 // context2
 		DPCHIGHIMPORTANCE // importance
@@ -237,15 +243,19 @@ fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
 	end
 end
 
-fn (IODispatchOpenFunction) DriverSerialOpen { object -- ok }
-	"hi open\n" Printf
+fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
+	// actually wake up blocked readers following a serial port interrupt
 
+	IOBOOSTSERIAL // priboost
+	context1@ // ringbuffer
+	ExRingBufferWakeReader
+end
+
+fn (IODispatchOpenFunction) DriverSerialOpen { object -- ok }
 	0 ok!
 end
 
 fn (IODispatchCloseFunction) DriverSerialClose { object -- ok }
-	"hi close\n" Printf
-
 	0 ok!
 end
 
@@ -298,5 +308,26 @@ fn (IODispatchReadFunction) DriverSerialRead { flags length bufsize offset buffe
 end
 
 fn (IODispatchWriteFunction) DriverSerialWrite { flags length bufsize offset buffer object lastmode -- byteswritten ok }
+	auto serialport
+	object@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ serialport!
+
+	0 byteswritten!
+
+	while (byteswritten@ length@ <)
+		if (byteswritten@ bufsize@ ==)
+			STATUS_BUFFER_MAXIMUM ok!
+
+			return
+		end
+
+		auto c
+		buffer@ gb c!
+
+		c@ serialport@ SerialPutc
+
+		1 buffer +=
+		1 byteswritten +=
+	end
+
 	0 ok!
 end

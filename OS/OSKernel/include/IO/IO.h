@@ -33,7 +33,7 @@ struct IOFileControlBlock
 	4 CacheInfoBlock
 	4 References
 	4 FileType
-	4 DeviceObject
+	4 DeviceObject // or mountpoint
 	4 DispatchTable
 endstruct
 

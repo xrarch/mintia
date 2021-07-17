@@ -7,6 +7,7 @@ struct ExRingBuffer
 	4 WritePointer
 	4 SynchIPL
 	4 ValueSizeLog
+	4 ChargedProcess
 
 	KeEvent_SIZEOF WriterEvent
 	KeEvent_SIZEOF ReaderEvent
@@ -26,7 +27,9 @@ extern ExRingBufferWakeReader { priboost ringbuffer -- }
 
 extern ExRingBufferWakeWriter { priboost ringbuffer -- }
 
-extern ExRingBufferCreate { sizelog valuesizelog synchipl -- ringbuffer ok }
+extern ExRingBufferCreate { sizelog valuesizelog synchipl chargedprocess -- ringbuffer ok }
+
+extern ExRingBufferDelete { ringbuffer -- }
 
 extern ExRingBufferWriteValue { value overwrite lastmode waitonfull priboost ringbuffer -- valueptr ok }
 

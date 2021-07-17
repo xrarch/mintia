@@ -19,18 +19,35 @@
 // this one's actually my own idea for once,
 // these are really useful and I'm just adapting the concept from AISIX
 
-fn ExRingBufferCreate { sizelog valuesizelog synchipl -- ringbuffer ok }
+fn ExRingBufferCreate { sizelog valuesizelog synchipl chargedprocess -- ringbuffer ok }
 	// size parameter is in units of values,
 	// NOT in units of bytes
 
 	auto size
 	1 sizelog@ << size!
 
-	ExRingBuffer_SIZEOF size@ valuesizelog@ << + // bytes
+	auto ringbufsize
+	ExRingBuffer_SIZEOF size@ valuesizelog@ << + ringbufsize!
+
+	if (chargedprocess@)
+		ringbufsize@ MmChargeBytesGet
+		chargedprocess@ MmQuotaChargeProcess ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	ringbufsize@ // bytes
 	'Ring' // tag
 	MmAllocWithTag ok! ringbuffer!
 
 	if (ok@)
+		if (chargedprocess@)
+			ringbufsize@ MmChargeBytesGet
+			chargedprocess@ MmQuotaUnchargeProcess
+		end
+
 		return
 	end
 
@@ -43,6 +60,8 @@ fn ExRingBufferCreate { sizelog valuesizelog synchipl -- ringbuffer ok }
 	synchipl@ ringbuffer@ ExRingBuffer_SynchIPL + !
 
 	valuesizelog@ ringbuffer@ ExRingBuffer_ValueSizeLog + !
+
+	chargedprocess@ ringbuffer@ ExRingBuffer_ChargedProcess + !
 
 	0 // signaled
 	KEEVENT_SYNCH // type
@@ -63,6 +82,19 @@ fn ExRingBufferCreate { sizelog valuesizelog synchipl -- ringbuffer ok }
 	if (ok@)
 		"ExRingBufferCreate: failed to initialize reader event\n" KeCrash
 	end
+end
+
+fn ExRingBufferDelete { ringbuffer -- }
+	auto chargedprocess
+
+	ringbuffer@ ExRingBuffer_ChargedProcess + @ chargedprocess!
+
+	if (chargedprocess@)
+		ringbuffer@ MmBlockChargeGet
+		chargedprocess@ MmQuotaUnchargeProcess
+	end
+
+	ringbuffer@ MmFree
 end
 
 fn ExRingBufferWakeReader { priboost ringbuffer -- }

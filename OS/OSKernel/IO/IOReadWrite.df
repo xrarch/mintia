@@ -85,8 +85,17 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 		return
 	end
 
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end
+
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	auto fileflags
+	fileobject@ IOFile_Flags + @ fileflags!
 
 	0 bytesread!
 
@@ -115,8 +124,39 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 			fileobject@ // object
 			KERNELMODE // lastmode (kernel mode assumed, since this is a system space read)
 			readfunc@ IODispatchReadFunction ok! bytesread!
+
+			return
+		end
+
+		if (cacheblock@ ~~)
+			fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
+			fcb@ // fcb
+			IOFileCacheCheck ok! cacheblock!
+
+			if (ok@)
+				return
+			end
+		end
+
+		if (cacheblock@ ~~)
+			// no caching -- call directly into driver.
+
+			flags@ // flags
+			length@ // length
+			length@ // bufsize (same as length since system is trusted)
+			fileobject@ IOFile_Offset + @ // offset
+			buffer@ // buffer
+			fileobject@ // object
+			KERNELMODE // lastmode (kernel mode assumed, since this is a system space read)
+			readfunc@ IODispatchReadFunction ok! bytesread!
+
+			// the FCB is still locked since this read was uncached
+
+			fcb@ IOFileControlBlockUnlock
 		end else
-			"IOFileReadProcess: TODO potentially cached file/block device reads\n" KeCrash
+			// caching -- call into cache read function.
+
+			"IOFileReadProcess: TODO cached read\n" KeCrash
 		end
 	end else
 		// translate and lock each buffer page into memory.
@@ -141,4 +181,33 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 	bytesread@ fileobject@ IOFile_Offset + +=
 
 	rs@ HALCPUInterruptRestore
+end
+
+fn IOFileCacheCheck { wantcaching fcb -- cacheblock ok }
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (wantcaching@)
+		if (cacheblock@ ~~)
+			// still no cache block, plus we want there to be one.
+			// therefore, initiate caching
+
+			"IOFileCacheCheck: TODO initiate caching\n" KeCrash
+		end
+	end
+
+	if (cacheblock@)
+		// may or may not have wanted caching, but are getting it regardless.
+		// unlock the FCB
+
+		fcb@ IOFileControlBlockUnlock
+	end
+
+	// if we didn't want caching, and there was no cache block, the FCB remains locked
+	// for the duration of the operation.
 end

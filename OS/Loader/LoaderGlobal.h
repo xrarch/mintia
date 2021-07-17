@@ -35,6 +35,7 @@ struct LoaderInfoPlatform
 	4 PlatformModel
 	4 BusModel
 	4 CPUModel
+	4 DKSBuffer
 endstruct
 
 struct BootResource

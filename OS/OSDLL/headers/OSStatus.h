@@ -20,3 +20,4 @@ const STATUS_NOT_FOUND             -18
 const STATUS_IO_NOT_SUPPORTED      -19
 const STATUS_BUFFER_MAXIMUM        -20
 const STATUS_IO_NOT_AVAILABLE      -21
+const STATUS_IS_A_DIRECTORY        -22

@@ -1,3 +1,5 @@
+// needs Kernel.h
+
 const IOVERSION_MAJOR 1
 const IOVERSION_MINOR 0
 
@@ -35,10 +37,22 @@ struct IOFileControlBlock
 	4 FileType
 	4 DeviceObject // or mountpoint
 	4 DispatchTable
+	KeMutex_SIZEOF Mutex
+	KeMutex_SIZEOF IOMutex
 endstruct
 
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 
+extern IOFileControlBlockDelete { fcb -- }
+
 extern IOFileControlBlockReference { fcb -- oldcount }
 
 extern IOFileControlBlockDereference { fcb -- oldcount }
+
+extern IOFileControlBlockLock { fcb -- ok }
+
+extern IOFileControlBlockUnlock { fcb -- }
+
+extern IOFileControlBlockLockIO { fcb -- ok }
+
+extern IOFileControlBlockUnlockIO { fcb -- }

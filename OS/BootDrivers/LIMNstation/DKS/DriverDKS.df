@@ -1,0 +1,321 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALLIMNstationCitron.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/IO.h"
+
+const DKS_REALDISK  1
+const DKS_PARTITION 2
+
+struct Disk
+	4 Type
+	4 DKSID
+	4 BlockOffset
+	4 BlockSize
+	4 Blocks
+endstruct
+
+const DKSMAXDISKID 7
+
+const DKSPORTCMD 0x19
+const DKSPORTA   0x1A
+const DKSPORTB   0x1B
+
+const DKSCMDSELECT  0x1
+const DKSCMDREAD    0x2
+const DKSCMDWRITE   0x3
+const DKSCMDINFO    0x4
+const DKSCMDPOLL    0x5
+const DKSCMDINTR    0x6
+const DKSCMDINTROFF 0x7
+
+const DKSINTERRUPT  0x3
+
+const DKSBLOCKTRANSFER 0x0
+
+table DriverDKSDispatch
+	pointerof DriverDKSOpen              // open
+	pointerof DriverDKSClose             // close
+	pointerof DriverDKSIOControl         // iocontrol
+	pointerof DriverDKSRead              // read
+	pointerof DriverDKSWrite             // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	0                                    // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverDKS
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"dks"                                // name
+	OSFILETYPE_BLOCKDEVICE               // type
+	pointerof DriverDKSDispatch          // dispatch table
+	Disk_SIZEOF                          // extension size
+endtable
+
+buffer DKSMutex KeMutex_SIZEOF
+buffer DKSEvent KeEvent_SIZEOF
+
+buffer DKSDPC KeDPC_SIZEOF
+
+externptr HALLIMNstationDKSBuffer
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	if (stage@ STAGE_THREAD ==)
+		"DKSMutex" // name
+		KERNELMODE // mode
+		DKSMutex // mutex
+		KeMutexInitialize ok!
+
+		if (ok@)
+			"DKSDriverInit: mutex initialization failed\n" KeCrash
+		end
+
+		0 // signaled
+		KEEVENT_SYNCH // type
+		"DKSEvent" // name
+		DKSEvent // event
+		KeEventInitialize ok!
+
+		if (ok@)
+			"DKSDriverInit: failed to initialize event\n" KeCrash
+		end
+
+		pointerof DriverDKSDPCFunction // function
+		DKSDPC // dpc
+		KeDPCInitialize ok!
+
+		if (ok@)
+			ok@ "DKSDriverInit: failed to initialize DPC\n" KeCrash
+		end
+
+		// detect and register disks
+
+		auto diskid
+		0 diskid!
+
+		auto namebuf
+		64 alloc namebuf!
+
+		namebuf@ // dest
+		"Dks" // src
+		strcpy
+
+		auto dev
+		auto disk
+
+		while (diskid@ DKSMAXDISKID <=)
+			auto present
+			auto blocks
+
+			diskid@ DKSPORTA HALLIMNstationCitronOutl
+
+			DKSCMDPOLL DKSPORTCMD HALLIMNstationCitronCommand
+
+			DKSPORTA HALLIMNstationCitronInl present!
+			DKSPORTB HALLIMNstationCitronInl blocks!
+
+			if (present@ 1 &)
+				// we have a disk at this ID
+
+				diskid@ // n
+				namebuf@ 3 + // buf
+				itoa
+
+				blocks@ namebuf@ diskid@ "ID %d: NAME=/Devices/%s BLOCKSZ=4096 BLOCKS=%d\n" "DKSDriverInit" HALLog
+
+				namebuf@ // name
+				DriverDKS // driver
+				ACCESS_OWNER_ALL ACCESS_GROUP_ALL | // permissions
+				IODeviceCreate ok! dev!
+
+				if (ok@)
+					ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
+				end
+
+				dev@ IODevice_Extension + @ disk!
+
+				DKS_REALDISK disk@ Disk_Type + !
+				diskid@ disk@ Disk_DKSID + !
+				0 disk@ Disk_BlockOffset + !
+				4096 disk@ Disk_BlockSize + !
+				blocks@ disk@ Disk_Blocks + !
+			end
+
+			1 diskid +=
+		end
+
+		pointerof DriverDKSInterrupt // function
+		DKSINTERRUPT // interrupt number
+		IPLDISK // interrupt priority level
+		HALInterruptRegister
+
+		DKSCMDINTR DKSPORTCMD HALLIMNstationCitronCommand
+	end
+
+	0 ok!
+end
+
+fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
+	// actually wake up blocked readers following a disk transfer interrupt
+
+	IOBOOSTDISK // priboost
+	DKSEvent // event
+	KeEventSignal drop
+end
+
+fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
+	auto event
+	auto details
+
+	DKSCMDINFO DKSPORTCMD HALLIMNstationCitronCommand
+	DKSPORTA HALLIMNstationCitronInl event!
+	DKSPORTB HALLIMNstationCitronInl details!
+
+	if (event@ DKSBLOCKTRANSFER ==)
+		auto dpc
+		DKSDPC dpc!
+
+		if (dpc@ KeDPC_Enqueued + @ ~~)
+			// defer waking up any blocked readers til later,
+			// otherwise we will BSOD since we're at IPLDISK
+
+			0 // context1
+			0 // context2
+			DPCLOWIMPORTANCE // importance
+			dpc@ // dpc
+			KeDPCEnqueue
+		end
+	end
+end
+
+fn DKSLock { -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	TIMEOUTINFINITE // timeout
+	DKSMutex // object
+	KeThreadWaitForObject ok!
+end
+
+fn DKSUnlock { -- }
+	DKSMutex KeMutexRelease drop
+end
+
+var DKSLastDisk 0
+var DKSLastBlockNo 0
+
+fn DKSBlockRead { blockno disk -- ok }
+	if (DKSLastBlockNo@ blockno@ ==)
+		if (DKSLastDisk@ disk@ ==)
+			0 ok!
+
+			return
+		end
+	end
+
+	// read blockno from disk into DKS buffer memory
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
+	DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
+
+	blockno@ DKSPORTA HALLIMNstationCitronOutl
+	DKSCMDREAD DKSPORTCMD HALLIMNstationCitronCommandASync
+
+	rs@ HALCPUInterruptRestore
+
+	KERNELMODE // waitmode
+	0 // alertable
+	TIMEOUTINFINITE // timeout
+	DKSEvent // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "DKSBlockRead: couldn't wait on event (%i)\n" KeCrash
+		end
+	end
+
+	disk@ DKSLastDisk!
+	blockno@ DKSLastBlockNo!
+end
+
+fn DKSBlockWrite { blockno disk -- ok }
+	// write DKS buffer memory into blockno
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
+	DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
+
+	blockno@ DKSPORTA HALLIMNstationCitronOutl
+	DKSCMDWRITE DKSPORTCMD HALLIMNstationCitronCommandASync
+
+	rs@ HALCPUInterruptRestore
+
+	KERNELMODE // waitmode
+	0 // alertable
+	TIMEOUTINFINITE // timeout
+	DKSEvent // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "DKSBlockWrite: couldn't wait on event (%i)\n" KeCrash
+		end
+	end
+end
+
+fn (IODispatchOpenFunction) DriverDKSOpen { object -- ok }
+	0 ok!
+end
+
+fn (IODispatchCloseFunction) DriverDKSClose { object -- ok }
+	0 ok!
+end
+
+fn (IODispatchIOControlFunction) DriverDKSIOControl { arg1 arg2 arg3 arg4 object -- ok }
+	0 ok!
+end
+
+fn (IODispatchReadFunction) DriverDKSRead { flags length bufsize offset buffer object lastmode -- bytesread ok }
+	auto disk
+	object@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ disk!
+
+
+	0 ok!
+end
+
+fn (IODispatchWriteFunction) DriverDKSWrite { flags length bufsize offset buffer object lastmode -- byteswritten ok }
+	0 ok!
+end

@@ -22,7 +22,6 @@ struct Disk
 	4 Type
 	4 DKSID
 	4 BlockOffset
-	4 BlockSize
 	4 Blocks
 endstruct
 
@@ -58,8 +57,8 @@ table DriverDKSDispatch
 	0                                    // set information
 	0                                    // get information
 	0                                    // rename
-	0                                    // reserved
-	0                                    // reserved
+	pointerof DriverDKSReadBlock         // readblock
+	pointerof DriverDKSWriteBlock        // writeblock
 	0                                    // reserved
 	0                                    // reserved
 	0                                    // reserved
@@ -151,22 +150,32 @@ fn (FDriverInit) DriverInit { stage -- ok }
 
 				blocks@ namebuf@ diskid@ "ID %d: NAME=/Devices/%s BLOCKSZ=4096 BLOCKS=%d\n" "DKSDriverInit" HALLog
 
-				namebuf@ // name
-				DriverDKS // driver
-				ACCESS_OWNER_ALL ACCESS_GROUP_ALL | // permissions
-				IODeviceCreate ok! dev!
+				auto sizeinbytes
 
-				if (ok@)
-					ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
+				if (blocks@ 1048576 <)
+					blocks@ 12 << sizeinbytes!
+
+					namebuf@ // name
+					sizeinbytes@ // sizeinbytes
+					DriverDKS // driver
+					ACCESS_OWNER_ALL ACCESS_GROUP_ALL | // permissions
+					IODeviceCreate ok! dev!
+
+					if (ok@)
+						ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
+					end
+
+					4096 dev@ IODevice_BlockSize + !
+
+					dev@ IODevice_Extension + @ disk!
+
+					DKS_REALDISK disk@ Disk_Type + !
+					diskid@ disk@ Disk_DKSID + !
+					0 disk@ Disk_BlockOffset + !
+					blocks@ disk@ Disk_Blocks + !
+				end else
+					namebuf@ "%s: disk is >=4GB; this is not supported! skipping.\n" "DKSDriverInit" HALLog
 				end
-
-				dev@ IODevice_Extension + @ disk!
-
-				DKS_REALDISK disk@ Disk_Type + !
-				diskid@ disk@ Disk_DKSID + !
-				0 disk@ Disk_BlockOffset + !
-				4096 disk@ Disk_BlockSize + !
-				blocks@ disk@ Disk_Blocks + !
 			end
 
 			1 diskid +=
@@ -231,7 +240,7 @@ end
 var DKSLastDisk 0
 var DKSLastBlockNo 0
 
-fn DKSBlockRead { blockno disk -- ok }
+fn DKSBlockReadCommand { blockno disk -- ok }
 	if (DEBUGCHECKS)
 		if (DKSMutex KeMutexIsLocked ~~)
 			"DKSBlockRead: DKSMutex should have been locked\n" KeCrash
@@ -241,7 +250,9 @@ fn DKSBlockRead { blockno disk -- ok }
 	if (DKSLastBlockNo@ blockno@ ==)
 		if (DKSLastDisk@ disk@ ==)
 			// utilize the DKS buffer memory as a one-block cache:
-			// if we read this block last time, just return.
+			// if the contents of this block are already present in
+			// the buffer, just return. this should cut way down on
+			// redundant reads during uncached accesses.
 
 			0 ok!
 
@@ -278,7 +289,7 @@ fn DKSBlockRead { blockno disk -- ok }
 	blockno@ DKSLastBlockNo!
 end
 
-fn DKSBlockWrite { blockno disk -- ok }
+fn DKSBlockWriteCommand { blockno disk -- ok }
 	if (DEBUGCHECKS)
 		if (DKSMutex KeMutexIsLocked ~~)
 			"DKSBlockRead: DKSMutex should have been locked\n" KeCrash
@@ -293,7 +304,7 @@ fn DKSBlockWrite { blockno disk -- ok }
 	disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
 	DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
 
-	blockno@ DKSPORTA HALLIMNstationCitronOutl
+	blockno@ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
 	DKSCMDWRITE DKSPORTCMD HALLIMNstationCitronCommandASync
 
 	rs@ HALCPUInterruptRestore
@@ -314,26 +325,255 @@ fn DKSBlockWrite { blockno disk -- ok }
 	blockno@ DKSLastBlockNo!
 end
 
-fn (IODispatchOpenFunction) DriverDKSOpen { object -- ok }
+fn (IODispatchOpenFunction) DriverDKSOpen { fileobject -- ok }
 	0 ok!
 end
 
-fn (IODispatchCloseFunction) DriverDKSClose { object -- ok }
+fn (IODispatchCloseFunction) DriverDKSClose { fileobject -- ok }
 	0 ok!
 end
 
-fn (IODispatchIOControlFunction) DriverDKSIOControl { arg1 arg2 arg3 arg4 object -- ok }
+fn (IODispatchIOControlFunction) DriverDKSIOControl { arg1 arg2 arg3 arg4 fileobject -- ok }
 	0 ok!
 end
 
-fn (IODispatchReadFunction) DriverDKSRead { flags length bufsize offset buffer object lastmode -- bytesread ok }
+// routines for I/O by byte offset.
+// these are only called when the device object is opened directly, either cached or uncached.
+// if caller isn't careful these can lead to some redundant reads and writes.
+
+fn (IODispatchReadFunction) DriverDKSRead { flags length bufsize offset buffer fileobject lastmode -- bytesread ok }
 	auto disk
-	object@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ disk!
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ disk!
 
+	auto blocksize
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_BlockSize + @ blocksize!
+
+	auto bytesize
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 	0 ok!
+
+	0 bytesread!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	offset@ bytesize@ -
+	length@
+	min length!
+
+	while (bytesread@ length@ <)
+		if (bytesread@ bufsize@ ==)
+			STATUS_BUFFER_MAXIMUM ok!
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (bytesread@ bufsize@ >)
+				"DriverDKSRead: bytesread > bufsize\n" KeCrash
+			end
+		end
+
+		auto blockno
+		offset@ blocksize@ / blockno!
+
+		auto blockoff
+		offset@ blocksize@ % blockoff!
+
+		auto m
+
+		length@ bytesread@ -
+		blocksize@ blockoff@ -
+		min
+		bufsize@ bytesread@ -
+		min m!
+
+		DKSLock ok!
+
+		if (ok@)
+			return
+		end
+
+		blockno@ disk@ DKSBlockReadCommand ok!
+
+		if (ok@)
+			DKSUnlock
+
+			return
+		end
+
+		buffer@ // dest
+		HALLIMNstationDKSBuffer@ blockoff@ + // src
+		m@ // size
+		memcpy
+
+		DKSUnlock
+
+		m@ buffer +=
+		m@ bytesread +=
+	end
 end
 
-fn (IODispatchWriteFunction) DriverDKSWrite { flags length bufsize offset buffer object lastmode -- byteswritten ok }
+fn (IODispatchWriteFunction) DriverDKSWrite { flags length bufsize offset buffer fileobject lastmode -- byteswritten ok }
+	auto disk
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ disk!
+
+	auto blocksize
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ IODevice_BlockSize + @ blocksize!
+
+	auto bytesize
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_SizeInBytes + @ bytesize!
+
 	0 ok!
+
+	0 byteswritten!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	offset@ bytesize@ -
+	length@
+	min length!
+
+	while (byteswritten@ length@ <)
+		if (byteswritten@ bufsize@ ==)
+			STATUS_BUFFER_MAXIMUM ok!
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (byteswritten@ bufsize@ >)
+				"DriverDKSWrite: byteswritten > bufsize\n" KeCrash
+			end
+		end
+
+		auto blockno
+		offset@ blocksize@ / blockno!
+
+		auto blockoff
+		offset@ blocksize@ % blockoff!
+
+		auto m
+
+		length@ byteswritten@ -
+		blocksize@ blockoff@ -
+		min
+		bufsize@ byteswritten@ -
+		min m!
+
+		DKSLock ok!
+
+		if (ok@)
+			return
+		end
+
+		if (m@ blocksize@ ~=)
+			blockno@ disk@ DKSBlockReadCommand ok!
+
+			if (ok@)
+				DKSUnlock
+
+				return
+			end
+		end
+
+		HALLIMNstationDKSBuffer@ blockoff@ + // dest
+		buffer@ // src
+		m@ // size
+		memcpy
+
+		blockno@ disk@ DKSBlockWriteCommand ok!
+
+		if (ok@)
+			DKSUnlock
+
+			return
+		end
+
+		DKSUnlock
+
+		m@ buffer +=
+		m@ byteswritten +=
+	end
+end
+
+// routines for I/O by block offset.
+// these are only called directly by a mounted filesystem.
+
+fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno bufsize buffer devobject -- ok }
+	// write by block
+
+	auto disk
+	devobject@ IODevice_Extension + @ disk!
+
+	auto blocksize
+	devobject@ IODevice_BlockSize + @ blocksize!
+
+	if (blockno@ disk@ Disk_Blocks + @ >=)
+		STATUS_IO_END_OF_DISK ok!
+
+		return
+	end
+
+	auto towrite
+	blocksize@ bufsize@ min towrite!
+
+	DKSLock ok!
+
+	if (ok@)
+		return
+	end
+
+	HALLIMNstationDKSBuffer@ // dest
+	buffer@ // src
+	towrite@ // size
+	memcpy
+
+	blockno@ disk@ DKSBlockWriteCommand ok!
+
+	DKSUnlock
+end
+
+fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno bufsize buffer devobject -- ok }
+	// read by block
+
+	auto disk
+	devobject@ IODevice_Extension + @ disk!
+
+	auto blocksize
+	devobject@ IODevice_BlockSize + @ blocksize!
+
+	if (blockno@ disk@ Disk_Blocks + @ >=)
+		STATUS_IO_END_OF_DISK ok!
+
+		return
+	end
+
+	auto toread
+	blocksize@ bufsize@ min toread!
+
+	DKSLock ok!
+
+	if (ok@)
+		return
+	end
+
+	blockno@ disk@ DKSBlockReadCommand ok!
+
+	if (ok@)
+		DKSUnlock
+
+		return
+	end
+
+	buffer@ // dest
+	HALLIMNstationDKSBuffer@ // src
+	toread@ // size
+	memcpy
+
+	DKSUnlock
 end

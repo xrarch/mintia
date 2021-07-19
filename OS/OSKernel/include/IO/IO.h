@@ -5,7 +5,7 @@ const IOVERSION_MINOR 0
 
 extern IOInitPhase1 { -- }
 
-extern IODeviceCreate { name driver permissions -- deviceobject ok }
+extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
 
 extern IOParse { flags path initialobject process -- reparsepath object ok }
 
@@ -37,6 +37,7 @@ struct IOFileControlBlock
 	4 FileType
 	4 DeviceObject // or mountpoint
 	4 DispatchTable
+	4 SizeInBytes
 	KeMutex_SIZEOF Mutex
 	KeMutex_SIZEOF IOMutex
 endstruct

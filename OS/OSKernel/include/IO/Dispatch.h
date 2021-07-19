@@ -1,16 +1,20 @@
-fnptr IODispatchOpenFunction { object -- ok }
+fnptr IODispatchOpenFunction { fileobject -- ok }
 
-fnptr IODispatchCloseFunction { object -- ok }
+fnptr IODispatchCloseFunction { fileobject -- ok }
 
-fnptr IODispatchIOControlFunction { arg1 arg2 arg3 arg4 object -- ok }
+fnptr IODispatchIOControlFunction { arg1 arg2 arg3 arg4 fileobject -- ok }
 
-fnptr IODispatchReadFunction { flags length bufsize offset buffer object lastmode -- bytesread ok }
+fnptr IODispatchReadFunction { flags length bufsize offset buffer fileobject lastmode -- bytesread ok }
 
-fnptr IODispatchWriteFunction { flags length bufsize offset buffer object lastmode -- byteswritten ok }
+fnptr IODispatchWriteFunction { flags length bufsize offset buffer fileobject lastmode -- byteswritten ok }
 
 fnptr IODispatchParseFunction { flags path initialobject process -- reparsepath object ok }
 
 fnptr IODispatchDeleteFunction { object -- ok }
+
+fnptr IODispatchWriteBlockFunction { blockno bufsize buffer devobject -- ok }
+
+fnptr IODispatchReadBlockFunction { blockno bufsize buffer devobject -- ok }
 
 struct IODispatchTable
 	4 Open
@@ -26,8 +30,8 @@ struct IODispatchTable
 	4 SetInformation
 	4 GetInformation
 	4 Rename
-	4 Reserved1
-	4 Reserved2
+	4 ReadBlock
+	4 WriteBlock
 	4 Reserved3
 	4 Reserved4
 	4 Reserved5

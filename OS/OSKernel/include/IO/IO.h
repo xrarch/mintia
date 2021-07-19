@@ -17,11 +17,11 @@ externptr IOFileTypeObject
 
 extern IOFileCreateObject { flags owninguser fcb -- fileobject ok }
 
-extern IOFileOpen { object process -- ok }
+extern IOFileOpenObject { object process -- ok }
 
-extern IOFileClose { object process -- }
+extern IOFileCloseObject { object process -- }
 
-extern IOFileDelete { object -- }
+extern IOFileDeleteObject { object -- }
 
 struct IOFile
 	4 FileControlBlock

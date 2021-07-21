@@ -1,0 +1,173 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+// A3X Partition Table (APT) support for LIMNstation
+
+table IOPartitionAPT
+	"APT"                            // name
+	pointerof IOPartitionAPTDetect   // detect
+	0                                // reserved
+	0                                // reserved
+endtable
+public IOPartitionAPT
+
+struct APT_VDB
+	16 Label
+	128 PartitionTable
+	4 Magic
+endstruct
+
+struct APT_PTE
+	8 Label
+	4 Blocks
+	4 Status
+endstruct
+
+const APT_VDBMAGIC 0x4E4D494C
+
+// this module will never be called multithreaded so its fine to use
+// a statically allocated buffer like this
+
+buffer IOPartitionAPTBlockBuffer 512
+
+fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontable ok }
+	// try to detect this disk as APT-formatted.
+	// if it is, attempt to parse it into a heap-allocated partition table.
+	// freeing this partition table after use is the responsibility of the caller.
+
+	STATUS_IO_NOT_AVAILABLE ok!
+
+	auto driver
+	devobject@ IODevice_Driver + @ driver!
+
+	if (driver@ IODriver_DeviceType + @ OSFILETYPE_BLOCKDEVICE ~=)
+		"IOPartitionAPTDetect: not a block device\n" KeCrash
+	end
+
+	auto readfunc
+	driver@ IODriver_DispatchTable + @ IODispatchTable_ReadBlock + @ readfunc!
+
+	if (readfunc@ ~~)
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	0 // blockno (VDB)
+	512 // bufsize
+	IOPartitionAPTBlockBuffer // buffer
+	devobject@
+	readfunc@ IODispatchReadBlockFunction ok!
+
+	if (ok@)
+		return
+	end
+
+	STATUS_IO_NOT_AVAILABLE ok!
+
+	if (IOPartitionAPTBlockBuffer APT_VDB_Magic + @ APT_VDBMAGIC ~=)
+		// magic is wrong, not APT
+
+		return
+	end
+
+	// magic is correct, assume APT
+
+	auto pte
+	IOPartitionAPTBlockBuffer APT_VDB_PartitionTable + pte!
+
+	auto pcount
+	0 pcount!
+
+	// count the number of partitions
+
+	auto i
+	0 i!
+
+	while (i@ 8 <)
+		if (pte@ APT_PTE_Status + @ 0 ~=)
+			1 pcount +=
+		end
+
+		APT_PTE_SIZEOF pte +=
+		1 i +=
+	end
+
+	// allocate partition table block
+
+	pcount@ IOPartitionEntry_SIZEOF * IOPartitionTable_SIZEOF + // bytes
+	'APTt' // tag
+	MmAllocWithTag ok! partitiontable!
+
+	if (ok@)
+		// allocation failed, return
+
+		return
+	end
+
+	// fill in label and partition count
+
+	IOPartitionAPT partitiontable@ IOPartitionTable_Format + !
+
+	partitiontable@ IOPartitionTable_Label + // dest
+	IOPartitionAPTBlockBuffer APT_VDB_Label + // src
+	15 // max
+	strncpy
+
+	pcount@ partitiontable@ IOPartitionTable_PartitionCount + !
+
+	// fill in partition information
+
+	IOPartitionAPTBlockBuffer APT_VDB_PartitionTable + pte!
+
+	0 i!
+
+	0 pcount!
+
+	auto offset
+	2 offset!
+
+	auto pbase
+	partitiontable@ IOPartitionTable_SIZEOF + pbase!
+
+	while (i@ 8 <)
+		if (pte@ APT_PTE_Status + @ 0 ~=)
+			pbase@ IOPartitionEntry_Label + // dest
+			pte@ APT_PTE_Label + // src
+			7 // max
+			strncpy
+
+			offset@ pbase@ IOPartitionEntry_BlockOffset + !
+			pte@ APT_PTE_Blocks + @ pbase@ IOPartitionEntry_SizeInBlocks + !
+			pcount@ pbase@ IOPartitionEntry_ID + !
+
+			pte@ APT_PTE_Blocks + @ offset +=
+			IOPartitionEntry_SIZEOF pbase +=
+			1 pcount +=
+		end
+
+		APT_PTE_SIZEOF pte +=
+		1 i +=
+	end
+end

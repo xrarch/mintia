@@ -3,3 +3,4 @@
 #include "<inc>/IO/Dispatch.h"
 #include "<inc>/IO/ReadWrite.h"
 #include "<inc>/IO/Boost.h"
+#include "<inc>/IO/Partition.h"

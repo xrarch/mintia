@@ -127,6 +127,13 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		"Dks" // src
 		strcpy
 
+		pointerof DriverDKSInterrupt // function
+		DKSINTERRUPT // interrupt number
+		IPLDISK // interrupt priority level
+		HALInterruptRegister
+
+		DKSCMDINTR DKSPORTCMD HALLIMNstationCitronCommand
+
 		auto dev
 		auto disk
 
@@ -173,6 +180,55 @@ fn (FDriverInit) DriverInit { stage -- ok }
 					diskid@ disk@ Disk_DKSID + !
 					0 disk@ Disk_BlockOffset + !
 					blocks@ disk@ Disk_Blocks + !
+
+					auto partitiontable
+
+					dev@ // devobject
+					IOPartitionTableRead ok! partitiontable!
+
+					if (ok@ 0 ==)
+						auto pcount
+						partitiontable@ IOPartitionTable_PartitionCount + @ pcount!
+
+						auto pte
+						partitiontable@ IOPartitionTable_SIZEOF + pte!
+
+						namebuf@ 4 + // dest
+						"s" // src
+						strcpy
+
+						while (pcount@)
+							pte@ IOPartitionEntry_ID + @ // n
+							namebuf@ 5 + // buf
+							itoa
+
+							pte@ IOPartitionEntry_SizeInBlocks + @ blocks!
+
+							blocks@ 12 << sizeinbytes!
+
+							namebuf@ // name
+							sizeinbytes@ // sizeinbytes
+							DriverDKS // driver
+							ACCESS_OWNER_ALL ACCESS_GROUP_ALL | // permissions
+							IODeviceCreate ok! dev!
+
+							if (ok@)
+								ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
+							end
+
+							4096 dev@ IODevice_BlockSize + !
+
+							dev@ IODevice_Extension + @ disk!
+
+							DKS_PARTITION disk@ Disk_Type + !
+							diskid@ disk@ Disk_DKSID + !
+							pte@ IOPartitionEntry_BlockOffset + @ disk@ Disk_BlockOffset + !
+							blocks@ disk@ Disk_Blocks + !
+
+							IOPartitionEntry_SIZEOF pte +=
+							1 pcount -=
+						end
+					end
 				end else
 					namebuf@ "%s: disk is >=4GB; this is not supported! skipping.\n" "DKSDriverInit" HALLog
 				end
@@ -180,13 +236,6 @@ fn (FDriverInit) DriverInit { stage -- ok }
 
 			1 diskid +=
 		end
-
-		pointerof DriverDKSInterrupt // function
-		DKSINTERRUPT // interrupt number
-		IPLDISK // interrupt priority level
-		HALInterruptRegister
-
-		DKSCMDINTR DKSPORTCMD HALLIMNstationCitronCommand
 	end
 
 	0 ok!
@@ -320,6 +369,9 @@ fn DKSBlockWriteCommand { blockno disk -- ok }
 			ok@ "DKSBlockWrite: couldn't wait on event (%i)\n" KeCrash
 		end
 	end
+
+	// update this. the buffer memory now contains the contents of this block,
+	// which means 
 
 	disk@ DKSLastDisk!
 	blockno@ DKSLastBlockNo!
@@ -473,6 +525,10 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags length bufsize offset buffer
 		end
 
 		if (m@ blocksize@ ~=)
+			// we aren't overwriting the whole block,
+			// so we need to read it in first in order to
+			// partially overwrite it...
+
 			blockno@ disk@ DKSBlockReadCommand ok!
 
 			if (ok@)

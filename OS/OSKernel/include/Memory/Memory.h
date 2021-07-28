@@ -31,12 +31,12 @@ endstruct
 struct MmPageFrameEntryFree
 	4 Next
 	4 PFN
-	4 R2
 	4 R3
 	4 R4
 	4 R5
 	4 R6
 	4 R7
+	4 R8
 endstruct
 
 extern MmUsageDump { -- }

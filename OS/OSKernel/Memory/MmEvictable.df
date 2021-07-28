@@ -1,0 +1,133 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+var MmEvictablePageListHead 0
+public MmEvictablePageListHead
+
+var MmEvictablePageListTail 0
+public MmEvictablePageListTail
+
+fn MmEvictablePageAlloc { evictionfunc priority -- pfdbe pfn ok }
+	priority@ // priority
+	MmPageAlloc ok! pfn! pfdbe!
+
+	1 pfdbe@ MmPageFrameEntryEvictable_References + !
+	
+	0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+	0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+
+	evictionfunc@ pfdbe@ MmPageFrameEntryEvictable_EvictionFunction + !
+end
+
+fn MmPageEvict { pfdbe -- evicted ok }
+	pfdbe@ MmEvictablePageReference drop
+
+	auto evictionfunc
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFunction + @ evictionfunc!
+
+	if (evictionfunc@)
+		pfdbe@ // pfdbe
+		evictionfunc@ MmEvictionFunction ok! evicted!
+	end else
+		0 ok!
+		1 evicted!
+	end
+
+	if (evicted@)
+		// evicted, free the page
+
+		if (DEBUGCHECKS)
+			if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 ~=)
+				pfdbe@ MmPageFrameEntryEvictable_References + @
+				"MmEvictPage: attempt to evict a page with %d references\n" KeCrash
+			end
+		end
+
+		pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+		MmPageFree
+	end else
+		// not evicted, dereference and place back on LRU queue
+
+		pfdbe@ MmEvictablePageDereference drop
+	end
+end
+
+fn MmEvictablePageDereference { pfdbe -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	pfdbe@ MmPageFrameEntryEvictable_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"MmEvictablePageDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - pfdbe@ MmPageFrameEntryEvictable_References + !
+
+	if (oldcount@ 1 ==)
+		// no refs now, add to back of evictable page LRU list
+
+		auto t
+		MmEvictablePageListTail@ t!
+
+		if (t@ ~~)
+			pfdbe@ MmEvictablePageListHead!
+			pfdbe@ MmEvictablePageListTail!
+		end else
+			t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
+			pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
+			pfdbe@ MmEvictablePageListTail!
+		end
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmEvictablePageReference { pfdbe -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	pfdbe@ MmPageFrameEntryEvictable_References + @ oldcount!
+
+	oldcount@ 1 + pfdbe@ MmPageFrameEntryEvictable_References + !
+
+	if (oldcount@ 0 ==)
+		// ref'd, remove from evictable page LRU list
+
+		auto ls
+		pfdbe@ MmPageFrameEntryEvictable_Prev + @ ls!
+
+		auto ns
+		pfdbe@ MmPageFrameEntryEvictable_Next + @ ns!
+
+		if (ls@)
+			ns@ ls@ MmPageFrameEntryEvictable_Next + !
+		end else
+			ns@ MmEvictablePageListHead!
+		end
+
+		if (ns@)
+			ls@ ns@ MmPageFrameEntryEvictable_Prev + !
+		end else
+			ls@ MmEvictablePageListTail!
+		end
+
+		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+	end
+
+	rs@ HALCPUInterruptRestore
+end

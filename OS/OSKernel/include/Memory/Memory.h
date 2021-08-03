@@ -87,7 +87,20 @@ externptr MmHeap
 
 externptr MmInited
 
+externptr MmEventPageAvailable
+
+externptr MmEventLowMemory
+
+externptr MmPageFreeCountLow
+
+externptr MmPageFreeCountSufficient
+
+const MMMUSTSUCCEEDPAGES 16
+
 // page allocation priorities
 
-const ZEROMUST 1
-const FREEFIRST 2
+const ZEROMUST    1
+const FREEFIRST   2
+
+const MUSTSUCCEED 0x8000
+const CANBLOCK    0x10000

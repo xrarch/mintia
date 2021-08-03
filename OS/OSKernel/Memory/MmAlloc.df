@@ -14,7 +14,7 @@
 
 var MmHeapBlockUsedListHead 0
 
-fn MmPageAlloc { priority -- pfdbe pfn ok }
+fn MmPageGet { priority threshold -- pfdbe pfn ok }
 	0 ok!
 
 	if (DEBUGCHECKS)
@@ -23,6 +23,8 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		end
 	end
 
+	0xFF priority &=
+
 	auto rs
 
 	if (priority@ FREEFIRST ==)
@@ -30,6 +32,14 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		// if its empty, try to get one from the zero list.
 
 		HALCPUInterruptDisable rs!
+
+		if (MmPageFreeCount@ threshold@ <=)
+			rs@ HALCPUInterruptRestore
+
+			STATUS_NO_MEMORY ok!
+
+			return
+		end
 
 		MmPageFreeListHead@ pfdbe!
 
@@ -63,6 +73,14 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		// if its empty, get one from the free list, and zero it out.
 
 		HALCPUInterruptDisable rs!
+
+		if (MmPageFreeCount@ threshold@ <=)
+			rs@ HALCPUInterruptRestore
+
+			STATUS_NO_MEMORY ok!
+
+			return
+		end
 
 		MmPageZeroListHead@ pfdbe!
 
@@ -101,7 +119,84 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 			end
 		end
 	end else
-		priority@ "MmPageAlloc: unknown priority %d\n" KeCrash
+		priority@ "MmPageGet: unknown priority %d\n" KeCrash
+	end
+end
+
+fn MmPageAlloc { priority -- pfdbe pfn ok }
+	0 ok!
+
+	if (DEBUGCHECKS)
+		if (MmInited@ ~~)
+			"MmPageAlloc: used before MmInit called\n" KeCrash
+		end
+	end
+
+	auto blockon
+	auto alertable
+	auto timeout
+
+	if (priority@ MUSTSUCCEED &)
+		// CANBLOCK page allocations have different wait rules
+		// if MUSTSUCCEED is also specified:
+
+		0 blockon! // can dip into MUSTSUCCEED page pool
+		0 alertable! // wait can't be interrupted
+		TIMEOUTINFINITE timeout! // wait forever for a page
+	end else
+		// normal rules for a CANBLOCK allocation:
+
+		MMMUSTSUCCEEDPAGES blockon! // don't dip into MUSTSUCCEED page pool
+		1 alertable! // wait can be interrupted
+		1500 timeout! // wait 1.5 seconds for a page before admitting defeat
+	end
+
+	while (1)
+		priority@ // priority
+		blockon@ // threshold
+		MmPageGet ok! pfn! pfdbe!
+
+		if (ok@ 0 ==)
+			if (MmPageFreeCount@ MmPageFreeCountLow@ <)
+				0 // priboost
+				MmEventLowMemory // event
+				KeEventSignal ok!
+
+				if (DEBUGCHECKS)
+					if (ok@)
+						ok@ "MmPageAlloc: couldn't signal event\n" KeCrash
+					end
+				end
+			end
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (ok@ STATUS_NO_MEMORY ~=)
+				ok@ "MmPageAlloc: MmPageGet returned weird status (%i)\n" KeCrash
+			end
+		end
+
+		if (priority@ CANBLOCK &)
+			KERNELMODE // waitmode
+			alertable@ // alertable
+			timeout@ // timeout
+			MmEventPageAvailable // object
+			KeThreadWaitForObject ok!
+
+			if (ok@ STATUS_WAIT_TIMEOUT ==)
+				STATUS_NO_MEMORY ok!
+			end
+
+			if (ok@)
+				return
+			end
+		end elseif (priority@ MUSTSUCCEED &)
+			"MmPageAlloc: MUSTSUCCEED allocation failed\n" KeCrash
+		end else
+			return
+		end
 	end
 end
 
@@ -121,6 +216,18 @@ fn MmPageFree { pfn -- }
 	1 MmPageFreeCount +=
 
 	rs@ HALCPUInterruptRestore
+
+	auto ok
+
+	0 // priboost
+	MmEventPageAvailable // event
+	KeEventSignal ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmPageFree: couldn't signal event\n" KeCrash
+		end
+	end
 end
 
 fn MmHeapPrintTag { tag -- }
@@ -645,7 +752,8 @@ fn MmBlockChargeGet { block -- charge }
 end
 
 fn MmKernelStackAlloc { -- kstack ok }
-	FREEFIRST MmPageAlloc ok! kstack! drop
+	FREEFIRST CANBLOCK | // priority
+	MmPageAlloc ok! kstack! drop
 
 	if (ok@)
 		return

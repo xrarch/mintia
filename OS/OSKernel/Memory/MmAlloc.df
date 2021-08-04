@@ -144,7 +144,7 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 
 	auto blockon
 	auto alertable
-	auto timeout
+	auto tries
 
 	if (priority@ MUSTSUCCEED &)
 		// CANBLOCK page allocations have different wait rules
@@ -152,13 +152,14 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 
 		0 blockon! // can dip into MUSTSUCCEED page pool
 		0 alertable! // wait can't be interrupted
-		TIMEOUTINFINITE timeout! // wait forever for a page
+		-1 tries! // try forever for a page
 	end else
 		// normal rules for a CANBLOCK allocation:
 
 		MMMUSTSUCCEEDPAGES blockon! // don't dip into MUSTSUCCEED page pool
 		1 alertable! // wait can be interrupted
-		1500 timeout! // wait 1.5 seconds for a page before admitting defeat
+		6 tries! // try 6 times to get a page
+		// each try is 250ms, so there's 6 * 250ms = 1.5 seconds until we admit defeat.
 	end
 
 	while (1)
@@ -196,15 +197,21 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		if (priority@ CANBLOCK &)
 			KERNELMODE // waitmode
 			alertable@ // alertable
-			timeout@ // timeout
+			250 // timeout
 			MmEventPageAvailable // object
 			KeThreadWaitForObject ok!
 
 			if (ok@ STATUS_WAIT_TIMEOUT ==)
-				STATUS_NO_MEMORY ok!
-			end
+				if (tries@ -1 ~=)
+					1 tries -=
 
-			if (ok@)
+					if (tries@ ~~)
+						STATUS_NO_MEMORY ok!
+
+						return
+					end
+				end
+			end elseif (ok@)
 				return
 			end
 		end elseif (priority@ MUSTSUCCEED &)

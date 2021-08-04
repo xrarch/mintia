@@ -12,3 +12,13 @@ struct MmPageFrameEntryEvictable
 endstruct
 
 extern MmEvictionWorker { context1 context2 -- }
+
+extern MmPageEvict { pfdbe -- evicted ok }
+
+extern MmEvictablePageDereference { pfdbe -- oldcount }
+
+extern MmEvictablePageReference { pfdbe -- oldcount }
+
+externptr MmEvictablePageListHead
+
+externptr MmEvictablePageListTail

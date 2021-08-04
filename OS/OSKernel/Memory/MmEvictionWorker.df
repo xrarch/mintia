@@ -21,6 +21,8 @@ fn MmEvictionWorker { context1 context2 -- }
 
 	// the eviction/swap thread
 
+	auto loops
+
 	while (1)
 		auto ok
 
@@ -36,9 +38,59 @@ fn MmEvictionWorker { context1 context2 -- }
 			end
 		end
 
-		"swap ?\n" Printf
+		0 loops!
 
-		MmEventLowMemory // event
-		KeEventReset drop
+		"evict!\n" Printf
+
+		auto evicted
+		auto rs
+		auto ipl
+
+		while (1)
+			1 loops +=
+
+			if (loops@ 64 % 0 ==)
+				20 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep drop
+			end
+
+			IPLDPC KeIPLRaise ipl!
+
+			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+				MmEventLowMemory // event
+				KeEventReset drop
+
+				ipl@ KeIPLLower
+
+				break
+			end
+
+			ipl@ KeIPLLower
+
+			HALCPUInterruptDisable rs!
+
+			auto pfdbe
+			MmEvictablePageListHead@ pfdbe!
+
+			if (pfdbe@)
+				pfdbe@ MmEvictablePageReference drop
+
+				rs@ HALCPUInterruptRestore
+
+				pfdbe@ // pfdbe
+				MmPageEvict ok! evicted!
+
+				if (evicted@ ~~)
+					// not evicted, dereference and re-place at back of LRU queue
+
+					pfdbe@ MmEvictablePageDereference drop					
+				end
+			end else
+				rs@ HALCPUInterruptRestore
+
+			end
+		end
 	end
 end

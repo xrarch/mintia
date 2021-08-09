@@ -1,0 +1,425 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn IOCacheInfoBlockCreate { -- cacheblock ok }
+	IOCacheInfoBlock_SIZEOF // bytes
+	'Cach' // tag
+	MmAllocWithTag ok! cacheblock!
+
+	if (ok@)
+		// allocation failed
+
+		return
+	end
+
+	"IOCacheInfoBlockMutex" // name
+	KERNELMODE // mode
+	cacheblock@ IOCacheInfoBlock_Mutex + // mutex
+	KeMutexInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"IOCacheInfoBlockCreate: couldn't initialize mutex\n" KeCrash
+		end
+	end
+
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + // ptr
+	IOCACHEPAGEBUCKETS 4 * // size
+	0 // word
+	memset
+end
+
+fn IOCacheInfoBlockLock { cacheblock -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	TIMEOUTINFINITE // timeout
+	cacheblock@ IOCacheInfoBlock_Mutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn IOCacheInfoBlockUnlock { cacheblock -- }
+	cacheblock@ IOCacheInfoBlock_Mutex + KeMutexRelease drop
+end
+
+// hashing algorithm for 32 buckets is:
+// ((offset>>12)+(offset>>17))&31
+
+fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
+	if (DEBUGCHECKS)
+		if (offset@ 0xFFF &)
+			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
+		end
+	end
+
+	0 ok!
+
+	auto cacheblock
+
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ IOCacheInfoBlock_Mutex + KeMutexIsLocked ~~)
+			"IOCachePageGet: cacheblock mutex was not locked\n" KeCrash
+		end
+	end
+
+	auto filesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ filesize!
+
+	if (DEBUGCHECKS)
+		if (offset@ filesize@ >=)
+			"IOCachePageGet: offset was beyond end of file\n" KeCrash
+		end
+	end
+
+	auto bucket
+	offset@ 12 >> offset@ 12 IOCACHEPAGESHIFT + >> + IOCACHEPAGEMASK & bucket!
+
+	auto buckethead
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 2 << + buckethead!
+
+	auto checknum
+	0 checknum!
+
+	buckethead@@ pfdbe!
+
+	while (pfdbe@)
+		if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset@ ==)
+			break
+		end
+
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
+
+		1 checknum +=
+	end
+
+	if (pfdbe@ ~~)
+		// didn't find, need to allocate
+
+		if (filesize@ offset@ - 4096 <)
+			// not a full page -- get zeroes because this might leak data otherwise
+
+			MMEVICTFLAG_FAST // flags
+			pointerof IOCachePageEvictionFunction // evictionfunc
+			ZEROMUST CANBLOCK | // priority
+			MmEvictablePageAlloc ok! drop pfdbe!
+		end else
+			// full page, get any random page that may or may not be zeroed
+
+			MMEVICTFLAG_FAST // flags
+			pointerof IOCachePageEvictionFunction // evictionfunc
+			FREEFIRST CANBLOCK | // priority
+			MmEvictablePageAlloc ok! drop pfdbe!
+		end
+
+		if (ok@)
+			return
+		end
+
+		0 pfdbe@ IOPageFrameEntryCache_Flags + !
+		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
+		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
+
+		// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
+	end else
+		// found the page, it was in the cache already!
+
+		// remove from hash list so that it can be reinserted on the recently-used end
+
+		auto n
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
+
+		if (n@)
+			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ n@ IOPageFrameEntryCache_PrevCachePage + !
+		end
+
+		auto p
+		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ p!
+
+		if (p@)
+			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ p@ IOPageFrameEntryCache_NextCachePage + !
+		end else // no prev means we were the head
+			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
+		end
+
+		// ref it so it doesn't get evicted while caller is using it
+
+		pfdbe@ // pfdbe
+		MmEvictablePageReference drop
+	end
+
+	// insert into hash list on the recently-used end
+
+	buckethead@@ n!
+
+	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
+	n@ pfdbe@ IOPageFrameEntryCache_NextCachePage + !
+
+	if (n@)
+		pfdbe@ n@ IOPageFrameEntryCache_PrevCachePage + !
+	end
+
+	pfdbe@ buckethead@!
+
+	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | pageframe!
+end
+
+fn IOCachePageRelease { pfdbe -- }
+	pfdbe@ // pfdbe
+	MmEvictablePageDereference drop
+end
+
+fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
+	auto cacheblock
+	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	cacheblock@ IOCacheInfoBlockLock ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			// shouldn't happen because this should only be called in the context
+			// of the eviction thread, which should never be prevented from waiting
+
+			"IOCachePageEvictionFunction: couldn't lock cache info block\n" KeCrash
+		end
+
+		if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ==)
+			"IOCachePageEvictionFunction: refcount == 0\n" KeCrash
+		end
+	end
+
+	if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 >)
+		// no longer a candidate for eviction!
+
+		cacheblock@ IOCacheInfoBlockUnlock
+
+		0 evicted!
+
+		return
+	end
+
+	if (DEBUGCHECKS)
+		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+			// we shouldn't be trying to evict a dirty page frame
+			// until the dirty page writer thread writes it out and
+			// dereferences it...
+
+			"IOCachePageEvictionFunction: tried to evict a dirty page frame\n" KeCrash
+		end
+	end
+
+	auto offset
+	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
+
+	auto bucket
+	offset@ 12 >> offset@ 12 IOCACHEPAGESHIFT + >> + IOCACHEPAGEMASK & bucket!
+
+	auto buckethead
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 2 << + buckethead!
+
+	// remove from hash list
+
+	auto n
+	pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
+
+	if (n@)
+		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ n@ IOPageFrameEntryCache_PrevCachePage + !
+	end
+
+	auto p
+	pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ p!
+
+	if (p@)
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ p@ IOPageFrameEntryCache_NextCachePage + !
+	end else // no prev means we were the head
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
+	end
+
+	cacheblock@ IOCacheInfoBlockUnlock
+
+	1 evicted!
+end
+
+fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ ~~)
+			"IOCachePageRead: attempt to perform cached page read from noncached file\n" KeCrash
+		end
+	end
+
+	cacheblock@ IOCacheInfoBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	offset@ // offset
+	fcb@ // fcb
+	IOCachePageGet ok! pfdbe! pageframe!
+
+	if (ok@)
+		cacheblock@ IOCacheInfoBlockUnlock
+
+		return
+	end
+
+	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_VALID & ~~)
+		// this cache page is invalid and needs to be read in
+
+		auto readfunc
+		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
+
+		if (readfunc@ ~~)
+			// XXX should this not just cause a crash? honestly
+
+			pfdbe@ IOCachePageRelease
+
+			cacheblock@ IOCacheInfoBlockUnlock
+
+			STATUS_IO_NOT_SUPPORTED ok!
+
+			return
+		end
+
+		// perform the read operation
+
+		flags@ // flags
+		4096 // length
+		4096 // bufsize
+		offset@ // offset
+		pageframe@ // buffer
+		fcb@ // fcb
+		lastmode@ // lastmode
+		readfunc@ IODispatchReadFunction ok! drop
+
+		if (ok@)
+			// read failed
+
+			pfdbe@ IOCachePageRelease
+
+			cacheblock@ IOCacheInfoBlockUnlock
+
+			return
+		end
+
+		// read succeeded, page is now valid
+
+		IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
+	end
+
+	cacheblock@ IOCacheInfoBlockUnlock
+end
+
+fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesread ok }
+	auto pfdbe
+	auto pageframe
+
+	0 ok!
+
+	0 bytesread!
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	offset@ bytesize@ -
+	length@
+	min length!
+
+	while (bytesread@ length@ <)
+		if (bytesread@ bufsize@ ==)
+			STATUS_BUFFER_MAXIMUM ok!
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (bytesread@ bufsize@ >)
+				"DriverDKSRead: bytesread > bufsize\n" KeCrash
+			end
+		end
+
+		auto pageno
+		offset@ 0xFFFFF000 & pageno!
+
+		auto pageoff
+		offset@ 4096 % pageoff!
+
+		auto m
+
+		length@ bytesread@ -
+		4096 pageoff@ -
+		min
+		bufsize@ bytesread@ -
+		min m!
+
+		flags@ // flags
+		pageno@ // offset
+		fcb@ // fcb
+		lastmode@ // lastmode
+		IOCachePageRead ok! pfdbe! pageframe!
+
+		if (ok@)
+			return
+		end
+
+		buffer@ // dest
+		pageframe@ pageoff@ + // src
+		m@ // size
+		memcpy
+
+		pfdbe@ IOCachePageRelease
+
+		m@ buffer +=
+		m@ bytesread +=
+		m@ offset +=
+	end
+end
+
+fn IOCacheInitialize { fcb -- cacheblock ok }
+	// initialize caching for an FCB
+
+	IOCacheInfoBlockCreate ok! cacheblock!
+
+	if (ok@)
+		// creation failed
+
+		return
+	end
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlock_CacheInfoBlock + @)
+			"IOCacheInitialize: FCB already had a cache info block\n" KeCrash
+		end
+	end
+
+	cacheblock@ fcb@ IOFileControlBlock_CacheInfoBlock + !
+end

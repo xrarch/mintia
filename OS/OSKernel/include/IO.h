@@ -4,3 +4,4 @@
 #include "<inc>/IO/ReadWrite.h"
 #include "<inc>/IO/Boost.h"
 #include "<inc>/IO/Partition.h"
+#include "<inc>/IO/Cache.h"

@@ -21,8 +21,8 @@ fn MmEvictionWorker { context1 context2 -- }
 
 	// the eviction/swap thread
 
-	auto evictions
-	0 evictions!
+	auto evictionscore
+	0 evictionscore!
 
 	while (1)
 		auto ok
@@ -44,18 +44,25 @@ fn MmEvictionWorker { context1 context2 -- }
 		auto ipl
 
 		while (1)
-			1 evictions +=
+			if (evictionscore@ 512 >=)
+				// deadlock prevention:
 
-			if (evictions@ 63 & 0 ==)
-				// sleep for 20ms for every 64 evictions,
-				// attempted or successful, to make sure the
-				// eviction thread doesn't wait too long to
-				// give up time to lower priority threads...
+				// sleep for 20ms every once in a while,
+				// to make sure the eviction thread doesn't wait too
+				// long to give up time to lower priority threads...
+
+				0 evictionscore!
 
 				20 // interval
 				KERNELMODE // waitmode
 				0 // alertable
-				KeThreadSleep drop
+				KeThreadSleep ok!
+
+				if (DEBUGCHECKS)
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						"MmEvictionWorker: failed to sleep\n" KeCrash
+					end
+				end
 			end
 
 			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
@@ -112,6 +119,12 @@ fn MmEvictionWorker { context1 context2 -- }
 					// not evicted, dereference and re-place at back of LRU queue
 
 					pfdbe@ MmEvictablePageDereference drop
+
+					1 evictionscore +=
+				end else
+					// succeeded
+
+					2 evictionscore +=
 				end
 			end else
 				rs@ HALCPUInterruptRestore

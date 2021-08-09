@@ -455,9 +455,9 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 			tab@ handletable@ ExHandleTableHeader_Table + !
 
-			tab@
-			tabsize@
-			0
+			tab@ // ptr
+			tabsize@ // size
+			0 // word
 			memset
 
 			EXTENDBYENTRIES entries +=
@@ -472,35 +472,29 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 			entries@ INITIALENTRIES - logsize@ << tabsize!
 
+			auto nquota
+			tabsize@ MmChargeBytesGet tab@ MmBlockChargeGet - nquota!
+
+			if (DEBUGCHECKS)
+				if (nquota@ 0 s<)
+					"ExHandleCreate: nquota < 0\n" KeCrash
+				end
+			end
+
 			if (chargedprocess@)
-				// BUGBUG there is a race condition here where the process's quota
-				// may become inconsistent if a charge is allowed to succeed in the middle
-				// of this operation!! should be reworked so that we only ever charge & uncharge
-				// the whole new chunk at once
+				if (nquota@)
+					nquota@ // charge
+					chargedprocess@ MmQuotaChargeProcess ok!
 
-				// we do this in a weird way.
-				// first we uncharge the quota for the extended table,
-				// then we re-charge the quota for the new size of the extended table.
+					if (ok@)
+						// insufficient quota
 
-				tab@ MmBlockChargeGet
-				chargedprocess@ MmQuotaUnchargeProcess
+						if (locked@ ~~)
+							handletable@ ExHandleTableUnlock
+						end
 
-				tabsize@ MmChargeBytesGet
-				chargedprocess@ MmQuotaChargeProcess ok!
-
-				if (ok@)
-					// insufficient quota
-
-					// re-charge the quota for the old size of the extended table.
-
-					tab@ MmBlockChargeGet
-					chargedprocess@ MmQuotaChargeProcess drop
-
-					if (locked@ ~~)
-						handletable@ ExHandleTableUnlock
+						return
 					end
-
-					return
 				end
 			end
 
@@ -513,11 +507,10 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 				if (chargedprocess@)
 					// undo the shenanigans we just did with the quota charge
 
-					tabsize@ MmChargeBytesGet
-					chargedprocess@ MmQuotaUnchargeProcess
-
-					tab@ MmBlockChargeGet
-					chargedprocess@ MmQuotaChargeProcess drop
+					if (nquota@)
+						nquota@ // charge
+						chargedprocess@ MmQuotaUnchargeProcess
+					end
 				end
 
 				if (locked@ ~~)

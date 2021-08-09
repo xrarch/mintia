@@ -59,6 +59,14 @@ fn IOCacheInfoBlockLock { cacheblock -- ok }
 	KeThreadWaitForObject ok!
 end
 
+fn IOCacheInfoBlockTryLock { cacheblock -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	50 // timeout
+	cacheblock@ IOCacheInfoBlock_Mutex + // object
+	KeThreadWaitForObject ok!
+end
+
 fn IOCacheInfoBlockUnlock { cacheblock -- }
 	cacheblock@ IOCacheInfoBlock_Mutex + KeMutexRelease drop
 end
@@ -195,14 +203,15 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	auto cacheblock
 	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-	cacheblock@ IOCacheInfoBlockLock ok!
+	cacheblock@ IOCacheInfoBlockTryLock ok!
+
+	if (ok@ STATUS_WAIT_TIMEOUT ==)
+		return
+	end
 
 	if (DEBUGCHECKS)
 		if (ok@)
-			// shouldn't happen because this should only be called in the context
-			// of the eviction thread, which should never be prevented from waiting
-
-			"IOCachePageEvictionFunction: couldn't lock cache info block\n" KeCrash
+			"IOCachePageEvictionFunction: failed to lock cache info block\n" KeCrash
 		end
 
 		if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ==)

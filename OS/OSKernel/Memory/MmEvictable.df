@@ -18,14 +18,26 @@ public MmEvictablePageListHead
 var MmEvictablePageListTail 0
 public MmEvictablePageListTail
 
-fn MmEvictablePageAlloc { evictionfunc priority -- pfdbe pfn ok }
+var MmEvictableFastPageListHead 0
+public MmEvictableFastPageListHead
+
+var MmEvictableFastPageListTail 0
+public MmEvictableFastPageListTail
+
+fn MmEvictablePageAlloc { flags evictionfunc priority -- pfdbe pfn ok }
 	priority@ // priority
 	MmPageAlloc ok! pfn! pfdbe!
+
+	if (ok@)
+		return
+	end
 
 	1 pfdbe@ MmPageFrameEntryEvictable_References + !
 	
 	0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 	0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+
+	flags@ pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + !
 
 	evictionfunc@ pfdbe@ MmPageFrameEntryEvictable_EvictionFunction + !
 end
@@ -75,15 +87,29 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 		// no refs now, add to back of evictable page LRU list
 
 		auto t
-		MmEvictablePageListTail@ t!
 
-		if (t@ ~~)
-			pfdbe@ MmEvictablePageListHead!
-			pfdbe@ MmEvictablePageListTail!
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+			MmEvictableFastPageListTail@ t!
+
+			if (t@ ~~)
+				pfdbe@ MmEvictableFastPageListHead!
+				pfdbe@ MmEvictableFastPageListTail!
+			end else
+				t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
+				pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
+				pfdbe@ MmEvictableFastPageListTail!
+			end
 		end else
-			t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
-			pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-			pfdbe@ MmEvictablePageListTail!
+			MmEvictablePageListTail@ t!
+
+			if (t@ ~~)
+				pfdbe@ MmEvictablePageListHead!
+				pfdbe@ MmEvictablePageListTail!
+			end else
+				t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
+				pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
+				pfdbe@ MmEvictablePageListTail!
+			end
 		end
 	end
 
@@ -110,13 +136,21 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 		if (ls@)
 			ns@ ls@ MmPageFrameEntryEvictable_Next + !
 		end else
-			ns@ MmEvictablePageListHead!
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+				ns@ MmEvictableFastPageListHead!
+			end else
+				ns@ MmEvictablePageListHead!
+			end
 		end
 
 		if (ns@)
 			ls@ ns@ MmPageFrameEntryEvictable_Prev + !
 		end else
-			ls@ MmEvictablePageListTail!
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+				ns@ MmEvictableFastPageListTail!
+			end else
+				ns@ MmEvictablePageListTail!
+			end
 		end
 
 		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !

@@ -26,6 +26,14 @@ struct MmPageFrameEntry
 	4 R6
 	4 R7
 	4 R8
+	4 R9
+	4 R10
+	4 R11
+	4 R12
+	4 R13
+	4 R14
+	4 R15
+	4 R16
 endstruct
 
 struct MmPageFrameEntryFree
@@ -37,6 +45,14 @@ struct MmPageFrameEntryFree
 	4 R6
 	4 R7
 	4 R8
+	4 R9
+	4 R10
+	4 R11
+	4 R12
+	4 R13
+	4 R14
+	4 R15
+	4 R16
 endstruct
 
 extern MmUsageDump { -- }

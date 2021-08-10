@@ -23,6 +23,12 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+var IOCacheModifiedPageListHead 0
+public IOCacheModifiedPageListHead
+
+var IOCacheModifiedPageListTail 0
+public IOCacheModifiedPageListTail
+
 fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	IOCacheInfoBlock_SIZEOF // bytes
 	'Cach' // tag
@@ -269,6 +275,49 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	cacheblock@ IOCacheInfoBlockUnlock
 
 	1 evicted!
+end
+
+fn IOCachePageModify { pfdbe -- ok }
+	// mark a page modified and insert it on the modified page list if necessary
+
+	0 ok!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	// bias the refcount so that it doesn't get evicted while dirty.
+	// this gets undone when it is written out
+
+	pfdbe@ MmEvictablePageReference drop
+
+	// use the evict LRU links to insert the page on the back of the modified list
+
+	auto t
+	IOCacheModifiedPageListTail@ t!
+
+	if (t@ ~~)
+		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+
+		pfdbe@ IOCacheModifiedPageListHead!
+		pfdbe@ IOCacheModifiedPageListTail!
+	end else
+		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+
+		t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
+		pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
+		pfdbe@ IOCacheModifiedPageListTail!
+	end
+
+	IOCACHEPAGEFLAG_DIRTY pfdbe@ IOPageFrameEntryCache_Flags + |=
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }

@@ -68,7 +68,7 @@ end
 fn IOCacheInfoBlockTryLock { cacheblock -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
-	HALRTCINTERVAL 2 * // timeout
+	25 // timeout
 	cacheblock@ IOCacheInfoBlock_Mutex + // object
 	KeThreadWaitForObject ok!
 end
@@ -76,9 +76,6 @@ end
 fn IOCacheInfoBlockUnlock { cacheblock -- }
 	cacheblock@ IOCacheInfoBlock_Mutex + KeMutexRelease drop
 end
-
-// hashing algorithm for 32 buckets is:
-// ((offset>>12)+(offset>>17))&31
 
 fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 	if (DEBUGCHECKS)
@@ -155,6 +152,7 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 		0 pfdbe@ IOPageFrameEntryCache_Flags + !
 		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
+		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
 
 		// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 	end else
@@ -316,6 +314,7 @@ fn IOCachePageModify { pfdbe -- ok }
 	end
 
 	IOCACHEPAGEFLAG_DIRTY pfdbe@ IOPageFrameEntryCache_Flags + |=
+	IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
 
 	rs@ HALCPUInterruptRestore
 end
@@ -393,6 +392,106 @@ fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }
 	cacheblock@ IOCacheInfoBlockUnlock
 end
 
+fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
+	auto pfdbe
+	auto pageframe
+
+	0 ok!
+
+	0 byteswritten!
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	auto growfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Grow + @ growfunc!
+
+	if (growfunc@ ~~)
+		// driver provides no way to grow this file
+
+		if (offset@ bytesize@ >=)
+			STATUS_IO_END_OF_FILE ok!
+
+			return
+		end
+
+		bytesize@ offset@ -
+		length@
+		min length!
+	end
+
+	while (byteswritten@ length@ <)
+		if (byteswritten@ bufsize@ ==)
+			STATUS_BUFFER_MAXIMUM ok!
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (byteswritten@ bufsize@ >)
+				"IOCacheFileWrite: byteswritten > bufsize\n" KeCrash
+			end
+		end
+
+		auto pageno
+		offset@ 0xFFFFF000 & pageno!
+
+		auto pageoff
+		offset@ 4095 & pageoff!
+
+		auto m
+
+		length@ byteswritten@ -
+		4096 pageoff@ -
+		min
+		bufsize@ byteswritten@ -
+		min m!
+
+		if (m@ 4096 ==)
+			// writing a full page -- no need to read something we're about to overwrite
+
+			pageno@ // offset
+			fcb@ // fcb
+			IOCachePageGet ok! pfdbe! pageframe!
+
+			if (ok@)
+				return
+			end
+		end else
+			// writing a partial page, may need to read the rest of the page
+
+			flags@ // flags
+			pageno@ // offset
+			fcb@ // fcb
+			lastmode@ // lastmode
+			IOCachePageRead ok! pfdbe! pageframe!
+
+			if (ok@)
+				return
+			end
+		end
+
+		pageframe@ pageoff@ + // dest
+		buffer@ // src
+		m@ // size
+		memcpy
+
+		pfdbe@ IOCachePageModify ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "IOCacheFileWrite: failed to mark page frame modified (%i)\n" KeCrash
+			end
+		end
+
+		pfdbe@ IOCachePageRelease
+
+		m@ buffer +=
+		m@ byteswritten +=
+		m@ offset +=
+	end
+end
+
 fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesread ok }
 	auto pfdbe
 	auto pageframe
@@ -421,7 +520,7 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 
 		if (DEBUGCHECKS)
 			if (bytesread@ bufsize@ >)
-				"DriverDKSRead: bytesread > bufsize\n" KeCrash
+				"IOCacheFileRead: bytesread > bufsize\n" KeCrash
 			end
 		end
 
@@ -429,7 +528,7 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 		offset@ 0xFFFFF000 & pageno!
 
 		auto pageoff
-		offset@ 4096 % pageoff!
+		offset@ 4095 & pageoff!
 
 		auto m
 

@@ -1,7 +1,7 @@
 // needs Kernel.h
 
-const IOCACHEPAGEBUCKETS 32
-const IOCACHEPAGESHIFT 5
+const IOCACHEPAGEBUCKETS 16 // must be a power of two
+const IOCACHEPAGESHIFT 4
 const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
 
 struct IOCacheInfoBlock
@@ -21,7 +21,7 @@ struct IOPageFrameEntryCache
 	4 Context3
 	4 Context4
 	4 Context5
-	4 Context6
+	4 ModifiedPTE
 	4 FCB
 	4 Flags
 	4 OffsetInFile

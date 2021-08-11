@@ -35,4 +35,4 @@ Where there's a filename, it will interpret it as a path relative to the `/Andro
 | -relink        | Force Relink | Forces Loader to relink all modules, even if they were successfully loaded at their preferred address. This can help diagnose strange boot DLL version issues. |
 | HEAPMAX=[KB]   | Heap Maximum | Changes the maximum size of the kernel heap, in kilobytes. Default is 2MB.                                                                                   |
 | HEAPMIN=[KB]   | Heap Minimum | Changes the minimum size of the kernel heap, in kilobytes. Default is 32KB.                                                                                    |
-| HEAPSHF=[N]    | Heap Shift   | Changes the proportion of memory to dedicate to the kernel heap (1/2^N). Default is 4 (1/16).                                                                  |
+| HEAPSHF=[N]    | Heap Shift   | Changes the proportion of memory to dedicate to the kernel heap (1/2^N). Default is 5 (1/32).                                                                  |

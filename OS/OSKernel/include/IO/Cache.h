@@ -1,12 +1,12 @@
 // needs Kernel.h
 
-const IOCACHEPAGEBUCKETS 16 // must be a power of two
-const IOCACHEPAGESHIFT 4
+const IOCACHEPAGEBUCKETS 8 // must be a power of two
+const IOCACHEPAGESHIFT 3 // 1<<IOCACHEPAGESHIFT must equal IOCACHEPAGEBUCKETS
 const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
 
 struct IOCacheInfoBlock
 	KeMutex_SIZEOF Mutex
-	(IOCACHEPAGEBUCKETS 4 *) PageBucketListHeads
+	(IOCACHEPAGEBUCKETS 8 *) PageBucketListHeads
 endstruct
 
 // should be kept in sync with MmPageFrameEntryEvictable
@@ -31,6 +31,8 @@ endstruct
 
 const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?
 const IOCACHEPAGEFLAG_DIRTY 2 // is the page dirty (does it need to be written out)?
+
+extern IOCacheDumpInfo { cacheblock -- }
 
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
 

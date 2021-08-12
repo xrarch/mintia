@@ -1,14 +1,15 @@
 #include "<df>/dragonfruit.h"
 
 #include "<inc>/HALLog.h"
-
 #include "<inc>/HALCPU.h"
-
 #include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
 
 #include "<inc>/Kernel.h"
 
 #include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
 
@@ -28,13 +29,15 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		KERNELMODE // waitmode
 		0 // alertable
-		TIMEOUTINFINITE // timeout
+		10000 // timeout (evict up to the high watermark every 10 seconds)
 		MmEventLowMemory // object
 		KeThreadWaitForObject ok!
 
 		if (DEBUGCHECKS)
 			if (ok@)
-				"MmEvictionWorker: failed to wait on low memory event\n" KeCrash
+				if (ok@ STATUS_WAIT_TIMEOUT ~=)
+					ok@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+				end
 			end
 		end
 
@@ -61,6 +64,29 @@ fn MmEvictionWorker { context1 context2 -- }
 				end
 
 				ipl@ KeIPLLower
+			end
+
+			if (evictionscore@ 128 >=)
+				// if we tried to unsuccessfully evict 128 times in a row,
+				// odds are we're stuck in an infinite loop and we
+				// need to let user threads run for a bit in order
+				// to successfully evict any more pages.
+				// go to sleep for 50ms.
+
+				0 evictionscore!
+
+				50 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep ok!
+
+				if (DEBUGCHECKS)
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+					end
+				end
+
+				0 ok!
 			end
 
 			HALCPUInterruptDisable rs!
@@ -99,9 +125,11 @@ fn MmEvictionWorker { context1 context2 -- }
 					// not evicted, dereference and re-place at back of LRU queue
 
 					pfdbe@ MmEvictablePageDereference drop
-				end
 
-				1 evictionscore +=
+					1 evictionscore +=
+				end else
+					0 evictionscore!
+				end
 			end else
 				rs@ HALCPUInterruptRestore
 

@@ -52,7 +52,7 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	end
 
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + // ptr
-	IOCACHEPAGEBUCKETS 4 * // size
+	IOCACHEPAGEBUCKETS 8 * // size
 	0 // word
 	memset
 end
@@ -65,12 +65,12 @@ fn IOCacheInfoBlockLock { cacheblock -- ok }
 	KeThreadWaitForObject ok!
 end
 
-fn IOCacheInfoBlockTryLock { cacheblock -- ok }
+fn IOCacheInfoBlockTryLock { cacheblock -- locked }
 	KERNELMODE // waitmode
-	1 // alertable
-	25 // timeout
+	0 // alertable
+	0 // timeout
 	cacheblock@ IOCacheInfoBlock_Mutex + // object
-	KeThreadWaitForObject ok!
+	KeThreadWaitForObject locked!
 end
 
 fn IOCacheInfoBlockUnlock { cacheblock -- }
@@ -109,10 +109,10 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 	offset@ 12 >> IOCACHEPAGEMASK & bucket!
 
 	auto buckethead
-	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 2 << + buckethead!
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
 
-	auto checknum
-	0 checknum!
+	auto buckettail
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + 4 + buckettail!
 
 	buckethead@@ pfdbe!
 
@@ -122,31 +122,101 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 		end
 
 		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
-
-		1 checknum +=
 	end
 
 	if (pfdbe@ ~~)
-		// didn't find, need to allocate
+		// didn't find, need to allocate.
+		// try without blocking first. if this fails,
+		// try to grab a page from our own cache block.
+		// only try again with CANBLOCK if there are none available.
 
 		if (filesize@ offset@ - 4096 <)
 			// not a full page -- get zeroes because this might leak data otherwise
 
 			MMEVICTFLAG_FAST // flags
 			pointerof IOCachePageEvictionFunction // evictionfunc
-			ZEROMUST CANBLOCK | // priority
+			ZEROMUST CACHEALLOC | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end else
 			// full page, get any random page that may or may not be zeroed
 
 			MMEVICTFLAG_FAST // flags
 			pointerof IOCachePageEvictionFunction // evictionfunc
-			FREEFIRST CANBLOCK | // priority
+			FREEFIRST CACHEALLOC | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end
 
 		if (ok@)
-			return
+			if (DEBUGCHECKS)
+				if (ok@ STATUS_NO_MEMORY ~=)
+					ok@ "IOCachePageGet: weird return value from MmEvictablePageAlloc (%i)\n" KeCrash
+				end
+			end
+
+			// check each bucket from 0 to IOCACHEPAGEBUCKETS-1.
+			// for each bucket, check from the least recently used end, backwards.
+			// if a page with no references is found, yoink it.
+
+			auto i
+			0 i!
+
+			while (i@ IOCACHEPAGEBUCKETS <)
+				// get bucket tail
+				cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + 4 + @ pfdbe!
+
+				while (pfdbe@)
+					if (pfdbe@ IOPageFrameEntryCache_References + @ 0 ==)
+						// found one
+
+						pfdbe@ // pfdbe
+						cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + // buckethead
+						IOCachePageRemove
+
+						pfdbe@ MmEvictablePageReference drop
+
+						break
+					end
+
+					pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
+				end
+
+				if (pfdbe@)
+					break
+				end
+
+				1 i +=
+			end
+
+			0 ok!
+
+			if (pfdbe@ ~~)
+				// weren't able to find a reusable page. try to allocate again,
+				// but this time we can block, without fear of deadlocking the
+				// eviction thread. we also do not specify CACHEALLOC here, which
+				// allows us to dip below the low watermark. normally, we try
+				// not to do this in order to avoid waking the eviction thread
+				// unnecessarily. here, it might happen, and we might block.
+
+				if (filesize@ offset@ - 4096 <)
+					// not a full page -- get zeroes because this might leak data otherwise
+
+					MMEVICTFLAG_FAST // flags
+					pointerof IOCachePageEvictionFunction // evictionfunc
+					ZEROMUST CANBLOCK | // priority
+					MmEvictablePageAlloc ok! drop pfdbe!
+				end else
+					// full page, get any random page that may or may not be zeroed
+
+					MMEVICTFLAG_FAST // flags
+					pointerof IOCachePageEvictionFunction // evictionfunc
+					FREEFIRST CANBLOCK | // priority
+					MmEvictablePageAlloc ok! drop pfdbe!
+				end
+
+				if (ok@)
+					return
+				end
+			end
 		end
 
 		0 pfdbe@ IOPageFrameEntryCache_Flags + !
@@ -154,36 +224,85 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
 		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
 
+		pfdbe@ // pfdbe
+		buckethead@ // buckethead
+		IOCachePageInsert
+
 		// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 	end else
 		// found the page, it was in the cache already!
 
 		// remove from hash list so that it can be reinserted on the recently-used end
 
-		auto n
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
+		if (pfdbe@ buckethead@@ ~=)
+			pfdbe@ // pfdbe
+			buckethead@ // buckethead
+			IOCachePageRemove
 
-		if (n@)
-			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ n@ IOPageFrameEntryCache_PrevCachePage + !
-		end
-
-		auto p
-		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ p!
-
-		if (p@)
-			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ p@ IOPageFrameEntryCache_NextCachePage + !
-		end else // no prev means we were the head
-			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
+			pfdbe@ // pfdbe
+			buckethead@ // buckethead
+			IOCachePageInsert
 		end
 
 		// ref it so it doesn't get evicted while caller is using it
 
-		pfdbe@ // pfdbe
-		MmEvictablePageReference drop
+		pfdbe@ MmEvictablePageReference drop
 	end
 
+	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | pageframe!
+end
+
+fn IOCacheDumpInfo { cacheblock -- }
+	auto i
+	0 i!
+
+	while (i@ IOCACHEPAGEBUCKETS <)
+		auto buckethead
+		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+
+		auto pfdbe
+		buckethead@@ pfdbe!
+
+		buckethead@ 4 + @ buckethead@@ i@ "%d h=%x t=%x: " Printf
+
+		while (pfdbe@)
+			pfdbe@ IOPageFrameEntryCache_References + @ "%d " Printf
+
+			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
+		end
+
+		"\n" Printf
+
+		1 i +=
+	end
+end
+
+fn IOCachePageRemove { pfdbe buckethead -- }
+	// remove from hash list
+
+	auto n
+	pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
+
+	if (n@)
+		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ n@ IOPageFrameEntryCache_PrevCachePage + !
+	end else // no next means we were the tail
+		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ buckethead@ 4 + !
+	end
+
+	auto p
+	pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ p!
+
+	if (p@)
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ p@ IOPageFrameEntryCache_NextCachePage + !
+	end else // no prev means we were the head
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
+	end
+end
+
+fn IOCachePageInsert { pfdbe buckethead -- }
 	// insert into hash list on the recently-used end
 
+	auto n
 	buckethead@@ n!
 
 	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
@@ -191,16 +310,15 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 
 	if (n@)
 		pfdbe@ n@ IOPageFrameEntryCache_PrevCachePage + !
+	end else // no head, set tail
+		pfdbe@ buckethead@ 4 + !
 	end
 
 	pfdbe@ buckethead@!
-
-	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | pageframe!
 end
 
 fn IOCachePageRelease { pfdbe -- }
-	pfdbe@ // pfdbe
-	MmEvictablePageDereference drop
+	pfdbe@ MmEvictablePageDereference drop
 end
 
 fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
@@ -209,15 +327,20 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 
 	cacheblock@ IOCacheInfoBlockTryLock ok!
 
-	if (ok@ STATUS_WAIT_TIMEOUT ==)
+	if (ok@ ~~)
+		// failed to lock -- don't wait.
+		// return so that the eviction thread can
+		// immediately try the next page.
+
+		0 ok!
+		0 evicted!
+
 		return
 	end
 
-	if (DEBUGCHECKS)
-		if (ok@)
-			"IOCachePageEvictionFunction: failed to lock cache info block\n" KeCrash
-		end
+	0 ok!
 
+	if (DEBUGCHECKS)
 		if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ==)
 			"IOCachePageEvictionFunction: refcount == 0\n" KeCrash
 		end
@@ -250,25 +373,13 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	offset@ 12 >> IOCACHEPAGEMASK & bucket!
 
 	auto buckethead
-	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 2 << + buckethead!
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
 
 	// remove from hash list
 
-	auto n
-	pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
-
-	if (n@)
-		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ n@ IOPageFrameEntryCache_PrevCachePage + !
-	end
-
-	auto p
-	pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ p!
-
-	if (p@)
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ p@ IOPageFrameEntryCache_NextCachePage + !
-	end else // no prev means we were the head
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
-	end
+	pfdbe@ // pfdbe
+	buckethead@ // buckethead
+	IOCachePageRemove
 
 	cacheblock@ IOCacheInfoBlockUnlock
 

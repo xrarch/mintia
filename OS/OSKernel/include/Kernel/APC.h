@@ -23,9 +23,6 @@ struct KeAPC
 endstruct
 
 extern KeAPCInitialize { thread exitfunc kernelfunc normalfunc mode apc -- ok }
-
 extern KeAPCDequeue { apc -- ok }
-
 extern KeAPCEnqueue { context1 context2 priboost apc -- ok }
-
 extern KeAPCDispatchQueue { trapframe lastmode -- }

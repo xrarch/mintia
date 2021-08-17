@@ -40,13 +40,8 @@ const WAITALERTABLE 1
 const TIMEOUTINFINITE -1
 
 extern KeDispatchInitialize { name type dobject -- ok }
-
 extern KeDispatchWaitBlockInitialize { thread waitblock -- ok }
-
 extern KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
-
 extern KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok }
-
 extern KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable -- ok }
-
 extern KeThreadWaitForObject { waitmode alertable timeout object -- ok }

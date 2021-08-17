@@ -18,17 +18,11 @@ struct ExHandleTableHeader
 endstruct
 
 extern ExHandleTableDelete { func handletable -- }
-
 extern ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
-
 extern ExHandleTableLock { handletable -- ok }
-
 extern ExHandleTableUnlock { handletable -- }
-
 extern ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok }
 
 extern ExHandleDelete { handle handletable locked -- entryvalue ok }
-
 extern ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
-
 extern ExHandleLookup { handle handletable locked -- entryptr ok }

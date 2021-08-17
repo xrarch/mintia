@@ -10,17 +10,11 @@ const PROCESSSTATUS_READY 1
 const PROCESSSTATUS_SUSPENDED 2
 
 const PRIORITY_IDLE 0
-
 const PRIORITY_LOWUSER 1
-
 const PRIORITY_DEFAULT 12
-
 const PRIORITY_HIGHUSER 23
-
 const PRIORITY_LOWREALTIME 24
-
 const PRIORITY_MEDIUMREALTIME 28
-
 const PRIORITY_HIGHREALTIME 31
 
 const PRIORITIES 32
@@ -59,7 +53,6 @@ const THREADDEFAULTQUANTUM 50 // in milliseconds
 const QUANTUMUNITSPERTICK 3
 
 const KETHREADNAMELEN 128
-
 const KETHREADSTACKSIZE 4096
 
 struct KeThread
@@ -120,55 +113,32 @@ struct KeThread
 endstruct
 
 extern KeProcessCurrent { -- current }
-
 extern KeProcessInitialize { name process -- ok }
 
 externptr KeProcessListHead
-
 externptr KeProcessIdleProcess
 
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
-
 extern KeThreadUninitialize { thread -- }
-
 extern KeThreadIgnoreKill { thread -- oldcount }
-
 extern KeThreadAcceptKill { thread -- oldcount }
-
 extern KeThreadUserAPCDisable { thread -- oldcount }
-
 extern KeThreadUserAPCEnable { thread -- oldcount }
-
 extern KeThreadEnqueue { front thread -- }
-
 extern KeThreadDequeue { thread -- }
-
 extern KeThreadNextPick { -- thread }
-
 extern KeThreadSwitch { thread -- }
-
 extern KeThreadTransition { status thread -- }
-
 extern KeThreadReady { front thread -- }
-
 extern KeThreadYield { yieldstatus -- }
-
 extern KeThreadPriorityBoost { boost thread -- }
-
 extern KeThreadNextSwitch { -- }
-
 extern KeThreadWakeup { waitstatus priboost thread -- woken }
-
 extern KeThreadSleep { ms waitmode alertable -- ok }
-
 extern KeThreadPrioritySet { priority thread -- }
 
 externptr KeThreadNext
-
 externptr KeThreadNextReason
-
 externptr KeThreadCurrent
-
 externptr KeThreadQuantumDPC
-
 externptr KeThreadPriorityQueueHeads

@@ -58,57 +58,35 @@ endstruct
 extern MmUsageDump { -- }
 
 extern MmInitPhase0 { -- }
-
 extern MmInitPhase1 { -- }
 
 extern MmPageAlloc { priority -- pfdbe pfn ok }
-
 extern MmPageFree { pfn -- }
-
 extern MmHeapCheck { -- }
-
 extern MmHeapDumpBuckets { -- }
-
 extern MmHeapDumpBlockInfo { block -- }
-
 extern MmAllocWithTag { bytes tag -- ptr ok }
-
 extern MmFree { ptr -- }
-
 extern MmChargeBytesGet { bytes -- charge }
-
 extern MmBlockChargeGet { block -- charge }
 
 extern MmKernelStackAlloc { -- kstack ok }
-
 extern MmKernelStackFree { kstack -- }
 
 extern MmZeroPageWorker { -- }
 
 externptr MmPageFrameDatabase
-
 externptr MmPageFreeListHead
-
 externptr MmPageZeroListHead
-
 externptr MmPageFreeCount
-
 externptr MmHeapBuckets
-
 externptr MmHeapSize
-
 externptr MmHeapBytesFree
-
 externptr MmHeap
-
 externptr MmInited
-
 externptr MmEventPageAvailable
-
 externptr MmEventLowMemory
-
 externptr MmPageFreeCountLow
-
 externptr MmPageFreeCountSufficient
 
 const MMMUSTSUCCEEDPAGES 16

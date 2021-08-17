@@ -57,11 +57,8 @@ struct ObObjectTableEntry
 endstruct
 
 fnptr ObTypeOpenFunction { object process -- ok }
-
 fnptr ObTypeCloseFunction { object process -- }
-
 fnptr ObTypeDeleteFunction { object -- }
-
 fnptr ObTypeParseFunction { flags path initialobject process -- reparsepath object ok }
 
 const OBFLAGS_PERMANENT 1
@@ -71,47 +68,35 @@ const OBHANDLEENTRYSIZELOG 1 // 4<<1 = 8 bytes
 const OBNAMEMAX 64
 
 externptr ObTypeObjectType
-
 externptr ObTypeDirectoryType
-
 externptr ObRootDirectoryObject
-
+externptr ObBootDirectoryObject
 externptr ObObjectTypesDirectoryObject
-
 externptr ObRootMutex
 
 extern ObInitPhase0 { -- }
-
 extern ObInitPhase1 { -- }
 
 extern ObHandleDestroyFunction { entryptr handle handletable -- ok }
-
 extern ObHandleInheritFunction { entryptr handle handletable -- ok }
 
 extern ObObjectCreate { name flags permissions owninguser bodysize type -- object ok }
-
 extern ObObjectFree { object -- ok }
-
 extern ObObjectDeallocate { object -- }
 
 extern ObTypeCreate { initializer -- type ok }
 
 extern ObObjectReferenceByHandle { type handle -- access object ok }
-
 extern ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 
 extern ObObjectClose { handle -- ok }
-
 extern ObObjectCloseProcess { handle process -- ok }
 
 extern ObObjectOpen { access object -- handle ok }
-
 extern ObObjectOpenProcess { access object process -- handle ok }
 
 extern ObObjectHandleCountIncrement { object -- oldcount }
-
 extern ObObjectHandleCountDecrement { object -- oldcount }
 
 extern ObObjectReferenceByPointer { object -- oldcount }
-
 extern ObObjectDereferenceByPointer { object -- oldcount }

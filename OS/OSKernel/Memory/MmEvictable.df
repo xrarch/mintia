@@ -24,7 +24,7 @@ public MmEvictableFastPageListHead
 var MmEvictableFastPageListTail 0
 public MmEvictableFastPageListTail
 
-fn MmEvictablePageAlloc { flags evictionfunc priority -- pfdbe pfn ok }
+fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 	priority@ // priority
 	MmPageAlloc ok! pfn! pfdbe!
 
@@ -39,12 +39,21 @@ fn MmEvictablePageAlloc { flags evictionfunc priority -- pfdbe pfn ok }
 
 	flags@ pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + !
 
-	evictionfunc@ pfdbe@ MmPageFrameEntryEvictable_EvictionFunction + !
+	evictablefuncs@ pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + !
 end
 
 fn MmPageEvict { pfdbe -- evicted ok }
+	auto evictionfuncs
+	pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+	if (DEBUGCHECKS)
+		if (evictionfuncs@ ~~)
+			"MmPageEvict: no eviction funcs for page\n" KeCrash
+		end
+	end
+
 	auto evictionfunc
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFunction + @ evictionfunc!
+	evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
 
 	if (evictionfunc@)
 		pfdbe@ // pfdbe
@@ -60,7 +69,7 @@ fn MmPageEvict { pfdbe -- evicted ok }
 		if (DEBUGCHECKS)
 			if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 ~=)
 				pfdbe@ MmPageFrameEntryEvictable_References + @
-				"MmEvictPage: attempt to evict a page with %d references\n" KeCrash
+				"MmPageEvict: attempt to evict a page with %d references\n" KeCrash
 			end
 		end
 
@@ -70,6 +79,24 @@ fn MmPageEvict { pfdbe -- evicted ok }
 end
 
 fn MmEvictablePageDereference { pfdbe -- oldcount }
+	auto evictionfuncs
+	pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+	if (DEBUGCHECKS)
+		if (evictionfuncs@ ~~)
+			"MmEvictablePageDereference: no eviction funcs for page\n" KeCrash
+		end
+	end
+
+	auto dereffunc
+	evictionfuncs@ MmEvictableFunctions_DereferenceFunc + @ dereffunc!
+
+	if (dereffunc@)
+		pfdbe@ MmPageFrameEntryEvictable_References + @ // oldcount (not guaranteed to be accurate...)
+		pfdbe@ // pfdbe
+		dereffunc@ MmDereferenceFunction
+	end
+
 	auto rs
 	HALCPUInterruptDisable rs!
 
@@ -168,4 +195,22 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 	end
 
 	rs@ HALCPUInterruptRestore
+
+	auto evictionfuncs
+	pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+	if (DEBUGCHECKS)
+		if (evictionfuncs@ ~~)
+			"MmEvictablePageDereference: no eviction funcs for page\n" KeCrash
+		end
+	end
+
+	auto reffunc
+	evictionfuncs@ MmEvictableFunctions_ReferenceFunc + @ reffunc!
+
+	if (reffunc@)
+		oldcount@ // oldcount
+		pfdbe@ // pfdbe
+		reffunc@ MmReferenceFunction
+	end
 end

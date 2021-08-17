@@ -4,23 +4,16 @@ const IOVERSION_MAJOR 1
 const IOVERSION_MINOR 0
 
 extern IOInitPhase1 { -- }
-
 extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
-
 extern IOParse { flags path initialobject process -- reparsepath object ok }
 
 externptr IODevicesDirectoryObject
-
 externptr IODeviceTypeObject
-
 externptr IOFileTypeObject
 
 extern IOFileCreateObject { flags owninguser fcb -- fileobject ok }
-
 extern IOFileOpenObject { object process -- ok }
-
 extern IOFileCloseObject { object process -- }
-
 extern IOFileDeleteObject { object -- }
 
 struct IOFile
@@ -43,17 +36,10 @@ struct IOFileControlBlock
 endstruct
 
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
-
 extern IOFileControlBlockDelete { fcb -- }
-
 extern IOFileControlBlockReference { fcb -- oldcount }
-
 extern IOFileControlBlockDereference { fcb -- oldcount }
-
 extern IOFileControlBlockLock { fcb -- ok }
-
 extern IOFileControlBlockUnlock { fcb -- }
-
 extern IOFileControlBlockLockIO { fcb -- ok }
-
 extern IOFileControlBlockUnlockIO { fcb -- }

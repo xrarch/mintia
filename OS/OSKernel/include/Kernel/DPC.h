@@ -15,9 +15,7 @@ const DPCHIGHIMPORTANCE 1
 const DPCLOWIMPORTANCE 2
 
 extern KeDPCEnqueue { context1 context2 importance dpc -- }
-
 extern KeDPCDispatchQueue { rs -- }
-
 extern KeDPCInitialize { function dpc -- ok }
 
 externptr KeDPCActive

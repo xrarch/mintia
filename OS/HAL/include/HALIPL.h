@@ -14,5 +14,4 @@ const IPLAPC 1
 const IPLLOW 0
 
 externptr HALIPLCurrent
-
 externptr HALIPLNames

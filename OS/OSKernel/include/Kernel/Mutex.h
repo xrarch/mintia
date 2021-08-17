@@ -10,9 +10,6 @@ struct KeMutex
 endstruct
 
 extern KeMutexInitialize { name mode mutex -- ok }
-
 extern KeMutexRelease { mutex -- ok }
-
 extern KeMutexOwnerSet { thread mutex -- ok }
-
 extern KeMutexIsLocked { mutex -- locked }

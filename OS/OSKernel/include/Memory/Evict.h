@@ -1,4 +1,17 @@
 fnptr MmEvictionFunction { pfdbe -- evicted ok }
+fnptr MmReferenceFunction { oldcount pfdbe -- }
+fnptr MmDereferenceFunction { oldcount pfdbe -- }
+
+struct MmEvictableFunctions
+	4 EvictionFunc
+	4 ReferenceFunc
+	4 DereferenceFunc
+	4 Reserved1
+	4 Reserved2
+	4 Reserved3
+	4 Reserved4
+	4 Reserved5
+endstruct
 
 // should be kept in sync with IOPageFrameEntryCache
 struct MmPageFrameEntryEvictable
@@ -6,7 +19,7 @@ struct MmPageFrameEntryEvictable
 	4 PFN
 	4 Prev
 	4 EvictionFlags
-	4 EvictionFunction
+	4 EvictableFunctions
 	4 References
 	4 Context2
 	4 Context3
@@ -23,19 +36,12 @@ endstruct
 const MMEVICTFLAG_FAST 1
 
 extern MmEvictionWorker { context1 context2 -- }
-
-extern MmEvictablePageAlloc { flags evictionfunc priority -- pfdbe pfn ok }
-
+extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 extern MmPageEvict { pfdbe -- evicted ok }
-
 extern MmEvictablePageDereference { pfdbe -- oldcount }
-
 extern MmEvictablePageReference { pfdbe -- oldcount }
 
 externptr MmEvictablePageListHead
-
 externptr MmEvictablePageListTail
-
 externptr MmEvictableFastPageListHead
-
 externptr MmEvictableFastPageListTail

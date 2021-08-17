@@ -33,23 +33,15 @@ struct PsThread
 endstruct
 
 externptr PsProcessObjectType
-
 externptr PsThreadObjectType
-
 externptr PsProcessTable
-
 externptr PsProcessListHead
-
 externptr PsSystemProcess
 
 extern PsInitPhase0 { -- }
-
 extern PsInitPhase1 { -- }
 
 extern PsProcessCreate { inherithandles owninguser parentprocess permissions name -- processhandle ok }
-
 extern PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
-
 extern PsProcessObjectDelete { object -- }
-
 extern PsThreadObjectDelete { object -- }

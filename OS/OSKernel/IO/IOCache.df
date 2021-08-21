@@ -25,9 +25,9 @@
 
 table IOCacheEvictableFunctions
 	pointerof IOCachePageEvictionFunction // EvictionFunc
-	0 // ReferenceFunc
-	0 // DereferenceFunc
-	0 // Reserved1
+	pointerof IOCachePageReferenceFunction // ReferenceFunc
+	pointerof IOCachePageDereferenceFunction // DereferenceFunc
+	pointerof IOCachePageModifyFunction // ModifyFunc
 	0 // Reserved2
 	0 // Reserved3
 	0 // Reserved4
@@ -62,6 +62,10 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 		end
 	end
 
+	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
+	0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
+	0 cacheblock@ IOCacheInfoBlock_Flags + !
+
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + // ptr
 	IOCACHEPAGEBUCKETS 8 * // size
 	0 // word
@@ -88,7 +92,132 @@ fn IOCacheInfoBlockUnlock { cacheblock -- }
 	cacheblock@ IOCacheInfoBlock_Mutex + KeMutexRelease drop
 end
 
-fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
+fn IOCacheInfoBlockReference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_PageReferences + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
+	0 ok!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (cacheblock@ IOCacheInfoBlock_Flags + @ IOCACHEBLOCKFLAG_TRUNCATING &)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
+	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_PageReferences + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"IOCacheInfoBlockDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_PageReferences + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
+	// attempt to evict all of the cacheblock's page frames.
+	// caller should have locked the associated FCB as necessary.
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (writeout@)
+		// caller insists on writing out all modified pages (i.e. FCB is being evicted).
+
+		if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @)
+			// there are modified pages associated with this cache block!
+
+			rs@ HALCPUInterruptRestore
+
+			"IOCacheInfoBlockTruncate: TODO: write out all modified pages\n" KeCrash
+
+			return
+		end
+
+		if (cacheblock@ IOCacheInfoBlock_PageReferences + @)
+			// one or more page frames in this cache is currently in use.
+			// don't allow truncation for now.
+
+			rs@ HALCPUInterruptRestore
+
+			STATUS_IO_TRY_AGAIN_LATER ok!
+
+			return
+		end
+	end elseif (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ >)
+		// caller doesn't care about modified pages, so we're fine to toss those (i.e. file was deleted or truncated).
+		// however, page refs > modified pages, implying there are other users of page frames.
+		// don't allow truncation for now.
+
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ ~=)
+			// they should both either be zero (all modified pages written out and zero other references),
+			// or both be equal (only modified pages, and writeout==0)
+
+			cacheblock@ IOCacheInfoBlock_ModifiedPages + @
+			cacheblock@ IOCacheInfoBlock_PageReferences + @
+			"IOCacheInfoBlockTruncate: page references (%d) != modified page count (%d)\n" KeCrash
+		end
+	end
+
+	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
+
+	rs@ HALCPUInterruptRestore
+
+	"IOCacheInfoBlockTruncate: NYI\n" KeCrash
+
+	HALCPUInterruptDisable rs!
+
+	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=
+
+	rs@ HALCPUInterruptRestore
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockUnlock
+end
+
+fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 	if (DEBUGCHECKS)
 		if (offset@ 0xFFF &)
 			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
@@ -101,9 +230,12 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-	if (DEBUGCHECKS)
-		if (cacheblock@ IOCacheInfoBlock_Mutex + KeMutexIsLocked ~~)
-			"IOCachePageGet: cacheblock mutex was not locked\n" KeCrash
+	if (locked@ ~~)
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockLock ok!
+
+		if (ok@)
+			return
 		end
 	end
 
@@ -179,11 +311,11 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 					if (pfdbe@ IOPageFrameEntryCache_References + @ 0 ==)
 						// found one
 
+						pfdbe@ MmEvictablePageReference drop
+
 						pfdbe@ // pfdbe
 						cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + // buckethead
 						IOCachePageRemove
-
-						pfdbe@ MmEvictablePageReference drop
 
 						break
 					end
@@ -225,6 +357,11 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 				end
 
 				if (ok@)
+					if (locked@ ~~)
+						cacheblock@ // cacheblock
+						IOCacheInfoBlockUnlock
+					end
+
 					return
 				end
 			end
@@ -238,6 +375,12 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 		pfdbe@ // pfdbe
 		buckethead@ // buckethead
 		IOCachePageInsert
+
+		// account for this new reference
+
+		0 // oldcount
+		pfdbe@ // pfdbe
+		IOCachePageReferenceFunction
 
 		// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 	end else
@@ -258,6 +401,11 @@ fn IOCachePageGet { offset fcb -- pageframe pfdbe ok }
 		// ref it so it doesn't get evicted while caller is using it
 
 		pfdbe@ MmEvictablePageReference drop
+	end
+
+	if (locked@ ~~)
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockUnlock
 	end
 
 	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | pageframe!
@@ -326,6 +474,26 @@ fn IOCachePageInsert { pfdbe buckethead -- }
 	end
 
 	pfdbe@ buckethead@!
+end
+
+fn (MmReferenceFunction) IOCachePageReferenceFunction { oldcount pfdbe -- }
+	// keep track of a global refcount for the cache block.
+	// this is done so that there's a fast way to tell whether
+	// a file can be truncated.
+
+	auto cacheblock
+	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockReference drop
+end
+
+fn (MmDereferenceFunction) IOCachePageDereferenceFunction { oldcount pfdbe -- }
+	auto cacheblock
+	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockDereference drop
 end
 
 fn IOCachePageRelease { pfdbe -- }
@@ -397,10 +565,19 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	1 evicted!
 end
 
-fn IOCachePageModify { pfdbe -- ok }
+fn (MmModifyFunction) IOCachePageModifyFunction { pfdbe -- ok }
 	// mark a page modified and insert it on the modified page list if necessary
 
 	0 ok!
+
+	auto cacheblock
+	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ ~~)
+			"IOCachePageModify: no cacheblock on FCB\n" KeCrash
+		end
+	end
 
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -436,7 +613,14 @@ fn IOCachePageModify { pfdbe -- ok }
 	end
 
 	IOCACHEPAGEFLAG_DIRTY pfdbe@ IOPageFrameEntryCache_Flags + |=
+
+	// mark valid: the page must either already be valid, and only be partially modified,
+	// or be invalid and fully overwritten (in which case, it is now valid). caller guarantees this.
+
 	IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
+
+	// will be decremented when written out
+	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + +=
 
 	rs@ HALCPUInterruptRestore
 end
@@ -457,6 +641,7 @@ fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }
 		return
 	end
 
+	1 // locked
 	offset@ // offset
 	fcb@ // fcb
 	IOCachePageGet ok! pfdbe! pageframe!
@@ -523,6 +708,16 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 
 	0 byteswritten!
 
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockTryReference ok! drop
+
+	if (ok@)
+		return
+	end
+
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
@@ -533,7 +728,10 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 		// driver provides no way to grow this file
 
 		if (offset@ bytesize@ >=)
-			STATUS_IO_END_OF_FILE ok!
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockDereference drop
+
+			STATUS_IO_END_OF_DISK ok!
 
 			return
 		end
@@ -541,12 +739,17 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 		bytesize@ offset@ -
 		length@
 		min length!
+	end else
+		0xFFFFF000 offset@ -
+		length@
+		min length!
 	end
-
-	// TODO grow file, make sure it can't get truncated in the middle of writing/reading, etc
 
 	while (byteswritten@ length@ <)
 		if (byteswritten@ bufsize@ ==)
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockDereference drop
+
 			STATUS_BUFFER_MAXIMUM ok!
 
 			return
@@ -572,14 +775,42 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 		bufsize@ byteswritten@ -
 		min m!
 
+		if (DEBUGCHECKS)
+			if (m@ ~~)
+				"IOCacheFileWrite: m == 0\n" KeCrash
+			end
+		end
+
+		if (growfunc@)
+			fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+			if (offset@ m@ + bytesize@ >)
+				m@ // length
+				offset@ // offset
+				fcb@ // fcb
+				growfunc@ IODispatchGrowFunction ok!
+
+				if (ok@)
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockDereference drop
+
+					return
+				end
+			end
+		end
+
 		if (m@ 4096 ==)
 			// writing a full page -- no need to read something we're about to overwrite
 
+			0 // locked
 			pageno@ // offset
 			fcb@ // fcb
 			IOCachePageGet ok! pfdbe! pageframe!
 
 			if (ok@)
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockDereference drop
+
 				return
 			end
 		end else
@@ -592,6 +823,9 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 			IOCachePageRead ok! pfdbe! pageframe!
 
 			if (ok@)
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockDereference drop
+
 				return
 			end
 		end
@@ -601,7 +835,7 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 		m@ // size
 		memcpy
 
-		pfdbe@ IOCachePageModify ok!
+		pfdbe@ IOCachePageModifyFunction ok!
 
 		if (DEBUGCHECKS)
 			if (ok@)
@@ -615,6 +849,9 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 		m@ byteswritten +=
 		m@ offset +=
 	end
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockDereference drop
 end
 
 fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesread ok }
@@ -625,10 +862,23 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 
 	0 bytesread!
 
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockTryReference ok! drop
+
+	if (ok@)
+		return
+	end
+
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 	if (offset@ bytesize@ >=)
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockDereference drop
+
 		return
 	end
 
@@ -638,6 +888,9 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 
 	while (bytesread@ length@ <)
 		if (bytesread@ bufsize@ ==)
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockDereference drop
+
 			STATUS_BUFFER_MAXIMUM ok!
 
 			return
@@ -663,6 +916,12 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 		bufsize@ bytesread@ -
 		min m!
 
+		if (DEBUGCHECKS)
+			if (m@ ~~)
+				"IOCacheFileRead: m == 0\n" KeCrash
+			end
+		end
+
 		flags@ // flags
 		pageno@ // offset
 		fcb@ // fcb
@@ -670,6 +929,9 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 		IOCachePageRead ok! pfdbe! pageframe!
 
 		if (ok@)
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockDereference drop
+
 			return
 		end
 
@@ -684,6 +946,9 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 		m@ bytesread +=
 		m@ offset +=
 	end
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockDereference drop
 end
 
 fn IOCacheInitialize { fcb -- cacheblock ok }

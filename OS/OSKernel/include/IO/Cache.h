@@ -6,8 +6,13 @@ const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
 
 struct IOCacheInfoBlock
 	KeMutex_SIZEOF Mutex
+	4 PageReferences
+	4 ModifiedPages
+	4 Flags
 	(IOCACHEPAGEBUCKETS 8 *) PageBucketListHeads
 endstruct
+
+const IOCACHEBLOCKFLAG_TRUNCATING 1
 
 // should be kept in sync with MmPageFrameEntryEvictable
 struct IOPageFrameEntryCache

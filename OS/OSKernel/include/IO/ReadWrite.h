@@ -1,3 +1,3 @@
-extern IOFileSeek { offset handle mode -- ok }
-extern IOFileRead { flags length buffer filehandle -- bytesread ok }
-extern IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
+extern IOFileSeek { offset handle mode -- newoffset ok }
+extern IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
+extern IOFileReadProcess { timeout flags length buffer fileobject process -- bytesread ok }

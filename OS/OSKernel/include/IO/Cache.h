@@ -34,5 +34,7 @@ const IOCACHEPAGEFLAG_DIRTY 2 // is the page dirty (does it need to be written o
 
 extern IOCacheDumpInfo { cacheblock -- }
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
+
 extern IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesread ok }
+
 extern IOCacheInitialize { fcb -- cacheblock ok }

@@ -34,11 +34,6 @@ const THREADWAITANY 2
 
 const THREADWAITBLOCKS 4
 
-const WAITUNALERTABLE 0
-const WAITALERTABLE 1
-
-const TIMEOUTINFINITE -1
-
 extern KeDispatchInitialize { name type dobject -- ok }
 extern KeDispatchWaitBlockInitialize { thread waitblock -- ok }
 extern KeDispatchSatisfyAll { waitstatus priboost object -- count ok }

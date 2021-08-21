@@ -31,6 +31,6 @@ extern ExRingBufferCreate { sizelog valuesizelog synchipl chargedprocess -- ring
 
 extern ExRingBufferDelete { ringbuffer -- }
 
-extern ExRingBufferWriteValue { value overwrite lastmode waitonfull ringbuffer -- valueptr ok }
+extern ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ringbuffer -- valueptr ok }
 
-extern ExRingBufferReadValue { lastmode waitonempty ringbuffer -- value valueptr ok }
+extern ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valueptr ok }

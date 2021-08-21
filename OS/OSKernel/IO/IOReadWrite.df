@@ -22,7 +22,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn IOFileSeek { offset handle mode -- ok }
+fn IOFileSeek { offset handle mode -- newoffset ok }
 	if (mode@ 0 ==)
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -46,29 +46,32 @@ fn IOFileSeek { offset handle mode -- ok }
 	offset@ // offset
 	fileobject@ // fileobject
 	mode@ // mode
-	IOFileSeekObject ok!
+	IOFileSeekObject ok! newoffset!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileSeekObject { offset fileobject mode -- ok }
+fn IOFileSeekObject { offset fileobject mode -- newoffset ok }
 	0 ok!
 
-	auto curoffset
-	fileobject@ IOFile_Offset + @ curoffset!
+	fileobject@ IOFile_Offset + @ newoffset!
 
-	if (mode@ OSSEEK_SET ==)
-		offset@ curoffset!
-	end elseif (mode@ OSSEEK_CUR ==)
-		curoffset@ offset@ + curoffset!
+	if (mode@ OSSEEK_CUR ==)
+		offset@ newoffset +=
 	end elseif (mode@ OSSEEK_END ==)
-		fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_SizeInBytes + @ offset@ + curoffset!
+		fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_SizeInBytes + @ offset@ + newoffset!
+	end elseif (mode@ OSSEEK_SET ==)
+		offset@ newoffset!
+	end else
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
 	end
 
-	curoffset@ fileobject@ IOFile_Offset + !
+	newoffset@ fileobject@ IOFile_Offset + !
 end
 
-fn IOFileRead { flags length buffer filehandle -- bytesread ok }
+fn IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 	auto access
 	auto fileobject
 
@@ -88,6 +91,7 @@ fn IOFileRead { flags length buffer filehandle -- bytesread ok }
 		return
 	end
 
+	timeout@ // timeout
 	flags@ // flags
 	length@ // length
 	buffer@ // buffer
@@ -98,7 +102,7 @@ fn IOFileRead { flags length buffer filehandle -- bytesread ok }
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
+fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesread ok }
 	if (process@ PsSystemProcess@ ==)
 		0 process!
 	end
@@ -162,6 +166,7 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 				end
 			end
 
+			timeout@ // timeout
 			flags@ // flags
 			length@ // length
 			length@ // bufsize (same as length since system is trusted)
@@ -187,6 +192,7 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 		if (cacheblock@ ~~)
 			// no caching -- call directly into driver.
 
+			timeout@ // timeout
 			flags@ // flags
 			length@ // length
 			length@ // bufsize (same as length since system is trusted)
@@ -196,7 +202,7 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 			KERNELMODE // lastmode (kernel mode assumed, since this is a system space read)
 			readfunc@ IODispatchReadFunction ok! bytesread!
 
-			// the FCB is still locked since this read was uncached
+			// the FCB was not unlocked by IOFileCacheCheck because this read was uncached
 
 			fcb@ IOFileControlBlockUnlock
 		end else
@@ -213,7 +219,7 @@ fn IOFileReadProcess { flags length buffer fileobject process -- bytesread ok }
 		end
 	end else
 		// translate and lock each buffer page into memory.
-		// (this may incur page fault logic (but never a page fault exception)).
+		// this may incur page fault logic (but never a page fault exception).
 		// for each buffer page, read at most 4096 bytes from the file
 		// into the identity-mapped page frame.
 

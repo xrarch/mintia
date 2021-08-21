@@ -1,7 +1,7 @@
 fnptr IODispatchOpenFunction { fileobject -- ok }
 fnptr IODispatchCloseFunction { fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg1 arg2 arg3 arg4 fcb -- ok }
-fnptr IODispatchReadFunction { flags length bufsize offset buffer fcb lastmode -- bytesread ok }
+fnptr IODispatchReadFunction { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
 fnptr IODispatchWriteFunction { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
 fnptr IODispatchParseFunction { flags path initialobject process -- reparsepath object ok }
 fnptr IODispatchDeleteFunction { object -- ok }

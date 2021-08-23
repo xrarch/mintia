@@ -155,40 +155,29 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (writeout@)
-		// caller insists on writing out all modified pages (i.e. FCB is being evicted).
-
-		if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @)
-			// there are modified pages associated with this cache block!
-
-			rs@ HALCPUInterruptRestore
-
-			"IOCacheInfoBlockTruncate: TODO: write out all modified pages\n" KeCrash
-
-			return
-		end
-
-		if (cacheblock@ IOCacheInfoBlock_PageReferences + @)
-			// one or more page frames in this cache is currently in use.
-			// don't allow truncation for now.
-
-			rs@ HALCPUInterruptRestore
-
-			STATUS_IO_TRY_AGAIN_LATER ok!
-
-			return
-		end
-	end elseif (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ >)
-		// caller doesn't care about modified pages, so we're fine to toss those (i.e. file was deleted or truncated).
-		// however, page refs > modified pages, implying there are other users of page frames.
+	if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + @ ~=)
+		// one or more page frames in this cache is currently in use.
 		// don't allow truncation for now.
 
 		rs@ HALCPUInterruptRestore
+
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockUnlock
+
+		if (DEBUGCHECKS)
+			if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ <)
+				"IOCacheInfoBlockTruncate: page references < modified page count\n" KeCrash
+			end
+		end
 
 		STATUS_IO_TRY_AGAIN_LATER ok!
 
 		return
 	end
+
+	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
+
+	rs@ HALCPUInterruptRestore
 
 	if (DEBUGCHECKS)
 		if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ ~=)
@@ -201,11 +190,51 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 		end
 	end
 
-	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
+	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
+	// for each bucket, free all cached pages. if a page is modified,
+	// and caller wanted us to write out dirty pages (writeout==1),
+	// write the page out first.
 
-	rs@ HALCPUInterruptRestore
+	auto i
+	0 i!
 
-	"IOCacheInfoBlockTruncate: NYI\n" KeCrash
+	while (i@ IOCACHEPAGEBUCKETS <)
+		auto buckethead
+		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+
+		auto pfdbe
+		buckethead@@ pfdbe!
+
+		while (pfdbe@)
+			if (pfdbe@ IOCacheInfoBlock_Flags + @ IOCACHEPAGEFLAG_DIRTY & writeout@ &&)
+				// this is a modified page, and caller wants us to write them out to disk.
+				// the alternative is writeout==0, which means the caller says its fine
+				// to ignore and toss them.
+
+				"IOCacheInfoBlockTruncate: TODO writeout\n" KeCrash
+			end
+
+			if (DEBUGCHECKS)
+				if (pfdbe@ IOPageFrameEntryCache_References + @)
+					pfdbe@ "IOCacheInfoBlockTruncate: found page with references (0x%08x)\n" KeCrash
+				end
+			end
+
+			auto npfdbe
+
+			// get this now, because who knows what MmPageFree will do to the field where NextCachePage is stored
+			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ npfdbe!
+
+			"IOCacheInfoBlockTruncate: TODO free page\n" KeCrash
+
+			npfdbe@ pfdbe!
+		end
+
+		// set buckethead to null to reflect that it is now empty
+		0 buckethead@!
+
+		1 i +=
+	end
 
 	HALCPUInterruptDisable rs!
 

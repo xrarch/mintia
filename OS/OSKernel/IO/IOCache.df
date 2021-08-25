@@ -203,38 +203,61 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
 
 		auto pfdbe
-		buckethead@@ pfdbe!
+
+		// get the tail so that we can go backwards thru the bucket.
+		// reason for this is that LRU -> MRU is the most likely
+		// order to go "in order" on the disk surface
+		buckethead@ 4 + @ pfdbe!
 
 		while (pfdbe@)
-			if (pfdbe@ IOCacheInfoBlock_Flags + @ IOCACHEPAGEFLAG_DIRTY & writeout@ &&)
-				// this is a modified page, and caller wants us to write them out to disk.
-				// the alternative is writeout==0, which means the caller says its fine
-				// to ignore and toss them.
+			if (DEBUGCHECKS)
+				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+					if (pfdbe@ IOPageFrameEntryCache_References + @ 1 ~=)
+						pfdbe@
+						pfdbe@ IOPageFrameEntryCache_References + @
+						"IOCacheInfoBlockTruncate: found page with odd refcount %d (0x%08x)\n" KeCrash
+					end
+				end elseif (pfdbe@ IOPageFrameEntryCache_References + @ 0 ~=)
+					pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ "off=%08x\n" KeCrash
 
-				"IOCacheInfoBlockTruncate: TODO writeout\n" KeCrash
+					pfdbe@
+					pfdbe@ IOPageFrameEntryCache_References + @
+					"IOCacheInfoBlockTruncate: found page with odd refcount %d (0x%08x)\n" KeCrash
+				end
 			end
 
-			if (DEBUGCHECKS)
-				if (pfdbe@ IOPageFrameEntryCache_References + @)
-					pfdbe@ "IOCacheInfoBlockTruncate: found page with references (0x%08x)\n" KeCrash
+			if (writeout@)
+				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+					// this is a modified page, and caller wants us to write them out to disk.
+					// the alternative is writeout==0, which means the caller says its fine
+					// to ignore and throw them out.
+
+					1 // dontunbias
+					pfdbe@ // pfdbe
+					IOCachePageWriteModified drop
 				end
 			end
 
 			auto npfdbe
 
-			// get this now, because who knows what MmPageFree will do to the field where NextCachePage is stored
-			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ npfdbe!
+			// get this now, because who knows what MmPageFree will do to the field where PrevCachePage is stored
+			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
 
-			"IOCacheInfoBlockTruncate: TODO free page\n" KeCrash
+			pfdbe@ IOPageFrameEntryCache_PFN + @ // pfn
+			MmPageFree
 
 			npfdbe@ pfdbe!
 		end
 
-		// set buckethead to null to reflect that it is now empty
+		// set buckethead and buckettail to null to reflect that it is now empty
 		0 buckethead@!
+		0 buckethead@ 4 + !
 
 		1 i +=
 	end
+
+	0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
+	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
 
 	HALCPUInterruptDisable rs!
 
@@ -244,6 +267,90 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockUnlock
+end
+
+fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
+	auto fcb
+	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
+
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (DEBUGCHECKS)
+		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY & ~~)
+			pfdbe@ "IOCachePageWriteModified: page wasn't dirty (0x%08x)\n" KeCrash
+		end
+	end
+
+	// clear dirty flag
+	IOCACHEPAGEFLAG_DIRTY ~ pfdbe@ IOPageFrameEntryCache_Flags + &=
+
+	// decrement modified page count
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @ 0 ==)
+			"IOCachePageWriteModified: underflow\n" KeCrash
+		end
+	end
+
+	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
+
+	// remove from modified list
+	auto n
+	pfdbe@ MmPageFrameEntryEvictable_Next + @ n!
+
+	if (n@)
+		pfdbe@ MmPageFrameEntryEvictable_Prev + @ n@ MmPageFrameEntryEvictable_Prev + !
+	end else // no next means we were the tail
+		pfdbe@ MmPageFrameEntryEvictable_Prev + @ IOCacheModifiedPageListTail!
+	end
+
+	auto p
+	pfdbe@ MmPageFrameEntryEvictable_Prev + @ p!
+
+	if (p@)
+		pfdbe@ MmPageFrameEntryEvictable_Next + @ p@ MmPageFrameEntryEvictable_Next + !
+	end else // no prev means we were the head
+		pfdbe@ MmPageFrameEntryEvictable_Next + @ IOCacheModifiedPageListHead!
+	end
+
+	// if there's a modified PTE somewhere, clear the writable bit so that
+	// the next time the process writes to it, this page gets properly
+	// marked as dirty again
+
+	if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
+		pfdbe@ "IOCachePageWriteModified: TODO: clear writable bit in PTE\n" KeCrash
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	// perform the write operation
+
+	OSACCESSFLAG_BLOCK // flags
+	4096 // length
+	4096 // bufsize
+	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ // offset
+	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | // buffer
+	fcb@ // fcb
+	KERNELMODE // lastmode
+	writefunc@ IODispatchWriteFunction ok! drop
+
+	if (dontunbias@ ~~)
+		// dontunbias will be 1 during something like truncation,
+		// where the page frame is freed immediately after being
+		// written out to disk. this avoids a redundant refcount bias,
+		// which would be bad because interrupts will get disabled
+		// for some cycles, twice, for no reason
+
+		// no longer dirty, unbias the refcount
+		pfdbe@ MmEvictablePageDereference drop
+	end
 end
 
 fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
@@ -567,8 +674,8 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	if (DEBUGCHECKS)
 		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
 			// we shouldn't be trying to evict a dirty page frame
-			// until the dirty page writer thread writes it out and
-			// dereferences it...
+			// until the dirty page writer thread it is written out
+			// and dereferenced...
 
 			"IOCachePageEvictionFunction: tried to evict a dirty page frame\n" KeCrash
 		end
@@ -645,7 +752,6 @@ fn (MmModifyFunction) IOCachePageModifyFunction { pfdbe -- ok }
 
 	// mark valid: the page must either already be valid, and only be partially modified,
 	// or be invalid and fully overwritten (in which case, it is now valid). caller guarantees this.
-
 	IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
 
 	// will be decremented when written out
@@ -654,7 +760,7 @@ fn (MmModifyFunction) IOCachePageModifyFunction { pfdbe -- ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }
+fn IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
@@ -702,13 +808,13 @@ fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }
 		// perform the read operation
 
 		OSWAIT_TIMEOUTINFINITE // timeout
-		flags@ // flags
+		flags@ OSACCESSFLAG_BLOCK | // flags
 		4096 // length
 		4096 // bufsize
 		offset@ // offset
 		pageframe@ // buffer
 		fcb@ // fcb
-		lastmode@ // lastmode
+		KERNELMODE // lastmode
 		readfunc@ IODispatchReadFunction ok! drop
 
 		if (ok@)
@@ -729,7 +835,7 @@ fn IOCachePageRead { flags offset fcb lastmode -- pageframe pfdbe ok }
 	cacheblock@ IOCacheInfoBlockUnlock
 end
 
-fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
+fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok }
 	auto pfdbe
 	auto pageframe
 
@@ -816,6 +922,8 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 		min m!
 
 		if (DEBUGCHECKS)
+			// just in case im dumb
+
 			if (m@ ~~)
 				"IOCacheFileWrite: m == 0\n" KeCrash
 			end
@@ -859,7 +967,6 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 			flags@ // flags
 			pageno@ // offset
 			fcb@ // fcb
-			lastmode@ // lastmode
 			IOCachePageRead ok! pfdbe! pageframe!
 
 			if (ok@)
@@ -894,7 +1001,7 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb lastmode -- byteswr
 	IOCacheInfoBlockDereference drop
 end
 
-fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesread ok }
+fn IOCacheFileRead { flags length bufsize offset buffer fcb -- bytesread ok }
 	auto pfdbe
 	auto pageframe
 
@@ -965,7 +1072,6 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb lastmode -- bytesrea
 		flags@ // flags
 		pageno@ // offset
 		fcb@ // fcb
-		lastmode@ // lastmode
 		IOCachePageRead ok! pfdbe! pageframe!
 
 		if (ok@)

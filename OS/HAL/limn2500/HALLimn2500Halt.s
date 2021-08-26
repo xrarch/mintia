@@ -21,6 +21,3 @@ HALLimn2500Reset:
 	.dl  0 ;this is an invalid instruction
 .wait:
 	b    .wait
-
-.wait:
-	b    .wait

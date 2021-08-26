@@ -269,6 +269,58 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 	IOCacheInfoBlockUnlock
 end
 
+fn IOCachePageRemoveModified { pfdbe -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	// remove from modified list
+	auto n
+	pfdbe@ MmPageFrameEntryEvictable_Next + @ n!
+
+	if (n@)
+		pfdbe@ MmPageFrameEntryEvictable_Prev + @ n@ MmPageFrameEntryEvictable_Prev + !
+	end else // no next means we were the tail
+		pfdbe@ MmPageFrameEntryEvictable_Prev + @ IOCacheModifiedPageListTail!
+	end
+
+	auto p
+	pfdbe@ MmPageFrameEntryEvictable_Prev + @ p!
+
+	if (p@)
+		pfdbe@ MmPageFrameEntryEvictable_Next + @ p@ MmPageFrameEntryEvictable_Next + !
+	end else // no prev means we were the head
+		pfdbe@ MmPageFrameEntryEvictable_Next + @ IOCacheModifiedPageListHead!
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCachePageInsertModified { pfdbe -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	// use the evict LRU links to insert the page on the back of the modified list
+
+	auto t
+	IOCacheModifiedPageListTail@ t!
+
+	if (t@ ~~)
+		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+
+		pfdbe@ IOCacheModifiedPageListHead!
+		pfdbe@ IOCacheModifiedPageListTail!
+	end else
+		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+
+		t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
+		pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
+		pfdbe@ IOCacheModifiedPageListTail!
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
@@ -299,23 +351,7 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
 
 	// remove from modified list
-	auto n
-	pfdbe@ MmPageFrameEntryEvictable_Next + @ n!
-
-	if (n@)
-		pfdbe@ MmPageFrameEntryEvictable_Prev + @ n@ MmPageFrameEntryEvictable_Prev + !
-	end else // no next means we were the tail
-		pfdbe@ MmPageFrameEntryEvictable_Prev + @ IOCacheModifiedPageListTail!
-	end
-
-	auto p
-	pfdbe@ MmPageFrameEntryEvictable_Prev + @ p!
-
-	if (p@)
-		pfdbe@ MmPageFrameEntryEvictable_Next + @ p@ MmPageFrameEntryEvictable_Next + !
-	end else // no prev means we were the head
-		pfdbe@ MmPageFrameEntryEvictable_Next + @ IOCacheModifiedPageListHead!
-	end
+	pfdbe@ IOCachePageRemoveModified
 
 	// if there's a modified PTE somewhere, clear the writable bit so that
 	// the next time the process writes to it, this page gets properly
@@ -729,24 +765,7 @@ fn (MmModifyFunction) IOCachePageModifyFunction { pfdbe -- ok }
 
 	pfdbe@ MmEvictablePageReference drop
 
-	// use the evict LRU links to insert the page on the back of the modified list
-
-	auto t
-	IOCacheModifiedPageListTail@ t!
-
-	if (t@ ~~)
-		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
-
-		pfdbe@ IOCacheModifiedPageListHead!
-		pfdbe@ IOCacheModifiedPageListTail!
-	end else
-		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-
-		t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
-		pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-		pfdbe@ IOCacheModifiedPageListTail!
-	end
+	pfdbe@ IOCachePageInsertModified
 
 	IOCACHEPAGEFLAG_DIRTY pfdbe@ IOPageFrameEntryCache_Flags + |=
 

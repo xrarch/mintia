@@ -22,3 +22,141 @@
 #include "<inc>/IO.h"
 
 #include "<ll>/OSDLL/OS.h"
+
+fn IOModifiedPageWorker { context1 context2 -- }
+	PRIORITY_LOWREALTIME // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	// the modified page writer
+
+	while (1)
+		// write out all modified pages every 15 seconds,
+		// or whenever the system is low on memory.
+
+		auto ok
+		auto waitok
+
+		KERNELMODE // waitmode
+		0 // alertable
+		15000 // timeout
+		MmEventLowMemory // object
+		KeThreadWaitForObject waitok!
+
+		if (DEBUGCHECKS)
+			if (waitok@)
+				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
+					waitok@ "IOModifiedPageWorker: failed to wait on low memory event (%i)\n" KeCrash
+				end
+			end
+		end
+
+		auto writescore
+		0 writescore!
+
+		while (1)
+			if (writescore@ 128 >=)
+				// if we tried to unsuccessfully write 128 times in a row,
+				// odds are we're stuck in an infinite loop and we
+				// need to let user threads run for a bit in order
+				// to successfully write out any more pages.
+				// go to sleep for 50ms.
+
+				0 writescore!
+
+				50 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep ok!
+
+				if (DEBUGCHECKS)
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						ok@ "IOModifiedPageWorker: wait failed (%i)\n" KeCrash
+					end
+				end
+
+				0 ok!
+			end
+
+			auto none
+			0 none!
+
+			auto pfdbe
+			IOCacheModifiedPageListHead@ pfdbe!
+
+			if (pfdbe@)
+				auto ipl
+				IPLDPC KeIPLRaise ipl!
+
+				IOCacheModifiedPageListHead@ pfdbe!
+
+				if (pfdbe@)
+					auto cacheblock
+					pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockTryLock ok!
+
+					if (ok@)
+						// locked successfully
+
+						ipl@ KeIPLLower
+
+						// write out page
+
+						0 // dontunbias
+						pfdbe@ // pfdbe
+						IOCachePageWriteModified drop
+
+						cacheblock@ // cacheblock
+						IOCacheInfoBlockUnlock
+
+						0 writescore!
+					end else
+						// not locked, move this page to the tail so that we don't
+						// try it infinitely
+
+						if (pfdbe@ IOCacheModifiedPageListTail@ ~=)
+							pfdbe@ IOCachePageRemoveModified
+
+							pfdbe@ IOCachePageInsertModified
+						end
+
+						ipl@ KeIPLLower
+
+						1 writescore +=
+					end
+				end else
+					ipl@ KeIPLLower
+
+					1 none!
+				end
+			end else
+				1 none!
+			end
+
+			if (none@)
+				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
+					// low memory event woke us. sleep for 50ms
+					// to make sure we don't infinite loop here
+					// since there aren't any more modified pages.
+
+					50 // interval
+					KERNELMODE // waitmode
+					0 // alertable
+					KeThreadSleep ok!
+
+					if (DEBUGCHECKS)
+						if (ok@ STATUS_WAIT_TIMEOUT ~=)
+							ok@ "IOModifiedPageWorker: wait failed (%i)\n" KeCrash
+						end
+					end
+				end
+
+				break
+			end
+		end
+	end
+end

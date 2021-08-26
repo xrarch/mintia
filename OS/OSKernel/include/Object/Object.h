@@ -70,7 +70,6 @@ const OBNAMEMAX 64
 externptr ObTypeObjectType
 externptr ObTypeDirectoryType
 externptr ObRootDirectoryObject
-externptr ObBootDirectoryObject
 externptr ObObjectTypesDirectoryObject
 externptr ObRootMutex
 

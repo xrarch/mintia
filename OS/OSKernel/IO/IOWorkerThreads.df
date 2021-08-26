@@ -23,6 +23,32 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+fn IOFilesystemSyncWorker { context1 context2 -- }
+	PRIORITY_LOWREALTIME // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	auto ok
+
+	while (1)
+		4000 // interval
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep ok!
+
+		if (DEBUGCHECKS)
+			if (ok@ STATUS_WAIT_TIMEOUT ~=)
+				ok@ "IOFilesystemSyncWorker: wait failed (%i)\n" KeCrash
+			end
+		end
+
+		// TODO iterate through all mounted filesystems and ask them to
+		// sync whatever internal caches/buffers they may have
+	end
+end
+
 fn IOModifiedPageWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME // priority
 	KeThreadCurrent@ // thread
@@ -33,6 +59,13 @@ fn IOModifiedPageWorker { context1 context2 -- }
 	// the modified page writer
 
 	while (1)
+		// XXX we don't do this currently, but it's possible that
+		// it would be best to go to sleep for every, say, 64-128 pages written out,
+		// in order to avoid tying up the disk controller for too long.
+		// this is a high priority thread, so flushing a mass quantity of modified
+		// pages could stop any user processes from doing any disk I/O for a long
+		// period of time.
+
 		// write out all modified pages every 5 seconds,
 		// or whenever the system is low on memory.
 

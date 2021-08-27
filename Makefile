@@ -40,11 +40,12 @@ sysfiles: $(LIB_DIR)/Dragonfruit.dll
 
 	make -C $(HAL_DIR)
 	$(FSTOOL) u /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
+	$(FSTOOL) u /Andromeda/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
 	make -C $(LIB_DIR)
 	make -C $(BR_DIR)
 
 drivers: $(LIB_DIR)/Dragonfruit.dll
-	make -C $(DRIVER_DIR)/LIMNstation
+	make -C $(DRIVER_DIR)
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll

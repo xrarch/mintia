@@ -1,33 +1,29 @@
 # Andromeda
 
-Andromeda is an overengineered operating system for LIMNstation, based largely around design principles borrowed from UNIX, Windows NT, and OpenVMS (mostly the last two).
+Andromeda is an overengineered operating system for LIMNstation, incorporating design principles borrowed from Windows NT and OpenVMS.
 
-It is an attempt at a better-designed sibling of the [AISIX](http://github.com/limnarch/aisix) project. AISIX was a "usable" operating system and didn't *need* to die, but I grew a distaste for it being bad Unix clone #129283, so I decided to write a not-Unix and relegate AISIX to proof-of-concept status.
+It is an attempt at a better-designed sibling of the [AISIX](http://github.com/limnarch/aisix) project, which has been relegated to proof-of-concept status.
 
-WIP: Andromeda is not currently in even a minimally usable state.
+WIP: Andromeda is not currently in an even minimally usable state.
 
-## (Mostly-)Implemented features
+## Implemented features
 
 1. Dynamically-linked kernel modules (including all drivers).
-2. Millisecond resolution timer expiration.
-3. Priority-based preemptive multitasking with wait boosting.
-4. Nested interrupts.
-5. IPLs (analogous to Windows IRQLs), DPCs, and APCs.
-6. Waiting on multiple events at once (akin to win32's WaitForMultipleObjects).
-7. NT-like Object Manager for centralized resource tracking and IPC.
-8. Unix-like permissions model.
-9. Paging enabled in kernel-space.
-10. Basically portable (to 32-bit architectures with a 4kb page size).
-11. NT-like layered kernel design.
-12. Loadable kernel-mode debugger with stack tracing and basic commands.
-13. Fully multithreaded kernel.
+2. Priority-based preemptive multitasking with wait boosting.
+3. Nested interrupts.
+4. IPLs (analogous to Windows IRQLs), DPCs, and APCs.
+5. Waiting on multiple events at once (akin to win32's WaitForMultipleObjects).
+6. An Object Manager for centralized resource tracking and IPC.
+7. Unix-like permissions model.
+8. NT-like layered kernel design.
+9. Loadable kernel-mode debugger with stack tracing and basic commands.
+10. Unix-like (synchronous) I/O manager with NT-like (filestream) cache.
 
-## Planned features (in rough order of priority)
+## Planned features (in rough descending order of priority)
 
-1. Unix-like (synchronous) I/O manager with NT-like (filestream) cache. (in progress)
-2. Filesystem drivers (aisixfs and FAT32).
-3. Demand paging, memory-mapped files, etc.
-4. Userspace processes and dynamic linking.
-5. Mac OS 9-like window system.
+1. Filesystem drivers (aisixfs and FAT32). (in progress)
+2. Demand paging, memory-mapped files, etc.
+3. Userspace processes and dynamic linking.
+4. Mac OS 9-like window system.
 
 ![Running](https://i.imgur.com/dFxBZO5.png)

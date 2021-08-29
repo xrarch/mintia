@@ -31,6 +31,7 @@ struct IOFileControlBlock
 	4 DeviceObject // or mountpoint
 	4 DispatchTable
 	4 SizeInBytes
+	4 FSContext
 	KeMutex_SIZEOF Mutex
 	KeMutex_SIZEOF IOMutex
 endstruct

@@ -28,10 +28,12 @@ struct IOFileControlBlock
 	4 CacheInfoBlock
 	4 References
 	4 FileType
-	4 DeviceObject // or mountpoint
+	4 DeviceObject // or parent mountpoint
 	4 DispatchTable
 	4 SizeInBytes
 	4 FSContext
+	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
+	4 Busy // busy with a mount operation
 	KeMutex_SIZEOF Mutex
 	KeMutex_SIZEOF IOMutex
 endstruct

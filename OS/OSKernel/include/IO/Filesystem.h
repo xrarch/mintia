@@ -3,6 +3,9 @@ fnptr IOFilesystemUnmountFunction { mount -- ok }
 fnptr IOFilesystemFlushFunction { mount -- ok }
 
 struct IOFilesystem
+	4 Next
+	4 Reserved0 // leave room for a prev link just in case
+
 	4 Name
 	4 DispatchTable
 

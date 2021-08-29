@@ -5,3 +5,4 @@
 #include "<inc>/IO/Boost.h"
 #include "<inc>/IO/Partition.h"
 #include "<inc>/IO/Cache.h"
+#include "<inc>/IO/Filesystem.h"

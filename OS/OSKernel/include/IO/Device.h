@@ -22,7 +22,6 @@ struct IODevice
 	4 Extension
 	4 FileControlBlock
 	4 BlockSize
-	4 Mount
 
 	4 Reserved1
 	4 Reserved2

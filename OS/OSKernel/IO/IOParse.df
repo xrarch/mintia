@@ -28,21 +28,69 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 	auto type
 	initialobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ type!
 
+	auto fcb
+	auto mount
+
 	if (type@ IODeviceTypeObject@ ==)
+		initialobject@ IODevice_FileControlBlock + @ fcb!
+
 		if (path@ gb 0 ==)
 			// no remaining path means we are opening the device itself.
 			// create a file object for the device.
 
+			// TODO return an error if this is a disk image
+
 			flags@ // flags
 			process@ PsProcess_OwningUser + @ // owninguser
-			initialobject@ IODevice_FileControlBlock + @ // fcb
+			fcb@ // fcb
 			IOFileCreateObject ok! object!
 
 			return
 		end else
+			// we only need to do this check here, where we're
+			// going from a device object to a file object on the filesystem,
+			// and not below, where we're going from a file object to a file object,
+			// because the ref operation implied by having that file object precludes
+			// nasty stuff from happening anyway.
+
+			auto rs
+			HALCPUInterruptDisable rs!
+
+			fcb@ IOFileControlBlock_Mount + @ mount!
+
+			if (fcb@ IOFileControlBlock_Busy + @)
+				rs@ HALCPUInterruptRestore
+
+				STATUS_IO_TRY_AGAIN_LATER ok!
+
+				return
+			end elseif (mount@ ~~)
+				rs@ HALCPUInterruptRestore
+
+				STATUS_NOT_A_DIRECTORY ok!
+
+				return
+			end
+
+			1 fcb@ IOFileControlBlock_ParseCount + +=
+
+			rs@ HALCPUInterruptRestore
+
 			// remaining path, call mounted filesystem (if any) to resolve it
 
 			"IOParse: NYI 1\n" KeCrash
+
+			HALCPUInterruptDisable rs!
+
+			if (DEBUGCHECKS)
+				if (fcb@ IOFileControlBlock_ParseCount + @ 0 ==)
+					"IOParse: underflow 1\n" KeCrash
+				end
+			end
+
+			1 fcb@ IOFileControlBlock_ParseCount + -=
+
+			rs@ HALCPUInterruptRestore
 		end
 	end elseif (type@ IOFileTypeObject@ ==)
 		// we need to call into the filesystem whether there is remaining path or not,

@@ -24,3 +24,4 @@ const STATUS_IS_A_DIRECTORY        -22
 const STATUS_IO_END_OF_DISK        -23
 const STATUS_IO_END_OF_FILE        -24
 const STATUS_IO_TRY_AGAIN_LATER    -25
+const STATUS_IO_DEVICE_BUSY        -26

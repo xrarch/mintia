@@ -34,6 +34,7 @@ struct IOFileControlBlock
 	4 FSContext
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 	4 Busy // busy with a mount operation
+	4 ParseCount
 	KeMutex_SIZEOF Mutex
 	KeMutex_SIZEOF IOMutex
 endstruct

@@ -37,3 +37,8 @@ struct IOMount
 	4 Reserved6
 	4 Reserved7
 endstruct
+
+extern IOFilesystemRegister { filesystem -- ok }
+
+extern IOMountObject { flags fileobject -- mount ok }
+extern IOUnmountObject { fileobject -- ok }

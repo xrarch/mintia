@@ -23,6 +23,9 @@ struct IOFilesystem
 endstruct
 
 struct IOMount
+	4 Next
+	4 Prev
+
 	4 FSContext
 	4 Filesystem
 	4 VolumeFile
@@ -42,3 +45,7 @@ extern IOFilesystemRegister { filesystem -- ok }
 
 extern IOMountObject { flags fileobject -- mount ok }
 extern IOUnmountObject { fileobject -- ok }
+
+extern IOFilesystemSyncAll { -- ok }
+
+externptr IOMountListMutex

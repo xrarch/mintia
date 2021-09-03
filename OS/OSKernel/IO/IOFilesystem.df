@@ -26,6 +26,9 @@
 var IOFilesystemListHead 0
 public IOFilesystemListHead
 
+var IOMountListHead 0
+public IOMountListHead
+
 fn IOFilesystemRegister { filesystem -- ok }
 	// assumes being run single-threaded (i.e. in a DriverInit routine)...
 
@@ -33,6 +36,52 @@ fn IOFilesystemRegister { filesystem -- ok }
 
 	IOFilesystemListHead@ filesystem@ IOFilesystem_Next + !
 	filesystem@ IOFilesystemListHead!
+end
+
+fn IOMountListLock { -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	IOMountListMutex // object
+	KeThreadWaitForObject ok!
+end
+
+fn IOMountListLockUnalertable { -- }
+	auto ok
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	IOMountListMutex // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "IOMountListLockUnalertable: failed to lock mount list (%i)\n" KeCrash
+		end
+	end
+end
+
+fn IOMountListUnlock { -- }
+	IOMountListMutex KeMutexRelease drop
+end
+
+fn IOFilesystemMount { flags handle -- mount ok }
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! drop
+
+	if (ok@)
+		return
+	end
+
+	flags@ // flags
+	fileobject@ // fileobject
+	IOMountObject ok! mount!
+
+	fileobject@ ObObjectDereferenceByPointer drop
 end
 
 fn IOMountObject { flags fileobject -- mount ok }
@@ -56,6 +105,10 @@ fn IOMountObject { flags fileobject -- mount ok }
 		return
 	end elseif (filetype@ OSFILETYPE_DIRECTORY ==)
 		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end elseif (filetype@ OSFILETYPE_FILE ==)
+		STATUS_IO_NOT_SUPPORTED ok!
 
 		return
 	end
@@ -96,6 +149,9 @@ fn IOMountObject { flags fileobject -- mount ok }
 
 		return
 	end
+
+	0 mount@ IOMount_Next + !
+	0 mount@ IOMount_Prev + !
 
 	0 mount@ IOMount_FSContext + !
 	fileobject@ mount@ IOMount_VolumeFile + !
@@ -139,16 +195,45 @@ fn IOMountObject { flags fileobject -- mount ok }
 		return
 	end
 
-	if (filetype@ OSFILETYPE_FILE ==)
-		"IOMountObject: TODO: create loopback object for disk image\n" KeCrash
-	end
-
 	mount@ fcb@ IOFileControlBlock_Mount + !
 
 	// bias the reference count of the volume file object
 	fileobject@ ObObjectReferenceByPointer drop
 
+	IOMountListLockUnalertable
+
+	// add to head of mount list
+
+	auto h
+	IOMountListHead@ h!
+
+	if (h@)
+		mount@ h@ IOMount_Prev + !
+	end
+
+	h@ mount@ IOMount_Next + !
+	mount@ IOMountListHead!
+
+	IOMountListUnlock
+
 	0 fcb@ IOFileControlBlock_Busy + !
+end
+
+fn IOFilesystemUnmount { handle -- ok }
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! drop
+
+	if (ok@)
+		return
+	end
+
+	fileobject@ // fileobject
+	IOUnmountObject ok!
+
+	fileobject@ ObObjectDereferenceByPointer drop
 end
 
 fn IOUnmountObject { fileobject -- ok }
@@ -205,30 +290,77 @@ fn IOUnmountObject { fileobject -- ok }
 		end
 	end
 
+	IOMountListLockUnalertable
+
 	mount@ // mount
 	unmountfunc@ IOFilesystemUnmountFunction ok!
 
 	if (ok@)
 		// failed to unmount
 
+		IOMountListUnlock
+
 		0 fcb@ IOFileControlBlock_Busy + !
 
 		return
 	end
 
+	// remove from mount list
+	auto n
+	mount@ IOMount_Next + @ n!
+
+	if (n@)
+		mount@ IOMount_Prev + @ n@ IOMount_Prev + !
+	end
+
+	auto p
+	mount@ IOMount_Prev + @ p!
+
+	if (p@)
+		mount@ IOMount_Next + @ p@ IOMount_Next + !
+	end else // no prev means we were the head
+		mount@ IOMount_Next + @ IOMountListHead!
+	end
+
+	IOMountListUnlock
+
+	mount@ MmFree
+
 	// unmounted successfully
 
 	0 fcb@ IOFileControlBlock_Mount + !
-
-	mount@ MmFree
 
 	// unbias reference count of volume file object
 
 	fileobject@ ObObjectDereferenceByPointer drop
 
-	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_FILE ==)
-		"IOUnmountObject: TODO: destroy loopback object for disk image\n" KeCrash
+	0 fcb@ IOFileControlBlock_Busy + !
+end
+
+fn IOFilesystemSyncAll { -- ok }
+	IOMountListLock ok!
+
+	if (ok@)
+		return
 	end
 
-	0 fcb@ IOFileControlBlock_Busy + !
+	auto mount
+	IOMountListHead@ mount!
+
+	while (mount@)
+		auto filesystem
+		mount@ IOMount_Filesystem + @ filesystem!
+
+		auto flushfunc
+		filesystem@ IOFilesystem_FlushFunction + @ flushfunc!
+
+		if (flushfunc@)
+			mount@ // mount
+			flushfunc@ IOFilesystemFlushFunction drop
+		end
+
+		mount@ IOMount_Next + @ mount!
+	end
+
+	IOMountListUnlock
 end

@@ -95,6 +95,7 @@ extern DLLLoadPrefix { prefix name -- dll ok }
 externptr LoaderEntrypoint
 externptr LoaderTotalRAM
 externptr LoaderHALName
+externptr LoaderBootDiskName
 externptr AFSDevice
 externptr MemBitmap
 externptr DLLListHead

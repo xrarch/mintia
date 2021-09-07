@@ -22,8 +22,10 @@ fn LoaderNVRAMGetVar { name -- value }
 end
 
 buffer LoaderInfoBlock LoaderInfo_SIZEOF
-
 buffer LoaderInfoPlatformBlock LoaderInfoPlatform_SIZEOF
+
+buffer LoaderBootDeviceName 64
+public LoaderBootDeviceName
 
 buffer HALNameBuffer 128
 
@@ -123,6 +125,35 @@ fn Main { args -- ret }
 	if (a3xMyDevice@ AFSMount)
 		"couldn't mount boot device\n" LoaderPanic
 	end
+
+	auto bootdevname
+	"BOOT" ArgsValue bootdevname!
+
+	if (bootdevname@)
+		LoaderBootDeviceName bootdevname@ strcpy
+	end else
+		// try to auto-identify the name of the boot device
+
+		a3xMyDevice@ a3xDeviceSelectNode
+			if ("model" a3xDGetProperty "AISA,satsuma-disk" strcmp ~~)
+				"warning: don't know how to auto-identify this boot device\n" Printf
+			end
+
+			LoaderBootDeviceName "dks" strcpy
+			"satsuma,id" a3xDGetProperty LoaderBootDeviceName 3 + itoa
+
+			if ("deviceType" a3xDGetProperty "disk-logical" strcmp)
+				// we're booting from a partition, add partition identifier
+
+				's' LoaderBootDeviceName 4 + sb
+				"partition#" a3xDGetProperty LoaderBootDeviceName 5 + itoa
+			end
+		a3xDeviceExit
+	end
+
+	// if (LoaderBootDiskName gb)
+	// 	LoaderBootDiskName "booting from /Devices/%s\n" Printf
+	// end
 
 	auto dll
 	"OSKernel.exe" DLLLoad ret! dll!
@@ -293,7 +324,7 @@ fn Main { args -- ret }
 	MemHeap@            LoaderInfoBlock LoaderInfo_Heap + !
 	MemHeapSize@        LoaderInfoBlock LoaderInfo_HeapSize + !
 	MemPageDirectory@   LoaderInfoBlock LoaderInfo_PageDirectory + !
-
+	LoaderBootDeviceName IDENTITYSPACE | LoaderInfoBlock LoaderInfo_BootDeviceName + !
 
 	HALNameBuffer       LoaderInfoPlatformBlock LoaderInfoPlatform_LowBuffer + !
 

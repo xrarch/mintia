@@ -43,7 +43,10 @@ endstruct
 
 extern IOFilesystemRegister { filesystem -- ok }
 
+extern IOFilesystemMount { flags handle -- mount ok }
 extern IOMountObject { flags fileobject -- mount ok }
+
+extern IOFilesystemUnmount { handle -- ok }
 extern IOUnmountObject { fileobject -- ok }
 
 extern IOFilesystemSyncAll { -- ok }

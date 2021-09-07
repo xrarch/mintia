@@ -2,15 +2,25 @@
 
 #include "<ll>/rta3x/a3x.h"
 
+#include "<ll>/OSDLL/OS.h"
+
 #include "<inc>/HALLog.h"
 #include "<inc>/HALDriver.h"
 #include "<inc>/HALRTC.h"
 #include "<inc>/HALLIMNstationCitron.h"
 #include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
 
 #include "<inc>/Kernel.h"
 
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
 #include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
 
 table DriverAFSFilesystem
 	0                              // next
@@ -19,9 +29,9 @@ table DriverAFSFilesystem
 	"AisixFS"                      // name
 	pointerof DriverAFSDispatch    // dispatchtable
 
-	0                              // mountfunction
-	0                              // unmountfunction
-	0                              // flushfunction
+	pointerof DriverAFSMount       // mountfunction
+	pointerof DriverAFSUnmount     // unmountfunction
+	pointerof DriverAFSFlush       // flushfunction
 
 	0                              // reserved
 	0                              // reserved
@@ -68,5 +78,112 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		end
 	end
 
+	0 ok!
+end
+
+struct AFSSuperblock
+	4 Version
+	4 Magic
+	4 Dirty
+	4 NumReservedBlocks
+	4 FATStart
+	4 FATSize
+	4 IStart
+	4 ICount
+	4 DataStart
+	4 DataSize
+	4 VolSize
+endstruct
+
+struct AFSData
+	4 FATStart
+	4 FATSize
+	4 IStart
+	4 ICount
+	4 VolSize
+	4 LastFreeBlock
+endstruct
+
+const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
+const AFSSUPERBLOCKVERSION 0x6
+
+fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
+	auto superblockpfn
+	FREEFIRST // priority
+	MmPageAlloc ok! superblockpfn! drop
+
+	auto pageframe
+	superblockpfn@ 12 << IDENTITYSPACE | pageframe!
+
+	auto bytesread
+
+	4096 // length
+	4096 // bufsize
+	0 // offset
+	pageframe@ // buffer
+	mount@ // mount
+	FSVolumeRead ok! bytesread!
+
+	if (ok@)
+		superblockpfn@ MmPageFree
+
+		return
+	end
+
+	if (bytesread@ 4096 ~=)
+		superblockpfn@ MmPageFree
+
+		STATUS_IO_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	if (pageframe@ AFSSuperblock_Magic + @ AFSSUPERBLOCKMAGIC ~=)
+		superblockpfn@ MmPageFree
+
+		STATUS_IO_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	if (pageframe@ AFSSuperblock_Version + @ AFSSUPERBLOCKVERSION ~=)
+		superblockpfn@ MmPageFree
+
+		STATUS_IO_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	auto afsdata
+
+	AFSData_SIZEOF // bytes
+	'AFSD' // tag
+	MmAllocWithTag ok! afsdata!
+
+	if (ok@)
+		superblockpfn@ MmPageFree
+
+		return
+	end
+
+	pageframe@ AFSSuperblock_FATStart + @ afsdata@ AFSData_FATStart + !
+	pageframe@ AFSSuperblock_FATSize + @ afsdata@ AFSData_FATSize + !
+	pageframe@ AFSSuperblock_IStart + @ afsdata@ AFSData_IStart + !
+	pageframe@ AFSSuperblock_ICount + @ afsdata@ AFSData_ICount + !
+	pageframe@ AFSSuperblock_VolSize + @ afsdata@ AFSData_VolSize + !
+	0 afsdata@ AFSData_LastFreeBlock + !
+
+	afsdata@ mount@ IOMount_FSContext + !
+
+	superblockpfn@ MmPageFree
+
+	0 ok!
+end
+
+fn (IOFilesystemUnmountFunction) DriverAFSUnmount { mount -- ok }
+	0 ok!
+end
+
+fn (IOFilesystemFlushFunction) DriverAFSFlush { mount -- ok }
 	0 ok!
 end

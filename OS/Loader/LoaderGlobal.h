@@ -1,5 +1,5 @@
 const LOADERMAJOR 1
-const LOADERMINOR 0
+const LOADERMINOR 1
 
 const BOOTFBFORMAT_AB5G5R5 1
 
@@ -26,6 +26,7 @@ struct LoaderInfo
 	4 HeapSize
 	4 PageDirectory
 	4 PlatformInfo
+	4 BootDeviceName
 endstruct
 
 struct LoaderInfoPlatform

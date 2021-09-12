@@ -218,13 +218,14 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 						"IOCacheInfoBlockTruncate: found page with odd refcount %d (0x%08x)\n" KeCrash
 					end
 				end elseif (pfdbe@ IOPageFrameEntryCache_References + @ 0 ~=)
-					pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ "off=%08x\n" KeCrash
-
 					pfdbe@
 					pfdbe@ IOPageFrameEntryCache_References + @
 					"IOCacheInfoBlockTruncate: found page with odd refcount %d (0x%08x)\n" KeCrash
 				end
 			end
+
+			auto wroteout
+			0 wroteout!
 
 			if (writeout@)
 				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
@@ -235,7 +236,13 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 					1 // dontunbias
 					pfdbe@ // pfdbe
 					IOCachePageWriteModified drop
+
+					1 wroteout!
 				end
+			end
+
+			if (wroteout@ ~~)
+				pfdbe@ MmEvictablePageReference drop
 			end
 
 			auto npfdbe
@@ -498,6 +505,7 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 						// found one
 
 						pfdbe@ MmEvictablePageReference drop
+						cacheblock@ IOCacheInfoBlockDereference drop
 
 						pfdbe@ // pfdbe
 						cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + // buckethead
@@ -703,6 +711,12 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 		return
 	end
 
+	// we come in here in IPLDPC for synchronization reasons, but now
+	// that we have the cacheblock locked, we can lower IPL. we just
+	// have to remember to raise it again when we leave!
+
+	IPLLOW KeIPLLower
+
 	0 ok!
 
 	if (DEBUGCHECKS)
@@ -717,6 +731,8 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 		cacheblock@ IOCacheInfoBlockUnlock
 
 		0 evicted!
+
+		IPLDPC KeIPLRaise drop
 
 		return
 	end
@@ -746,9 +762,15 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	buckethead@ // buckethead
 	IOCachePageRemove
 
+	// earlier, the eviction thread incremented this refcount
+	// by ref'ing this page frame. undo that.
+	cacheblock@ IOCacheInfoBlockDereference drop
+
 	cacheblock@ IOCacheInfoBlockUnlock
 
 	1 evicted!
+
+	IPLDPC KeIPLRaise drop
 end
 
 fn (MmModifyFunction) IOCachePageModifyFunction { pfdbe -- ok }
@@ -775,7 +797,7 @@ fn (MmModifyFunction) IOCachePageModifyFunction { pfdbe -- ok }
 	end
 
 	// bias the refcount so that it doesn't get evicted while dirty.
-	// this gets undone when it is written out
+	// this gets undone when it is written out.
 
 	pfdbe@ MmEvictablePageReference drop
 

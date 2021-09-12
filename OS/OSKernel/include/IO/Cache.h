@@ -9,6 +9,7 @@ struct IOCacheInfoBlock
 	4 PageReferences
 	4 ModifiedPages
 	4 Flags
+
 	(IOCACHEPAGEBUCKETS 8 *) PageBucketListHeads
 endstruct
 

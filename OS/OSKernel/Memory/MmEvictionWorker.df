@@ -105,9 +105,11 @@ fn MmEvictionWorker { context1 context2 -- }
 			if (pfdbe@)
 				pfdbe@ MmEvictablePageReference drop
 
+				IPLDPC KeIPLRaise drop
+
 				rs@ HALCPUInterruptRestore
 
-				// MmPageEvict will call an MmEvictionFunction defined by the PFDBE.
+				// we will call an MmEvictionFunction defined by the PFDBE.
 				// this function's primary job is to perform whatever actions are
 				// necessary to evict the page frame, such as writing it out to the
 				// page file.
@@ -120,8 +122,38 @@ fn MmEvictionWorker { context1 context2 -- }
 				// that the refcount increased to >1 between the page being selected for
 				// eviction here, and a mutex being locked on it by the eviction function.
 
-				pfdbe@ // pfdbe
-				MmPageEvict ok! evicted!
+				auto evictionfuncs
+				pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+				if (DEBUGCHECKS)
+					if (evictionfuncs@ ~~)
+						"MmEvictionWorker: no eviction funcs for page\n" KeCrash
+					end
+				end
+
+				auto evictionfunc
+				evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+				1 evicted!
+
+				if (evictionfunc@)
+					pfdbe@ // pfdbe
+					evictionfunc@ MmEvictionFunction drop evicted!
+				end
+
+				if (evicted@)
+					// evicted, free the page
+
+					if (DEBUGCHECKS)
+						if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 ~=)
+							pfdbe@ MmPageFrameEntryEvictable_References + @
+							"MmEvictionWorker: attempt to evict a page with %d references\n" KeCrash
+						end
+					end
+
+					pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+					MmPageFree
+				end
 
 				if (evicted@ ~~)
 					// not evicted, dereference and re-place at back of LRU queue
@@ -132,6 +164,8 @@ fn MmEvictionWorker { context1 context2 -- }
 				end else
 					0 evictionscore!
 				end
+
+				IPLLOW KeIPLLower
 			end else
 				rs@ HALCPUInterruptRestore
 

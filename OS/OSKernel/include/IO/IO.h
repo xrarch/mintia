@@ -4,7 +4,10 @@ const IOVERSION_MAJOR 1
 const IOVERSION_MINOR 0
 
 extern IOInitPhase1 { -- }
+
 extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
+extern IODeviceDeleteFileObject { object -- ok }
+
 extern IOParse { flags path initialobject process -- reparsepath object ok }
 
 externptr IODevicesDirectoryObject
@@ -47,3 +50,6 @@ extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 extern IOFileControlBlockLockIO { fcb -- ok }
 extern IOFileControlBlockUnlockIO { fcb -- }
+
+extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
+extern IOFileControlBlockAcquireCheck { flags fcb -- ok }

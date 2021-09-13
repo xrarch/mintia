@@ -9,3 +9,6 @@ extern HALCPUContextSwitch { old new -- }
 extern HALCPURunInContext { int handler stack -- }
 extern HALCPUMapSwitch { asid pgtb -- oldasid oldpgtb }
 extern HALCPURunInContextNoInterrupts { handler stack arg1 arg0 -- ret0 ret1 }
+
+extern HALCPUAtomicIncrement { inc ptr -- oldvalue }
+extern HALCPUAtomicDecrement { dec ptr -- oldvalue }

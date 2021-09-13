@@ -127,3 +127,66 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 
 	rs@ HALCPUInterruptRestore
 end
+
+fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (wantcaching@)
+		if (cacheblock@ ~~)
+			// still no cache block, plus we want there to be one.
+			// therefore, initiate caching
+
+			fcb@ // fcb
+			IOCacheInitialize ok! cacheblock!
+
+			if (ok@)
+				// failed to initialize caching, do this I/O operation
+				// uncached and try again later...
+
+				0 cacheblock!
+			end
+		end
+	end
+
+	if (cacheblock@)
+		// may or may not have wanted caching, but are getting it regardless.
+		// unlock the FCB
+
+		fcb@ IOFileControlBlockUnlock
+	end
+
+	// if we didn't want caching, and there was no cache block, the FCB remains locked
+	// for the duration of the operation.
+end
+
+fn IOFileControlBlockAcquireCheck { flags fcb -- ok }
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto oldcount
+	fcb@ IOFileControlBlockReference oldcount!
+
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (flags@ OSFILEFLAG_NOCACHE &)
+		if (oldcount@ 0 ==)
+			if (cacheblock@)
+				// we can destroy the cacheblock!
+
+				"IOFileControlBlockAcquireCheck: TODO: destroy the cache block\n" KeCrash
+			end
+		end
+	end
+
+	fcb@ IOFileControlBlockUnlock
+end

@@ -1,4 +1,4 @@
-# Andromeda address space
+# MINTIA address space
 
 00000000-7FFFFFFF: userspace (or a second identity mapping of RAM in system process)
 

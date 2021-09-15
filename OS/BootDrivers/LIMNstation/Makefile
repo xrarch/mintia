@@ -6,9 +6,9 @@ all:
 	make sysfiles
 
 
-SYSFILEDIR := /Andromeda/BootDrivers/
+SYSFILEDIR := /mintia/BootDrivers/
 
-DISTIMAGE  := ../../../Distribution/Andromeda.img
+DISTIMAGE  := ../../../build/mintia-dist.img
 FST        := ../../../../sdk/fstool.sh
 OFFSET     := 2
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)

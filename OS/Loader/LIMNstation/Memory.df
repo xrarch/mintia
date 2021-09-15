@@ -35,7 +35,7 @@ fn MemInit { -- }
 	MemBitmap bm!
 
 	auto pages
-	LoaderTotalRAM@ 12 >> pages!
+	LoaderTotalRAM@ PAGESHIFT >> pages!
 
 	// limit to first 256MB as thats all we have bitmap space for.
 	// (LIMNstation only supports this much RAM anyway)
@@ -49,7 +49,7 @@ fn MemInit { -- }
 	auto ldrtop
 	pointerof _bss_end ldrtop!
 
-	1 ldrtop@ 4095 + 12 >> 0 MemSetStatus
+	1 ldrtop@ PAGEOFFSETMASK + PAGESHIFT >> 0 MemSetStatus
 
 	auto astart
 
@@ -61,10 +61,10 @@ fn MemInit { -- }
 		"couldn't allocate kernel page directory\n" LoaderPanic
 	end
 
-	astart@ 12 << MemPageDirectory!
+	astart@ PAGESHIFT << MemPageDirectory!
 
 	MemPageDirectory@
-	4096
+	PAGESIZE
 	0
 	memset
 
@@ -88,8 +88,8 @@ fn MemInit { -- }
 			"couldn't identity map kernel space\n" LoaderPanic
 		end
 
-		4096 kspc +=
-		4096 astart +=
+		PAGESIZE kspc +=
+		PAGESIZE astart +=
 	end
 
 	MemEnablePaging
@@ -104,13 +104,13 @@ fn MemInit { -- }
 
 	rps@ "pageframe db is %d bytes" Printf
 
-	rps@ 4095 + 12 >> PFDBBASE 12 >> 0 MemAllocUpper ok! astart!
+	rps@ PAGEOFFSETMASK + PAGESHIFT >> PFDBBASE PAGESHIFT >> 0 MemAllocUpper ok! astart!
 
 	if (ok@)
 		"couldn't allocate pageframe db\n" LoaderPanic
 	end
 
-	astart@ 12 << MemPageFrameDB!
+	astart@ PAGESHIFT << MemPageFrameDB!
 
 	MemPageFrameDB@ " at 0x%08x\n" Printf
 
@@ -143,7 +143,7 @@ fn MemInit { -- }
 		HEAPSHFDEFAULT heapshf!
 	end
 
-	pages@ heapshf@ >> 12 << rps!
+	pages@ heapshf@ >> PAGESHIFT << rps!
 
 	if (rps@ heapmin@ <)
 		heapmin@ rps!
@@ -161,18 +161,18 @@ fn MemInit { -- }
 	rps@ 16 >> rps |=
 	rps@ 1 >> rps -=
 
-	rps@ 4095 + 12 >> rps!
+	rps@ PAGEOFFSETMASK + PAGESHIFT >> rps!
 
-	rps@ 12 << "heap is %d bytes" Printf
+	rps@ PAGESHIFT << "heap is %d bytes" Printf
 
-	rps@ HEAPBASE 12 >> 0 MemAllocUpper ok! astart!
+	rps@ HEAPBASE PAGESHIFT >> 0 MemAllocUpper ok! astart!
 
 	if (ok@)
 		"\ncouldn't allocate kernel heap\n" LoaderPanic
 	end
 
-	astart@ 12 << MemHeap!
-	rps@ 12 << MemHeapSize!
+	astart@ PAGESHIFT << MemHeap!
+	rps@ PAGESHIFT << MemHeapSize!
 
 	MemHeap@ " at 0x%08x\n" Printf
 end
@@ -245,7 +245,7 @@ fn MemMapPage { phys virt nc -- ok }
 	virt@ 22 >> 2 << MemPageDirectory@ + pdi!
 
 	auto pt
-	pdi@@ 5 >> 12 << pt!
+	pdi@@ 5 >> PAGESHIFT << pt!
 
 	if (pt@ 0 ==)
 		1 0 MemAlloc ok! pt!
@@ -254,17 +254,17 @@ fn MemMapPage { phys virt nc -- ok }
 			return
 		end
 
-		12 pt <<=
+		PAGESHIFT pt <<=
 
-		pt@ 4096 0 memset
+		pt@ PAGESIZE 0 memset
 
-		pt@ 12 >> 5 << pdi@!
+		pt@ PAGESHIFT >> 5 << pdi@!
 	end
 
-	virt@ 12 >> 1023 & 2 << pt@ + pdi!
+	virt@ PAGESHIFT >> 1023 & 2 << pt@ + pdi!
 
 	if (pdi@@ PTE_V &)
-		virt@ 12 >> "MemMapPage: vpn %x is already mapped!\n" LoaderPanic
+		virt@ PAGESHIFT >> "MemMapPage: vpn %x is already mapped!\n" LoaderPanic
 	end
 
 	auto flags
@@ -278,7 +278,7 @@ fn MemMapPage { phys virt nc -- ok }
 		PTE_NC flags |=
 	end
 
-	phys@ 12 >> 5 << flags@ | pdi@!
+	phys@ PAGESHIFT >> 5 << flags@ | pdi@!
 end
 
 const PAGEMAX 1048575
@@ -289,13 +289,13 @@ fn MemFindEmptyRow { length start must -- ok ava }
 	end
 
 	auto i
-	start@ 12 >> i!
+	start@ PAGESHIFT >> i!
 
 	auto pd
 	MemPageDirectory@ start@ 22 >> 2 << + pd!
 
 	auto pt
-	pd@@ 5 >> 12 << pt!
+	pd@@ 5 >> PAGESHIFT << pt!
 
 	auto max
 	PAGEMAX max!
@@ -317,7 +317,7 @@ fn MemFindEmptyRow { length start must -- ok ava }
 		if (pt@ 0 ==)
 			1024 rmnd@ - row!
 			1024 rmnd@ - i +=
-			0x400000 rmnd@ 12 << - cv +=
+			0x400000 rmnd@ PAGESHIFT << - cv +=
 		end else
 			rmnd@ 2 << pt +=
 		end
@@ -342,16 +342,16 @@ fn MemFindEmptyRow { length start must -- ok ava }
 			end
 
 			1 r!
-			KERNELSPACE 12 >> i!
+			KERNELSPACE PAGESHIFT >> i!
 			0 row!
-			start@ 12 >> max!
+			start@ PAGESHIFT >> max!
 			KERNELSPACE ava!
 			KERNELSPACE cv!
 			MemPageDirectory@ KERNELSPACE 22 >> 2 << + pd!
 		end
 
 		if (i@ 1023 & 0 ==)
-			pd@@ 5 >> 12 << pt!
+			pd@@ 5 >> PAGESHIFT << pt!
 
 			4 pd +=
 		end
@@ -370,14 +370,14 @@ fn MemFindEmptyRow { length start must -- ok ava }
 			end
 
 			0 row!
-			cv@ 0x1000 + ava!
+			cv@ PAGESIZE + ava!
 		end else
 			1 row +=
 		end
 		
 		1 i +=
 		4 pt +=
-		0x1000 cv +=
+		PAGESIZE cv +=
 	end
 
 	ERR ok!
@@ -403,14 +403,14 @@ fn MemMapIORange { pages phys -- vaddr ok }
 			return
 		end
 
-		4096 vptr +=
-		4096 phys +=
+		PAGESIZE vptr +=
+		PAGESIZE phys +=
 		1 i +=
 	end
 end
 
 fn MemAllocUpper { pages vstart must -- astart ok }
-	pages@ vstart@ 12 << must@ MemFindEmptyRow astart! ok!
+	pages@ vstart@ PAGESHIFT << must@ MemFindEmptyRow astart! ok!
 
 	if (ok@)
 		-1 astart!
@@ -436,17 +436,17 @@ fn MemAllocUpper { pages vstart must -- astart ok }
 			return
 		end
 
-		pptr@ 12 << vptr@ 0 MemMapPage ok!
+		pptr@ PAGESHIFT << vptr@ 0 MemMapPage ok!
 
 		if (ok@)
 			return
 		end
 
-		4096 vptr +=
+		PAGESIZE vptr +=
 		1 i +=
 	end 
 
-	12 astart >>=
+	PAGESHIFT astart >>=
 
 	0 ok!
 end

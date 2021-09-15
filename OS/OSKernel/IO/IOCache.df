@@ -387,13 +387,13 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	end
 
 	fcb@ IOFileControlBlock_SizeInBytes + @ off@ -
-	4096 min len!
+	PAGESIZE min len!
 
 	OSACCESSFLAG_BLOCK // flags
 	len@ // length
 	len@ // bufsize
 	off@ // offset
-	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | // buffer
+	pfdbe@ IOPageFrameEntryCache_PFN + @ PAGESHIFT << IDENTITYSPACE | // buffer
 	fcb@ // fcb
 	KERNELMODE // lastmode
 	writefunc@ IODispatchWriteFunction ok! drop
@@ -412,7 +412,7 @@ end
 
 fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 	if (DEBUGCHECKS)
-		if (offset@ 0xFFF &)
+		if (offset@ PAGEOFFSETMASK &)
 			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
 		end
 	end
@@ -442,7 +442,7 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 	end
 
 	auto bucket
-	offset@ 12 >> IOCACHEPAGEMASK & bucket!
+	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
 
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
@@ -466,7 +466,7 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 		// try to grab a page from our own cache block.
 		// only try again with CANBLOCK if there are none available.
 
-		if (filesize@ offset@ - 4096 <)
+		if (filesize@ offset@ - PAGESIZE <)
 			// not a full page -- get zeroes because this might leak data otherwise
 
 			MMEVICTFLAG_FAST // flags
@@ -534,7 +534,7 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 				// not to do this in order to avoid waking the eviction thread
 				// unnecessarily. here, it might happen, and we might block.
 
-				if (filesize@ offset@ - 4096 <)
+				if (filesize@ offset@ - PAGESIZE <)
 					// not a full page -- get zeroes because this might leak data otherwise
 
 					MMEVICTFLAG_FAST // flags
@@ -602,7 +602,7 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 		IOCacheInfoBlockUnlock
 	end
 
-	pfdbe@ IOPageFrameEntryCache_PFN + @ 12 << IDENTITYSPACE | pageframe!
+	pfdbe@ IOPageFrameEntryCache_PFN + @ PAGESHIFT << IDENTITYSPACE | pageframe!
 end
 
 fn IOCacheDumpInfo { cacheblock -- }
@@ -751,7 +751,7 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
 
 	auto bucket
-	offset@ 12 >> IOCACHEPAGEMASK & bucket!
+	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
 
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
@@ -864,8 +864,8 @@ fn IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
 
 		OSWAIT_TIMEOUTINFINITE // timeout
 		flags@ OSACCESSFLAG_BLOCK | // flags
-		4096 // length
-		4096 // bufsize
+		PAGESIZE // length
+		PAGESIZE // bufsize
 		offset@ // offset
 		pageframe@ // buffer
 		fcb@ // fcb
@@ -930,7 +930,7 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok 
 		length@
 		min length!
 	end else
-		if (offset@ 0xFFFFF000 >=)
+		if (offset@ PAGENUMBERMASK >=)
 			// prevent underflow
 
 			cacheblock@ // cacheblock
@@ -941,7 +941,7 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok 
 			return
 		end
 
-		0xFFFFF000 offset@ -
+		PAGENUMBERMASK offset@ -
 		length@
 		min length!
 	end
@@ -963,15 +963,15 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok 
 		end
 
 		auto pageno
-		offset@ 0xFFFFF000 & pageno!
+		offset@ PAGENUMBERMASK & pageno!
 
 		auto pageoff
-		offset@ 4095 & pageoff!
+		offset@ PAGEOFFSETMASK & pageoff!
 
 		auto m
 
 		length@ byteswritten@ -
-		4096 pageoff@ -
+		PAGESIZE pageoff@ -
 		min
 		bufsize@ byteswritten@ -
 		min m!
@@ -1002,7 +1002,7 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok 
 			end
 		end
 
-		if (m@ 4096 ==)
+		if (m@ PAGESIZE ==)
 			// writing a full page -- no need to read something we're about to overwrite
 
 			0 // locked
@@ -1105,15 +1105,15 @@ fn IOCacheFileRead { flags length bufsize offset buffer fcb -- bytesread ok }
 		end
 
 		auto pageno
-		offset@ 0xFFFFF000 & pageno!
+		offset@ PAGENUMBERMASK & pageno!
 
 		auto pageoff
-		offset@ 4095 & pageoff!
+		offset@ PAGEOFFSETMASK & pageoff!
 
 		auto m
 
 		length@ bytesread@ -
-		4096 pageoff@ -
+		PAGESIZE pageoff@ -
 		min
 		bufsize@ bytesread@ -
 		min m!

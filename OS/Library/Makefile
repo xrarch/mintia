@@ -1,3 +1,3 @@
-SYSFILEDIR := /Andromeda/
+SYSFILEDIR := /mintia/
 
 include ../SysFiles.mk

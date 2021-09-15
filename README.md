@@ -1,10 +1,10 @@
-# Andromeda
+# MINTIA
 
-Andromeda is an overengineered operating system for LIMNstation, incorporating design principles borrowed from Windows NT and OpenVMS.
+MINTIA is an overengineered operating system for LIMNstation, incorporating design principles borrowed from Windows NT and OpenVMS.
 
 It is an attempt at a better-designed sibling of the [AISIX](http://github.com/limnarch/aisix) project, which has been relegated to proof-of-concept status.
 
-WIP: Andromeda is not currently in an even minimally usable state.
+WIP: MINTIA is not currently in an even minimally usable state.
 
 ## Implemented features
 

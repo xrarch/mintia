@@ -5,7 +5,8 @@ extern HALConsoleSetCursor { x y -- }
 extern HALConsoleClear { -- }
 extern HALConsoleSetMode { newmode -- oldmode }
 
-const CONSOLEBG 6 // blue
+const CONSOLEFG 15 // black
+const CONSOLEBG 0  // white
 
 const CONSOLEMODEOFF 0
 const CONSOLEMODETTY 1
@@ -19,14 +20,18 @@ externptr HALConsoleWidthChars
 externptr HALConsoleHeightChars
 externptr HALConsoleWidthPix
 externptr HALConsoleHeightPix
+externptr HALConsoleFontFlags
 
 // definitions for the HAL Console Font (HCF) format
 
 const HCFMAGIC 0x664E4C45
 
+const HCFFLAG_REVERSE 1
+
 struct HCFHeader
 	4 Magic
 	4 Width
 	4 Height
-	20 Reserved
+	4 Flags
+	16 Reserved
 endstruct

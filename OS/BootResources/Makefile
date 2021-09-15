@@ -1,3 +1,3 @@
-SYSFILEDIR := /Andromeda/BootResources/
+SYSFILEDIR := /mintia/BootResources/
 
 include ../SysFiles.mk

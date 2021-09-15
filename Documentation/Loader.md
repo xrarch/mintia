@@ -1,15 +1,15 @@
-# Andromeda Boot Process
+# MINTIA Boot Process
 
-The boot process starts when the [LIMNstation BIOS](https://github.com/limnarch/a3x) grabs [Loader](https://github.com/limnarch/andromeda/tree/main/OS/Loader) from blocks 2-15 of the selected boot partition and jumps to it. True to its name, Loader will locate and load essential Andromeda components.
+The boot process starts when the [LIMNstation BIOS](https://github.com/limnarch/a3x) grabs [Loader](https://github.com/limnarch/mintia/tree/main/OS/Loader) from blocks 2-15 of the selected boot partition and jumps to it. True to its name, Loader will locate and load essential MINTIA components.
 
 | Component                   | Typical Path                   | Description                                                                                                                            |
 |-----------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| Andromeda Kernel            | /Andromeda/OSKernel.exe | The main body of kernel code, the center of the operating system.                                                                      |
-| Hardware Abstraction Layer  | /Andromeda/HALLIMNstation.dll  | Anything and everything platform-specific in the kernel is put in the HAL, which forms the very lowest layer of the operating system.  |
-| Dragonfruit Runtime Library | /Andromeda/Dragonfruit.dll     | The dragonfruit library. User programs also link with this library.                                                                    |
-| Drivers                     | /Andromeda/BootDrivers/        | Any drivers that Loader determines are necessary to operate the machine.                                                               |
-| Binary Resources            | /Andromeda/BootResources/      | Large reclaimable resources like fonts and logos.                                                                                      |
-| Kernel Debugger             | /Andromeda/224Debug.exe        | Optionally loadable kernel debugger.                                                                                                   |
+| MINTIA Kernel               | /mintia/OSKernel.exe | The main body of kernel code, the center of the operating system.                                                                      |
+| Hardware Abstraction Layer  | /mintia/HALLIMNstation.dll  | Anything and everything platform-specific in the kernel is put in the HAL, which forms the very lowest layer of the operating system.  |
+| Dragonfruit Runtime Library | /mintia/Dragonfruit.dll     | The dragonfruit library. User programs also link with this library.                                                                    |
+| Drivers                     | /mintia/BootDrivers/        | Any drivers that Loader determines are necessary to operate the machine.                                                               |
+| Binary Resources            | /mintia/BootResources/      | Large reclaimable resources like fonts and logos.                                                                                      |
+| Kernel Debugger             | /mintia/224Debug.exe        | Optionally loadable kernel debugger.                                                                                                   |
 
 ## Loader
 Source code: `/OS/Loader/`
@@ -26,7 +26,7 @@ After loading all required files, Loader will jump to the HAL's entry point.
 
 A number of boot arguments can be specified in the BIOS that have an effect on Loader's behavior.
 
-Where there's a filename, it will interpret it as a path relative to the `/Andromeda/` system directory. This can be overridden by prefixing it with a `/` character, which will make it an absolute path.
+Where there's a filename, it will interpret it as a path relative to the `/mintia/` system directory. This can be overridden by prefixing it with a `/` character, which will make it an absolute path.
 
 | Format         | Name         | Behavior                                                                                                                                                       |
 |----------------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|

@@ -1,9 +1,9 @@
-DISTIMAGE  := ./Distribution/Andromeda.img
+DISTIMAGE  := ./build/mintia-dist.img
 DISTIMGSZ  := 2048
 FST        := ../sdk/fstool.sh
 OBJTOOL    := ../sdk/link.sh
 
-DISKLABEL  := ./Distribution/DiskLabel.vh
+DISKLABEL  := ./build/defaultdisklabel
 OFFSET     := 2
 
 OS_DIR     := ./OS
@@ -27,11 +27,11 @@ bootable:
 
 kernel:
 	make -C $(KERN_DIR)
-	$(FSTOOL) u /Andromeda/OSKernel.exe $(KERN_DIR)/OSKernel.exe
+	$(FSTOOL) u /mintia/OSKernel.exe $(KERN_DIR)/OSKernel.exe
 
 224debug:
 	make -C $(DBG_DIR)
-	$(FSTOOL) u /Andromeda/224Debug.exe $(DBG_DIR)/224Debug.exe
+	$(FSTOOL) u /mintia/224Debug.exe $(DBG_DIR)/224Debug.exe
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	make -C $(RTL_DIR)
@@ -39,8 +39,8 @@ sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	../sdk/install.sh $(RTL_DIR)
 
 	make -C $(HAL_DIR)
-	$(FSTOOL) u /Andromeda/BootResources.txt $(OS_DIR)/BootResources.txt
-	$(FSTOOL) u /Andromeda/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
+	$(FSTOOL) u /mintia/BootResources.txt $(OS_DIR)/BootResources.txt
+	$(FSTOOL) u /mintia/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
 	make -C $(LIB_DIR)
 	make -C $(BR_DIR)
 

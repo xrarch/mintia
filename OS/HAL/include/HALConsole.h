@@ -5,8 +5,8 @@ extern HALConsoleSetCursor { x y -- }
 extern HALConsoleClear { -- }
 extern HALConsoleSetMode { newmode -- oldmode }
 
-const CONSOLEFG 15 // black
-const CONSOLEBG 0  // white
+const CONSOLEFG 0 // black
+const CONSOLEBG 6  // white
 
 const CONSOLEMODEOFF 0
 const CONSOLEMODETTY 1

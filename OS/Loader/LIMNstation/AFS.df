@@ -42,19 +42,24 @@ var AFSInited 0
 const AFSSuperblockMagic 0xAFBBAFBB
 const AFSSuperblockVersion 0x6
 
+const AFSBLOCKSIZE 4096
+const AFSBLOCKOFFMASK (AFSBLOCKSIZE 1 -)
+const AFSBLOCKNUMBERMASK (AFSBLOCKOFFMASK ~)
+const AFSBLOCKSHIFT 12
+
 fn AFSInit { -- }
-	4096 Malloc AFSFATBlock!
+	AFSBLOCKSIZE Malloc AFSFATBlock!
 	if (AFSFATBlock@ ERR ==)
 		"couldn't allocate fat block buffer\n" LoaderPanic
 	end
 
-	4096 Malloc AFSINodeBlock!
+	AFSBLOCKSIZE Malloc AFSINodeBlock!
 	if (AFSINodeBlock@ ERR ==)
 		AFSFATBlock@ Free
 		"couldn't allocate inode block buffer\n" LoaderPanic
 	end
 
-	4096 Malloc AFSDataBlock!
+	AFSBLOCKSIZE Malloc AFSDataBlock!
 	if (AFSDataBlock@ ERR ==)
 		AFSFATBlock@ Free
 		AFSINodeBlock@ Free
@@ -190,12 +195,12 @@ end
 
 fn AFSIGetStruct { inum ino -- }
 	auto iblk
-	inum@ AFSINode_SIZEOF * 4096 / iblk!
+	inum@ AFSINode_SIZEOF * AFSBLOCKSIZE / iblk!
 
 	iblk@ AFSReadINodeBlock
 
 	auto inop
-	AFSINodeBlock@ inum@ AFSINode_SIZEOF * 4096 % + inop!
+	AFSINodeBlock@ inum@ AFSINode_SIZEOF * AFSBLOCKSIZE % + inop!
 
 	ino@ inop@ AFSINode_SIZEOF memcpy
 end
@@ -216,24 +221,24 @@ fn AFSRead { buf len seek ino -- bytes }
 	auto bnum
 	seek@ ino@ AFSFATSeek bnum!
 
-	if (seek@ 4095 &)
+	if (seek@ AFSBLOCKOFFMASK &)
 		bnum@ AFSReadDataBlock
 		bnum@ AFSBlockStatus bnum!
 	end
 
 	while (tot@ len@ <)
-		if (seek@ 4095 & 0 ==)
+		if (seek@ AFSBLOCKOFFMASK & 0 ==)
 			bnum@ AFSReadDataBlock
 			bnum@ AFSBlockStatus bnum!
 		end
 
 		auto m
 		len@ tot@ -
-		4096 seek@ 4096 % -
+		AFSBLOCKSIZE seek@ AFSBLOCKSIZE % -
 		min m!
 
 		buf@
-		AFSDataBlock@ seek@ 4096 % +
+		AFSDataBlock@ seek@ AFSBLOCKSIZE % +
 		m@ memcpy
 
 		m@ buf +=
@@ -344,7 +349,7 @@ end
 
 fn AFSFATSeek { seek ino -- bnum }
 	auto seeks
-	seek@ 4096 / seeks!
+	seek@ AFSBLOCKSIZE / seeks!
 
 	ino@ AFSINode_StartBlock + @ bnum!
 
@@ -359,8 +364,8 @@ fn AFSBlockStatus { bnum -- status }
 	auto fatblock
 	auto fatoff
 
-	bnum@ 4096 / fatblock!
-	bnum@ 4096 % fatoff!
+	bnum@ AFSBLOCKSIZE / fatblock!
+	bnum@ AFSBLOCKSIZE % fatoff!
 
 	fatblock@ AFSReadFATBlock
 	fatoff@ 4 * AFSFATBlock@ + @ status!

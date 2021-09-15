@@ -135,3 +135,8 @@ struct AFSINode
 	4 Reserved2
 	4 Size
 endstruct
+
+const PAGESIZE 4096
+const PAGEOFFSETMASK (PAGESIZE 1 -)
+const PAGENUMBERMASK (PAGEOFFSETMASK ~)
+const PAGESHIFT 12

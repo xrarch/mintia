@@ -141,6 +141,50 @@ fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
 	rs@ HALCPUInterruptRestore
 end
 
+fn IOCacheInfoBlockFlush { cacheblock -- ok }
+	// flush all of the cacheblock's modified pages.
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
+	// for each bucket, if a page if modified, write it out.
+
+	auto i
+	0 i!
+
+	while (i@ IOCACHEPAGEBUCKETS <)
+		auto buckethead
+		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+
+		auto pfdbe
+
+		// get the tail so that we can go backwards thru the bucket.
+		// reason for this is that LRU -> MRU is the most likely
+		// order to go "in order" on the disk surface
+		buckethead@ 4 + @ pfdbe!
+
+		while (pfdbe@)
+			if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+				0 // dontunbias
+				pfdbe@ // pfdbe
+				IOCachePageWriteModified drop
+			end
+
+			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
+		end
+
+		1 i +=
+	end
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockUnlock
+end
+
 fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 	// attempt to evict all of the cacheblock's page frames.
 	// caller should have locked the associated FCB as necessary.

@@ -69,12 +69,36 @@ end
 fn IOFilesystemMount { flags handle fsname -- mount ok }
 	auto fileobject
 
+	auto access
+
 	IOFileTypeObject@ // type
 	handle@ // handle
-	ObObjectReferenceByHandle ok! fileobject! drop
+	ObObjectReferenceByHandle ok! fileobject! access!
 
 	if (ok@)
 		return
+	end
+
+	access@ // access
+	ACCESS_READ // permission
+	SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	if (flags@ OSMOUNT_READONLY & ~~)
+		access@ // access
+		ACCESS_WRITE // permission
+		SeCheckAccess ok!
+
+		if (ok@)
+			fileobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
 	end
 
 	flags@ // flags
@@ -86,14 +110,6 @@ fn IOFilesystemMount { flags handle fsname -- mount ok }
 end
 
 fn IOMountObject { flags fileobject fsname -- mount ok }
-	SYSTEMPERMISSION_MOUNT // permission
-	SeUserCurrentGet // user
-	SeUserCheckPermission ok!
-
-	if (ok@)
-		return
-	end
-
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
@@ -264,11 +280,23 @@ end
 fn IOFilesystemUnmount { handle -- ok }
 	auto fileobject
 
+	auto access
+
 	IOFileTypeObject@ // type
 	handle@ // handle
-	ObObjectReferenceByHandle ok! fileobject! drop
+	ObObjectReferenceByHandle ok! fileobject! access!
 
 	if (ok@)
+		return
+	end
+
+	access@ // access
+	ACCESS_READ // permission
+	SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
 		return
 	end
 
@@ -279,14 +307,6 @@ fn IOFilesystemUnmount { handle -- ok }
 end
 
 fn IOUnmountObject { fileobject -- ok }
-	SYSTEMPERMISSION_MOUNT // permission
-	SeUserCurrentGet // user
-	SeUserCheckPermission ok!
-
-	if (ok@)
-		return
-	end
-
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
@@ -378,6 +398,115 @@ fn IOUnmountObject { fileobject -- ok }
 	// unbias reference count of volume file object
 
 	volfile@ ObObjectDereferenceByPointer drop
+
+	0 fcb@ IOFileControlBlock_Busy + !
+end
+
+fn IOMountUpdateFlags { newflags handle -- mount ok }
+	auto fileobject
+
+	auto access
+
+	IOFileTypeObject@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ // access
+	ACCESS_READ // permission
+	SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	if (newflags@ OSMOUNT_READONLY & ~~)
+		access@ // access
+		ACCESS_WRITE // permission
+		SeCheckAccess ok!
+
+		if (ok@)
+			fileobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+	end
+
+	newflags@ // newflags
+	fileobject@ // fileobject
+	IOMountUpdateFlagsObject ok!
+
+	fileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto mount
+	fcb@ IOFileControlBlock_Mount + @ mount!
+
+	if (mount@ ~~)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end elseif (fcb@ IOFileControlBlock_Busy + @)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end elseif (fcb@ IOFileControlBlock_ParseCount + @)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
+	1 fcb@ IOFileControlBlock_Busy + !
+
+	rs@ HALCPUInterruptRestore
+
+	auto oldflags
+	mount@ IOMount_Flags + @ oldflags!
+
+	if (oldflags@ newflags@ ==)
+		0 fcb@ IOFileControlBlock_Busy + !
+
+		return
+	end
+
+	auto filesystem
+	mount@ IOMount_Filesystem + @ filesystem!
+
+	auto updatefunc
+	filesystem@ IOFilesystem_UpdateFlagsFunction + @ updatefunc!
+
+	if (DEBUGCHECKS)
+		if (updatefunc@ ~~)
+			"IOMountUpdateFlagsObject: filesystem had no update flags function\n" KeCrash
+		end
+	end
+
+	newflags@ // newflags
+	oldflags@ // oldflags
+	mount@ // mount
+	updatefunc@ IOFilesystemUpdateFlagsFunction ok!
+
+	if (ok@ ~~)
+		newflags@ mount@ IOMount_Flags + !
+	end
 
 	0 fcb@ IOFileControlBlock_Busy + !
 end

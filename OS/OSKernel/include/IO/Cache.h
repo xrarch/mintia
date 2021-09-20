@@ -53,6 +53,10 @@ extern IOCachePageInsertModified { pfdbe -- }
 
 extern IOCachePageWriteModified { dontunbias pfdbe -- ok }
 
+extern IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
+extern IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
+extern IOCachePageModifyFunction { pfdbe -- ok }
+
 extern IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok }
 extern IOCacheFileRead { flags length bufsize offset buffer fcb -- bytesread ok }
 

@@ -10,3 +10,5 @@ const OSACCESSFLAG_BLOCK     1
 const OSSEEK_SET             1
 const OSSEEK_CUR             2
 const OSSEEK_END             3
+
+const OSMOUNT_READONLY       1

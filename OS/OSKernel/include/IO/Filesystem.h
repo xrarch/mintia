@@ -31,6 +31,7 @@ struct IOMount
 	4 VolumeFile
 	4 RootFCB
 	4 Flags
+	4 BlockSize
 
 	4 Reserved1
 	4 Reserved2

@@ -4,7 +4,7 @@
 #include "<inc>/HALRTC.h"
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALDebug.h"
-#include "<inc>/HALDriver.h"
+#include "<inc>/HALMap.h"
 
 #include "<inc>/Kernel.h"
 
@@ -15,6 +15,39 @@
 #include "<inc>/IO.h"
 
 #include "<ll>/OSDLL/OS.h"
+
+fn FSVolumeInitialize { blocksize mount -- cacheblock ok }
+	// start caching on volume file
+
+	auto volfcb
+	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+
+	if (DEBUGCHECKS)
+		if (volfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+			// this is a character device!
+
+			"FSVolumeInitialize: attempted to initialize a character device\n" KeCrash
+		end
+	end
+
+	if (volfcb@ IOFileControlBlock_SizeInBytes + @ blocksize@ 1 - &)
+		// volume file size isn't aligned with the block size...
+
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	1 // wantcaching
+	volfcb@ // fcb
+	IOFileControlBlockCacheCheck ok! cacheblock!
+
+	blocksize@ mount@ IOMount_BlockSize + !
+
+	if (blocksize@ PAGESIZE >)
+		PAGESIZE blocksize@ "FSVolumeInitialize: blocksize (%d) > pagesize (%d)\n" KeCrash
+	end
+end
 
 fn FSVolumeRead { length bufsize offset buf mount -- bytesread ok }
 	auto volfcb
@@ -61,4 +94,79 @@ fn FSVolumeWrite { length bufsize offset buf mount -- byteswritten ok }
 	volfcb@ // fcb
 	KERNELMODE // lastmode
 	writefunc@ IODispatchWriteFunction ok! byteswritten!
+end
+
+fn FSVolumeReadCached { length bufsize offset buf mount -- bytesread ok }
+	auto volfcb
+	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+
+	auto readfunc
+	volfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
+
+	if (readfunc@ ~~)
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	OSACCESSFLAG_BLOCK // flags
+	length@ // length
+	bufsize@ // bufsize
+	offset@ // offset
+	buf@ // buffer
+	volfcb@ // fcb
+	IOCacheFileRead ok! bytesread!
+end
+
+fn FSVolumeWriteCached { length bufsize offset buf mount -- byteswritten ok }
+	auto volfcb
+	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+
+	if (DEBUGCHECKS)
+		if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
+			"FSVolumeWrite: fs driver attempted to write a readonly volume\n" KeCrash
+		end
+	end
+
+	auto writefunc
+	volfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	if (writefunc@ ~~)
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	OSACCESSFLAG_BLOCK // flags
+	length@ // length
+	bufsize@ // bufsize
+	offset@ // offset
+	buf@ // buffer
+	volfcb@ // fcb
+	IOCacheFileWrite ok! byteswritten!
+end
+
+fn FSVolumeBlockRead { flags offset mount -- pageframe pfdbe ok }
+	auto blocksize
+	mount@ IOMount_BlockSize + @ blocksize!
+
+	if (DEBUGCHECKS)
+		if (blocksize@ 1 - offset@ &)
+			offset@ "FSVolumeBlockRead: offset %d wasn't block-aligned within volume\n" KeCrash
+		end
+	end
+
+	auto volfcb
+	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+
+	flags@ // flags
+	offset@ PAGENUMBERMASK & // offset
+	volfcb@ // fcb
+	IOCachePageRead ok! pfdbe! pageframe!
+
+	offset@ PAGEOFFSETMASK & pageframe +=
+end
+
+fn FSVolumeBlockWrite { pfdbe -- ok }
+	pfdbe@ IOCachePageModifyFunction ok!
 end

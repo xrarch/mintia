@@ -69,6 +69,9 @@ table DriverAFSDispatch
 endtable
 
 const AFSBLOCKSIZE 4096
+const AFSBLOCKOFFMASK (AFSBLOCKSIZE 1 -)
+const AFSBLOCKNUMBERMASK (AFSBLOCKOFFMASK ~)
+const AFSBLOCKSHIFT 12
 
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
@@ -110,38 +113,29 @@ const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
 const AFSSUPERBLOCKVERSION 0x6
 
 fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
-	auto superblockpfn
-	FREEFIRST // priority
-	MmPageAlloc ok! superblockpfn! drop
-
-	auto pageframe
-	superblockpfn@ PAGESHIFT << IDENTITYSPACE | pageframe!
-
-	auto bytesread
-
-	AFSBLOCKSIZE // length
-	AFSBLOCKSIZE // bufsize
-	0 // offset
-	pageframe@ // buffer
+	AFSBLOCKSIZE // blocksize
 	mount@ // mount
-	FSVolumeRead ok! bytesread!
+	FSVolumeInitialize ok! drop
 
 	if (ok@)
-		superblockpfn@ MmPageFree
-
 		return
 	end
 
-	if (bytesread@ AFSBLOCKSIZE ~=)
-		superblockpfn@ MmPageFree
+	auto pageframe
 
-		STATUS_IO_BAD_FILESYSTEM ok!
+	auto pfdbe
 
+	0 // flags
+	0 // offset
+	mount@ // mount
+	FSVolumeBlockRead ok! pfdbe! pageframe!
+
+	if (ok@)
 		return
 	end
 
 	if (pageframe@ AFSSuperblock_Magic + @ AFSSUPERBLOCKMAGIC ~=)
-		superblockpfn@ MmPageFree
+		pfdbe@ MmEvictablePageDereference drop
 
 		STATUS_IO_BAD_FILESYSTEM ok!
 
@@ -149,7 +143,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	end
 
 	if (pageframe@ AFSSuperblock_Version + @ AFSSUPERBLOCKVERSION ~=)
-		superblockpfn@ MmPageFree
+		pfdbe@ MmEvictablePageDereference drop
 
 		STATUS_IO_BAD_FILESYSTEM ok!
 
@@ -163,7 +157,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	MmAllocWithTag ok! afsdata!
 
 	if (ok@)
-		superblockpfn@ MmPageFree
+		pfdbe@ MmEvictablePageDereference drop
 
 		return
 	end
@@ -177,7 +171,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 
 	afsdata@ mount@ IOMount_FSContext + !
 
-	superblockpfn@ MmPageFree
+	pfdbe@ MmEvictablePageDereference drop
 
 	0 ok!
 end

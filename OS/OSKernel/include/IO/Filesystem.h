@@ -1,6 +1,7 @@
 fnptr IOFilesystemMountFunction { mount -- ok }
 fnptr IOFilesystemUnmountFunction { mount -- ok }
 fnptr IOFilesystemFlushFunction { mount -- ok }
+fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags mount -- ok }
 
 struct IOFilesystem
 	4 Next
@@ -12,6 +13,7 @@ struct IOFilesystem
 	4 MountFunction
 	4 UnmountFunction
 	4 FlushFunction
+	4 UpdateFlagsFunction
 	4 Flags
 
 	4 Reserved1

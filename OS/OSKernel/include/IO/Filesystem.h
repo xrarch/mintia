@@ -12,6 +12,7 @@ struct IOFilesystem
 	4 MountFunction
 	4 UnmountFunction
 	4 FlushFunction
+	4 Flags
 
 	4 Reserved1
 	4 Reserved2
@@ -42,10 +43,12 @@ struct IOMount
 	4 Reserved7
 endstruct
 
+const IOFSFLAG_NOAUTO 1
+
 extern IOFilesystemRegister { filesystem -- ok }
 
-extern IOFilesystemMount { flags handle -- mount ok }
-extern IOMountObject { flags fileobject -- mount ok }
+extern IOFilesystemMount { flags handle fsname -- mount ok }
+extern IOMountObject { flags fileobject fsname -- mount ok }
 
 extern IOFilesystemUnmount { handle -- ok }
 extern IOUnmountObject { fileobject -- ok }

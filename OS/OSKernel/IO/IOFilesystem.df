@@ -66,7 +66,7 @@ fn IOMountListUnlock { -- }
 	IOMountListMutex KeMutexRelease drop
 end
 
-fn IOFilesystemMount { flags handle -- mount ok }
+fn IOFilesystemMount { flags handle fsname -- mount ok }
 	auto fileobject
 
 	IOFileTypeObject@ // type
@@ -79,12 +79,13 @@ fn IOFilesystemMount { flags handle -- mount ok }
 
 	flags@ // flags
 	fileobject@ // fileobject
+	fsname@ // fsname
 	IOMountObject ok! mount!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOMountObject { flags fileobject -- mount ok }
+fn IOMountObject { flags fileobject fsname -- mount ok }
 	SYSTEMPERMISSION_MOUNT // permission
 	SeUserCurrentGet // user
 	SeUserCheckPermission ok!
@@ -111,6 +112,27 @@ fn IOMountObject { flags fileobject -- mount ok }
 		STATUS_IO_NOT_SUPPORTED ok!
 
 		return
+	end
+
+	auto filesystem
+	0 filesystem!
+
+	if (fsname@)
+		IOFilesystemListHead@ filesystem!
+
+		while (filesystem@)
+			if (filesystem@ IOFilesystem_Name + @ fsname@ strcmp)
+				break
+			end
+
+			filesystem@ IOFilesystem_Next + @ filesystem!
+		end
+
+		if (filesystem@ ~~)
+			STATUS_IO_NO_SUCH_FILESYSTEM ok!
+
+			return
+		end
 	end
 
 	auto rs
@@ -158,31 +180,49 @@ fn IOMountObject { flags fileobject -- mount ok }
 	0 mount@ IOMount_RootFCB + !
 	flags@ mount@ IOMount_Flags + !
 
-	auto filesystem
-	IOFilesystemListHead@ filesystem!
+	auto mountfunc
 
-	while (filesystem@)
+	if (filesystem@ ~~)
+		// no filesystem was explicitly given.
+		// try any
+
+		IOFilesystemListHead@ filesystem!
+
+		while (filesystem@)
+			filesystem@ mount@ IOMount_Filesystem + !
+			
+			filesystem@ IOFilesystem_MountFunction + @ mountfunc!
+
+			if (DEBUGCHECKS)
+				if (mountfunc@ ~~)
+					"IOMountObject: filesystem had no mount function 1\n" KeCrash
+				end
+			end
+
+			mount@ // mount
+			mountfunc@ IOFilesystemMountFunction ok!
+
+			if (ok@ 0 ==)
+				// successfully mounted as this filesystem
+
+				break
+			end
+
+			filesystem@ IOFilesystem_Next + @ filesystem!
+		end
+	end else
 		filesystem@ mount@ IOMount_Filesystem + !
-		
-		auto mountfunc
+
 		filesystem@ IOFilesystem_MountFunction + @ mountfunc!
 
 		if (DEBUGCHECKS)
 			if (mountfunc@ ~~)
-				"IOMountObject: filesystem had no mount function\n" KeCrash
+				"IOMountObject: filesystem had no mount function 2\n" KeCrash
 			end
 		end
 
 		mount@ // mount
 		mountfunc@ IOFilesystemMountFunction ok!
-
-		if (ok@ 0 ==)
-			// successfully mounted as this filesystem
-
-			break
-		end
-
-		filesystem@ IOFilesystem_Next + @ filesystem!
 	end
 
 	if (ok@)

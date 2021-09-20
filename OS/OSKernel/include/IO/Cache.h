@@ -47,6 +47,7 @@ extern IOCacheInfoBlockLock { cacheblock -- ok }
 extern IOCacheInfoBlockTryLock { cacheblock -- locked }
 extern IOCacheInfoBlockUnlock { cacheblock -- }
 extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
+extern IOCacheInfoBlockFlush { cacheblock -- ok }
 
 extern IOCachePageRemoveModified { pfdbe -- }
 extern IOCachePageInsertModified { pfdbe -- }

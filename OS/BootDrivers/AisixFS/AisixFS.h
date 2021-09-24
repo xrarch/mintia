@@ -17,10 +17,8 @@ struct AFSSuperblock
 	4 VolSize
 endstruct
 
-const AFSFCBMAX 64 // only cache 64 FCBs
-
-const AFSFCBBUCKETS 16 // must be a power of two
-const AFSFCBSHIFT 4 // 1<<AFSFCBSHIFT must equal AFSFCBBUCKETS
+const AFSFCBBUCKETS 32 // must be a power of two
+const AFSFCBSHIFT 5 // 1<<AFSFCBSHIFT must equal AFSFCBBUCKETS
 const AFSFCBMASK (AFSFCBBUCKETS 1 -)
 
 struct AFSData
@@ -31,6 +29,25 @@ struct AFSData
 	4 VolSize
 	4 LastFreeBlock
 
+	4 FCBRefTotal
+
+	4 FCBUsedCount
+
+	4 FCBReusableListHead
+	4 FCBReusableListTail
+
+	KeMutex_SIZEOF FCBCacheMutex
+	(AFSFCBBUCKETS 8 *) FCBBucketListHeads
+endstruct
+
+struct AFSFCBData
+	4 NextFCB
+	4 PrevFCB
+
+	4 NextReusableFCB
+	4 PrevReusableFCB
+	
+	4 INum
 endstruct
 
 struct AFSDirEnt
@@ -51,3 +68,5 @@ endstruct
 
 const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
 const AFSSUPERBLOCKVERSION 0x6
+
+externptr AFSFCBCacheCount

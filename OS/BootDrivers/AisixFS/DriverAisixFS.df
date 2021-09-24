@@ -72,8 +72,15 @@ table DriverAFSDispatch
 	0                                    // reserved
 endtable
 
+var AFSFCBCacheCount 0
+public AFSFCBCacheCount
+
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
+		MmHeapSize@ IOFileControlBlock_SIZEOF AFSFCBData_SIZEOF + / 10 / AFSFCBCacheCount!
+
+		AFSFCBCacheCount@ "caching %d FCBs\n" "DriverAFSInit" HALLog
+
 		DriverAFSFilesystem // filesystem
 		IOFilesystemRegister ok!
 
@@ -141,6 +148,25 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	pageframe@ AFSSuperblock_ICount + @ afsdata@ AFSData_ICount + !
 	pageframe@ AFSSuperblock_VolSize + @ afsdata@ AFSData_VolSize + !
 	0 afsdata@ AFSData_LastFreeBlock + !
+	0 afsdata@ AFSData_FCBUsedCount + !
+	0 afsdata@ AFSData_FCBReusableListHead + !
+	0 afsdata@ AFSData_FCBRefTotal + !
+
+	"AFSFCBCacheMutex" // name
+	KERNELMODE // mode
+	afsdata@ AFSData_FCBCacheMutex + // mutex
+	KeMutexInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"DriverAFSMount: couldn't initialize fcb cache mutex\n" KeCrash
+		end
+	end
+
+	afsdata@ AFSData_FCBBucketListHeads + // ptr
+	AFSFCBBUCKETS 8 * // size
+	0 // word
+	memset
 
 	afsdata@ mount@ IOMount_FSContext + !
 

@@ -24,6 +24,154 @@
 
 #include "AisixFS.h"
 
+fn AFSFCBCacheLock { mount -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMount_FSContext + @ AFSData_FCBCacheMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn AFSFCBCacheUnlock { mount -- }
+	mount@ IOMount_FSContext + @ AFSData_FCBCacheMutex + KeMutexRelease drop
+end
+
+fn AFSFCBRemove { fcb buckethead -- }
+	// remove from hash list.
+	// assumes fcb cache is locked.
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+	auto n
+	fcbdata@ AFSFCBData_NextFCB + @ n!
+
+	if (n@)
+		fcbdata@ AFSFCBData_PrevFCB + @ n@ IOFileControlBlock_FSContext + @ AFSFCBData_PrevFCB + !
+	end else // no next means we were the tail
+		fcbdata@ AFSFCBData_PrevFCB + @ buckethead@ 4 + !
+	end
+
+	auto p
+	fcbdata@ AFSFCBData_PrevFCB + @ p!
+
+	if (p@)
+		fcbdata@ AFSFCBData_NextFCB + @ p@ IOFileControlBlock_FSContext + @ AFSFCBData_NextFCB + !
+	end else // no prev means we were the head
+		fcbdata@ AFSFCBData_NextFCB + @ buckethead@!
+	end
+end
+
+fn AFSFCBInsert { fcb buckethead -- }
+	// insert into hash list on the recently-used end.
+	// assumes fcb cache is locked.
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+	auto n
+	buckethead@@ n!
+
+	0 fcbdata@ AFSFCBData_PrevFCB + !
+	n@ fcbdata@ AFSFCBData_NextFCB + !
+
+	if (n@)
+		fcbdata@ n@ IOFileControlBlock_FSContext + @ AFSFCBData_PrevFCB + !
+	end else // no head, set tail
+		fcb@ buckethead@ 4 + !
+	end
+
+	fcb@ buckethead@!
+end
+
+fn AFSFCBReference { fcb -- oldcount }
+	// assumes fcb cache is locked.
+
+	1 fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ AFSData_FCBRefTotal + +=
+
+	fcb@ IOFileControlBlockReference oldcount!
+end
+
+fn AFSFCBDereference { fcb -- oldcount }
+	// assumes fcb cache is locked.
+
+	fcb@ IOFileControlBlockDereference oldcount!
+
+	1 fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ AFSData_FCBRefTotal + -=
+end
+
+fn AFSFCBRead { inum mount -- fcb ok }
+	auto afsdata
+	mount@ IOMount_FSContext + @ afsdata!
+
+	if (inum@ 0 ==)
+		"AFSFCBRead: inum == 0\n" KeCrash
+	end
+
+	if (inum@ afsdata@ AFSData_ICount + @ >=)
+		"AFSFCBRead: inum >= icount\n" KeCrash
+	end
+
+	mount@ AFSFCBCacheLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto bucket
+	inum@ AFSFCBMASK & bucket!
+
+	auto buckethead
+	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
+
+	auto buckettail
+	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + 4 + buckettail!
+
+	buckethead@@ fcb!
+
+	while (fcb@)
+		if (fcb@ IOFileControlBlock_FSContext + @ AFSFCBData_INum + @ inum@ ==)
+			break
+		end
+
+		fcb@ IOFileControlBlock_FSContext + @ AFSFCBData_NextFCB + @ fcb!
+	end
+
+	if (fcb@ ~~)
+		// didn't find, need to allocate and read in the inode.
+
+		if (afsdata@ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
+			// the cache is full. try to reclaim an unused FCB.
+			// if there are none, we will be forced to allocate
+			// a new one and go above the limit for a while.
+			// while above the limit, any FCBs whose refcounts
+			// drop to 0 get instantly freed...
+
+			"TODO: that\n" KeCrash
+		end
+
+		"TODO: stuff\n" KeCrash
+	end else
+		// found the FCB, it was in the cache already!
+
+		// remove from hash list so that it can be reinserted on the recently-used end
+
+		if (fcb@ buckethead@@ ~=)
+			fcb@ // fcb
+			buckethead@ // buckethead
+			AFSFCBRemove
+
+			fcb@ // fcb
+			buckethead@ // buckethead
+			AFSFCBInsert
+		end
+	end
+
+	fcb@ AFSFCBReference drop
+
+	mount@ AFSFCBCacheUnlock
+end
+
 fn AFSINodeRead { inum mount -- ptr pfdbe ok }
 	auto block
 	auto off

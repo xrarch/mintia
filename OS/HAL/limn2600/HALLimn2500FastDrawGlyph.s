@@ -25,7 +25,7 @@ HALCPUFastDrawGlyphBackwards:
 
 	rshi t2, t2, 1
 	andi t3, t2, 1
-	beq  t3, zero, .nopix
+	beq  t3, .nopix
 
 	mov  t4, long [sp + 16]
 
@@ -33,11 +33,11 @@ HALCPUFastDrawGlyphBackwards:
 	mov  int [a2], t4
 
 	addi a2, a2, 2
-	bne  t1, zero, .xloop
+	bne  t1, .xloop
 
 	addi a0, a0, 1
 	add  a2, a2, a1
-	bne  a3, zero, .yloop
+	bne  a3, .yloop
 
 	ret
 
@@ -66,7 +66,7 @@ HALCPUFastDrawGlyph:
 
 	rsh  t3, t2, t1
 	andi t3, t3, 1
-	beq  t3, zero, .nopix
+	beq  t3, .nopix
 
 	mov  t4, long [sp + 16]
 
@@ -74,10 +74,10 @@ HALCPUFastDrawGlyph:
 	mov  int [a2], t4
 
 	addi a2, a2, 2
-	bne  t1, zero, .xloop
+	bne  t1, .xloop
 
 	addi a0, a0, 1
 	add  a2, a2, a1
-	bne  a3, zero, .yloop
+	bne  a3, .yloop
 
 	ret

@@ -48,6 +48,10 @@ struct AFSFCBData
 	4 PrevReusableFCB
 	
 	4 INum
+	4 FirstFATLink
+	4 UID
+	4 Permissions
+	4 IParent
 endstruct
 
 struct AFSDirEnt
@@ -68,5 +72,7 @@ endstruct
 
 const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
 const AFSSUPERBLOCKVERSION 0x6
+
+externptr DriverAFSDispatch
 
 externptr AFSFCBCacheCount

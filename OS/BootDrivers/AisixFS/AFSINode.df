@@ -24,6 +24,28 @@
 
 #include "AisixFS.h"
 
+fn AFSINodeRead { inum mount -- ptr pfdbe ok }
+	auto block
+	auto off
+
+	auto inode
+
+	inum@ AFSINode_SIZEOF * off!
+
+	mount@ IOMount_FSContext + @ AFSData_IStart + @ off@ AFSBLOCKSHIFT >> + AFSBLOCKSHIFT << block!
+
+	0 // flags
+	block@ // offset
+	mount@ // mount
+	FSVolumeBlockRead ok! pfdbe! ptr!
+
+	if (ok@)
+		return
+	end
+
+	off@ AFSBLOCKOFFMASK & ptr +=
+end
+
 fn AFSFCBCacheLock { mount -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
@@ -137,6 +159,10 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		fcb@ IOFileControlBlock_FSContext + @ AFSFCBData_NextFCB + @ fcb!
 	end
 
+	auto pfdbe
+
+	auto fcbdata
+
 	if (fcb@ ~~)
 		// didn't find, need to allocate and read in the inode.
 
@@ -150,7 +176,88 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			"TODO: that\n" KeCrash
 		end
 
-		"TODO: stuff\n" KeCrash
+		auto ptr
+
+		inum@ // inum
+		mount@ // mount
+		AFSINodeRead ok! pfdbe! ptr!
+
+		if (ok@)
+			mount@ AFSFCBCacheUnlock
+
+			return
+		end
+
+		if (fcb@ ~~)
+			// didn't manage to get an FCB by now. allocate one
+
+			DriverAFSDispatch // dispatchtable
+			mount@ // devobj
+			0 // filetype (filled in below)
+			0 // flags
+			IOFileControlBlockCreate ok! fcb!
+
+			if (ok@)
+				mount@ AFSFCBCacheUnlock
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				return
+			end
+
+			AFSFCBData_SIZEOF // bytes
+			'AFCX' // tag
+			MmAllocWithTag ok! fcbdata!
+
+			if (ok@)
+				-1 // writeout
+				fcb@ // fcb
+				IOFileControlBlockDelete
+
+				mount@ AFSFCBCacheUnlock
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				return
+			end
+
+			fcbdata@ fcb@ IOFileControlBlock_FSContext + !
+		end
+
+		fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+		0 fcbdata@ AFSFCBData_NextFCB + !
+		0 fcbdata@ AFSFCBData_PrevFCB + !
+
+		0 fcbdata@ AFSFCBData_NextReusableFCB + !
+		0 fcbdata@ AFSFCBData_PrevReusableFCB + !
+
+		inum@ fcbdata@ AFSFCBData_INum + !
+
+		ptr@ AFSINode_startblock + @ fcbdata@ AFSFCBData_FirstFATLink + !
+		ptr@ AFSINode_uid + @ fcbdata@ AFSFCBData_UID + !
+		ptr@ AFSINode_permissions + @ fcbdata@ AFSFCBData_Permissions + !
+		ptr@ AFSINode_iparent + @ fcbdata@ AFSFCBData_IParent + !
+
+		0 fcb@ IOFileControlBlock_Flags + !
+
+		if (ptr@ AFSINode_type + @ 1 ==)
+			OSFILETYPE_FILE fcb@ IOFileControlBlock_FileType + !
+		end elseif (ptr@ AFSINode_type + @ 2 ==)
+			OSFILETYPE_DIRECTORY fcb@ IOFileControlBlock_FileType + !
+		end else
+			ptr@ AFSINode_type + @
+			inum@
+			"AFSFCBRead: i=%d weird inode type %d\n" KeCrash
+		end
+
+		ptr@ AFSINode_bytesize + @ fcb@ IOFileControlBlock_SizeInBytes + !
+
+		ptr@ AFSINode_timestamp + @ fcb@ IOFileControlBlock_AccessTime + KeTime_SecPart + !
+		ptr@ AFSINode_timestamp + @ fcb@ IOFileControlBlock_ModifyTime + KeTime_SecPart + !
+		ptr@ AFSINode_timestamp + @ fcb@ IOFileControlBlock_ChangeTime + KeTime_SecPart + !
+
+		pfdbe@ MmEvictablePageDereference drop
 	end else
 		// found the FCB, it was in the cache already!
 
@@ -170,26 +277,4 @@ fn AFSFCBRead { inum mount -- fcb ok }
 	fcb@ AFSFCBReference drop
 
 	mount@ AFSFCBCacheUnlock
-end
-
-fn AFSINodeRead { inum mount -- ptr pfdbe ok }
-	auto block
-	auto off
-
-	auto inode
-
-	inum@ AFSINode_SIZEOF * off!
-
-	mount@ IOMount_FSContext + @ AFSData_IStart + @ off@ AFSBLOCKSHIFT >> + AFSBLOCKSHIFT << block!
-
-	0 // flags
-	block@ // offset
-	mount@ // mount
-	FSVolumeBlockRead ok! pfdbe! ptr!
-
-	if (ok@)
-		return
-	end
-
-	off@ AFSBLOCKOFFMASK & ptr +=
 end

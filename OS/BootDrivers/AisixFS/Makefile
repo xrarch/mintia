@@ -9,7 +9,7 @@ LD      =  $(OBJTOOL) link
 
 LIBDIR  = ../../Library
 
-DCFLAGS = incdir=../../HAL/include/:../../HAL/LIMNstation/include:../../OSKernel/include/
+DCFLAGS = incdir=../../HAL/include/:../../OSKernel/include/
 
 all: AisixFS.sys
 

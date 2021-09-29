@@ -73,6 +73,12 @@ endstruct
 const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
 const AFSSUPERBLOCKVERSION 0x6
 
-externptr DriverAFSDispatch
+extern AFSFCBRead { inum mount -- fcb ok }
 
+extern AFSParse { flags path initialobject process -- reparsepath object ok }
+extern AFSDeleteObject { object -- ok }
+extern AFSReadFile { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
+extern AFSWriteFile { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
+
+externptr DriverAFSDispatch
 externptr AFSFCBCacheCount

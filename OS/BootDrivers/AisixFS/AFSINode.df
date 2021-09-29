@@ -7,7 +7,6 @@
 #include "<inc>/HALLog.h"
 #include "<inc>/HALDriver.h"
 #include "<inc>/HALRTC.h"
-#include "<inc>/HALLIMNstationCitron.h"
 #include "<inc>/HALInterrupt.h"
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALMap.h"
@@ -106,12 +105,49 @@ fn AFSFCBInsert { fcb buckethead -- }
 	fcb@ buckethead@!
 end
 
-fn AFSFCBReference { fcb -- oldcount }
+fn AFSFCBReferenceInitial { fcb -- oldcount }
 	// assumes fcb cache is locked.
 
 	1 fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ AFSData_FCBRefTotal + +=
 
 	fcb@ IOFileControlBlockReference oldcount!
+end
+
+fn AFSFCBReference { fcb -- oldcount }
+	// assumes fcb cache is locked.
+
+	fcb@ AFSFCBReferenceInitial oldcount!
+
+	if (oldcount@ 0 ==)
+		auto fcbdata
+		fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+		auto mountdata
+		fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ mountdata!
+
+		// raised to 1, remove from reusable list
+
+		auto ls
+		fcbdata@ AFSFCBData_PrevReusableFCB + @ ls!
+
+		auto ns
+		fcbdata@ AFSFCBData_NextReusableFCB + @ ns!
+
+		if (ls@)
+			ns@ ls@ IOFileControlBlock_FSContext + @ AFSFCBData_NextReusableFCB + !
+		end else
+			ns@ mountdata@ AFSData_FCBReusableListHead + !
+		end
+
+		if (ns@)
+			ls@ ns@ IOFileControlBlock_FSContext + @ AFSFCBData_PrevReusableFCB + !
+		end else
+			ls@ mountdata@ AFSData_FCBReusableListTail + !
+		end
+
+		0 fcbdata@ AFSFCBData_PrevReusableFCB + !
+		0 fcbdata@ AFSFCBData_NextReusableFCB + !
+	end
 end
 
 fn AFSFCBDereference { fcb -- oldcount }
@@ -120,6 +156,33 @@ fn AFSFCBDereference { fcb -- oldcount }
 	fcb@ IOFileControlBlockDereference oldcount!
 
 	1 fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ AFSData_FCBRefTotal + -=
+
+	if (oldcount@ 1 ==)
+		auto fcbdata
+		fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+		auto mountdata
+		fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ mountdata!
+
+		// deref'd to 0, add to back of reusable list
+
+		auto t
+		mountdata@ AFSData_FCBReusableListTail + @ t!
+
+		if (t@ ~~)
+			0 fcbdata@ AFSFCBData_NextReusableFCB + !
+			0 fcbdata@ AFSFCBData_PrevReusableFCB + !
+
+			fcb@ mountdata@ AFSData_FCBReusableListHead + !
+			fcb@ mountdata@ AFSData_FCBReusableListTail + !
+		end else
+			0 fcbdata@ AFSFCBData_NextReusableFCB + !
+
+			t@ fcbdata@ AFSFCBData_PrevReusableFCB + !
+			fcb@ t@ IOFileControlBlock_FSContext + @ AFSFCBData_NextReusableFCB + !
+			fcb@ mountdata@ AFSData_FCBReusableListTail + !
+		end
+	end
 end
 
 fn AFSFCBRead { inum mount -- fcb ok }
@@ -160,8 +223,8 @@ fn AFSFCBRead { inum mount -- fcb ok }
 	end
 
 	auto pfdbe
-
 	auto fcbdata
+	auto rs
 
 	if (fcb@ ~~)
 		// didn't find, need to allocate and read in the inode.
@@ -173,7 +236,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			// while above the limit, any FCBs whose refcounts
 			// drop to 0 get instantly freed...
 
-			"TODO: that\n" KeCrash
+			"AFSFCBRead: TODO: that\n" KeCrash
 		end
 
 		auto ptr
@@ -191,9 +254,10 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		if (fcb@ ~~)
 			// didn't manage to get an FCB by now. allocate one
 
-			DriverAFSDispatch // dispatchtable
-			mount@ // devobj
-			0 // filetype (filled in below)
+			// these fields are filled in below by IOFileControlBlockInitialize
+			0 // dispatchtable
+			0 // devobj
+			0 // filetype
 			0 // flags
 			IOFileControlBlockCreate ok! fcb!
 
@@ -204,6 +268,8 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 				return
 			end
+
+			// allocate a new fcbdata
 
 			AFSFCBData_SIZEOF // bytes
 			'AFCX' // tag
@@ -221,10 +287,16 @@ fn AFSFCBRead { inum mount -- fcb ok }
 				return
 			end
 
-			fcbdata@ fcb@ IOFileControlBlock_FSContext + !
-		end
+			HALCPUInterruptDisable rs!
+			
+			1 afsdata@ AFSData_FCBUsedCount + +=
+			
+			rs@ HALCPUInterruptRestore
+		end else
+			// reuse the fcbdata from last time
 
-		fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+			fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+		end
 
 		0 fcbdata@ AFSFCBData_NextFCB + !
 		0 fcbdata@ AFSFCBData_PrevFCB + !
@@ -239,17 +311,30 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		ptr@ AFSINode_permissions + @ fcbdata@ AFSFCBData_Permissions + !
 		ptr@ AFSINode_iparent + @ fcbdata@ AFSFCBData_IParent + !
 
-		0 fcb@ IOFileControlBlock_Flags + !
+		auto filetype
 
 		if (ptr@ AFSINode_type + @ 1 ==)
-			OSFILETYPE_FILE fcb@ IOFileControlBlock_FileType + !
+			OSFILETYPE_FILE filetype!
 		end elseif (ptr@ AFSINode_type + @ 2 ==)
-			OSFILETYPE_DIRECTORY fcb@ IOFileControlBlock_FileType + !
+			OSFILETYPE_DIRECTORY filetype!
 		end else
 			ptr@ AFSINode_type + @
 			inum@
 			"AFSFCBRead: i=%d weird inode type %d\n" KeCrash
 		end
+
+		DriverAFSDispatch // dispatchtable
+		mount@ // devobj
+		filetype@ // filetype
+		0 // flags
+		fcb@ // fcb
+		IOFileControlBlockInitialize ok!
+
+		if (ok@)
+			"AFSFCBRead: failed to initialize FCB\n" KeCrash
+		end
+
+		fcbdata@ fcb@ IOFileControlBlock_FSContext + !
 
 		ptr@ AFSINode_bytesize + @ fcb@ IOFileControlBlock_SizeInBytes + !
 
@@ -262,6 +347,8 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		fcb@ // fcb
 		buckethead@ // buckethead
 		AFSFCBInsert
+
+		fcb@ AFSFCBReferenceInitial drop
 	end else
 		// found the FCB, it was in the cache already!
 
@@ -276,9 +363,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			buckethead@ // buckethead
 			AFSFCBInsert
 		end
-	end
 
-	fcb@ AFSFCBReference drop
+		fcb@ AFSFCBReference drop
+	end
 
 	mount@ AFSFCBCacheUnlock
 end

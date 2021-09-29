@@ -38,7 +38,7 @@ struct IOFileControlBlock
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 	4 Busy // busy with a mount operation
 	4 ParseCount
-	
+
 	KeMutex_SIZEOF Mutex
 	KeMutex_SIZEOF IOMutex
 
@@ -47,6 +47,7 @@ struct IOFileControlBlock
 	KeTime_SIZEOF ChangeTime
 endstruct
 
+extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- ok }
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- }
 extern IOFileControlBlockReference { fcb -- oldcount }

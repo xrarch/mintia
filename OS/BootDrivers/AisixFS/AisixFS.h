@@ -52,6 +52,9 @@ struct AFSFCBData
 	4 UID
 	4 Permissions
 	4 IParent
+
+	4 LastFATLinkBlkOff
+	4 LastFATLinkValue
 endstruct
 
 struct AFSDirEnt

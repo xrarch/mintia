@@ -21,65 +21,89 @@
 
 #include "AisixFS.h"
 
-fn AFSWalkFAT { startcount startblkno mount -- left blkno ok }
-	startblkno@ blkno!
-	startcount@ left!
-
-	auto fatblkno
-	0 fatblkno!
-
-	auto curfatblkno
-	-1 curfatblkno!
-
-	auto fatpfdbe
-	0 fatpfdbe!
-
-	auto off
-
-	auto fatdata
-
-	auto fatbase
-	mount@ IOMount_FSContext + @ AFSData_FATStart + @ fatbase!
-
-	while (left@)
-		if (blkno@ 0xFFFFFFFF ==)
-			"AFSWalkFAT: balloc\n" KeCrash
-		end
-
-		blkno@ 1024 / fatblkno! // 4096/4 = 1024 FAT entries per block
-		blkno@ 2 << AFSBLOCKOFFMASK & off!
-
-		if (fatblkno@ curfatblkno@ ~=)
-			// must read in a new FAT block
-
-			if (fatpfdbe@)
-				fatpfdbe@ MmEvictablePageDereference drop
-			end
-
-			0 // flags
-			fatbase@ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
-
-			if (ok@)
-				return
-			end
-
-			fatblkno@ curfatblkno!
-		end
-
-		fatdata@ blkno@ 2 << + @ blkno!
-
-		1 left -=
-	end
-
-	if (fatpfdbe@)
-		fatpfdbe@ MmEvictablePageDereference drop
-	end
-end
+// We don't need to worry about per-file synchronization issues in the
+// filesystem specific code, because the upper-level code achieves this for
+// us: If the file is uncached, the main FCB mutex will be held throughout
+// the operation. If the file is cached, the cacheblock mutex will be held
+// throughout the operation.
 
 fn (IODispatchReadFunction) AFSReadFile { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
-	"AFSReadFile: TODO\n" KeCrash
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	auto mount
+	fcb@ IOFileControlBlock_DeviceObject + @ mount!
+
+	0 ok!
+
+	0 bytesread!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	bytesize@ offset@ -
+	length@
+	min length!
+
+	while (bytesread@ length@ <)
+		if (bytesread@ bufsize@ ==)
+			STATUS_BUFFER_MAXIMUM ok!
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (bytesread@ bufsize@ >)
+				"AFSReadFile: bytesread > bufsize\n" KeCrash
+			end
+		end
+
+		auto blockno
+		offset@ AFSBLOCKSHIFT >> blockno!
+
+		auto blockoff
+		offset@ AFSBLOCKOFFMASK & blockoff!
+
+		auto m
+
+		length@ bytesread@ -
+		AFSBLOCKSIZE blockoff@ -
+		min
+		bufsize@ bytesread@ -
+		min m!
+
+		blockno@ // blkoff
+		fcb@ // fcb
+		AFSBlockMap ok! blockno!
+
+		if (ok@)
+			return
+		end
+
+		auto br
+
+		m@ // length
+		m@ // bufsize
+		blockno@ AFSBLOCKSHIFT << blockoff@ + // offset
+		buffer@ // buf
+		mount@ // mount
+		FSVolumeRead ok! br!
+
+		if (ok@)
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (br@ m@ ~=)
+				"AFSReadFile: volume read failed\n" KeCrash
+			end
+		end
+
+		m@ buffer +=
+		m@ bytesread +=
+		m@ offset +=
+	end
 end
 
 fn (IODispatchWriteFunction) AFSWriteFile { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }

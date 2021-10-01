@@ -229,12 +229,37 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 		if (afsdata@ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
 			// the cache is full. try to reclaim an unused FCB.
+			// this will involve destroying its cacheblock.
 			// if there are none, we will be forced to allocate
 			// a new one and go above the limit for a while.
 			// while above the limit, any FCBs whose refcounts
 			// drop to 0 get instantly freed...
 
-			"AFSFCBRead: TODO: that\n" KeCrash
+			mount@ IOMount_FSContext + @ AFSData_FCBReusableListHead + @ fcb!
+
+			if (fcb@)
+				// found one we can reclaim!
+
+				// this is just to take it off the reusable list.
+				// the count and other things get reset back to zero by
+				// IOFileControlBlockInitialize.
+				fcb@ AFSFCBReference drop
+
+				auto cacheblock
+				fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+				if (cacheblock@)
+					1 // writeout
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockDestroy ok!
+
+					if (DEBUGCHECKS)
+						if (ok@)
+							ok@ "AFSFCBRead: couldn't destroy cacheblock (%i)\n" KeCrash
+						end
+					end
+				end
+			end
 		end
 
 		auto ptr
@@ -296,9 +321,6 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			fcb@ IOFileControlBlock_FSContext + @ fcbdata!
 		end
 
-		0 fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
-		0 fcbdata@ AFSFCBData_LastFATLinkValue + !
-
 		0 fcbdata@ AFSFCBData_NextFCB + !
 		0 fcbdata@ AFSFCBData_PrevFCB + !
 
@@ -311,6 +333,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		ptr@ AFSINode_uid + @ fcbdata@ AFSFCBData_UID + !
 		ptr@ AFSINode_permissions + @ fcbdata@ AFSFCBData_Permissions + !
 		ptr@ AFSINode_iparent + @ fcbdata@ AFSFCBData_IParent + !
+
+		0 fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
+		ptr@ AFSINode_startblock + @ fcbdata@ AFSFCBData_LastFATLinkValue + !
 
 		auto filetype
 
@@ -353,7 +378,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 	end else
 		// found the FCB, it was in the cache already!
 
-		// remove from hash list so that it can be reinserted on the recently-used end
+		// remove from hash list and reinsert on the recently-used end
 
 		if (fcb@ buckethead@@ ~=)
 			fcb@ // fcb

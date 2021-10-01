@@ -21,4 +21,93 @@
 
 #include "AisixFS.h"
 
-// stub
+fn (IODispatchReadDirectoryFunction) AFSReadDirectory { seek dirent fcb -- nextseek ok }
+	// FCB is locked by caller
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+			// should have been caught by the IO system code
+
+			"AFSReadDirectory: not a directory\n" KeCrash
+		end
+	end
+
+	auto mount
+	fcb@ IOFileControlBlock_DeviceObject + @ mount!
+
+	auto byteoff
+	seek@ AFSDirEnt_SIZEOF * byteoff!
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	auto blkno
+	byteoff@ AFSBLOCKSHIFT >> blkno!
+
+	auto curblkno
+	-1 curblkno!
+
+	auto pfdbe
+	0 pfdbe!
+
+	auto data
+
+	while (byteoff@ bytesize@ <)
+		if (blkno@ curblkno@ ~=)
+			// must read in a new block
+
+			if (pfdbe@)
+				pfdbe@ MmEvictablePageDereference drop
+			end
+
+			auto realblockno
+
+			blkno@ // blkoff
+			fcb@ // fcb
+			AFSBlockMap ok! realblockno!
+
+			if (ok@)
+				return
+			end
+
+			0 // flags
+			realblockno@ AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! pfdbe! data!
+
+			if (ok@)
+				return
+			end
+
+			byteoff@ AFSBLOCKOFFMASK & data +=
+
+			blkno@ curblkno!
+		end
+
+		if (data@ AFSDirEnt_INum + @)
+			// found a dirent
+
+			dirent@ OSDirectoryEntry_Name + // dest
+			data@ AFSDirEnt_name + // src
+			63 // max
+			strncpy
+
+			0 ok!
+			seek@ 1 + nextseek!
+
+			return
+		end
+
+		AFSDirEnt_SIZEOF data +=
+		AFSDirEnt_SIZEOF byteoff +=
+		byteoff@ AFSBLOCKSHIFT >> blkno!
+		1 seek +=
+	end
+
+	if (pfdbe@)
+		pfdbe@ MmEvictablePageDereference drop
+	end
+
+	seek@ nextseek!
+	STATUS_IO_END_OF_FILE ok!
+end

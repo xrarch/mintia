@@ -21,6 +21,9 @@ const AFSFCBBUCKETS 32 // must be a power of two
 const AFSFCBSHIFT 5 // 1<<AFSFCBSHIFT must equal AFSFCBBUCKETS
 const AFSFCBMASK (AFSFCBBUCKETS 1 -)
 
+const AFSFATMUTEXES 4 // must be a power of two
+const AFSFATMUTEXMASK (AFSFATMUTEXES 1 -)
+
 struct AFSData
 	4 FATStart
 	4 FATSize
@@ -38,6 +41,8 @@ struct AFSData
 
 	KeMutex_SIZEOF FCBCacheMutex
 	(AFSFCBBUCKETS 8 *) FCBBucketListHeads
+
+	(AFSFATMUTEXES KeMutex_SIZEOF *) FATMutexes
 endstruct
 
 struct AFSFCBData
@@ -78,10 +83,14 @@ const AFSSUPERBLOCKVERSION 0x6
 
 extern AFSFCBRead { inum mount -- fcb ok }
 
+extern AFSWalkFAT { growing startcount startblkno mount -- left blkno ok }
+extern AFSBlockMap { blkoff fcb -- blkno ok }
+
 extern AFSParse { flags path initialobject process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }
 extern AFSReadFile { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
 extern AFSWriteFile { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
+extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 
 externptr DriverAFSDispatch
 externptr AFSFCBCacheCount

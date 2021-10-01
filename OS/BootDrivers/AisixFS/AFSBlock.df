@@ -1,0 +1,148 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "AisixFS.h"
+
+fn AFSWalkFAT { growing startcount startblkno mount -- left blkno ok }
+	startblkno@ blkno!
+	startcount@ left!
+
+	auto fatblkno
+	0 fatblkno!
+
+	auto curfatblkno
+	-1 curfatblkno!
+
+	auto fatpfdbe
+	0 fatpfdbe!
+
+	0 ok!
+
+	auto off
+
+	auto fatdata
+
+	auto fatbase
+	mount@ IOMount_FSContext + @ AFSData_FATStart + @ fatbase!
+
+	while (left@)
+		if (blkno@ 0xFFFFFFFF ==)
+			if (growing@ ~~)
+				"AFSWalkFAT: blkno == 0xFFFFFFFF\n" KeCrash
+			end
+
+			return
+		end
+
+		blkno@ 1024 / fatblkno! // 4096/4 = 1024 FAT entries per block
+		blkno@ 2 << AFSBLOCKOFFMASK & off!
+
+		if (fatblkno@ curfatblkno@ ~=)
+			// must read in a new FAT block
+
+			if (fatpfdbe@)
+				fatpfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			fatbase@ fatblkno@ + AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+			if (ok@)
+				return
+			end
+
+			fatblkno@ curfatblkno!
+		end
+
+		fatdata@ blkno@ 2 << + @ blkno!
+
+		1 left -=
+	end
+
+	if (fatpfdbe@)
+		fatpfdbe@ MmEvictablePageDereference drop
+	end
+end
+
+fn AFSBlockMap { blkoff fcb -- blkno ok }
+	// convert a block offset within an FCB to an absolute disk block number.
+
+	// we use two FAT lookup reference points: the file's first block number,
+	// and that of the last successful lookup. if blkoff is >= the last
+	// successful lookup, we can use it as a jumping off point to speed
+	// things up. if thats not the case, we have to start at the first block
+	// number.
+
+	0 ok!
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+	auto fcbblocks
+	fcb@ IOFileControlBlock_SizeInBytes + @ AFSBLOCKOFFMASK + AFSBLOCKSHIFT >> fcbblocks!
+
+	if (blkoff@ fcbblocks@ >=)
+		"AFSBlockMap: blkoff > size in blocks\n" KeCrash
+	end
+
+	if (blkoff@ 0 ==)
+		// bit of a fast path
+
+		fcbdata@ AFSFCBData_FirstFATLink + @ blkno!
+
+		return
+	end
+
+	auto lastlookup
+	fcbdata@ AFSFCBData_LastFATLinkBlkOff + @ lastlookup!
+
+	auto walkcount
+	auto walkstart
+
+	if (blkoff@ lastlookup@ >=)
+		blkoff@ lastlookup@ - walkcount!
+		fcbdata@ AFSFCBData_LastFATLinkValue + @ walkstart!
+	end else
+		blkoff@ walkcount!
+		fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
+	end
+
+	0 // growing
+	walkcount@ // startcount
+	walkstart@ // startblkno
+	fcb@ IOFileControlBlock_DeviceObject + @ // mount
+	AFSWalkFAT ok! blkno! walkcount!
+
+	if (walkcount@)
+		walkcount@ "AFSBlockMap: walkcount = %d\n" KeCrash
+	end
+
+	if (ok@)
+		return
+	end
+
+	if (blkoff@ lastlookup@ >= blkoff@ 2 >= ||)
+		blkoff@ fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
+		blkno@ fcbdata@ AFSFCBData_LastFATLinkValue + !
+	end
+end

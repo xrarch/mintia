@@ -8,6 +8,7 @@ fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchWriteBlockFunction { blockno bufsize buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno bufsize buffer devobject -- ok }
 fnptr IODispatchGrowFunction { length offset fcb -- ok }
+fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 
 struct IODispatchTable
 	4 Open
@@ -26,7 +27,7 @@ struct IODispatchTable
 	4 ReadBlock
 	4 WriteBlock
 	4 Grow
-	4 Reserved4
+	4 ReadDirectory
 	4 Reserved5
 	4 Reserved6
 	4 Reserved7

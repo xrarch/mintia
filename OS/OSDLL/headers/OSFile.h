@@ -13,3 +13,8 @@ const OSSEEK_CUR             2
 const OSSEEK_END             3
 
 const OSMOUNT_READONLY       1
+
+struct OSDirectoryEntry
+	256 Name
+	32 Reserved
+endstruct

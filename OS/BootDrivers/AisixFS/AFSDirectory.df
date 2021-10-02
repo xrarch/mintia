@@ -32,6 +32,17 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 		end
 	end
 
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (cacheblock@ ~~)
+		// initialize caching on directory FCB
+
+		1 // wantcaching
+		fcb@ // fcb
+		IOFileControlBlockCacheCheck ok! cacheblock!
+	end
+
 	auto mount
 	fcb@ IOFileControlBlock_DeviceObject + @ mount!
 
@@ -41,11 +52,11 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
-	auto blkno
-	byteoff@ AFSBLOCKSHIFT >> blkno!
+	auto pageno
+	byteoff@ PAGESHIFT >> pageno!
 
-	auto curblkno
-	-1 curblkno!
+	auto curpageno
+	-1 curpageno!
 
 	auto pfdbe
 	0 pfdbe!
@@ -53,35 +64,25 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 	auto data
 
 	while (byteoff@ bytesize@ <)
-		if (blkno@ curblkno@ ~=)
-			// must read in a new block
+		if (pageno@ curpageno@ ~=)
+			// must read in a new page
 
 			if (pfdbe@)
 				pfdbe@ MmEvictablePageDereference drop
 			end
 
-			auto realblockno
-
-			blkno@ // blkoff
-			fcb@ // fcb
-			AFSBlockMap ok! realblockno!
-
-			if (ok@)
-				return
-			end
-
 			0 // flags
-			realblockno@ AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! pfdbe! data!
+			byteoff@ PAGENUMBERMASK & // offset
+			fcb@ // fcb
+			IOCachePageRead ok! pfdbe! data!
 
 			if (ok@)
 				return
 			end
 
-			byteoff@ AFSBLOCKOFFMASK & data +=
+			byteoff@ PAGEOFFSETMASK & data +=
 
-			blkno@ curblkno!
+			pageno@ curpageno!
 		end
 
 		if (data@ AFSDirEnt_INum + @)
@@ -105,7 +106,7 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
 		AFSDirEnt_SIZEOF data +=
 		AFSDirEnt_SIZEOF byteoff +=
-		byteoff@ AFSBLOCKSHIFT >> blkno!
+		byteoff@ PAGESHIFT >> pageno!
 		1 seek +=
 	end
 

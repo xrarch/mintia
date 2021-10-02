@@ -88,6 +88,11 @@ extern AFSMountDereference { mount -- oldcount }
 extern AFSFCBReference { fcb -- oldcount }
 extern AFSFCBDereference { fcb -- oldcount }
 
+extern AFSFCBRemove { fcb buckethead -- }
+extern AFSFCBInsert { fcb buckethead -- }
+
+extern AFSFCBCacheLock { mount -- ok }
+extern AFSFCBCacheUnlock { mount -- }
 extern AFSFCBCacheDestroy { mount -- ok }
 extern AFSFCBRead { inum mount -- fcb ok }
 

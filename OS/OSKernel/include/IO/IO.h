@@ -14,7 +14,7 @@ externptr IODevicesDirectoryObject
 externptr IODeviceTypeObject
 externptr IOFileTypeObject
 
-extern IOFileCreateObject { flags owninguser fcb -- fileobject ok }
+extern IOFileCreateObject { flags owninguser permissions fcb -- fileobject ok }
 extern IOFileOpenObject { object process -- ok }
 extern IOFileCloseObject { object process -- }
 extern IOFileDeleteObject { object -- }

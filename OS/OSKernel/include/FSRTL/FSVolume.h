@@ -1,3 +1,4 @@
+extern FSVolumeNameGet { mount -- name }
 extern FSVolumeInitialize { blocksize mount -- cacheblock ok }
 extern FSVolumeFlush { mount -- ok }
 

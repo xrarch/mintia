@@ -22,6 +22,48 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+fn IOParseCountIncrement { fcb -- mount ok }
+	0 ok!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	fcb@ IOFileControlBlock_Mount + @ mount!
+
+	if (fcb@ IOFileControlBlock_Busy + @)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end elseif (mount@ ~~)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_NOT_A_DIRECTORY ok!
+
+		return
+	end
+
+	1 fcb@ IOFileControlBlock_ParseCount + +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOParseCountDecrement { fcb -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlock_ParseCount + @ 0 ==)
+			"IOParseCountDecrement: underflow 1\n" KeCrash
+		end
+	end
+
+	1 fcb@ IOFileControlBlock_ParseCount + -=
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepath object ok }
 	0 reparsepath!
 
@@ -30,6 +72,7 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 
 	auto fcb
 	auto mount
+	auto parsefunc
 
 	if (type@ IODeviceTypeObject@ ==)
 		initialobject@ IODevice_FileControlBlock + @ fcb!
@@ -45,6 +88,7 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 
 			flags@ // flags
 			process@ PsProcess_OwningUser + @ // owninguser
+			ACCESS_OWNER_ALL // permissions
 			fcb@ // fcb
 			IOFileCreateObject ok! object!
 
@@ -60,56 +104,69 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 
 			return
 		end else
+			// remaining path, call mounted filesystem (if any) to resolve it
+
 			// we only need to do this check here, where we're
 			// going from a device object to a file object on the filesystem,
 			// and not below, where we're going from a file object to a file object,
 			// because the ref operation implied by having that file object precludes
 			// nasty stuff from happening anyway.
 
-			auto rs
-			HALCPUInterruptDisable rs!
+			fcb@ // fcb
+			IOParseCountIncrement ok! mount!
 
-			fcb@ IOFileControlBlock_Mount + @ mount!
-
-			if (fcb@ IOFileControlBlock_Busy + @)
-				rs@ HALCPUInterruptRestore
-
-				STATUS_IO_TRY_AGAIN_LATER ok!
-
+			if (ok@)
 				return
-			end elseif (mount@ ~~)
-				rs@ HALCPUInterruptRestore
+			end
+
+			auto rootfcb
+			mount@ IOMount_RootFCB + @ rootfcb!
+
+			if (rootfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+				fcb@ IOParseCountDecrement
 
 				STATUS_NOT_A_DIRECTORY ok!
 
 				return
 			end
 
-			1 fcb@ IOFileControlBlock_ParseCount + +=
+			rootfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Parse + @ parsefunc!
 
-			rs@ HALCPUInterruptRestore
+			if (parsefunc@ ~~)
+				fcb@ IOParseCountDecrement
 
-			// remaining path, call mounted filesystem (if any) to resolve it
+				STATUS_NOT_A_DIRECTORY ok!
 
-			"IOParse: NYI 1\n" KeCrash
-
-			HALCPUInterruptDisable rs!
-
-			if (DEBUGCHECKS)
-				if (fcb@ IOFileControlBlock_ParseCount + @ 0 ==)
-					"IOParse: underflow 1\n" KeCrash
-				end
+				return
 			end
 
-			1 fcb@ IOFileControlBlock_ParseCount + -=
+			flags@ // flags
+			path@ // path
+			rootfcb@ // initialfcb
+			process@ // process
+			parsefunc@ IODispatchParseFunction ok! object! reparsepath!
 
-			rs@ HALCPUInterruptRestore
+			fcb@ IOParseCountDecrement
 		end
 	end elseif (type@ IOFileTypeObject@ ==)
 		// we need to call into the filesystem whether there is remaining path or not,
 		// in order to open this new file object correctly
 
-		"IOParse: NYI 2\n" KeCrash
+		initialobject@ IOFile_FileControlBlock + @ fcb!
+
+		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Parse + @ parsefunc!
+
+		if (DEBUGCHECKS)
+			if (parsefunc@ ~~)
+				"IOParse: no parse function\n" KeCrash
+			end
+		end
+
+		flags@ // flags
+		path@ // path
+		fcb@ // initialfcb
+		process@ // process
+		parsefunc@ IODispatchParseFunction ok! object! reparsepath!
 	end else
 		"IOParse: unknown type\n" KeCrash
 	end

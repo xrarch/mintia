@@ -15,16 +15,282 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Process.h"
+
+#include "<inc>/Security.h"
+
 #include "<inc>/IO.h"
 
 #include "<inc>/FSRTL.h"
 
 #include "AisixFS.h"
 
-fn (IODispatchParseFunction) AFSParse { flags path initialobject process -- reparsepath object ok }
-	"AFSParse: TODO\n" KeCrash
+fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparsepath object ok }
+	0 reparsepath!
+	0 ok!
+
+	auto fullpath
+	path@ fullpath!
+
+	auto pcomp
+	60 alloc pcomp!
+
+	auto afsdirent
+	AFSDirEnt_SIZEOF alloc afsdirent!
+
+	auto mount
+	initialfcb@ IOFileControlBlock_DeviceObject + @ mount!
+
+	if (path@ gb)
+		if (initialfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+			STATUS_NOT_A_DIRECTORY ok!
+
+			return
+		end
+
+		initialfcb@ AFSFCBReference drop
+		initialfcb@ IOFileControlBlockLock ok!
+
+		if (ok@)
+			return
+		end
+
+		while (1)
+			while (path@ gb '/' ==)
+				1 path +=
+			end
+
+			if (path@ gb ~~)
+				// no more path, done
+
+				initialfcb@ IOFileControlBlockUnlock
+
+				break
+			end
+
+			auto fcbdata
+			initialfcb@ IOFileControlBlock_FSContext + @ fcbdata!
+
+			// more path, traverse
+
+			if (mount@ IOMount_Flags + @ OSMOUNT_NOUID & ~~)
+				if (process@)
+					// check traverse rights
+
+					ACCESS_EXEC // access
+					fcbdata@ AFSFCBData_Permissions + @ // permbits
+					fcbdata@ AFSFCBData_UID + @ // owninguid
+					fcbdata@ AFSFCBData_GID + @ // owninggid 
+					process@ PsProcess_OwningUser + @ // user
+					SeCheckAccessFilesystem ok!
+
+					if (ok@)
+						// no rights
+
+						initialfcb@ IOFileControlBlockUnlock
+						initialfcb@ AFSFCBDereference drop
+
+						return
+					end
+				end
+			end
+
+			auto len
+			0 len!
+
+			while (1)
+				if (path@ gb '/' ==)
+					break
+				end
+
+				if (path@ gb 0 ==)
+					break
+				end
+
+				if (len@ 59 >=)
+					initialfcb@ IOFileControlBlockUnlock
+					initialfcb@ AFSFCBDereference drop
+
+					STATUS_NAME_TOO_LONG ok!
+
+					return
+				end
+
+				path@ gb pcomp@ len@ + sb
+
+				1 len +=
+				1 path +=
+			end
+
+			0 pcomp@ len@ + sb
+
+			if (pcomp@ "." strcmp)
+				continue
+			end
+
+			auto nextfcb
+
+			if (pcomp@ ".." strcmp)
+				auto iparent
+				initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_IParent + @ iparent!
+
+				if (iparent@ initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_INum + @ ==)
+					continue
+				end
+
+				iparent@ // inum
+				initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+				AFSFCBRead ok! nextfcb!
+
+				initialfcb@ IOFileControlBlockUnlock
+				initialfcb@ AFSFCBDereference drop
+
+				if (ok@)
+					return
+				end
+
+				nextfcb@ IOFileControlBlockLock ok!
+
+				if (ok@)
+					nextfcb@ AFSFCBDereference drop
+
+					return
+				end
+
+				nextfcb@ initialfcb!
+
+				continue
+			end
+
+			auto seek
+			0 seek!
+
+			while (1)
+				seek@ // seek
+				afsdirent@ // afsdirent
+				initialfcb@ // fcb
+				AFSDirectoryGetEntry ok! seek!
+
+				if (ok@)
+					initialfcb@ IOFileControlBlockUnlock
+					initialfcb@ AFSFCBDereference drop
+
+					if (ok@ STATUS_IO_END_OF_FILE ==)
+						STATUS_NOT_FOUND ok!
+					end
+
+					return
+				end
+
+				if (afsdirent@ AFSDirEnt_name + pcomp@ strcmp)
+					// found the entry!
+
+					afsdirent@ AFSDirEnt_INum + @ // inum
+					initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+					AFSFCBRead ok! nextfcb!
+
+					initialfcb@ IOFileControlBlockUnlock
+					initialfcb@ AFSFCBDereference drop
+
+					if (ok@)
+						return
+					end
+
+					if (path@ gb)
+						if (nextfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+							nextfcb@ AFSFCBDereference drop
+
+							STATUS_NOT_A_DIRECTORY ok!
+
+							return
+						end
+
+						nextfcb@ IOFileControlBlockLock ok!
+
+						if (ok@)
+							nextfcb@ AFSFCBDereference drop
+							return
+						end
+					end
+
+					nextfcb@ initialfcb!
+
+					break
+				end
+			end
+
+			if (initialfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+				break
+			end
+		end
+	end else
+		initialfcb@ AFSFCBReference drop
+	end
+
+	// at this point the FCB should be refed but unlocked
+
+	auto owninguser
+
+	if (mount@ IOMount_Flags + @ OSMOUNT_NOUID &)
+		process@ PsProcess_OwningUser + @ owninguser!
+	end else
+		initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_UID + @ // uid
+		0 // userlistlocked
+		SeUserGetByUID ok! owninguser!
+
+		if (ok@)
+			if (ok@ STATUS_NO_SUCH_USER ~=)
+				initialfcb@ AFSFCBDereference drop
+
+				return
+			end
+
+			// user not found... make calling process the owner
+
+			process@ PsProcess_OwningUser + @ owninguser!
+		end
+	end
+
+	flags@ // flags
+	initialfcb@ // initialfcb
+	IOFileControlBlockAcquireCheck ok!
+
+	if (ok@)
+		initialfcb@ AFSFCBDereference drop
+
+		return
+	end
+
+	// unbias the refcount
+	initialfcb@ AFSFCBDereference drop
+
+	initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+	AFSMountReference drop
+
+	flags@ // flags
+	owninguser@ // owninguser
+	initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_Permissions + @ // permissions
+	initialfcb@ // fcb
+	IOFileCreateObject ok! object!
+
+	if (ok@)
+		initialfcb@ AFSFCBDereference drop
+
+		initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+		AFSMountDereference drop
+	end
 end
 
 fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
-	"AFSDeleteObject: TODO\n" KeCrash
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	// TODO: delete file if this is the last reference and a deletion is pending
+
+	fcb@ AFSFCBDereference drop
+
+	fcb@ IOFileControlBlock_DeviceObject + @ // mount
+	AFSMountDereference drop
+
+	0 ok!
 end

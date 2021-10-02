@@ -55,6 +55,7 @@ struct AFSFCBData
 	4 INum
 	4 FirstFATLink
 	4 UID
+	4 GID
 	4 Permissions
 	4 IParent
 
@@ -81,16 +82,23 @@ endstruct
 const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
 const AFSSUPERBLOCKVERSION 0x6
 
+extern AFSMountReference { mount -- oldcount }
+extern AFSMountDereference { mount -- oldcount }
+
+extern AFSFCBReference { fcb -- oldcount }
+extern AFSFCBDereference { fcb -- oldcount }
+
 extern AFSFCBRead { inum mount -- fcb ok }
 
 extern AFSWalkFAT { growing startcount startblkno mount -- left blkno ok }
 extern AFSBlockMap { blkoff fcb -- blkno ok }
 
-extern AFSParse { flags path initialobject process -- reparsepath object ok }
+extern AFSParse { flags path initialfcb process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }
 extern AFSReadFile { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
 extern AFSWriteFile { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
+extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
 externptr DriverAFSDispatch
 externptr AFSFCBCacheCount

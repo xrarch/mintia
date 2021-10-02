@@ -103,20 +103,49 @@ fn AFSFCBInsert { fcb buckethead -- }
 	fcb@ buckethead@!
 end
 
-fn AFSFCBReferenceInitial { fcb -- oldcount }
-	// assumes fcb cache is locked.
+fn AFSMountReference { mount -- oldcount }
+	auto afsdata
+	mount@ IOMount_FSContext + @ afsdata!
 
-	1 fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ AFSData_FCBRefTotal + +=
+	auto rs
+	HALCPUInterruptDisable rs!
 
-	fcb@ IOFileControlBlockReference oldcount!
+	afsdata@ AFSData_FCBRefTotal + @ oldcount!
+
+	oldcount@ 1 + afsdata@ AFSData_FCBRefTotal + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn AFSMountDereference { mount -- oldcount }
+	auto afsdata
+	mount@ IOMount_FSContext + @ afsdata!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	afsdata@ AFSData_FCBRefTotal + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"AFSMountDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - afsdata@ AFSData_FCBRefTotal + !
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn AFSFCBReference { fcb -- oldcount }
-	// assumes fcb cache is locked.
+	auto rs
+	HALCPUInterruptDisable rs!
 
-	fcb@ AFSFCBReferenceInitial oldcount!
+	fcb@ IOFileControlBlockReference oldcount!
 
 	if (oldcount@ 0 ==)
+		// fcb@ "->0x%08x " Printf
+
 		auto fcbdata
 		fcb@ IOFileControlBlock_FSContext + @ fcbdata!
 
@@ -146,16 +175,19 @@ fn AFSFCBReference { fcb -- oldcount }
 		0 fcbdata@ AFSFCBData_PrevReusableFCB + !
 		0 fcbdata@ AFSFCBData_NextReusableFCB + !
 	end
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn AFSFCBDereference { fcb -- oldcount }
-	// assumes fcb cache is locked.
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	fcb@ IOFileControlBlockDereference oldcount!
 
-	1 fcb@ IOFileControlBlock_DeviceObject + @ IOMount_FSContext + @ AFSData_FCBRefTotal + -=
-
 	if (oldcount@ 1 ==)
+		// fcb@ "0x%08x-> " Printf
+
 		auto fcbdata
 		fcb@ IOFileControlBlock_FSContext + @ fcbdata!
 
@@ -181,6 +213,8 @@ fn AFSFCBDereference { fcb -- oldcount }
 			fcb@ mountdata@ AFSData_FCBReusableListTail + !
 		end
 	end
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn AFSFCBRead { inum mount -- fcb ok }
@@ -241,7 +275,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 				// found one we can reclaim!
 
 				// this is just to take it off the reusable list.
-				// the count and other things get reset back to zero by
+				// the refcount and other things get reset back to zero by
 				// IOFileControlBlockInitialize.
 				fcb@ AFSFCBReference drop
 
@@ -259,6 +293,8 @@ fn AFSFCBRead { inum mount -- fcb ok }
 						end
 					end
 				end
+
+				// remove from hash bucket
 
 				fcb@ IOFileControlBlock_FSContext + @ AFSFCBData_INum + @ AFSFCBMASK & bucket!
 
@@ -338,6 +374,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		inum@ fcbdata@ AFSFCBData_INum + !
 
 		ptr@ AFSINode_startblock + @ fcbdata@ AFSFCBData_FirstFATLink + !
+		0 fcbdata@ AFSFCBData_GID + !
 		ptr@ AFSINode_uid + @ fcbdata@ AFSFCBData_UID + !
 		ptr@ AFSINode_permissions + @ fcbdata@ AFSFCBData_Permissions + !
 		ptr@ AFSINode_iparent + @ fcbdata@ AFSFCBData_IParent + !
@@ -382,7 +419,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		buckethead@ // buckethead
 		AFSFCBInsert
 
-		fcb@ AFSFCBReferenceInitial drop
+		fcb@ IOFileControlBlockReference drop
+
+		// fcb@ "->0x%08x " Printf
 	end else
 		// found the FCB, it was in the cache already!
 

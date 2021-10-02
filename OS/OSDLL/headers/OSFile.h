@@ -6,15 +6,16 @@ const OSFILETYPE_BLOCKDEVICE 4
 const OSFILEFLAG_NOCACHE     1
 const OSFILEFLAG_NOREADAHEAD 2
 
-const OSACCESSFLAG_BLOCK     1
+const OSACCESSFLAG_NONBLOCK  1
 
 const OSSEEK_SET             1
 const OSSEEK_CUR             2
 const OSSEEK_END             3
 
 const OSMOUNT_READONLY       1
+const OSMOUNT_NOUID          2
 
 struct OSDirectoryEntry
 	256 Name
-	32 Reserved
+	32  Reserved
 endstruct

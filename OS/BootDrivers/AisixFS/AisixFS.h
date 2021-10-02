@@ -88,6 +88,7 @@ extern AFSMountDereference { mount -- oldcount }
 extern AFSFCBReference { fcb -- oldcount }
 extern AFSFCBDereference { fcb -- oldcount }
 
+extern AFSFCBCacheDestroy { mount -- ok }
 extern AFSFCBRead { inum mount -- fcb ok }
 
 extern AFSWalkFAT { growing startcount startblkno mount -- left blkno ok }

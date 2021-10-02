@@ -285,11 +285,61 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	auto fcb
 	object@ IOFile_FileControlBlock + @ fcb!
 
-	// TODO: delete file if this is the last reference and a deletion is pending
+	auto mount
+	fcb@ IOFileControlBlock_DeviceObject + @ mount!
 
-	fcb@ AFSFCBDereference drop
+	auto oldcount
+	fcb@ AFSFCBDereference oldcount!
 
-	fcb@ IOFileControlBlock_DeviceObject + @ // mount
+	if (oldcount@ 1 ==)
+		// TODO: delete file if this is the last reference and a deletion is pending
+
+		if (mount@ IOMount_FSContext + @ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
+			// we're in a low-fcb condition, remove this one immediately if still possible
+
+			mount@ AFSFCBCacheLock ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"AFSDeleteObject: lock failed even though in a delete object routine\n" KeCrash
+				end
+			end
+
+			if (fcb@ IOFileControlBlock_References + @ 0 ==)
+				if (mount@ IOMount_FSContext + @ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
+					// FCB refcount still 0, and still in low-fcb condition...
+					// nuke it.
+
+					auto bucket
+					fcb@ IOFileControlBlock_FSContext + @ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+
+					auto buckethead
+					mount@ IOMount_FSContext + @ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
+
+					fcb@ // fcb
+					buckethead@ // buckethead
+					AFSFCBRemove
+
+					fcb@ IOFileControlBlock_FSContext + @ MmFree
+
+					1 // writeout
+					fcb@ // fcb
+					IOFileControlBlockDelete
+
+					auto rs
+					HALCPUInterruptDisable rs!
+					
+					1 mount@ IOMount_FSContext + @ AFSData_FCBUsedCount + -=
+					
+					rs@ HALCPUInterruptRestore
+				end
+			end
+
+			mount@ AFSFCBCacheUnlock
+		end
+	end
+
+	mount@ // mount
 	AFSMountDereference drop
 
 	0 ok!

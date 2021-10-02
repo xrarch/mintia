@@ -1,6 +1,6 @@
 extern FSVolumeNameGet { mount -- name }
 extern FSVolumeInitialize { blocksize mount -- cacheblock ok }
-extern FSVolumeFlush { mount -- ok }
+extern FSVolumeFlush { trunc mount -- ok }
 
 extern FSVolumeRead { length bufsize offset buf mount -- bytesread ok }
 extern FSVolumeWrite { length bufsize offset buf mount -- byteswritten ok }

@@ -15,6 +15,7 @@ extern AFSRead { buf len seek ino -- bytes }
 extern AFSPath { path -- ino }
 extern AFSFreeINode { ino -- }
 extern AFSINodeSize { ino -- sz }
+extern AFSINodeExecutable { ino -- isexecutable }
 
 extern MemInit { -- }
 extern MemAlloc { pages pstart -- astart ok }

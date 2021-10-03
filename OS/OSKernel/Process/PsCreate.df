@@ -20,7 +20,7 @@
 
 #include "<inc>/HALDebug.h"
 
-fn PsProcessCreate { inherithandles owninguser parentprocess permissions name -- processhandle ok }
+fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permissions name -- processhandle ok }
 	auto initial
 	0 initial!
 
@@ -109,6 +109,11 @@ fn PsProcessCreate { inherithandles owninguser parentprocess permissions name --
 
 	auto pid
 
+	// XXX this may be VERY racey,
+	// should probably take a mutex to lock out
+	// any operations that take a process's PID
+	// until this process is fully initialized.
+
 	process@ // entryvalue
 	PsProcessTable@ // handletable
 	0 // locked
@@ -146,6 +151,21 @@ fn PsProcessCreate { inherithandles owninguser parentprocess permissions name --
 
 	rs@ HALCPUInterruptRestore
 
+	if (sectionobject@)
+		sectionobject@ // sectionobject
+		process@ // process
+		MmProcessInitialize ok!
+
+		if (ok@)
+			// just dereference and let PsProcessObjectDelete take care of the cleanup
+
+			process@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+	end
+
+	1 // nocheck
 	ACCESS_ALL // permissions
 	process@ // process
 	ObObjectOpen ok! processhandle!
@@ -248,6 +268,7 @@ fn PsThreadCreate { context1 context2 startfunc permissions name processhandle p
 		return
 	end
 
+	1 // nocheck
 	ACCESS_ALL // permissions
 	threadptr@ // thread
 	ObObjectOpen ok! threadhandle!

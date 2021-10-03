@@ -28,10 +28,12 @@ bootable:
 kernel:
 	make -C $(KERN_DIR)
 	$(FSTOOL) u /mintia/OSKernel.exe $(KERN_DIR)/OSKernel.exe
+	$(FSTOOL) chmod /mintia/OSKernel.exe 493
 
 224debug:
 	make -C $(DBG_DIR)
 	$(FSTOOL) u /mintia/224Debug.exe $(DBG_DIR)/224Debug.exe
+	$(FSTOOL) chmod /mintia/224Debug.exe 493
 
 sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	make -C $(RTL_DIR)
@@ -49,7 +51,7 @@ drivers: $(LIB_DIR)/Dragonfruit.dll
 
 $(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll text=0x300000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll mintiadll text=0x300000,data=text+text_size+align,bss=data+data_size+align
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=4096 count=$(DISTIMGSZ) 2>/dev/null

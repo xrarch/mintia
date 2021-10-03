@@ -88,6 +88,7 @@ externptr MmEventPageAvailable
 externptr MmEventLowMemory
 externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
+externptr MmSectionObjectType
 
 const MMMUSTSUCCEEDPAGES 16
 

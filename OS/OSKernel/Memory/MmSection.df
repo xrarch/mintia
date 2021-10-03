@@ -1,0 +1,202 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
+	// if anonymous, free all associated page frames (in main memory and in swap).
+	// if memory-mapped file, dereference the file object.
+
+	auto fileobject
+	object@ MmSection_FileObject + @ fileobject!
+
+	auto anonsize
+	object@ MmSection_AnonSize + @ anonsize!
+
+	if (fileobject@)
+		// file-backed
+
+		if (DEBUGCHECKS)
+			if (anonsize@)
+				"MmSectionObjectDelete: file-backed section had anonsize\n" KeCrash
+			end
+		end
+
+		fileobject@ ObObjectDereferenceByPointer drop
+	end else
+		// anonymous
+
+		if (DEBUGCHECKS)
+			if (anonsize@ ~~)
+				"MmSectionObjectDelete: anonymous section had no anonsize\n" KeCrash
+			end
+		end
+
+		"MmSectionObjectDelete: TODO cleanup anonymous\n" KeCrash
+	end
+end
+
+fn MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser permissions name -- sectionobject ok }
+	auto bodysize
+	MmSection_SIZEOF bodysize!
+
+	auto inlineppt
+	0 inlineppt!
+
+	if (anonsize@)
+		if (fileobject@)
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+
+		if (anonsize@ PAGEOFFSETMASK &)
+			// round up to next page boundary
+
+			anonsize@ PAGESIZE + PAGENUMBERMASK & anonsize!
+		end
+
+		if (pageprotection@ PAGEACCESS_WRITECOPY &)
+			if (pageprotection@ PAGEACCESS_WRITE & ~~)
+				STATUS_INVALID_ARGUMENT ok!
+
+				return
+			end
+		end
+
+		// figure out the best way to do the prototype page table. if the
+		// section is <=64 pages in size, it ought to be relatively
+		// inexpensive to allocate inline with the section object. if it is
+		// 65 to (PAGESIZE/4) pages in size, it should be managed as a single-
+		// level table. larger sections will be managed as a multi-level
+		// table.
+
+		if (anonsize@ PAGESHIFT >> 64 <=)
+			anonsize@ PAGESHIFT >> 2 << bodysize +=
+
+			1 inlineppt!
+		end
+	end elseif (fileobject@ ~~)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	name@ // name
+	0 // flags
+	permissions@ // permissions
+	owninguser@ // owninguser
+	bodysize@ // bodysize
+	MmSectionObjectType@ // type
+	ObObjectCreate ok! sectionobject!
+
+	if (ok@)
+		return
+	end
+
+	pageprotection@ sectionobject@ MmSection_PageProtection + !
+
+	fileobject@ sectionobject@ MmSection_FileObject + !
+
+	anonsize@ sectionobject@ MmSection_AnonSize + !
+
+	0 sectionobject@ MmSection_AnonPrototypePageTable + !
+
+	if (fileobject@)
+		// memory-mapped file. ref the file object and force caching.
+
+		fileobject@ ObObjectReferenceByPointer drop
+
+		auto fcb
+		fileobject@ IOFile_FileControlBlock + @ fcb!
+
+		if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+			1 // wantcaching
+			fcb@ // fcb
+			IOFileControlBlockCacheCheck ok! drop
+
+			if (ok@)
+				// failed to initialize caching
+
+				sectionobject@ ObObjectDereferenceByPointer drop
+
+				return
+			end
+		end
+	end else
+		if (inlineppt@)
+			sectionobject@ MmSection_SIZEOF + sectionobject@ MmSection_AnonPrototypePageTable + !
+		end
+	end
+end
+
+fn MmSectionObjectCreate { pageprotection anonsize filehandle owninguser permissions name -- sectionhandle ok }
+	auto access
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	filehandle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ // access
+	pageprotection@ ACCESS_ALL & // permission
+	SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto sectionobject
+
+	pageprotection@ // pageprotection
+	anonsize@ // anonsize
+	fileobject@ // fileobject
+	owninguser@ // owninguser
+	permissions@ // permissions
+	name@ // name
+	MmSectionObjectCreateObject ok! sectionobject!
+
+	1 // nocheck
+	ACCESS_ALL // permissions
+	sectionobject@ // object
+	ObObjectOpen ok! sectionhandle!
+
+	fileobject@ ObObjectDereferenceByPointer drop
+
+	if (ok@)
+		sectionobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+end
+
+fn MmProcessInitialize { sectionobject process -- ok }
+	// create mappings for OSDLL and PEB section
+end
+
+fn MmProcessUninitialize { process -- ok }
+	// destroy all VADs etc
+
+	"MmProcessUninitialize: TODO\n" KeCrash
+end

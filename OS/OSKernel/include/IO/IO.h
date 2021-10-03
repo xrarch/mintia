@@ -59,3 +59,5 @@ extern IOFileControlBlockUnlockIO { fcb -- }
 
 extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 extern IOFileControlBlockAcquireCheck { flags fcb -- ok }
+
+externptr IOBootDevice

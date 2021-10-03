@@ -4,8 +4,8 @@ extern HALPlatformMapRestore { asid oldpgtb -- }
 
 externptr HALPlatformKernelPageDirectory
 
-const KERNELSPACE 0x80000000
-const IDENTITYSPACE 0xD0000000
+const KERNELSPACE   0x80000000
+const IDENTITYSPACE 0xC0000000
 
 const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 

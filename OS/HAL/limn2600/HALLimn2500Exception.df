@@ -365,9 +365,70 @@ HALCPUMapSwitch:
 
 	ret
 
+HALLimn2500TLBFlush:
+	ftlb a0, a1
+	ret
+
 "
 
+extern HALLimn2500TLBFlush { vpn asid -- }
+
+fn HALLimn2500TLBFlushASID { asid -- }
+	-1 asid@ HALLimn2500TLBFlush
+end
+
+fn HALLimn2500TLBFlushAll { -- }
+	-1 -1 HALLimn2500TLBFlush
+end
+
 extern LoadInitialContext { -- }
+
+table HALLimn2500UsedASIDs[257]
+
+fn HALCPUASIDRegister { asid -- }
+	if (asid@ 0 ==)
+		// kernel process, dont care
+
+		return
+	end
+
+	asid@ 255 & 1 + asid!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	1 [asid@]HALLimn2500UsedASIDs +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn HALCPUASIDUnregister { asid -- }
+	if (asid@ 0 ==)
+		"HALCPUASIDUnregister: asid==0\n" HALCrash
+	end
+
+	asid@ 255 & 1 + asid!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	1 [asid@]HALLimn2500UsedASIDs -=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn HALCPUAddressSpaceSwitch { asid pdir -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if ([asid@]HALLimn2500UsedASIDs@ 1 >)
+		asid@ HALLimn2500TLBFlushASID
+	end
+
+	asid@ pdir@ HALCPUMapSwitch drop drop
+
+	rs@ HALCPUInterruptRestore
+end
 
 const EXCNAMESMAX 15
 

@@ -29,6 +29,11 @@ struct KeProcess
 	4 BasePriority
 
 	4 MainThread
+
+	// memory manager information
+
+	4 PageDirectory
+	4 ASID
 endstruct
 
 const THREADYIELD_PREEMPTED  1
@@ -110,7 +115,8 @@ struct KeThread
 endstruct
 
 extern KeProcessCurrent { -- current }
-extern KeProcessInitialize { name process -- ok }
+extern KeProcessInitialize { name asid process -- ok }
+extern KeProcessUninitialize { process -- }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess

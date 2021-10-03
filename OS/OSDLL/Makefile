@@ -5,6 +5,7 @@ SOBJ   := $(SFILES:.s=.o)
 
 DC  =  ../../../sdk/dragonc.sh
 AS  =  ../../../sdk/asm.sh
+OBJTOOL = ../../../sdk/link.sh
 LD  =  ../../../sdk/link.sh link
 INS =  ../../../sdk/install.sh
 
@@ -14,7 +15,8 @@ all: obj/OSDLL.dll
 obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	mkdir -p obj
 	mkdir -p src
-	$(LD) obj/OSDLL.dll $(OBJ) $(SOBJ) -d ../Library/Dragonfruit.dll
+	$(LD) obj/OSDLL.dll $(SOBJ) $(OBJ) -d ../Library/Dragonfruit.dll
+	$(OBJTOOL) move obj/OSDLL.dll mintiadll text=0x1000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df
 	$(DC) $< $@ incdir=./headers/

@@ -1,6 +1,8 @@
 #include "<df>/dragonfruit.h"
 
 #include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
 
 #include "<inc>/Kernel.h"
 
@@ -14,11 +16,9 @@
 
 #include "<inc>/Security.h"
 
+#include "<inc>/IO.h"
+
 #include "<ll>/OSDLL/OS.h"
-
-#include "<inc>/HALCPU.h"
-
-#include "<inc>/HALDebug.h"
 
 var PsProcessObjectType 0
 public PsProcessObjectType
@@ -56,10 +56,7 @@ fn PsInitPhase0 { -- }
 
 	// initialize ObTypeInitializer fields
 
-	ObTypeInitializer_SIZEOF typeinit@ ObTypeInitializer_Length + !
-	0 typeinit@ ObTypeInitializer_OpenFunction + !
-	0 typeinit@ ObTypeInitializer_CloseFunction + !
-	0 typeinit@ ObTypeInitializer_ParseFunction + !
+	typeinit@ ObTypeInitializerInitialize
 
 	// create Process type
 
@@ -91,6 +88,7 @@ fn PsInitPhase0 { -- }
 
 	auto handle
 
+	0 // sectionobject
 	0 // inherithandles
 	SeUserCurrentGet // owninguser
 	0 // parentprocess
@@ -142,5 +140,248 @@ fn PsInitPhase0 { -- }
 end
 
 fn PsInitPhase1 { -- }
+	PsOSDLLInit
+end
 
+buffer PsOSDLLInformation PsOSDLLInfo_SIZEOF
+public PsOSDLLInformation
+
+var PsOSDLLSectionObject 0
+public PsOSDLLSectionObject
+
+struct LOFFHeader
+	4 Magic
+	4 SymbolTableOffset
+	4 SymbolCount
+	4 StringTableOffset
+	4 StringTableSize
+	4 TargetArchitecture
+	4 EntrySymbol
+	4 Stripped
+	4 ImportTableOffset
+	4 ImportCount
+	4 Timestamp
+	4 Fragment
+	12 Reserved2
+	4 TextHeader
+	4 DataHeader
+	4 BSSHeader
+endstruct
+
+struct LOFFSectionHeader
+	4 FixupTableOffset
+	4 FixupCount
+	4 SectionOffset
+	4 SectionSize
+	4 LinkedAddress
+endstruct
+
+struct LOFFSymbol
+	4 NameOffset
+	4 Section
+	4 Type
+	4 Value
+	4 ImportIndex
+endstruct
+
+const LOFFMAGIC  'LOF5'
+const LOFFGLOBAL 1
+
+fn PsOSDLLInit { -- }
+	auto info
+	PsOSDLLInformation info!
+
+	auto filehandle
+	auto ok
+
+	0 // flags
+	ACCESS_READ ACCESS_EXEC | // access
+	0 // initialobject
+	"/mintia/OSDLL.dll" // path
+	KeProcessCurrent // process
+	ObObjectOpenByPathProcess ok! filehandle!
+
+	if (ok@)
+		ok@ "PsOSDLLInit: couldn't open required system component /mintia/OSDLL.dll (%i)\n" KeCrash
+	end
+
+	auto head
+	filehandle@ PsOSDLLLoadHead ok! head!
+
+	if (ok@)
+		ok@ "PsOSDLLInit: failed to load head (%i)\n" KeCrash
+	end
+
+	auto sectionheader
+
+	head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+	sectionheader@ LOFFSectionHeader_SectionOffset + @ info@ PsOSDLLInfo_TextOffset + !
+	sectionheader@ LOFFSectionHeader_SectionSize + @ info@ PsOSDLLInfo_TextSize + !
+	sectionheader@ LOFFSectionHeader_LinkedAddress + @ info@ PsOSDLLInfo_TextVAddr + !
+
+	head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+	sectionheader@ LOFFSectionHeader_SectionOffset + @ info@ PsOSDLLInfo_DataOffset + !
+	sectionheader@ LOFFSectionHeader_SectionSize + @ info@ PsOSDLLInfo_DataSize + !
+	sectionheader@ LOFFSectionHeader_LinkedAddress + @ info@ PsOSDLLInfo_DataVAddr + !
+
+	head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
+	sectionheader@ LOFFSectionHeader_SectionSize + @ info@ PsOSDLLInfo_BSSSize + !
+	sectionheader@ LOFFSectionHeader_LinkedAddress + @ info@ PsOSDLLInfo_BSSVAddr + !
+
+	auto addr
+
+	"__OSDLLStart" // name
+	info@ PsOSDLLInfo_TextVAddr + @ // textbase
+	head@ // head
+	PsOSDLLFindFunction ok! addr!
+
+	if (ok@)
+		"PsOSDLLInit: couldn't find symbol '_OSDLLStart'\n" KeCrash
+	end
+
+	head@ MmFree
+
+	auto sectionhandle
+
+	PAGEACCESS_READ PAGEACCESS_EXEC | // pageprotection
+	0 // anonsize
+	filehandle@ // filehandle
+	SeUserCurrentGet // owninguser
+	ACCESS_OWNER_ALL ACCESS_GROUP_ALL | ACCESS_WORLD_ALL | // permissions
+	"PsOSDLLSection" // name
+	MmSectionObjectCreate ok! sectionhandle!
+
+	if (ok@)
+		ok@ "PsOSDLLInit: failed to create PsOSDLLSection (%i)\n" KeCrash
+	end
+
+	filehandle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "PsOSDLLInit: couldn't close OSDLL.dll (%i)\n" KeCrash
+	end
+
+	MmSectionObjectType@ // type
+	sectionhandle@ // handle
+	ObObjectReferenceByHandle ok! PsOSDLLSectionObject! drop
+
+	if (ok@)
+		ok@ "PsOSDLLInit: couldn't ref PsOSDLLSection (%i)\n" KeCrash
+	end
+
+	sectionhandle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "PsOSDLLInit: couldn't close PsOSDLLSection (%i)\n" KeCrash
+	end
+end
+
+const OSDLLHEADMAX 32000 // just in case. subject to future adjustment.
+
+fn PsOSDLLLoadHead { filehandle -- head ok }
+	auto loffheader
+	LOFFHeader_SIZEOF alloc loffheader!
+
+	auto bytesread
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	LOFFHeader_SIZEOF // length
+	loffheader@ // buffer
+	filehandle@ // filehandle
+	IOFileRead ok! bytesread!
+
+	if (ok@)
+		ok@ "PsOSDLLLoadHead: couldn't read /mintia/OSDLL.dll header (%i)\n" KeCrash
+	end
+
+	if (bytesread@ LOFFHeader_SIZEOF <)
+		ok@ "PsOSDLLLoadHead: /mintia/OSDLL.dll short (hdr)\n" KeCrash
+	end
+
+	if (loffheader@ LOFFHeader_Magic + @ LOFFMAGIC ~=)
+		"PsOSDLLLoadHead: /mintia/OSDLL.dll corrupted\n" KeCrash
+	end
+
+	if (loffheader@ LOFFHeader_TargetArchitecture + @ 5 ~=)
+		// XXX portability issue: this value is specific to limn2600...
+		// though I guess LOFF is a giant portability issue already.
+
+		"PsOSDLLLoadHead: /mintia/OSDLL.dll is not for this architecture\n" KeCrash
+	end
+
+	auto headsz
+	loffheader@ LOFFHeader_BSSHeader + @ LOFFSectionHeader_SIZEOF + headsz!
+
+	if (headsz@ OSDLLHEADMAX >)
+		"PsOSDLLLoadHead: /mintia/OSDLL.dll head too big\n" KeCrash
+	end
+
+	// XXX this is a really dumb way to do this but I can't think of a better way
+
+	headsz@ // bytes
+	'HEAD' // tag
+	MmAllocWithTag ok! head!
+	
+	if (ok@)
+		headsz@ "PsOSDLLLoadHead: failed to allocate %d bytes for head\n" KeCrash
+	end
+
+	0 // offset
+	filehandle@ // filehandle
+	OSSEEK_SET // mode
+	IOFileSeek ok! drop
+
+	if (ok@)
+		ok@ "PsOSDLLLoadHead: couldn't seek (%i)\n" KeCrash
+	end
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	headsz@ // length
+	head@ // buffer
+	filehandle@ // filehandle
+	IOFileRead ok! bytesread!
+
+	if (ok@)
+		ok@ "PsOSDLLLoadHead: couldn't read /mintia/OSDLL.dll head (%i)\n" KeCrash
+	end	
+
+	if (bytesread@ headsz@ ~=)
+		"PsOSDLLLoadHead: /mintia/OSDLL.dll short\n" KeCrash
+	end
+end
+
+fn PsOSDLLFindFunction { name textbase head -- addr ok }
+	auto ptr
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + ptr!
+
+	auto stringtable
+	head@ LOFFHeader_StringTableOffset + @ head@ + stringtable!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ LOFFHeader_SymbolCount + @ count!
+
+	0 ok!
+
+	while (i@ count@ <)
+		if (ptr@ LOFFSymbol_Type + @ LOFFGLOBAL ==)
+			auto sname
+			ptr@ LOFFSymbol_NameOffset + @ stringtable@ + sname!
+
+			if (sname@ name@ strcmp)
+				ptr@ LOFFSymbol_Value + @ textbase@ + addr!
+
+				return
+			end
+		end
+
+		LOFFSymbol_SIZEOF ptr +=
+		1 i +=
+	end
+
+	-1 ok!
 end

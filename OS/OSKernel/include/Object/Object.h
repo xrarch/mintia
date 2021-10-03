@@ -34,8 +34,6 @@ struct ObType
 endstruct
 
 struct ObTypeInitializer
-	4 Length
-
 	4 Name
 	4 Tag
 	4 BodySize
@@ -83,6 +81,7 @@ extern ObObjectCreate { name flags permissions owninguser bodysize type -- objec
 extern ObObjectFree { object -- ok }
 extern ObObjectDeallocate { object -- }
 
+extern ObTypeInitializerInitialize { initializer -- }
 extern ObTypeCreate { initializer -- type ok }
 
 extern ObObjectReferenceByHandle { type handle -- access object ok }
@@ -91,8 +90,8 @@ extern ObObjectReferenceByHandleProcess { type handle process -- access object o
 extern ObObjectClose { handle -- ok }
 extern ObObjectCloseProcess { handle process -- ok }
 
-extern ObObjectOpen { access object -- handle ok }
-extern ObObjectOpenProcess { access object process -- handle ok }
+extern ObObjectOpen { nocheck access object -- handle ok }
+extern ObObjectOpenProcess { nocheck access object process -- handle ok }
 
 extern ObObjectHandleCountIncrement { object -- oldcount }
 extern ObObjectHandleCountDecrement { object -- oldcount }

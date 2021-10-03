@@ -20,10 +20,7 @@ struct PsProcess
 
 	// virtual memory information
 
-	4 WorkingSetSize
-	4 WorkingSetMaximum
-
-	4 WorkingSetThrashMaximum
+	4 SectionObject
 
 	4 PageFaultCount
 endstruct
@@ -32,16 +29,32 @@ struct PsThread
 	KeThread_SIZEOF TCB
 endstruct
 
+struct PsOSDLLInfo
+	4 TextOffset
+	4 TextSize
+	4 TextVAddr
+
+	4 DataOffset
+	4 DataSize
+	4 DataVAddr
+
+	4 BSSSize
+	4 BSSVAddr
+endstruct
+
 externptr PsProcessObjectType
 externptr PsThreadObjectType
 externptr PsProcessTable
 externptr PsProcessListHead
 externptr PsSystemProcess
 
+externptr PsOSDLLInformation
+externptr PsOSDLLSectionObject
+
 extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
 
-extern PsProcessCreate { inherithandles owninguser parentprocess permissions name -- processhandle ok }
+extern PsProcessCreate { sectionobject inherithandles owninguser parentprocess permissions name -- processhandle ok }
 extern PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
 extern PsProcessObjectDelete { object -- }
 extern PsThreadObjectDelete { object -- }

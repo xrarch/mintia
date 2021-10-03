@@ -12,3 +12,7 @@ extern HALCPURunInContextNoInterrupts { handler stack arg1 arg0 -- ret0 ret1 }
 
 extern HALCPUAtomicIncrement { inc ptr -- oldvalue }
 extern HALCPUAtomicDecrement { dec ptr -- oldvalue }
+
+extern HALCPUASIDRegister { asid -- }
+extern HALCPUASIDUnregister { asid -- }
+extern HALCPUAddressSpaceSwitch { asid pdir -- }

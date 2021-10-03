@@ -73,6 +73,9 @@ extern MmBlockChargeGet { block -- charge }
 extern MmKernelStackAlloc { -- kstack ok }
 extern MmKernelStackFree { kstack -- }
 
+extern MmPageDirectoryAlloc { -- pdir ok }
+extern MmPageDirectoryFree { pdir -- }
+
 extern MmZeroPageWorker { -- }
 
 externptr MmPageFrameDatabase

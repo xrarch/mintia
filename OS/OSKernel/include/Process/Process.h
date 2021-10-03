@@ -20,7 +20,12 @@ struct PsProcess
 
 	// virtual memory information
 
-	4 SectionObject
+	KeMutex_SIZEOF VADListMutex
+
+	4 VADListHead
+	4 VADListTail
+
+	4 LastVAD
 
 	4 PageFaultCount
 endstruct

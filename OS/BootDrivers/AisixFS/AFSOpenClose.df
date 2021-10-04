@@ -1,0 +1,72 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "AisixFS.h"
+
+fn (IODispatchOpenFunction) AFSOpen { access fileobject -- ok }
+	0 ok!
+
+	auto mount
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DeviceObject + @ mount!
+
+	if (access@ ACCESS_WRITE &)
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
+			rs@ HALCPUInterruptRestore
+
+			STATUS_READONLY_FILESYSTEM ok!
+
+			return
+		end
+
+		1 mount@ IOMount_FSContext + @ AFSData_WritableFiles + +=
+
+		rs@ HALCPUInterruptRestore
+	end
+end
+
+fn (IODispatchCloseFunction) AFSClose { access fileobject -- ok }
+	0 ok!
+
+	auto mount
+	fileobject@ IOFileControlBlock_DeviceObject + @ mount!
+
+	if (access@ ACCESS_WRITE &)
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		if (DEBUGCHECKS)
+			if (mount@ IOMount_FSContext + @ AFSData_WritableFiles + @ 0 ==)
+				"AFSClose: underflow\n" KeCrash
+			end
+		end
+
+		1 mount@ IOMount_FSContext + @ AFSData_WritableFiles + -=
+
+		rs@ HALCPUInterruptRestore
+	end
+end

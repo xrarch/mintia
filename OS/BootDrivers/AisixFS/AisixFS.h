@@ -32,6 +32,8 @@ struct AFSData
 	4 VolSize
 	4 LastFreeBlock
 
+	4 WritableFiles
+
 	4 FCBRefTotal
 
 	4 FCBUsedCount
@@ -98,6 +100,9 @@ extern AFSFCBRead { inum mount -- fcb ok }
 
 extern AFSWalkFAT { growing startcount startblkno mount -- left blkno ok }
 extern AFSBlockMap { blkoff fcb -- blkno ok }
+
+extern AFSOpen { access fileobject -- ok }
+extern AFSClose { access fileobject -- ok }
 
 extern AFSParse { flags path initialfcb process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }

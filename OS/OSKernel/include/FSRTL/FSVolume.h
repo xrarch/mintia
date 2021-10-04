@@ -9,4 +9,4 @@ extern FSVolumeReadCached { length bufsize offset buf mount -- bytesread ok }
 extern FSVolumeWriteCached { length bufsize offset buf mount -- byteswritten ok }
 
 extern FSVolumeBlockRead { flags offset mount -- pageframe pfdbe ok }
-extern FSVolumeBlockWrite { pfdbe -- ok }
+extern FSVolumeBlockWrite { pfdbe mount -- ok }

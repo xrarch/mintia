@@ -44,8 +44,8 @@ table DriverAFSFilesystem
 endtable
 
 table DriverAFSDispatch
-	0                                    // open
-	0                                    // close
+	pointerof AFSOpen                    // open
+	pointerof AFSClose                   // close
 	0                                    // iocontrol
 	pointerof AFSReadFile                // read
 	pointerof AFSWriteFile               // write
@@ -161,6 +161,8 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	0 afsdata@ AFSData_FCBReusableListTail + !
 	0 afsdata@ AFSData_FCBRefTotal + !
 
+	0 afsdata@ AFSData_WritableFiles + !
+
 	"AFSFCBCacheMutex" // name
 	KERNELMODE // mode
 	afsdata@ AFSData_FCBCacheMutex + // mutex
@@ -251,9 +253,43 @@ end
 fn (IOFilesystemFlushFunction) DriverAFSFlush { mount -- ok }
 	// "DriverAFSFlush: TODO\n" KeCrash
 
+	// I mean, we access the volume through the page cache,
+	// so we don't have anything to flush I don't think...
+
 	0 ok!
 end
 
 fn (IOFilesystemUpdateFlagsFunction) DriverAFSUpdateFlags { newflags oldflags mount -- ok }
-	"DriverAFSUpdateFlags: TODO\n" KeCrash
+	0 ok!
+
+	if (newflags@ OSMOUNT_READONLY &)
+		if (oldflags@ OSMOUNT_READONLY & ~~)
+			// volume is being downgraded to read-only.
+			// only allow if there are no writable files opened.
+
+			auto rs
+			HALCPUInterruptDisable rs!
+
+			if (mount@ IOMount_FSContext + @ AFSData_WritableFiles + @)
+				rs@ HALCPUInterruptRestore
+
+				STATUS_IO_DEVICE_BUSY ok!
+
+				return
+			end
+
+			// evade a race condition by setting the readonly flag here
+
+			OSMOUNT_READONLY mount@ IOMount_Flags + |=
+
+			rs@ HALCPUInterruptRestore
+
+			// flush all modified pages to ensure the volume
+			// won't be written while read-only.
+
+			0 // trunc
+			mount@ // mount
+			FSVolumeFlush drop
+		end
+	end
 end

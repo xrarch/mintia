@@ -39,11 +39,18 @@ fn ObObjectCloseProcess { handle process -- ok }
 	end
 
 	auto object
+	auto entryptr
+
+	handletable@ ExHandleTableLock ok!
+
+	if (ok@)
+		return
+	end
 
 	handle@ // handle
 	handletable@ // handletable
-	0 // locked
-	ExHandleDelete ok! object!
+	1 // locked
+	ExHandleDelete ok! object! entryptr!
 
 	if (ok@)
 		return
@@ -54,6 +61,11 @@ fn ObObjectCloseProcess { handle process -- ok }
 			"ObObjectCloseProcess: object was null\n" KeCrash
 		end
 	end
+
+	auto access
+	entryptr@ ObObjectTableEntry_Access + @ access!
+
+	handletable@ ExHandleTableUnlock
 
 	auto obh
 	object@ ObHeader_SIZEOF - obh!
@@ -71,7 +83,10 @@ fn ObObjectCloseProcess { handle process -- ok }
 		type@ ObType_CloseFunction + @ closefunc!
 
 		if (closefunc@)
-			object@ process@ closefunc@ ObTypeCloseFunction
+			access@ // access
+			object@ // object
+			process@ // process
+			closefunc@ ObTypeCloseFunction
 		end
 	end
 
@@ -122,24 +137,6 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 		end
 	end
 
-	auto type
-	obh@ ObHeader_TypeObject + @ type!
-
-	if (type@)
-		auto openfunc
-		type@ ObType_OpenFunction + @ openfunc!
-
-		if (openfunc@)
-			object@ process@ openfunc@ ObTypeOpenFunction ok!
-
-			if (ok@)
-				handletable@ ExHandleTableUnlock
-
-				return
-			end
-		end
-	end
-
 	obh@ ObHeader_QuotaCharge + @
 	process@ MmQuotaChargeProcess ok!
 
@@ -166,6 +163,41 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	end
 
 	access@ entryptr@ ObObjectTableEntry_Access + !
+
+	auto type
+	obh@ ObHeader_TypeObject + @ type!
+
+	if (type@)
+		auto openfunc
+		type@ ObType_OpenFunction + @ openfunc!
+
+		if (openfunc@)
+			access@ // access
+			object@ // object
+			process@ // process
+			openfunc@ ObTypeOpenFunction ok!
+
+			if (ok@)
+				handle@ // handle
+				handletable@ // handletable
+				1 // locked
+				ExHandleDelete access! drop drop
+
+				if (DEBUGCHECKS)
+					if (access@)
+						"ObObjectOpenProcess: failed to delete handle\n" KeCrash
+					end
+				end
+
+				obh@ ObHeader_QuotaCharge + @
+				process@ MmQuotaUnchargeProcess
+
+				handletable@ ExHandleTableUnlock
+
+				return
+			end
+		end
+	end
 
 	object@ ObObjectHandleCountIncrement drop
 

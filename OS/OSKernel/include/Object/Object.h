@@ -54,8 +54,8 @@ struct ObObjectTableEntry
 	4 Access
 endstruct
 
-fnptr ObTypeOpenFunction { object process -- ok }
-fnptr ObTypeCloseFunction { object process -- }
+fnptr ObTypeOpenFunction { access object process -- ok }
+fnptr ObTypeCloseFunction { access object process -- }
 fnptr ObTypeDeleteFunction { object -- }
 fnptr ObTypeParseFunction { flags path initialobject process -- reparsepath object ok }
 

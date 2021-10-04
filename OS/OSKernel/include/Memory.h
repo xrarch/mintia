@@ -3,3 +3,4 @@
 #include "<inc>/Memory/Evict.h"
 #include "<inc>/Memory/Section.h"
 #include "<inc>/Memory/VAD.h"
+#include "<inc>/Memory/Pool.h"

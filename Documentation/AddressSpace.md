@@ -6,6 +6,6 @@
 
 A0000000-AFFFFFFF 256MB: system structures (preferred, can have binaries)
 
-BF000000-BFFFFFFF  16MB: dynamic pool
+BEF00000-BFF00000  16MB: dynamic pool
 
 C0000000-FFFFFFFF   1GB: identity mapping of RAM

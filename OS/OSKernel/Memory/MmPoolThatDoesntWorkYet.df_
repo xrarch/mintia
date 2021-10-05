@@ -15,6 +15,8 @@
 
 const MMPOOLMAGIC 'Pool'
 
+const MMPOOLBLOCKMINIMUM 32
+
 buffer MmPoolSpaceBitmapHeader ExBitmapHeader_SIZEOF
 buffer MmPoolSpaceBitmap POOLPAGES
 
@@ -24,6 +26,10 @@ buffer MmPoolSpaceBitmap POOLPAGES
 // are handled by directly allocating pool pages.
 
 fn MmPoolInit { -- }
+	if (MMPOOLBLOCKMINIMUM MmPoolBlock_SIZEOF <)
+		"MmPoolInit: MMPOOLBLOCKMINIMUM < MmPoolBlock_SIZEOF"
+	end
+
 	POOLPAGES // sizeinbits
 	MmPoolSpaceBitmap // data	
 	MmPoolSpaceBitmapHeader // header
@@ -32,12 +38,28 @@ fn MmPoolInit { -- }
 	auto ptr
 	auto ok
 
-	8193
+	"hi\n" Printf
+
+	16384
 	'TEST'
 	MmAllocWithTag ok! ptr!
 
+	ptr@ ok@ "%i 0x%08x\n" Printf
+
+	if (ok@ ~~)
+		ptr@ // ptr
+		16384 // size
+		0xFFFFFFFF // word
+		memset
+	end
+
+	"ok done\n" Printf
+
 	ptr@ // ptr
-	12289 // size
+	MmPoolPageAlignedFree
+
+	ptr@ // ptr
+	16384 // size
 	0xFFFFFFFF // word
 	memset
 
@@ -72,9 +94,43 @@ fn MmHeapDumpBlockInfo { block -- }
 
 end
 
+fn MmAllocWithTag { bytes tag -- ptr ok }
+	if (DEBUGCHECKS)
+		if (MmInited@ ~~)
+			"MmAllocWithTag: used before MmInit called\n" KeCrash
+		end
+	end
+
+	if (bytes@ MMPOOLBLOCKMINIMUM + PAGESIZE >=)
+		bytes@ // bytes
+		tag@ // tag
+		MmPoolPageAlignedAlloc ok! ptr! drop
+
+		return
+	end
+end
+
+fn MmFree { ptr -- }
+	if (DEBUGCHECKS)
+		if (MmInited@ ~~)
+			"MmFree: used before MmInit called\n" KeCrash
+		end
+
+		if (ptr@ -1 ==)
+			"MmFree: tried to free -1 pointer\n" KeCrash
+		end
+	end
+
+	if (ptr@ ~~)
+		"MmFree: tried to free null pointer\n" KeCrash
+	end
+
+
+end
+
 var MmPoolPageHint 0
 
-fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
+fn MmPoolPageAlignedAlloc { bytes tag -- pfdbe ptr ok }
 	auto pagesneeded
 	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
 
@@ -111,7 +167,7 @@ fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
 	// the vaddrs are marked allocated, so we don't need to be in IPLDPC now
 
 	auto vaddr
-	offset@ PAGESHIFT << POOLSPACE | vaddr!
+	offset@ PAGESHIFT << POOLSPACE + vaddr!
 
 	vaddr@ ptr!
 
@@ -121,9 +177,11 @@ fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
 	auto i
 	0 i!
 
+	auto firstpfdbe
+	0 firstpfdbe!
+
 	while (i@ pagesneeded@ <)
 		auto phyaddr
-		auto pfdbe
 
 		FREEFIRST // priority
 		MmPageAlloc ok! phyaddr! pfdbe!
@@ -131,7 +189,7 @@ fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
 		if (ok@)
 			// failed to allocate... gotta go back and free/unmap those pages
 
-			ok@ pagesneeded!
+			ok@ ipl!
 
 			while (i@)
 				PAGESIZE vaddr -=
@@ -152,14 +210,27 @@ fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
 				phyaddr@ PAGESHIFT >> MmPageFree
 			end
 
-			pagesneeded@ ok!
+			ipl@ ok!
+
+			IPLDPC KeIPLRaise ipl!
+
+			pagesneeded@ // runlength
+			offset@ // index
+			bmpheader@ // header
+			ExBitmapClearBits
+
+			ipl@ KeIPLLower
 
 			return
 		end
 
+		if (firstpfdbe@ ~~)
+			pfdbe@ firstpfdbe!
+		end
+
 		phyaddr@ PAGESHIFT << // phyaddr
 		vaddr@ // vaddr
-		PTE_G PTE_K | PTE_V | PTE_W | // flags
+		PTE_G PTE_K | PTE_W | PTE_V | // flags
 		kdir@ // pagemap
 		0 // canalloc
 		MmMapVirtualAddress ok!
@@ -176,40 +247,75 @@ fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
 		PAGESIZE vaddr +=
 		1 i +=
 	end
+
+	firstpfdbe@ pfdbe!
 end
 
-fn MmAllocWithTag { bytes tag -- ptr ok }
+fn MmPoolPageAlignedFree { ptr -- }
 	if (DEBUGCHECKS)
-		if (MmInited@ ~~)
-			"MmAllocWithTag: used before MmInit called\n" KeCrash
+		if (ptr@ POOLSPACE <)
+			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x < POOLSPACE\n" KeCrash
+		end
+
+		if (ptr@ POOLSPACE POOLSIZE + >=)
+			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x beyond pool space\n" KeCrash
+		end
+
+		if (ptr@ 3 &)
+			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x not aligned\n" KeCrash
 		end
 	end
 
-	if (bytes@ PAGESIZE >=)
-		bytes@ // bytes
-		tag@ // tag
-		MmPoolPageAlignedAlloc ok! ptr!
+	auto offset
+	ptr@ POOLSPACE - PAGESHIFT >> offset!
 
-		return
-	end
-end
+	auto pfdbe
 
-fn MmFree { ptr -- }
-	if (DEBUGCHECKS)
-		if (MmInited@ ~~)
-			"MmFree: used before MmInit called\n" KeCrash
+	ptr@ MmPoolPageGetPhysical pfdbe! drop
+
+	auto pages
+	pfdbe@ MmPageFrameEntryPool_BytesUsed + @ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	while (i@ pages@ <)
+		auto phyaddr
+		auto ok
+
+		ptr@ // vaddr
+		0 // asid
+		kdir@ // pagemap
+		0 // canfree
+		MmUnmapVirtualAddress ok! phyaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmPoolPageAlignedFree: failed to unmap\n" KeCrash
+			end
 		end
 
-		if (ptr@ -1 ==)
-			"MmFree: tried to free -1 pointer\n" KeCrash
-		end
+		phyaddr@ PAGESHIFT >> MmPageFree
+
+		PAGESIZE ptr +=
+		1 i +=
 	end
 
-	if (ptr@ ~~)
-		"MmFree: tried to free null pointer\n" KeCrash
-	end
+	auto bmpheader
+	MmPoolSpaceBitmapHeader bmpheader!
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
+	pages@ // runlength
+	offset@ // index
+	bmpheader@ // header
+	ExBitmapClearBits
+
+	ipl@ KeIPLLower
 end
 
 fn MmChargeBytesGet { bytes -- charge }

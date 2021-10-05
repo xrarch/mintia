@@ -18,12 +18,13 @@ WIP: MINTIA is not currently in an even minimally usable state.
 8. NT-like layered kernel design.
 9. Loadable kernel-mode debugger with stack tracing and basic commands.
 10. Unix-like (synchronous) I/O manager with NT-like (filestream) cache.
+11. AisixFS read-only support.
 
 ## Planned features (in rough descending order of priority)
 
-1. Filesystem drivers (aisixfs and FAT32). (in progress)
-2. Demand paging, memory-mapped files, etc.
-3. Userspace processes and dynamic linking.
-4. Mac OS 9-like window system.
+1. Demand paging, memory-mapped files, etc. (in process)
+2. Userspace processes and dynamic linking.
+3. AisixFS write support, FAT32 driver
+3. Mac OS 9-like window system.
 
 ![Running](https://i.imgur.com/dFxBZO5.png)

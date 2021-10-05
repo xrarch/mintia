@@ -7,42 +7,181 @@
 
 #include "<inc>/Kernel.h"
 
+#include "<inc>/Executive.h"
+
 #include "<inc>/Memory.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-buffer MmPoolSpaceBitmap 512
+const MMPOOLMAGIC 'Pool'
+
+buffer MmPoolSpaceBitmapHeader ExBitmapHeader_SIZEOF
+buffer MmPoolSpaceBitmap POOLPAGES
 
 // The heap is managed within a 16MB region of kernel space called
 // "pool space". Allocations less than a page size are handled by a linked-
 // list allocator within pool pages. Allocations of a page size or more
 // are handled by directly allocating pool pages.
 
-fn MmHeapPrintTag { tag -- }
+fn MmPoolInit { -- }
+	POOLPAGES // sizeinbits
+	MmPoolSpaceBitmap // data	
+	MmPoolSpaceBitmapHeader // header
+	ExBitmapInitialize
 
+	auto ptr
+	auto ok
+
+	8193
+	'TEST'
+	MmAllocWithTag ok! ptr!
+
+	ptr@ // ptr
+	12289 // size
+	0xFFFFFFFF // word
+	memset
+
+	while (1)
+		HALCPUHalt
+	end
+end
+
+fn MmHeapPrintTag { tag -- }
+	auto shf
+	32 shf!
+
+	while (shf@)
+		8 shf -=
+
+		auto c
+		tag@ shf@ >> 0xFF & c!
+
+		if (c@ 0x80 & ~~ c@ 0x20 >= &&)
+			c@ Putc
+		end else
+			'!' Putc
+		end
+	end
 end
 
 fn MmHeapCheck { -- }
-
-end
-
-fn MmHeapDumpBlockInfoHdr { block -- }
-
+	"MmHeapCheck: not implemented\n" KeCrash
 end
 
 fn MmHeapDumpBlockInfo { block -- }
 
 end
 
-fn MmHeapDumpBuckets { -- }
+var MmPoolPageHint 0
 
+fn MmPoolPageAlignedAlloc { bytes tag -- ptr ok }
+	auto pagesneeded
+	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
+
+	auto offset
+
+	auto bmpheader
+	MmPoolSpaceBitmapHeader bmpheader!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	MmPoolPageHint@ // hint
+	pagesneeded@ // runlength
+	bmpheader@ // header
+	ExBitmapFindRun ok! offset!
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		STATUS_NO_MEMORY ok!
+
+		return
+	end
+
+	offset@ MmPoolPageHint!
+
+	pagesneeded@ // runlength
+	offset@ // index
+	bmpheader@ // header
+	ExBitmapSetBits
+
+	ipl@ KeIPLLower
+
+	// the vaddrs are marked allocated, so we don't need to be in IPLDPC now
+
+	auto vaddr
+	offset@ PAGESHIFT << POOLSPACE | vaddr!
+
+	vaddr@ ptr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	while (i@ pagesneeded@ <)
+		auto phyaddr
+		auto pfdbe
+
+		FREEFIRST // priority
+		MmPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			// failed to allocate... gotta go back and free/unmap those pages
+
+			ok@ pagesneeded!
+
+			while (i@)
+				PAGESIZE vaddr -=
+				1 i -=
+
+				vaddr@ // vaddr
+				0 // asid
+				kdir@ // pagemap
+				0 // canfree
+				MmUnmapVirtualAddress ok! phyaddr!
+
+				if (DEBUGCHECKS)
+					if (ok@)
+						"MmPoolPageAlignedAlloc: failed to unmap\n" KeCrash
+					end
+				end
+
+				phyaddr@ PAGESHIFT >> MmPageFree
+			end
+
+			pagesneeded@ ok!
+
+			return
+		end
+
+		phyaddr@ PAGESHIFT << // phyaddr
+		vaddr@ // vaddr
+		PTE_G PTE_K | PTE_V | PTE_W | // flags
+		kdir@ // pagemap
+		0 // canalloc
+		MmMapVirtualAddress ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmPoolPageAlignedAlloc: failed to map virtual address\n" KeCrash
+			end
+		end
+
+		tag@ pfdbe@ MmPageFrameEntryPool_Tag + !
+		pagesneeded@ PAGESHIFT << pfdbe@ MmPageFrameEntryPool_BytesUsed + !
+
+		PAGESIZE vaddr +=
+		1 i +=
+	end
 end
-
 
 fn MmAllocWithTag { bytes tag -- ptr ok }
 	if (DEBUGCHECKS)
 		if (MmInited@ ~~)
-			"MmAllocWithTag: used before MemInit called\n" KeCrash
+			"MmAllocWithTag: used before MmInit called\n" KeCrash
 		end
 	end
 
@@ -58,7 +197,7 @@ end
 fn MmFree { ptr -- }
 	if (DEBUGCHECKS)
 		if (MmInited@ ~~)
-			"MmFree: used before MemInit called\n" KeCrash
+			"MmFree: used before MmInit called\n" KeCrash
 		end
 
 		if (ptr@ -1 ==)
@@ -74,9 +213,80 @@ fn MmFree { ptr -- }
 end
 
 fn MmChargeBytesGet { bytes -- charge }
+	bytes@ MmPoolBlock_SIZEOF + charge!
 
+	if (charge@ PAGESIZE >=)
+		bytes@ charge!
+	end
 end
 
 fn MmBlockChargeGet { block -- charge }
+	if (DEBUGCHECKS)
+		if (block@ POOLSPACE <)
+			block@ "MmBlockChargeGet: ptr 0x%08x < POOLSPACE\n" KeCrash
+		end
 
+		if (block@ POOLSPACE POOLSIZE + >=)
+			block@ "MmBlockChargeGet: ptr 0x%08x beyond pool space\n" KeCrash
+		end
+
+		if (block@ 3 &)
+			block@ "MmBlockChargeGet: ptr 0x%08x not aligned\n" KeCrash
+		end
+	end
+
+	if (block@ PAGEOFFSETMASK & ~~)
+		// page aligned. charge is defined by the pfdbe.
+
+		auto pfdbe
+		block@ MmPoolPageGetPhysical pfdbe! drop
+
+		pfdbe@ MmPageFrameEntryPool_BytesUsed + @ charge!
+
+		return
+	end
+
+	// not page aligned. charge is defined by pool header.
+
+	MmPoolBlock_SIZEOF block -=
+
+	if (block@ MmPoolBlock_Magic + @ MMPOOLMAGIC ~=)
+		block@ MmPoolBlock_Magic + @
+		block@ "MmBlockChargeGet: ptr 0x%08x had bad magic 0x%08x\n" KeCrash
+	end
+
+	block@ MmPoolBlock_Size + @ charge!
+end
+
+fn MmPoolPageGetPhysical { ptr -- pfn pfdbe }
+	if (DEBUGCHECKS)
+		if (ptr@ POOLSPACE <)
+			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x < POOLSPACE\n" KeCrash
+		end
+
+		if (ptr@ POOLSPACE POOLSIZE + >=)
+			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x beyond pool space\n" KeCrash
+		end
+
+		if (ptr@ 3 &)
+			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x not aligned\n" KeCrash
+		end
+	end
+
+	auto phyaddr
+	auto ok
+
+	ptr@ // vaddr
+	HALPlatformKernelPageDirectory@ // pagemap
+	MmGetPhysicalAddress ok! phyaddr! drop
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ ptr@ "MmPoolPageGetPhysical: ptr %08x wasn't mapped (%i)\n" KeCrash
+		end
+	end
+
+	phyaddr@ 12 >> pfn!
+
+	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 end

@@ -4,3 +4,4 @@
 #include "<inc>/Memory/Section.h"
 #include "<inc>/Memory/VAD.h"
 #include "<inc>/Memory/Pool.h"
+#include "<inc>/Memory/VirtualMemory.h"

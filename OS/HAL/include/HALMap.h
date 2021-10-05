@@ -1,5 +1,4 @@
 extern HALPlatformMapKernelSwitch { -- asid oldpgtb }
-
 extern HALPlatformMapRestore { asid oldpgtb -- }
 
 externptr HALPlatformKernelPageDirectory

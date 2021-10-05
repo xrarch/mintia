@@ -2,7 +2,7 @@
 
 .ds ANTE
 
-.ds mintia
+.ds MINTIA
 .bytes 10 0
 
 .dl 2

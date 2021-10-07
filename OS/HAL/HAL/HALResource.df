@@ -40,7 +40,7 @@ end
 
 // free up memory by eliminating the bitmap allocations for any resources marked jettisonable
 // this is done before the kernel sets up its memory allocator using the bootloader's initial bitmap
-// so we need the support routine HALJettisonSupportMemSetStatus to accomplish this
+// so we need the support routine HALJettisonClearBits to accomplish this
 
 fn HALResourceJettison { ldrinfo -- }
 	auto bmp
@@ -58,7 +58,10 @@ fn HALResourceJettison { ldrinfo -- }
 			rsrc@ BootResource_Size + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
 			rsrc@ BootResource_Data + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
 
-			bmp@ 0 sz@ start@ HALJettisonSupportMemSetStatus
+			sz@ // runlength
+			start@ // index
+			bmp@ // bmp
+			HALJettisonClearBits
 
 			0 rsrc@ BootResource_Data + ! // mark jettisoned
 		end
@@ -74,42 +77,50 @@ fn HALResourceJettison { ldrinfo -- }
 			dll@ DLL_LOFF + LOFFLoaded_HeaderSize + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
 			dll@ DLL_LOFF + LOFFLoaded_Base + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
 
-			bmp@ 0 sz@ start@ HALJettisonSupportMemSetStatus
+			sz@ // runlength
+			start@ // index
+			bmp@ // bmp
+			HALJettisonClearBits
 
 			dll@ DLL_Next + @ dll!
 		end
 	end
 end
 
-fn HALJettisonSupportMemSetStatus { bmp with pages start -- }
-	auto max
-	pages@ start@ + max!
+fn HALJettisonClearBits { runlength index bmp -- }
+	// taken from ExBitmapClearBits
 
-	start@ 32 / 4 * bmp +=
-
-	auto word
-	bmp@@ word!
-
-	auto q
-	start@ q!
-
-	while (start@ max@ <)
-		if (with@)
-			word@ start@ 31 & bitset word!
-		end else
-			word@ start@ 31 & bitclear word!
-		end
-
-		1 start +=
-
-		if (start@ 31 & ~~)
-			word@ bmp@!
-
-			4 bmp +=
-
-			bmp@@ word!
-		end
+	if (runlength@ 0 ==)
+		return
 	end
 
-	word@ bmp@!
+	auto bitoffset
+	index@ 31 & bitoffset!
+
+	auto curlongptr
+	bmp@ index@ 5 >> 2 << + curlongptr!
+
+	if (bitoffset@ runlength@ + 32 <=)
+		// you are expected to understand this
+
+		curlongptr@@ 0xFFFFFFFF 32 runlength@ - >> bitoffset@ << ~ & curlongptr@! 
+
+		return
+	end
+
+	curlongptr@@ 0xFFFFFFFF bitoffset@ << ~ & curlongptr@!
+
+	4 curlongptr +=
+	32 bitoffset@ - runlength -=
+
+	while (runlength@ 32 >=)
+		0 curlongptr@!
+
+		4 curlongptr +=
+		32 runlength -=
+	end
+
+	if (runlength@)
+		curlongptr@@ 0xFFFFFFFF runlength@ << & curlongptr@!
+	end
 end

@@ -1,0 +1,226 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+// slab allocation functions. should be called only through MmAllocWithTag and
+// MmFree.
+
+var MmSlabBytesUsedExternally 0
+public MmSlabBytesUsedExternally
+
+var MmSlabBytesUsedInternally 0
+public MmSlabBytesUsedInternally
+
+table MmSlabListHeads[MMSLABBUCKETS]
+
+fn MmSlabAlloc { bytes tag -- ptr ok }
+	0 ok!
+
+	// calculate as much stuff as possible here before we disable interrupts
+
+	MmPoolSlab_SIZEOF bytes +=
+
+	auto sz
+	1 MMSLABPO2START << sz!
+
+	auto bucketindex
+	0 bucketindex!
+	
+	while (sz@ bytes@ <)
+		1 sz <<=
+		1 bucketindex +=
+	end
+
+	auto slabsperpage
+	PAGESIZE bucketindex@ MMSLABPO2START + >> 1 - slabsperpage!
+
+	if (DEBUGCHECKS)
+		if (bucketindex@ MMSLABBUCKETS >=)
+			"MmSlabAlloc: bucketindex too big\n" KeCrash
+		end
+	end
+
+	auto pfdbe
+
+	auto listhead
+	[bucketindex@]MmSlabListHeads listhead!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	listhead@@ ptr!
+
+	if (ptr@)
+		if (ptr@ MmPoolSlab_Magic + gi MMSLABFREEMAGIC ~=)
+			ptr@ MmPoolSlab_Magic + gi
+			ptr@ "MmSlabAlloc: slab 0x%08x had bad magic (0x%08x)\n" KeCrash
+		end
+
+		if (DEBUGCHECKS)
+			if (ptr@ MmPoolSlab_Reserved + gb)
+				ptr@ MmPoolSlab_Reserved + gb
+				ptr@ "MmSlabAlloc: slab 0x%08x had a non-zero reserved byte (0x%08x)\n" KeCrash
+			end
+
+			if (ptr@ MmPoolSlab_BucketIndex + gb bucketindex@ ~=)
+				ptr@ MmPoolSlab_BucketIndex + gb
+				bucketindex@
+				ptr@ "MmSlabAlloc: slab 0x%08x had a weird bucketindex, wanted %d, found %d\n" KeCrash
+			end
+		end
+
+		ptr@ IDENTITYSPACE ~ & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		1 pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + +=
+
+		ptr@ MmPoolSlab_TagOrNextFree + @ listhead@!
+
+		sz@ MmSlabBytesUsedInternally +=
+
+		rs@ HALCPUInterruptRestore
+
+		tag@ ptr@ MmPoolSlab_TagOrNextFree + !
+		MMSLABSWIFTMAGIC ptr@ MmPoolSlab_Magic + si
+
+		MmPoolSlab_SIZEOF ptr +=
+
+		return
+	end
+
+	// no slab found, allocate a physical page and turn it into a bunch of
+	// properly-sized slabs. dip down into IPLDPC and turn interrupts back
+	// on since this just turned into a lengthy operation.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	rs@ HALCPUInterruptRestore
+
+	FREEFIRST // priority
+	MmPageAlloc ok! ptr! pfdbe!
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	1 pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + !
+
+	ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
+
+	if (DEBUGCHECKS)
+		0 ptr@ MmPoolSlab_Reserved + sb
+	end
+
+	bucketindex@ ptr@ MmPoolSlab_BucketIndex + sb
+	tag@ ptr@ MmPoolSlab_TagOrNextFree + !
+	MMSLABSWIFTMAGIC ptr@ MmPoolSlab_Magic + si
+
+	// store current slab pointer in pfdbe to avoid saving another auto in the
+	// function prologue
+	ptr@ sz@ + pfdbe!
+
+	// store last slab pointer in ok for same reason as above
+	listhead@@ ok!
+
+	while (slabsperpage@)
+		if (DEBUGCHECKS)
+			0 pfdbe@ MmPoolSlab_Reserved + sb
+		end
+
+		bucketindex@ pfdbe@ MmPoolSlab_BucketIndex + sb
+		ok@ pfdbe@ MmPoolSlab_TagOrNextFree + !
+		MMSLABFREEMAGIC pfdbe@ MmPoolSlab_Magic + si
+
+		pfdbe@ ok!
+		1 slabsperpage -=
+		sz@ pfdbe +=
+	end
+
+	sz@ pfdbe -=
+	pfdbe@ listhead@!
+
+	PAGESIZE MmSlabBytesUsedExternally +=
+	sz@ MmSlabBytesUsedInternally +=
+
+	ipl@ KeIPLLower
+
+	MmPoolSlab_SIZEOF ptr +=
+
+	0 ok!
+end
+
+fn MmSlabFree { ptr -- }
+	MmPoolSlab_SIZEOF ptr -=
+
+	if (ptr@ MmPoolSlab_Magic + gi MMSLABSWIFTMAGIC ~=)
+		ptr@ MmPoolSlab_Magic + gi
+		ptr@ "MmSlabFree: slab 0x%08x had bad magic (0x%08x)\n" KeCrash
+	end
+
+	if (DEBUGCHECKS)
+		if (ptr@ MmPoolSlab_Reserved + gb)
+			ptr@ MmPoolSlab_Reserved + gb
+			ptr@ "MmSlabFree: slab 0x%08x had a non-zero reserved byte (0x%08x)\n" KeCrash
+		end
+	end
+
+	auto pfn
+	ptr@ IDENTITYSPACE ~ & PAGESHIFT >> pfn!
+
+	auto pfdbe
+	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	auto bucketindex
+	ptr@ MmPoolSlab_BucketIndex + gb bucketindex!
+
+	auto sz
+	1 MMSLABPO2START bucketindex@ + << sz!
+
+	auto rs
+
+	if (pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + @ 1 ==)
+		// last slab has been freed, just free the entire page frame and move on
+
+		HALCPUInterruptDisable rs!
+
+		sz@ MmSlabBytesUsedInternally -=
+		PAGESIZE MmSlabBytesUsedExternally -=
+
+		rs@ HALCPUInterruptRestore
+
+		pfn@ MmPageFree
+
+		return
+	end
+
+	auto listhead
+	[bucketindex@]MmSlabListHeads listhead!
+
+	// was not the final slab.
+
+	MMSLABFREEMAGIC ptr@ MmPoolSlab_Magic + si
+
+	HALCPUInterruptDisable rs!
+
+	listhead@@ ptr@ MmPoolSlab_TagOrNextFree + !
+	ptr@ listhead@!
+
+	1 pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + -=
+
+	sz@ MmSlabBytesUsedInternally -=
+
+	rs@ HALCPUInterruptRestore
+end

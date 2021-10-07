@@ -24,7 +24,7 @@ externptr HALConsoleFontFlags
 
 // definitions for the HAL Console Font (HCF) format
 
-const HCFMAGIC 0x664E4C45
+const HCFMAGIC 'fNLE'
 
 const HCFFLAG_REVERSE 1
 

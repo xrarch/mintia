@@ -47,3 +47,5 @@ externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail
 externptr MmEvictableFastPageListHead
 externptr MmEvictableFastPageListTail
+
+externptr MmEvictablePageCount

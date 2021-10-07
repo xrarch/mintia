@@ -49,7 +49,9 @@ fn MemInit { -- }
 	auto ldrtop
 	pointerof _bss_end ldrtop!
 
-	1 ldrtop@ PAGEOFFSETMASK + PAGESHIFT >> 0 MemSetStatus
+	ldrtop@ PAGEOFFSETMASK + PAGESHIFT >> // runlength
+	0 // index
+	MemSetBits
 
 	auto astart
 
@@ -226,38 +228,86 @@ fn HexDump { addr len -- }
 	'\n' Putc
 end
 
-fn MemSetStatus { with pages start -- }
-	auto max
-	pages@ start@ + max!
+fn MemSetBits { runlength index -- }
+	// taken from ExBitmapSetBits
 
 	auto bmp
-	MemBitmap start@ 32 / 4 * + bmp!
+	MemBitmap bmp!
 
-	auto word
-	bmp@@ word!
-
-	auto q
-	start@ q!
-
-	while (start@ max@ <)
-		if (with@)
-			word@ start@ 31 & bitset word!
-		end else
-			word@ start@ 31 & bitclear word!
-		end
-
-		1 start +=
-
-		if (start@ 31 & ~~)
-			word@ bmp@!
-
-			4 bmp +=
-
-			bmp@@ word!
-		end
+	if (runlength@ 0 ==)
+		return
 	end
 
-	word@ bmp@!
+	auto bitoffset
+	index@ 31 & bitoffset!
+
+	auto curlongptr
+	bmp@ index@ 5 >> 2 << + curlongptr!
+
+	if (bitoffset@ runlength@ + 32 <=)
+		// you are expected to understand this
+
+		curlongptr@@ 0xFFFFFFFF 32 runlength@ - >> bitoffset@ << | curlongptr@! 
+
+		return
+	end
+
+	curlongptr@@ 0xFFFFFFFF bitoffset@ << | curlongptr@!
+
+	4 curlongptr +=
+	32 bitoffset@ - runlength -=
+
+	while (runlength@ 32 >=)
+		0xFFFFFFFF curlongptr@!
+
+		4 curlongptr +=
+		32 runlength -=
+	end
+
+	if (runlength@)
+		curlongptr@@ 0xFFFFFFFF runlength@ << ~ | curlongptr@!
+	end
+end
+
+fn MemClearBits { runlength index -- }
+	auto bmp
+	MemBitmap bmp!
+
+	// taken from ExBitmapClearBits
+
+	if (runlength@ 0 ==)
+		return
+	end
+
+	auto bitoffset
+	index@ 31 & bitoffset!
+
+	auto curlongptr
+	bmp@ index@ 5 >> 2 << + curlongptr!
+
+	if (bitoffset@ runlength@ + 32 <=)
+		// you are expected to understand this
+
+		curlongptr@@ 0xFFFFFFFF 32 runlength@ - >> bitoffset@ << ~ & curlongptr@! 
+
+		return
+	end
+
+	curlongptr@@ 0xFFFFFFFF bitoffset@ << ~ & curlongptr@!
+
+	4 curlongptr +=
+	32 bitoffset@ - runlength -=
+
+	while (runlength@ 32 >=)
+		0 curlongptr@!
+
+		4 curlongptr +=
+		32 runlength -=
+	end
+
+	if (runlength@)
+		curlongptr@@ 0xFFFFFFFF runlength@ << & curlongptr@!
+	end
 end
 
 const PTE_V  1
@@ -484,7 +534,9 @@ end
 fn MemFree { pages pstart -- }
 	pages@ MemAllocated -=
 
-	0 pages@ pstart@ MemSetStatus
+	pages@ // runlength
+	pstart@ // index
+	MemClearBits
 end
 
 var MemLastAlloc 0
@@ -602,7 +654,9 @@ fn MemAlloc { pages pstart -- astart ok }
 		end
 
 		if (run@ pages@ >=)
-			1 pages@ astart@ MemSetStatus
+			pages@ // runlength
+			astart@ // index
+			MemSetBits
 
 			pages@ MemAllocated +=
 

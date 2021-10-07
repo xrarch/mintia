@@ -66,3 +66,5 @@ extern IOCacheInitialize { fcb -- cacheblock ok }
 
 externptr IOCacheModifiedPageListHead
 externptr IOCacheModifiedPageListTail
+
+externptr IOCachePagesUsed

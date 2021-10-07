@@ -7,14 +7,28 @@
 
 #include "<inc>/Kernel.h"
 
+#include "<inc>/Executive.h"
+
 #include "<inc>/Memory.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-var MmHeapBlockUsedListHead 0
+buffer MmPoolSpaceBitmapHeader ExBitmapHeader_SIZEOF
+buffer MmPoolSpaceBitmap POOLPAGES
+
+var MmPoolBytesUsed 0
+public MmPoolBytesUsed
+
+// The heap is managed within a 16MB region of kernel space called
+// "pool space". Allocations less than a page size are handled by a slab
+// allocator within pool pages. Allocations of a page size or more are handled
+// by directly allocating pool pages.
 
 fn MmPoolInit { -- }
-	// nothing
+	POOLPAGES // sizeinbits
+	MmPoolSpaceBitmap // data	
+	MmPoolSpaceBitmapHeader // header
+	ExBitmapInitialize
 end
 
 fn MmHeapPrintTag { tag -- }
@@ -36,355 +50,40 @@ fn MmHeapPrintTag { tag -- }
 end
 
 fn MmHeapCheck { -- }
-	if (DEBUGCHECKS ~~)
-		"MmHeapCheck: wasn't compiled with DEBUGCHECKS\n" KeCrash
-	end
-
-	auto i
-	0 i!
-
-	auto base
-	MmHeap@ base!
-
-	auto sz
-	1 BUCKETSPO2START << sz!
-
-	while (i@ BUCKETS <)
-		i@ "checking [%d]MemBuckets\n" Printf
-
-		auto block
-		[i@]MmHeapBuckets@ block!
-
-		if (block@)
-			if (block@ MmHeapBlock_Prev + @)
-				block@ MmHeapBlock_Prev + @ "!!! head had a prev 0x%08x\n" Printf
-			end
-		end
-
-		while (block@)
-			if (block@ 0x3 &)
-				block@ "!!!! unaligned block ptr 0x%08x\n" Printf
-				break
-			end
-
-			if (block@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-				"!!!! bad magic:\n" Printf
-				block@ MmHeapDumpBlockInfoHdr
-				break
-			end
-
-			if (block@ MmHeapBlock_Tag + @ HEAPBLOCKFREE ~=)
-				"!!! bad tag:\n" Printf
-				block@ MmHeapDumpBlockInfoHdr
-			end
-
-			if (block@ MmHeapBlock_BucketIndex + @ i@ ~=)
-				"!!! bad bucketindex:\n" Printf
-				block@ MmHeapDumpBlockInfoHdr
-			end
-
-			auto buddy
-			block@ base@ - sz@ ^ base@ + buddy!
-
-			if (buddy@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-				"!!! bad buddy. main guy:\n" Printf
-				block@ MmHeapDumpBlockInfoHdr
-				"buddy:\n" Printf
-				buddy@ MmHeapDumpBlockInfoHdr
-			end else
-				if (buddy@ MmHeapBlock_Tag + @ HEAPBLOCKFREE ==)
-					// check if buddy is on the proper list
-
-					auto blockb
-					[buddy@ MmHeapBlock_BucketIndex + @]MmHeapBuckets@ blockb!
-
-					auto found
-					0 found!
-
-					while (blockb@)
-						if (blockb@ buddy@ ==)
-							1 found!
-							break
-						end
-
-						blockb@ MmHeapBlock_Next + @ blockb!
-					end
-
-					if (found@ ~~)
-						"!!! buddy was free but not on free list:\n" Printf
-						buddy@ MmHeapDumpBlockInfoHdr
-					end
-				end
-			end
-
-			auto nextblock
-			block@ MmHeapBlock_Next + @ nextblock!
-
-			if (nextblock@)
-				if (nextblock@ 0x3 & ~~)
-					if (nextblock@ MmHeapBlock_Prev + @ block@ ~=)
-						"!!! prev didn't match:\n" Printf
-						block@ MmHeapDumpBlockInfoHdr
-					end
-				end
-			end
-
-			nextblock@ block!
-		end
-
-		1 sz <<=
-		1 i +=
-	end
-
-	"checking used block list\n" Printf
-
-	MmHeapBlockUsedListHead@ block!
-
-	if (block@)
-		if (block@ MmHeapBlock_Prev + @)
-			block@ MmHeapBlock_Prev + @ "!!! head had a prev 0x%08x\n" Printf
-		end
-	end
-
-	while (block@)
-		block@ "checking 0x%08x" Printf
-
-		if (block@ 0x3 &)
-			block@ "\n!!!! unaligned block ptr 0x%08x\n" Printf
-			break
-		end
-
-		' ' Putc
-
-		block@ MmHeapBlock_Tag + @ MmHeapPrintTag
-
-		'\n' Putc
-
-		if (block@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-			"\n!!!! bad magic:\n" Printf
-			block@ MmHeapDumpBlockInfoHdr
-			break
-		end
-
-		1 block@ MmHeapBlock_BucketIndex + @ BUCKETSPO2START + << sz!
-
-		block@ base@ - sz@ ^ base@ + buddy!
-
-		if (buddy@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-			"!!! bad buddy. main guy:\n" Printf
-			block@ MmHeapDumpBlockInfoHdr
-			"buddy:\n" Printf
-			buddy@ MmHeapDumpBlockInfoHdr
-		end else
-			if (buddy@ MmHeapBlock_Tag + @ HEAPBLOCKFREE ==)
-				// check if buddy is on the proper list
-
-				[buddy@ MmHeapBlock_BucketIndex + @]MmHeapBuckets@ blockb!
-
-				0 found!
-
-				while (blockb@)
-					if (blockb@ buddy@ ==)
-						1 found!
-						break
-					end
-
-					blockb@ MmHeapBlock_Next + @ blockb!
-				end
-
-				if (found@ ~~)
-					"!!! buddy was free but not on free list:\n" Printf
-					buddy@ MmHeapDumpBlockInfoHdr
-				end
-			end
-		end
-
-		block@ MmHeapBlock_Next + @ nextblock!
-
-		if (nextblock@)
-			if (nextblock@ 0x3 & ~~)
-				if (nextblock@ MmHeapBlock_Prev + @ block@ ~=)
-					"!!! prev didn't match:\n" Printf
-					block@ MmHeapDumpBlockInfoHdr
-				end
-			end
-		end
-
-		nextblock@ block!
-	end
-end
-
-fn MmHeapDumpBlockInfoHdr { block -- }
-	block@ "header @ %08x\n" Printf
-
-	block@ MmHeapBlock_Magic + @ "  magic=%08x\n" Printf
-	block@ MmHeapBlock_Next + @ "  next=%08x\n" Printf
-	block@ MmHeapBlock_Prev + @ "  prev=%08x\n" Printf
-	block@ MmHeapBlock_BucketIndex + @ dup BUCKETSPO2START + 1 swap << swap "  bucketindex=%d (%d bytes)\n" Printf
-	block@ MmHeapBlock_Tag + @ "  tag=%08x\n" Printf
+	"MmHeapCheck: not implemented\n" KeCrash
 end
 
 fn MmHeapDumpBlockInfo { block -- }
-	block@ MmHeapBlock_SIZEOF - MmHeapDumpBlockInfoHdr
+
 end
-
-fn MmHeapDumpBuckets { -- }
-	auto i
-	0 i!
-
-	auto sz
-	1 BUCKETSPO2START << sz!
-
-	while (i@ BUCKETS <)
-		sz@ "[%d]: " Printf
-
-		auto ptr
-		[i@]MmHeapBuckets@ ptr!
-
-		while (ptr@)
-			auto bsz
-			1 ptr@ MmHeapBlock_BucketIndex + @ BUCKETSPO2START + << bsz!
-
-			bsz@ bsz@ ptr@ + MmHeap@ - ptr@ MmHeap@ - "%x-%x (%d) | " Printf
-
-			ptr@ MmHeapBlock_Next + @ ptr!
-		end
-
-		'\n' Putc
-
-		1 sz <<=
-		1 i +=
-	end
-end
-
-// fn MmAllocWithTagCharge { bytes tag -- ptr ok }
-// 	auto charge
-// 	bytes@ MmChargeBytesGet charge!
-
-// 	charge@ MmQuotaCharge ok!
-
-// 	if (ok@)
-// 		return
-// 	end
-
-// 	bytes@ tag@ MmAllocWithTag ok! ptr!
-
-// 	if (ok@)
-// 		charge@ MmQuotaUncharge
-
-// 		return
-// 	end
-// end
 
 fn MmAllocWithTag { bytes tag -- ptr ok }
 	if (DEBUGCHECKS)
 		if (MmInited@ ~~)
-			"MmAllocWithTag: used before MemInit called\n" KeCrash
+			"MmAllocWithTag: used before MmInit called\n" KeCrash
 		end
 	end
 
-	MmHeapBlock_SIZEOF bytes +=
+	// round up to nearest long
+	bytes@ 3 + 3 ~ & bytes!
 
-	auto sz
-	1 BUCKETSPO2START << sz!
+	if (bytes@ MmPoolSlab_SIZEOF + PAGESIZE >=)
+		bytes@ // bytes
+		tag@ // tag
+		MmPoolPageAlignedAlloc ok! ptr! drop
 
-	auto i
-	0 i!
-
-	auto base
-	MmHeap@ base!
-
-	auto dist
-	-1 dist!
-
-	STATUS_NO_MEMORY ok!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	while (i@ BUCKETS <)
-		if (bytes@ sz@ <=)
-			if (dist@ -1 ==)
-				i@ dist!
-			end
-
-			[i@]MmHeapBuckets@ ptr!
-
-			if (ptr@)
-				auto ts
-				sz@ ts!
-
-				auto pt
-				ptr@ MmHeapBlock_Next + @ pt!
-
-				pt@ [i@]MmHeapBuckets!
-
-				if (pt@)
-					0 pt@ MmHeapBlock_Prev + !
-				end
-
-				while (i@ dist@ >)
-					1 i -=
-					1 ts >>=
-
-					auto tp
-					ptr@ ts@ + tp!
-
-					HEAPBLOCKMAGIC tp@ MmHeapBlock_Magic + !
-					i@ tp@ MmHeapBlock_BucketIndex + !
-					HEAPBLOCKFREE tp@ MmHeapBlock_Tag + !
-					0 tp@ MmHeapBlock_Prev + !
-
-					[i@]MmHeapBuckets@ pt!
-
-					if (pt@)
-						tp@ pt@ MmHeapBlock_Prev + !
-					end
-
-					pt@ tp@ MmHeapBlock_Next + !
-					tp@ [i@]MmHeapBuckets!
-				end
-
-				HEAPBLOCKMAGIC ptr@ MmHeapBlock_Magic + !
-				i@ ptr@ MmHeapBlock_BucketIndex + !
-				tag@ ptr@ MmHeapBlock_Tag + !
-
-				1 i@ BUCKETSPO2START + << MmHeapBytesFree -=
-
-				if (DEBUGCHECKS)
-					// add to used block list
-
-					0 ptr@ MmHeapBlock_Prev + !
-
-					MmHeapBlockUsedListHead@ ts!
-
-					if (ts@)
-						ptr@ ts@ MmHeapBlock_Prev + !
-					end
-
-					ptr@ MmHeapBlockUsedListHead!
-
-					ts@ ptr@ MmHeapBlock_Next + !
-				end
-
-				0 ok!
-				MmHeapBlock_SIZEOF ptr +=
-
-				break
-			end
-		end
-
-		1 sz <<=
-		1 i +=
+		return
 	end
 
-	ipl@ KeIPLLower
+	bytes@ // bytes
+	tag@ // tag
+	MmSlabAlloc ok! ptr!
 end
 
 fn MmFree { ptr -- }
 	if (DEBUGCHECKS)
 		if (MmInited@ ~~)
-			"MmFree: used before MemInit called\n" KeCrash
+			"MmFree: used before MmInit called\n" KeCrash
 		end
 
 		if (ptr@ -1 ==)
@@ -396,145 +95,302 @@ fn MmFree { ptr -- }
 		"MmFree: tried to free null pointer\n" KeCrash
 	end
 
+	if (ptr@ PAGEOFFSETMASK & ~~)
+		// page aligned. defined by pfdbe.
+
+		ptr@ // ptr
+		MmPoolPageAlignedFree
+
+		return
+	end
+
+	ptr@ MmSlabFree
+end
+
+var MmPoolPageHint 0
+
+fn MmPoolPageAlignedAlloc { bytes tag -- pfdbe ptr ok }
+	auto pagesneeded
+	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
+
+	auto offset
+
+	auto bmpheader
+	MmPoolSpaceBitmapHeader bmpheader!
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	MmHeapBlock_SIZEOF ptr -=
+	MmPoolPageHint@ // hint
+	pagesneeded@ // runlength
+	bmpheader@ // header
+	ExBitmapFindRun ok! offset!
 
-	if (ptr@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-		ptr@ "MmFree: tried to free corrupted heap block (0x%08x)\n" KeCrash
+	if (ok@)
+		ipl@ KeIPLLower
+
+		STATUS_NO_MEMORY ok!
+
+		return
 	end
 
-	if (ptr@ MmHeapBlock_Tag + @ HEAPBLOCKFREE ==)
-		ptr@ "MmFree: tried to free heap block that was free (0x%08x)\n" KeCrash
-	end
+	offset@ MmPoolPageHint!
 
-	if (DEBUGCHECKS)
-		// remove from used block list
+	pagesneeded@ // runlength
+	offset@ // index
+	bmpheader@ // header
+	ExBitmapSetBits
 
-		ptr@ MmHeapBlock_Prev + @ l!
+	ipl@ KeIPLLower
 
-		ptr@ MmHeapBlock_Next + @ n!
+	// the vaddrs are marked allocated, so we don't need to be in IPLDPC now,
+	// since nobody else is going to touch this range.
 
-		if (l@)
-			n@ l@ MmHeapBlock_Next + !
-		end else
-			// no last block means was list head
+	auto vaddr
+	offset@ PAGESHIFT << POOLSPACE + vaddr!
 
-			n@ MmHeapBlockUsedListHead!
-		end
+	vaddr@ ptr!
 
-		if (n@)
-			l@ n@ MmHeapBlock_Prev + !
-		end
-	end
-
-	auto hpsz
-	MmHeapSize@ hpsz!
-
-	auto base
-	MmHeap@ base!
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
 
 	auto i
-	ptr@ MmHeapBlock_BucketIndex + @ i!
+	0 i!
 
-	auto sz
-	1 ptr@ MmHeapBlock_BucketIndex + @ BUCKETSPO2START + << sz!
+	auto firstpfdbe
+	0 firstpfdbe!
 
-	sz@ MmHeapBytesFree +=
+	while (i@ pagesneeded@ <)
+		auto phyaddr
 
-	while (i@ BUCKETS 1 - <)
-		if (sz@ hpsz@ >=)
-			break
+		FREEFIRST // priority
+		MmPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			// failed to allocate... gotta go back and free/unmap those pages
+
+			ok@ ipl!
+
+			while (i@)
+				PAGESIZE vaddr -=
+				1 i -=
+
+				vaddr@ // vaddr
+				0 // asid
+				kdir@ // pagemap
+				0 // canfree
+				MmUnmapVirtualAddress ok! phyaddr!
+
+				if (DEBUGCHECKS)
+					if (ok@)
+						"MmPoolPageAlignedAlloc: failed to unmap\n" KeCrash
+					end
+				end
+
+				phyaddr@ PAGESHIFT >> MmPageFree
+			end
+
+			ipl@ ok!
+
+			IPLDPC KeIPLRaise ipl!
+
+			pagesneeded@ // runlength
+			offset@ // index
+			bmpheader@ // header
+			ExBitmapClearBits
+
+			ipl@ KeIPLLower
+
+			return
 		end
 
-		auto buddy
-		ptr@ base@ - sz@ ^ base@ + buddy!
-
-		if (buddy@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-			buddy@ MmHeapBlock_SIZEOF + "MmFree: corrupted buddy (0x%08x)\n" KeCrash
+		if (firstpfdbe@ ~~)
+			pfdbe@ firstpfdbe!
 		end
 
-		if (buddy@ MmHeapBlock_Tag + @ HEAPBLOCKFREE ~=)
-			// buddy's not free, can't do any more coalescing
+		phyaddr@ PAGESHIFT << // phyaddr
+		vaddr@ // vaddr
+		PTE_G PTE_K | PTE_W | PTE_V | // flags
+		kdir@ // pagemap
+		0 // canalloc
+		MmMapVirtualAddress ok!
 
-			break
-		end elseif (buddy@ MmHeapBlock_BucketIndex + @ i@ ~=)
-			// buddy isn't our size, can't do any more coalescing
-
-			break
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmPoolPageAlignedAlloc: failed to map virtual address\n" KeCrash
+			end
 		end
 
-		// coalesce
+		tag@ pfdbe@ MmPageFrameEntryPool_Tag + !
+		pagesneeded@ PAGESHIFT << pfdbe@ MmPageFrameEntryPool_ByteSize + !
+		vaddr@ pfdbe@ MmPageFrameEntryPool_VirtualAddress + !
 
-		// remove buddy, who is free, from the bucket he's listed on
-
-		auto l
-		buddy@ MmHeapBlock_Prev + @ l!
-
-		auto n
-		buddy@ MmHeapBlock_Next + @ n!
-
-		if (l@)
-			n@ l@ MmHeapBlock_Next + !
-		end else
-			// no last block means buddy was the bucket list head
-			n@ [i@]MmHeapBuckets!
-		end
-
-		if (n@)
-			l@ n@ MmHeapBlock_Prev + !
-		end
-
-		if (buddy@ ptr@ >)
-			0 buddy@ MmHeapBlock_Magic + !
-			i@ 1 + ptr@ MmHeapBlock_BucketIndex + !
-		end else
-			0 ptr@ MmHeapBlock_Magic + !
-			i@ 1 + buddy@ MmHeapBlock_BucketIndex + !
-			buddy@ ptr!
-		end
-
-		1 sz <<=
+		PAGESIZE vaddr +=
 		1 i +=
 	end
 
-	HEAPBLOCKFREE ptr@ MmHeapBlock_Tag + !
+	auto rs
+	HALCPUInterruptDisable rs!
 
-	auto pt
-	[i@]MmHeapBuckets@ pt!
+	pagesneeded@ PAGESHIFT << MmPoolBytesUsed +=
 
-	if (pt@)
-		ptr@ pt@ MmHeapBlock_Prev + !
+	rs@ HALCPUInterruptRestore
+
+	firstpfdbe@ pfdbe!
+end
+
+fn MmPoolPageAlignedFree { ptr -- }
+	if (DEBUGCHECKS)
+		if (ptr@ POOLSPACE <)
+			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x < POOLSPACE\n" KeCrash
+		end
+
+		if (ptr@ POOLSPACE POOLSIZE + >=)
+			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x beyond pool space\n" KeCrash
+		end
+
+		if (ptr@ 3 &)
+			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x not aligned\n" KeCrash
+		end
 	end
 
-	pt@ ptr@ MmHeapBlock_Next + !
+	auto offset
+	ptr@ POOLSPACE - PAGESHIFT >> offset!
 
-	0 ptr@ MmHeapBlock_Prev + !
+	auto pfdbe
 
-	ptr@ [i@]MmHeapBuckets!
+	ptr@ MmPoolPageGetPhysical pfdbe! drop
+
+	auto pages
+	pfdbe@ MmPageFrameEntryPool_ByteSize + @ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	while (i@ pages@ <)
+		auto phyaddr
+		auto ok
+
+		ptr@ // vaddr
+		0 // asid
+		kdir@ // pagemap
+		0 // canfree
+		MmUnmapVirtualAddress ok! phyaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmPoolPageAlignedFree: failed to unmap\n" KeCrash
+			end
+		end
+
+		phyaddr@ PAGESHIFT >> MmPageFree
+
+		PAGESIZE ptr +=
+		1 i +=
+	end
+
+	auto bmpheader
+	MmPoolSpaceBitmapHeader bmpheader!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pages@ PAGESHIFT << MmPoolBytesUsed -=
+
+	pages@ // runlength
+	offset@ // index
+	bmpheader@ // header
+	ExBitmapClearBits
 
 	ipl@ KeIPLLower
 end
 
 fn MmChargeBytesGet { bytes -- charge }
-	MmHeapBlock_SIZEOF bytes +=
+	bytes@ MmPoolSlab_SIZEOF + charge!
 
-	1 BUCKETSPO2START << charge!
+	if (charge@ PAGESIZE >=)
+		bytes@ PAGEOFFSETMASK + PAGENUMBERMASK & charge!
+	end else
+		1 MMSLABPO2START << charge!
 
-	while (charge@ bytes@ <)
-		1 charge <<=
+		while (charge@ bytes@ <)
+			1 charge <<=
+		end
 	end
 end
 
 fn MmBlockChargeGet { block -- charge }
-	MmHeapBlock_SIZEOF block -=
-
 	if (DEBUGCHECKS)
-		if (block@ MmHeapBlock_Magic + @ HEAPBLOCKMAGIC ~=)
-			block@ MmHeapBlock_Magic + @ "MmBlockChargeGet: block had invalid magic number 0x%08x\n" KeCrash
+		if (block@ 3 &)
+			block@ "MmBlockChargeGet: ptr 0x%08x not aligned\n" KeCrash
 		end
 	end
 
-	1 block@ MmHeapBlock_BucketIndex + @ BUCKETSPO2START + << charge!
+	if (block@ PAGEOFFSETMASK & ~~)
+		if (DEBUGCHECKS)
+			if (block@ POOLSPACE <)
+				block@ "MmBlockChargeGet: ptr 0x%08x < POOLSPACE\n" KeCrash
+			end
+
+			if (block@ POOLSPACE POOLSIZE + >=)
+				block@ "MmBlockChargeGet: ptr 0x%08x beyond pool space\n" KeCrash
+			end
+		end
+
+		// page aligned. charge is defined by the pfdbe.
+
+		auto pfdbe
+		block@ MmPoolPageGetPhysical pfdbe! drop
+
+		pfdbe@ MmPageFrameEntryPool_ByteSize + @ charge!
+
+		return
+	end
+
+	// not page aligned. charge is defined by pool header.
+
+	MmPoolSlab_SIZEOF block -=
+
+	if (block@ MmPoolSlab_Magic + gi MMSLABSWIFTMAGIC ~=)
+		block@ MmPoolSlab_Magic + gi
+		block@ "MmBlockChargeGet: ptr 0x%08x had bad magic 0x%08x\n" KeCrash
+	end
+
+	1 MMSLABPO2START block@ MmPoolSlab_BucketIndex + gb + << charge!
+end
+
+fn MmPoolPageGetPhysical { ptr -- pfn pfdbe }
+	if (DEBUGCHECKS)
+		if (ptr@ POOLSPACE <)
+			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x < POOLSPACE\n" KeCrash
+		end
+
+		if (ptr@ POOLSPACE POOLSIZE + >=)
+			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x beyond pool space\n" KeCrash
+		end
+
+		if (ptr@ 3 &)
+			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x not aligned\n" KeCrash
+		end
+	end
+
+	auto phyaddr
+	auto ok
+
+	ptr@ // vaddr
+	HALPlatformKernelPageDirectory@ // pagemap
+	MmGetPhysicalAddress ok! phyaddr! drop
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ ptr@ "MmPoolPageGetPhysical: ptr %08x wasn't mapped (%i)\n" KeCrash
+		end
+	end
+
+	phyaddr@ 12 >> pfn!
+
+	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 end

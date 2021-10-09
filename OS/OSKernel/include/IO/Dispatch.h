@@ -7,7 +7,7 @@ fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath obj
 fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchWriteBlockFunction { blockno bufsize buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno bufsize buffer devobject -- ok }
-fnptr IODispatchGrowFunction { length offset fcb -- ok }
+fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 
 struct IODispatchTable
@@ -26,7 +26,7 @@ struct IODispatchTable
 	4 Rename
 	4 ReadBlock
 	4 WriteBlock
-	4 Grow
+	4 Truncate
 	4 ReadDirectory
 	4 Reserved5
 	4 Reserved6

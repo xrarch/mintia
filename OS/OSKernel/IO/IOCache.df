@@ -165,7 +165,8 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	end
 
 	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
-	// for each bucket, if a page if modified, write it out.
+	// for each bucket, iterate all pages. if a page if modified, write it
+	// out to disk.
 
 	auto i
 	0 i!
@@ -198,9 +199,12 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	IOCacheInfoBlockUnlock
 end
 
-fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
-	// attempt to evict all of the cacheblock's page frames.
+fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
+	// attempt to evict all of the cacheblock's page frames beyond newsize.
 	// caller should have locked the associated FCB as necessary.
+
+	auto maxpage
+	newsize@ PAGEOFFSETMASK + PAGENUMBERMASK & maxpage!
 
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockLock ok!
@@ -281,47 +285,61 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 				end
 			end
 
-			auto wroteout
-			0 wroteout!
+			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
+				auto wroteout
+				0 wroteout!
 
-			if (writeout@)
-				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-					// this is a modified page, and caller wants us to write them out to disk.
-					// the alternative is writeout==0, which means the caller says its fine
-					// to ignore and throw them out.
+				if (writeout@)
+					if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+						// this is a modified page, and caller wants us to write them out to disk.
+						// the alternative is writeout==0, which means the caller says its fine
+						// to ignore and throw them out.
 
-					1 // dontunbias
-					pfdbe@ // pfdbe
-					IOCachePageWriteModified drop
+						1 // dontunbias
+						pfdbe@ // pfdbe
+						IOCachePageWriteModified drop
 
-					1 wroteout!
+						1 wroteout!
+					end
+				end else
+					pfdbe@ MmEvictablePageReference drop
 				end
+
+				auto npfdbe
+
+				if (maxpage@)
+					// we are slightly more sophisticated in our hash list
+					// management when maxpage ~= 0 since it may not be empty
+					// after this operation, whereas when its zero we are
+					// definitely removing every page. this is sort of a
+					// micro-optimization.
+
+					pfdbe@ // pfdbe
+					buckethead@ // buckethead
+					IOCachePageRemove
+				end
+
+				// get this now, because who knows what MmPageFree will do to the field where PrevCachePage is stored
+				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
+
+				pfdbe@ IOPageFrameEntryCache_PFN + @ // pfn
+				MmPageFree
+
+				HALCPUInterruptDisable rs!
+
+				1 IOCachePagesUsed -=
+
+				rs@ HALCPUInterruptRestore
 			end
-
-			if (wroteout@ ~~)
-				pfdbe@ MmEvictablePageReference drop
-			end
-
-			auto npfdbe
-
-			// get this now, because who knows what MmPageFree will do to the field where PrevCachePage is stored
-			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
-
-			pfdbe@ IOPageFrameEntryCache_PFN + @ // pfn
-			MmPageFree
-
-			HALCPUInterruptDisable rs!
-
-			1 IOCachePagesUsed -=
-
-			rs@ HALCPUInterruptRestore
 
 			npfdbe@ pfdbe!
 		end
 
-		// set buckethead and buckettail to null to reflect that it is now empty
-		0 buckethead@!
-		0 buckethead@ 4 + !
+		if (maxpage@ 0 ==)
+			// set buckethead and buckettail to null to reflect that it is now empty
+			0 buckethead@!
+			0 buckethead@ 4 + !
+		end
 
 		1 i +=
 	end
@@ -340,6 +358,7 @@ fn IOCacheInfoBlockTruncate { writeout cacheblock -- ok }
 end
 
 fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
+	0 // newsize
 	writeout@ // writeout
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockTruncate ok!
@@ -1011,10 +1030,10 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok 
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
-	auto growfunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Grow + @ growfunc!
+	auto truncfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
 
-	if (growfunc@ ~~)
+	if (truncfunc@ ~~)
 		// driver provides no way to grow this file
 
 		if (offset@ bytesize@ >=)
@@ -1084,14 +1103,16 @@ fn IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok 
 			end
 		end
 
-		if (growfunc@)
+		if (truncfunc@)
 			fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 			if (offset@ m@ + bytesize@ >)
-				m@ // length
-				offset@ // offset
+				offset@ m@ + bytesize!
+
+				bytesize@ // newsize
+				1 // growing
 				fcb@ // fcb
-				growfunc@ IODispatchGrowFunction ok!
+				truncfunc@ IODispatchTruncateFunction ok!
 
 				if (ok@)
 					cacheblock@ // cacheblock

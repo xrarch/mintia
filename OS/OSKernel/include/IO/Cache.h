@@ -41,6 +41,8 @@ const IOCACHEPAGEFLAG_DIRTY 2 // is the page dirty (does it need to be written o
 extern IOModifiedPageWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
 
+extern IOCacheInit { -- }
+
 extern IOCacheDumpInfo { cacheblock -- }
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
 extern IOCacheInfoBlockLock { cacheblock -- ok }

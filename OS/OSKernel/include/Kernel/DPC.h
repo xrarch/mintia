@@ -19,3 +19,4 @@ extern KeDPCDispatchQueue { rs -- }
 extern KeDPCInitialize { function dpc -- ok }
 
 externptr KeDPCActive
+externptr KeDPCListHead

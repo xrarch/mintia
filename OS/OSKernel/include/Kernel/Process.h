@@ -90,6 +90,7 @@ struct KeThread
 	4 WaitIPL
 
 	4 APCQueueable
+	4 APCEnqueued
 
 	4 APCUserListHead
 	4 APCUserListTail

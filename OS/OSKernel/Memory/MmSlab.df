@@ -16,6 +16,17 @@
 // slab allocation functions. should be called only through MmAllocWithTag and
 // MmFree.
 
+table MmSlabEvictableFunctions
+	pointerof MmSlabEvictionFunction // EvictionFunc
+	0 // ReferenceFunc
+	0 // DereferenceFunc
+	0 // ModifyFunc
+	0 // Reserved2
+	0 // Reserved3
+	0 // Reserved4
+	0 // Reserved5
+endtable
+
 var MmSlabBytesUsedExternally 0
 public MmSlabBytesUsedExternally
 
@@ -81,10 +92,16 @@ fn MmSlabAlloc { bytes tag -- ptr ok }
 		end
 
 		ptr@ IDENTITYSPACE ~ & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		pfdbe@ MmEvictablePageReference drop
 
-		1 pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + +=
+		auto n
+		ptr@ MmPoolSlab_TagOrNextFree + @ n!
 
-		ptr@ MmPoolSlab_TagOrNextFree + @ listhead@!
+		n@ listhead@!
+
+		if (n@)
+			0 n@ MmPoolSlab_PrevFree + !
+		end
 
 		sz@ MmSlabBytesUsedInternally +=
 
@@ -107,8 +124,10 @@ fn MmSlabAlloc { bytes tag -- ptr ok }
 
 	rs@ HALCPUInterruptRestore
 
+	MMEVICTFLAG_FAST // flags
+	MmSlabEvictableFunctions // evictablefuncs
 	FREEFIRST // priority
-	MmPageAlloc ok! ptr! pfdbe!
+	MmEvictablePageAlloc ok! ptr! pfdbe!
 
 	if (ok@)
 		ipl@ KeIPLLower
@@ -116,7 +135,7 @@ fn MmSlabAlloc { bytes tag -- ptr ok }
 		return
 	end
 
-	1 pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + !
+	bucketindex@ pfdbe@ MmPageFrameEntrySlab_BucketIndex + !
 
 	ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
 
@@ -125,6 +144,7 @@ fn MmSlabAlloc { bytes tag -- ptr ok }
 	end
 
 	bucketindex@ ptr@ MmPoolSlab_BucketIndex + sb
+	0 ptr@ MmPoolSlab_PrevFree + !
 	tag@ ptr@ MmPoolSlab_TagOrNextFree + !
 	MMSLABSWIFTMAGIC ptr@ MmPoolSlab_Magic + si
 
@@ -143,6 +163,10 @@ fn MmSlabAlloc { bytes tag -- ptr ok }
 		bucketindex@ pfdbe@ MmPoolSlab_BucketIndex + sb
 		ok@ pfdbe@ MmPoolSlab_TagOrNextFree + !
 		MMSLABFREEMAGIC pfdbe@ MmPoolSlab_Magic + si
+
+		if (ok@)
+			pfdbe@ ok@ MmPoolSlab_PrevFree + !
+		end
 
 		pfdbe@ ok!
 		1 slabsperpage -=
@@ -186,41 +210,81 @@ fn MmSlabFree { ptr -- }
 	auto bucketindex
 	ptr@ MmPoolSlab_BucketIndex + gb bucketindex!
 
-	auto sz
-	1 MMSLABPO2START bucketindex@ + << sz!
-
-	auto rs
-
-	if (pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + @ 1 ==)
-		// last slab has been freed, just free the entire page frame and move on
-
-		HALCPUInterruptDisable rs!
-
-		sz@ MmSlabBytesUsedInternally -=
-		PAGESIZE MmSlabBytesUsedExternally -=
-
-		rs@ HALCPUInterruptRestore
-
-		pfn@ MmPageFree
-
-		return
-	end
+	auto h
 
 	auto listhead
 	[bucketindex@]MmSlabListHeads listhead!
 
-	// was not the final slab.
+	listhead@@ h!
 
 	MMSLABFREEMAGIC ptr@ MmPoolSlab_Magic + si
 
+	auto sz
+	1 MMSLABPO2START bucketindex@ + << sz!
+
+	auto rs
 	HALCPUInterruptDisable rs!
 
-	listhead@@ ptr@ MmPoolSlab_TagOrNextFree + !
+	h@ ptr@ MmPoolSlab_TagOrNextFree + !
 	ptr@ listhead@!
 
-	1 pfdbe@ MmPageFrameEntryPool_UsedSlabsCount + -=
+	if (h@)
+		ptr@ h@ MmPoolSlab_PrevFree + !
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
 
 	sz@ MmSlabBytesUsedInternally -=
 
 	rs@ HALCPUInterruptRestore
+end
+
+fn (MmEvictionFunction) MmSlabEvictionFunction { pfdbe -- evicted ok }
+	0 ok!
+	1 evicted!
+
+	// we need to unlink all the free slabs from the proper list
+
+	auto bucketindex
+	pfdbe@ MmPageFrameEntrySlab_BucketIndex + @ bucketindex!
+
+	auto listhead
+	[bucketindex@]MmSlabListHeads listhead!
+
+	auto slab
+	pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << IDENTITYSPACE | slab!
+
+	auto sz
+	1 MMSLABPO2START bucketindex@ + << sz!
+
+	auto slabsperpage
+	PAGESIZE bucketindex@ MMSLABPO2START + >> slabsperpage!
+
+	while (slabsperpage@)
+		if (slab@ MmPoolSlab_Magic + gi MMSLABFREEMAGIC ~=)
+			slab@ MmPoolSlab_Magic + gi
+			slab@ MmPoolSlab_TagOrNextFree + @
+			slab@
+			"MmSlabEvictionFunction: 0x%08x (0x%08x): bad magic 0x%04x\n" KeCrash
+		end
+
+		auto ls
+		slab@ MmPoolSlab_PrevFree + @ ls!
+
+		auto ns
+		slab@ MmPoolSlab_TagOrNextFree + @ ns!
+
+		if (ls@)
+			ns@ ls@ MmPoolSlab_TagOrNextFree + !
+		end else
+			ns@ listhead@!
+		end
+
+		if (ns@)
+			ls@ ns@ MmPoolSlab_PrevFree + !
+		end
+
+		sz@ slab +=
+		1 slabsperpage -=
+	end
 end

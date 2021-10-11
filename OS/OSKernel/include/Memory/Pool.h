@@ -9,6 +9,7 @@ struct MmPoolSlab
 	1 BucketIndex
 	1 Reserved
 	4 TagOrNextFree
+	4 PrevFree
 endstruct
 
 externptr MmPoolBytesUsed

@@ -34,6 +34,25 @@ struct MmPageFrameEntryEvictable
 	4 Context11
 endstruct
 
+struct MmPageFrameEntrySlab
+	4 Next
+	4 PFN
+	4 Prev
+	4 EvictionFlags
+	4 EvictableFunctions
+	4 References
+	4 BucketIndex
+	4 Context3
+	4 Context4
+	4 Context5
+	4 Context6
+	4 Context7
+	4 Context8
+	4 Context9
+	4 Context10
+	4 Context11
+endstruct
+
 const MMEVICTFLAG_FAST 1
 
 extern MmEvictionWorker { context1 context2 -- }

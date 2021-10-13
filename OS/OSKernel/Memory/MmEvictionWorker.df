@@ -13,6 +13,9 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
+const MMFASTPAGEEVICTCOUNT 128
+const MMSLOWPAGEEVICTCOUNT 32
+
 fn MmEvictionWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
@@ -22,7 +25,13 @@ fn MmEvictionWorker { context1 context2 -- }
 
 	// the eviction/swap thread
 
-	auto evictionscore
+	auto sleptonce
+	0 sleptonce!
+
+	auto pteinvlcount
+	0 pteinvlcount!
+
+	auto ipl
 
 	while (1)
 		auto ok
@@ -41,47 +50,67 @@ fn MmEvictionWorker { context1 context2 -- }
 			end
 		end
 
-		auto evicted
-		auto rs
-		auto ipl
+		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+			IPLDPC KeIPLRaise ipl!
 
-		0 evictionscore!
+			// recheck at IPLDPC -- this seemingly redundant check
+			// minimizes overhead in the more common case
 
-		while (1)
 			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-				IPLDPC KeIPLRaise ipl!
-
-				// recheck at IPLDPC -- this seemingly redundant check
-				// minimizes overhead in the more common case
-
-				if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-					MmEventLowMemory // event
-					KeEventReset drop
-
-					ipl@ KeIPLLower
-
-					break
-				end
+				MmEventLowMemory // event
+				KeEventReset drop
 
 				ipl@ KeIPLLower
+
+				0 sleptonce!
+				0 pteinvlcount!
+
+				continue
 			end
 
-			// TODO: VERY IMPORTANT LIKE NEXT THING ON THE LIST: TODO TODO:
-			// Make eviction worker search through fast list linearly and
-			// resort to slow pages after fast list is exhausted, no matter
-			// how many were actually reclaimed. We can do this now that we go
-			// to IPLDPC in the main loop.
+			ipl@ KeIPLLower
+		end
 
-			if (evictionscore@ 128 >=)
-				// if we tried to unsuccessfully evict 128 times in a row,
-				// odds are we're stuck in an infinite loop and we
-				// need to let user threads run for a bit in order
-				// to successfully evict any more pages.
-				// go to sleep for 50ms.
+		if (pteinvlcount@ 7 & ~~)
+			// we've been here a lot of times...
+			// giving up the processor for 75ms might untangle things and help
+			// us evict more pages...
 
-				// TODO also try invalidating process PTEs here
+			75 // interval
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep ok!
 
-				0 evictionscore!
+			if (DEBUGCHECKS)
+				if (ok@ STATUS_WAIT_TIMEOUT ~=)
+					ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+				end
+			end
+
+			continue
+		end
+
+		auto done
+
+		MMFASTPAGEEVICTCOUNT // trycount
+		MmEvictableFastPageListHead // listhead
+		MmEvictFromList ok! done!
+
+		if (ok@)
+			ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
+		end
+
+		if (done@)
+			continue
+		end
+
+		if (sleptonce@ ~~)
+			if (IOCacheModifiedPageListHead@)
+				// there's some modified page frames.
+				// go to sleep for 50ms with the hope that the modified page writer will have freed some up by
+				// the time we wake up.
+
+				1 sleptonce!
 
 				50 // interval
 				KERNELMODE // waitmode
@@ -94,109 +123,137 @@ fn MmEvictionWorker { context1 context2 -- }
 					end
 				end
 
-				0 ok!
-			end
-
-			HALCPUInterruptDisable rs!
-
-			auto pfdbe
-			MmEvictableFastPageListHead@ pfdbe!
-
-			if (pfdbe@ ~~)
-				// no fast page, try a slow page
-
-				MmEvictablePageListHead@ pfdbe!
-			end
-
-			if (pfdbe@)
-				pfdbe@ MmEvictablePageReference drop
-
-				IPLDPC KeIPLRaise drop
-
-				rs@ HALCPUInterruptRestore
-
-				// we will call an MmEvictionFunction defined by the PFDBE.
-				// this function's primary job is to perform whatever actions
-				// are necessary to evict the page frame, such as writing it
-				// out to the page file.
-
-				// another equally important job of the MmEvictionFunction is
-				// to perform whatever synchronization is needed between any
-				// other parts of the system that make use of this page frame,
-				// and its eviction. if this synchronization is not possible
-				// for any reason, the function returns 0 in the 'evicted'
-				// return value.
-
-				auto evictionfuncs
-				pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
-
-				if (DEBUGCHECKS)
-					if (evictionfuncs@ ~~)
-						"MmEvictionWorker: no eviction funcs for page\n" KeCrash
-					end
-				end
-
-				auto evictionfunc
-				evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
-
-				1 evicted!
-
-				if (evictionfunc@)
-					pfdbe@ // pfdbe
-					evictionfunc@ MmEvictionFunction drop evicted!
-				end
-
-				if (evicted@)
-					// evicted, free the page
-
-					if (DEBUGCHECKS)
-						if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 ~=)
-							pfdbe@ MmPageFrameEntryEvictable_References + @
-							"MmEvictionWorker: attempt to evict a page with %d references\n" KeCrash
-						end
-					end
-
-					pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
-					MmPageFree
-				end
-
-				if (evicted@ ~~)
-					// not evicted, dereference and re-place at back of LRU queue
-
-					pfdbe@ MmEvictablePageDereference drop
-
-					1 evictionscore +=
-				end else
-					0 evictionscore!
-				end
-
-				IPLLOW KeIPLLower
-			end else
-				rs@ HALCPUInterruptRestore
-
-				if (IOCacheModifiedPageListHead@)
-					// there's some modified page frames.
-					// go to sleep for 20ms with the hope that the modified page writer will have freed some up by
-					// the time we wake up.
-
-					20 // interval
-					KERNELMODE // waitmode
-					0 // alertable
-					KeThreadSleep ok!
-
-					if (DEBUGCHECKS)
-						if (ok@ STATUS_WAIT_TIMEOUT ~=)
-							ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
-						end
-					end
-				end else
-					// no evictable page frames.
-					// invalidate/evict some process PTEs
-					// to try to free some up
-
-					"TODO evict processes\n" KeCrash
-				end
+				continue
 			end
 		end
+
+		MMSLOWPAGEEVICTCOUNT // trycount
+		MmEvictablePageListHead // listhead
+		MmEvictFromList ok! done!
+
+		if (ok@)
+			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
+		end
+
+		if (done@)
+			continue
+		end
+
+		// permit a sleep on the modified page list again
+		0 sleptonce!
+
+		1 pteinvlcount +=
+
+		"MmEvictionWorker: TODO: invalidate PTEs\n" KeCrash
 	end
+end
+
+fn MmEvictFromList { trycount listhead -- done ok }
+	0 done!
+	0 ok!
+
+	auto succeedcount
+	0 succeedcount!
+
+	auto i
+	0 i!
+
+	auto ipl
+
+	while (i@ trycount@ <)
+		// check each page if the low memory situation is resolved
+
+		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+			IPLDPC KeIPLRaise ipl!
+
+			// recheck at IPLDPC -- this seemingly redundant check
+			// minimizes overhead in the more common case
+
+			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+				MmEventLowMemory // event
+				KeEventReset drop
+
+				ipl@ KeIPLLower
+
+				1 done!
+
+				return
+			end
+
+			ipl@ KeIPLLower
+		end
+
+		// low memory situation not resolved, attempt yoink
+
+		IPLDPC KeIPLRaise ipl!
+
+		auto pfdbe
+		listhead@@ pfdbe!
+
+		if (pfdbe@ ~~)
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		pfdbe@ MmEvictablePageReference drop
+
+		// we will call an MmEvictionFunction defined by the PFDBE.
+		// this function's primary job is to perform whatever actions
+		// are necessary to evict the page frame, such as writing it
+		// out to the page file.
+
+		// another equally important job of the MmEvictionFunction is
+		// to perform whatever synchronization is needed between any
+		// other parts of the system that make use of this page frame,
+		// and its eviction. if this synchronization is not possible
+		// for any reason, the function returns 0 in the 'evicted'
+		// return value.
+
+		auto evictionfuncs
+		pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+		if (DEBUGCHECKS)
+			if (evictionfuncs@ ~~)
+				"MmEvictFromList: no eviction funcs for page\n" KeCrash
+			end
+		end
+
+		auto evictionfunc
+		evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+		auto evicted
+		1 evicted!
+
+		if (evictionfunc@)
+			pfdbe@ // pfdbe
+			evictionfunc@ MmEvictionFunction drop evicted!
+		end
+
+		if (evicted@)
+			// evicted, free the page
+
+			if (DEBUGCHECKS)
+				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 ~=)
+					pfdbe@ MmPageFrameEntryEvictable_References + @
+					"MmEvictFromList: attempt to evict a page with %d references\n" KeCrash
+				end
+			end
+
+			1 succeedcount +=
+
+			pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+			MmPageFree
+		end else
+			// not evicted, dereference and re-place at back of LRU queue
+
+			pfdbe@ MmEvictablePageDereference drop
+		end
+
+		ipl@ KeIPLLower
+
+		1 i +=
+	end
+
+	succeedcount@ trycount@ == done!
 end

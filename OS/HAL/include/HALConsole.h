@@ -21,6 +21,7 @@ externptr HALConsoleHeightChars
 externptr HALConsoleWidthPix
 externptr HALConsoleHeightPix
 externptr HALConsoleFontFlags
+externptr HALConsoleFontName
 
 // definitions for the HAL Console Font (HCF) format
 
@@ -33,5 +34,6 @@ struct HCFHeader
 	4 Width
 	4 Height
 	4 Flags
+	16 FontName
 	16 Reserved
 endstruct

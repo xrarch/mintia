@@ -7,7 +7,7 @@
 ;sp+8  - background
 ;sp+12 - width
 ;sp+16 - foreground
-HALCPUFastDrawGlyphBackwards:
+HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 .global HALCPUFastDrawGlyphBackwards
 	mov  t5, long [sp + 8]
 
@@ -48,7 +48,7 @@ HALCPUFastDrawGlyphBackwards:
 ;sp+8  - background
 ;sp+12 - width
 ;sp+16 - foreground
-HALCPUFastDrawGlyph:
+HALCPUFastDrawGlyph: ;highest bit is leftmost
 .global HALCPUFastDrawGlyph
 	mov  t5, long [sp + 8]
 

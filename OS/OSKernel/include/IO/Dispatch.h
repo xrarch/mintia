@@ -1,12 +1,12 @@
 fnptr IODispatchOpenFunction { access fileobject -- ok }
 fnptr IODispatchCloseFunction { access fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg1 arg2 arg3 arg4 fcb -- ok }
-fnptr IODispatchReadFunction { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
-fnptr IODispatchWriteFunction { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
+fnptr IODispatchReadFunction { timeout flags length offset buffer fcb lastmode -- bytesread ok }
+fnptr IODispatchWriteFunction { flags length offset buffer fcb lastmode -- byteswritten ok }
 fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
-fnptr IODispatchWriteBlockFunction { blockno bufsize buffer devobject -- ok }
-fnptr IODispatchReadBlockFunction { blockno bufsize buffer devobject -- ok }
+fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
+fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 

@@ -46,11 +46,6 @@ endstruct
 
 const APT_VDBMAGIC 0x4E4D494C
 
-// this module will never be called multithreaded so its fine to use
-// a statically allocated buffer like this
-
-buffer IOPartitionAPTBlockBuffer 512
-
 fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontable ok }
 	// try to detect this disk as APT-formatted.
 	// if it is, attempt to parse it into a heap-allocated partition table.
@@ -74,20 +69,34 @@ fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontabl
 		return
 	end
 
-	0 // blockno (VDB)
-	512 // bufsize
-	IOPartitionAPTBlockBuffer // buffer
-	devobject@
-	readfunc@ IODispatchReadBlockFunction ok!
+	auto blockbuf
+	
+	devobject@ IODevice_BlockSize + @ // bytes
+	'APTb' // tag
+	MmAllocWithTag ok! blockbuf!
 
 	if (ok@)
 		return
 	end
 
+
+	0 // blockno (VDB)
+	blockbuf@ // buffer
+	devobject@
+	readfunc@ IODispatchReadBlockFunction ok!
+
+	if (ok@)
+		blockbuf@ MmFree
+
+		return
+	end
+
 	STATUS_IO_NOT_AVAILABLE ok!
 
-	if (IOPartitionAPTBlockBuffer APT_VDB_Magic + @ APT_VDBMAGIC ~=)
+	if (blockbuf@ APT_VDB_Magic + @ APT_VDBMAGIC ~=)
 		// magic is wrong, not APT
+
+		blockbuf@ MmFree
 
 		return
 	end
@@ -95,7 +104,7 @@ fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontabl
 	// magic is correct, assume APT at our own risk
 
 	auto pte
-	IOPartitionAPTBlockBuffer APT_VDB_PartitionTable + pte!
+	blockbuf@ APT_VDB_PartitionTable + pte!
 
 	auto pcount
 	0 pcount!
@@ -123,6 +132,8 @@ fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontabl
 	if (ok@)
 		// allocation failed, return
 
+		blockbuf@ MmFree
+
 		return
 	end
 
@@ -131,7 +142,7 @@ fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontabl
 	IOPartitionAPT partitiontable@ IOPartitionTable_Format + !
 
 	partitiontable@ IOPartitionTable_Label + // dest
-	IOPartitionAPTBlockBuffer APT_VDB_Label + // src
+	blockbuf@ APT_VDB_Label + // src
 	15 // max
 	strncpy
 
@@ -139,7 +150,7 @@ fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontabl
 
 	// fill in partition information
 
-	IOPartitionAPTBlockBuffer APT_VDB_PartitionTable + pte!
+	blockbuf@ APT_VDB_PartitionTable + pte!
 
 	0 i!
 
@@ -170,4 +181,6 @@ fn (IOPartitionDetectFunction) IOPartitionAPTDetect { devobject -- partitiontabl
 		APT_PTE_SIZEOF pte +=
 		1 i +=
 	end
+
+	blockbuf@ MmFree
 end

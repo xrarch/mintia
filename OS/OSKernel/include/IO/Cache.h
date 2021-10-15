@@ -61,8 +61,8 @@ extern IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
 extern IOCachePageModifyFunction { pfdbe -- ok }
 
-extern IOCacheFileWrite { flags length bufsize offset buffer fcb -- byteswritten ok }
-extern IOCacheFileRead { flags length bufsize offset buffer fcb -- bytesread ok }
+extern IOCacheFileWrite { flags length offset buffer fcb -- byteswritten ok }
+extern IOCacheFileRead { flags length offset buffer fcb -- bytesread ok }
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
 

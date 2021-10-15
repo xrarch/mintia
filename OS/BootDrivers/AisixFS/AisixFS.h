@@ -106,8 +106,8 @@ extern AFSClose { access fileobject -- ok }
 
 extern AFSParse { flags path initialfcb process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }
-extern AFSReadFile { timeout flags length bufsize offset buffer fcb lastmode -- bytesread ok }
-extern AFSWriteFile { flags length bufsize offset buffer fcb lastmode -- byteswritten ok }
+extern AFSReadFile { timeout flags length offset buffer fcb lastmode -- bytesread ok }
+extern AFSWriteFile { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 

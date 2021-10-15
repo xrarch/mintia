@@ -149,6 +149,8 @@ fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesre
 
 	0 bytesread!
 
+	auto lastmode
+
 	if (process@ ~~)
 		// no process provided to read into. therefore, we must be reading directly into
 		// system space.
@@ -157,80 +159,83 @@ fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesre
 			"IOFileReadProcess: buffer was not in system space\n" KeCrash
 		end
 
-		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-			// always bypass cache for character devices -- call directly into driver.
-
-			if (DEBUGCHECKS)
-				if (cacheblock@)
-					"IOFileReadProcess: file was character device, but is cached?\n" KeCrash
-				end
-			end
-
-			timeout@ // timeout
-			flags@ // flags
-			length@ // length
-			length@ // bufsize (same as length since system is trusted)
-			fileobject@ IOFile_Offset + @ // offset
-			buffer@ // buffer
-			fcb@ // fcb
-			KERNELMODE // lastmode (kernel mode assumed, since this is a system space read)
-			readfunc@ IODispatchReadFunction ok! bytesread!
+		KERNELMODE lastmode!
+	end else
+		// do these checks first to make sure no overflow
+		if (buffer@ MMHIGHESTUSERADDRESS >)
+			STATUS_FORBIDDEN_OPERATION ok!
 
 			return
-		end
-
-		if (cacheblock@ ~~)
-			fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
-			fcb@ // fcb
-			IOFileControlBlockCacheCheck ok! cacheblock!
-
-			if (ok@)
-				return
-			end
-		end
-
-		if (cacheblock@ ~~)
-			// no caching -- call directly into driver.
-
-			timeout@ // timeout
-			flags@ // flags
-			length@ // length
-			length@ // bufsize (same as length since system is trusted)
-			fileobject@ IOFile_Offset + @ // offset
-			buffer@ // buffer
-			fcb@ // fcb
-			KERNELMODE // lastmode
-			readfunc@ IODispatchReadFunction ok! bytesread!
-
-			// the FCB was not unlocked by IOFileCacheCheck because this read was uncached
-
-			fcb@ IOFileControlBlockUnlock
-		end else
-			// caching -- call into cache read function.
-
-			flags@ // flags
-			length@ // length
-			length@ // bufsize (same as length since system is trusted)
-			fileobject@ IOFile_Offset + @ // offset
-			buffer@ // buffer
-			fcb@ // fcb
-			IOCacheFileRead ok! bytesread!
-		end
-	end else
-		// translate and lock each buffer page into memory.
-		// this may incur page fault logic (but never a page fault exception).
-		// for each buffer page, read at most PAGESIZE bytes from the file
-		// into the identity-mapped page frame.
-
-		// buffer must not be in system space.
-
-		if (buffer@ MMHIGHESTUSERADDRESS >)
+		end elseif (length@ MMHIGHESTUSERADDRESS >)
 			STATUS_FORBIDDEN_OPERATION ok!
 
 			return
 		end
 
-		"IOFileReadProcess: TODO userspace reads\n" KeCrash
+		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			return
+		end
+
+		USERMODE lastmode!
+	end
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+		// always bypass cache for character devices -- call directly into driver.
+
+		if (DEBUGCHECKS)
+			if (cacheblock@)
+				"IOFileReadProcess: file was character device, but is cached?\n" KeCrash
+			end
+		end
+
+		timeout@ // timeout
+		flags@ // flags
+		length@ // length
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fcb@ // fcb
+		lastmode@ // lastmode
+		readfunc@ IODispatchReadFunction ok! bytesread!
+
+		return
+	end
+
+	if (cacheblock@ ~~)
+		fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
+		fcb@ // fcb
+		IOFileControlBlockCacheCheck ok! cacheblock!
+
+		if (ok@)
+			return
+		end
+	end
+
+	if (cacheblock@ ~~)
+		// no caching -- call directly into driver.
+
+		timeout@ // timeout
+		flags@ // flags
+		length@ // length
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fcb@ // fcb
+		lastmode@ // lastmode
+		readfunc@ IODispatchReadFunction ok! bytesread!
+
+		// the FCB was not unlocked by IOFileCacheCheck because this read was uncached
+
+		fcb@ IOFileControlBlockUnlock
+	end else
+		// caching -- call into cache read function.
+
+		flags@ // flags
+		length@ // length
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fcb@ // fcb
+		IOCacheFileRead ok! bytesread!
 	end
 
 	auto rs
@@ -318,86 +323,91 @@ fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten o
 
 	0 byteswritten!
 
+	auto lastmode
+
 	if (process@ ~~)
-		// no process provided to read from. therefore, we must be reading directly from
+		// no process provided to read into. therefore, we must be reading directly into
 		// system space.
 
 		if (buffer@ MMLOWESTSYSTEMADDRESS <)
 			"IOFileWriteProcess: buffer was not in system space\n" KeCrash
 		end
 
-		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-			// always bypass cache for character devices -- call directly into driver.
-
-			if (DEBUGCHECKS)
-				if (cacheblock@)
-					"IOFileWriteProcess: file was character device, but is cached?\n" KeCrash
-				end
-			end
-
-			flags@ // flags
-			length@ // length
-			length@ // bufsize (same as length since system is trusted)
-			fileobject@ IOFile_Offset + @ // offset
-			buffer@ // buffer
-			fcb@ // fcb
-			KERNELMODE // lastmode (kernel mode assumed, since this is a system space read)
-			writefunc@ IODispatchWriteFunction ok! byteswritten!
+		KERNELMODE lastmode!
+	end else
+		// do these checks first to make sure no overflow
+		if (buffer@ MMHIGHESTUSERADDRESS >)
+			STATUS_FORBIDDEN_OPERATION ok!
 
 			return
-		end
-
-		if (cacheblock@ ~~)
-			fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
-			fcb@ // fcb
-			IOFileControlBlockCacheCheck ok! cacheblock!
-
-			if (ok@)
-				return
-			end
-		end
-
-		if (cacheblock@ ~~)
-			// no caching -- call directly into driver.
-
-			flags@ // flags
-			length@ // length
-			length@ // bufsize (same as length since system is trusted)
-			fileobject@ IOFile_Offset + @ // offset
-			buffer@ // buffer
-			fcb@ // fcb
-			KERNELMODE // lastmode
-			writefunc@ IODispatchWriteFunction ok! byteswritten!
-
-			// the FCB was not unlocked by IOFileCacheCheck because this write was uncached
-
-			fcb@ IOFileControlBlockUnlock
-		end else
-			// caching -- call into cache write function.
-
-			flags@ // flags
-			length@ // length
-			length@ // bufsize (same as length since system is trusted)
-			fileobject@ IOFile_Offset + @ // offset
-			buffer@ // buffer
-			fcb@ // fcb
-			IOCacheFileWrite ok! byteswritten!
-		end
-	end else
-		// translate and lock each buffer page into memory.
-		// this may incur page fault logic (but never a page fault exception).
-		// for each buffer page, write at most PAGESIZE bytes from the identity-mapped page frame
-		// into the file.
-
-		// buffer must not be in system space.
-
-		if (buffer@ MMHIGHESTUSERADDRESS >)
+		end elseif (length@ MMHIGHESTUSERADDRESS >)
 			STATUS_FORBIDDEN_OPERATION ok!
 
 			return
 		end
 
-		"IOFileWriteProcess: TODO userspace writes\n" KeCrash
+		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			return
+		end
+
+		USERMODE lastmode!
+	end
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+		// always bypass cache for character devices -- call directly into driver.
+
+		if (DEBUGCHECKS)
+			if (cacheblock@)
+				"IOFileWriteProcess: file was character device, but is cached?\n" KeCrash
+			end
+		end
+
+		flags@ // flags
+		length@ // length
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fcb@ // fcb
+		lastmode@ // lastmode
+		writefunc@ IODispatchWriteFunction ok! byteswritten!
+
+		return
+	end
+
+	if (cacheblock@ ~~)
+		fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
+		fcb@ // fcb
+		IOFileControlBlockCacheCheck ok! cacheblock!
+
+		if (ok@)
+			return
+		end
+	end
+
+	if (cacheblock@ ~~)
+		// no caching -- call directly into driver.
+
+		flags@ // flags
+		length@ // length
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fcb@ // fcb
+		lastmode@ // lastmode
+		writefunc@ IODispatchWriteFunction ok! byteswritten!
+
+		// the FCB was not unlocked by IOFileCacheCheck because this write was uncached
+
+		fcb@ IOFileControlBlockUnlock
+	end else
+		// caching -- call into cache write function.
+
+		flags@ // flags
+		length@ // length
+		fileobject@ IOFile_Offset + @ // offset
+		buffer@ // buffer
+		fcb@ // fcb
+		IOCacheFileWrite ok! byteswritten!
 	end
 
 	auto rs

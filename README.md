@@ -22,7 +22,7 @@ WIP: MINTIA is not currently in an even minimally usable state.
 
 ## Planned features (in rough descending order of priority)
 
-1. Demand paging, memory-mapped files, etc. (in process)
+1. Demand paging, memory-mapped files, etc. (in progress)
 2. Userspace processes and dynamic linking.
 3. AisixFS write support, FAT32 driver
 3. Mac OS 9-like window system.

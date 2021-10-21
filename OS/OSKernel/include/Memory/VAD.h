@@ -17,7 +17,7 @@ struct MmVAD
 	4 SectionObject
 endstruct
 
-// COW pages are never shareable so they must get some special treatment here.
+// COW pages are never shareable so they should get some special treatment here.
 
 struct MmVADCopyOnWrite
 	4 Next
@@ -29,8 +29,6 @@ struct MmVADCopyOnWrite
 	4 EndVA
 
 	4 PageProtection
-
-	// and then an inline prototype page table,
-	// or an out of line prototype page table,
-	// whatever's appropriate...
 endstruct
+
+extern MmVADCreate { startva endva prot offset sectionobject vadtype -- vad ok }

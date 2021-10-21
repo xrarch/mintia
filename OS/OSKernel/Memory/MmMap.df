@@ -1,0 +1,169 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn MmSectionPrepare { endofview sectionobject -- ok }
+	// helper function
+
+	0 ok!
+
+	auto fileobject
+	sectionobject@ MmSection_FileObject + @ fileobject!
+
+	if (fileobject@)
+		if (DEBUGCHECKS)
+			if (sectionobject@ MmSection_AnonSize + @)
+				"MmSectionPrepare: anonsize != 0\n" KeCrash
+			end
+		end
+
+		auto fcb
+		fileobject@ IOFile_FileControlBlock + @ fcb!
+
+		auto cacheblock
+		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+		if (cacheblock@ ~~)
+			// initialize caching on mapped FCB
+
+			1 // wantcaching
+			fcb@ // fcb
+			IOFileControlBlockCacheCheck ok! cacheblock!
+
+			if (ok@)
+				return
+			end
+		end
+
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockTryReference ok! drop
+
+		if (ok@)
+			return
+		end
+
+		if (endofview@ fcb@ IOFileControlBlock_SizeInBytes + @ >)
+			cacheblock@ IOCacheInfoBlockDereference drop
+
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+	end else
+		if (DEBUGCHECKS)
+			if (sectionobject@ MmSection_AnonSize + @ ~~)
+				"MmSectionPrepare: anonsize == 0\n" KeCrash
+			end
+		end
+
+		if (endofview@ sectionobject@ MmSection_AnonSize + @ >)
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+	end
+end
+
+fn MmSectionUnprepare { sectionobject -- }
+	// helper function
+
+	auto fileobject
+	sectionobject@ MmSection_FileObject + @ fileobject!
+
+	if (fileobject@)
+		auto fcb
+		fileobject@ IOFile_FileControlBlock + @ fcb!
+
+		auto cacheblock
+		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+		if (DEBUGCHECKS)
+			if (cacheblock@ ~~)
+				"MmSectionUnprepare: no cacheblock\n" KeCrash
+			end
+		end
+
+		cacheblock@ IOCacheInfoBlockDereference drop
+	end
+end
+
+fn MmSectionMapViewProcessObject { length prefaddr sectionoffset sectionobject processobject pageprotection flags -- realaddr ok }
+	// check to make sure the offsets are sane for this architecture
+
+	if (sectionoffset@ PAGEOFFSETMASK &)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	if (prefaddr@ PAGEOFFSETMASK &)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	auto endofview
+	length@ sectionoffset@ + endofview!
+
+	if (endofview@ length@ <)
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (endofview@ sectionoffset@ <)
+		// XXX I'm tired, is this overflow check even necessary if the first
+		// one passed?
+
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & length!
+
+	if (length@ 0 ==)
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (sectionobject@ MmSection_PageProtection + @ pageprotection@ & pageprotection@ ~=)
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	// if the section has a file object, initialize caching on its FCB and
+	// reference the cacheblock so that it can't be truncated.
+	// this is done in MmSectionPrepare.
+
+	endofview@ // endofview
+	sectionobject@ // sectionobject
+	MmSectionPrepare ok!
+
+	if (ok@)
+		return
+	end
+
+	// from here on we need to call MmSectionUnprepare when we return with an
+	// error...
+
+	"MmSectionMapViewProcessObject: TODO\n" KeCrash
+end

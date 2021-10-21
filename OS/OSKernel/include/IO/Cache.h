@@ -48,6 +48,9 @@ extern IOCacheInfoBlockCreate { -- cacheblock ok }
 extern IOCacheInfoBlockLock { cacheblock -- ok }
 extern IOCacheInfoBlockTryLock { cacheblock -- locked }
 extern IOCacheInfoBlockUnlock { cacheblock -- }
+extern IOCacheInfoBlockReference { cacheblock -- oldcount }
+extern IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
+extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }

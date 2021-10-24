@@ -28,6 +28,9 @@ struct PsProcess
 	4 VADLookupHint
 	4 VADMapHint
 
+	4 MappedPageFrames
+	4 CommittedPageFrames
+
 	4 PageFaultCount
 endstruct
 

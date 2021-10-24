@@ -7,6 +7,8 @@ struct MmSection
 
 	4 AnonSize
 	4 AnonPrototypePageTable
+
+	4 NoCommit
 endstruct
 
 extern MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser permissions name -- sectionobject ok }

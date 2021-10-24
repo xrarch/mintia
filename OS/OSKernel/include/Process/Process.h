@@ -25,7 +25,8 @@ struct PsProcess
 	4 VADListHead
 	4 VADListTail
 
-	4 LastVAD
+	4 VADPageFaultHint
+	4 VADMapHint
 
 	4 PageFaultCount
 endstruct

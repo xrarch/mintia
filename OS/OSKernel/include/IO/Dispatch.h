@@ -9,6 +9,7 @@ fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
+fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 
 struct IODispatchTable
 	4 Open
@@ -28,7 +29,7 @@ struct IODispatchTable
 	4 WriteBlock
 	4 Truncate
 	4 ReadDirectory
-	4 Reserved5
+	4 GetPageAddress
 	4 Reserved6
 	4 Reserved7
 	4 Reserved8

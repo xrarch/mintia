@@ -42,7 +42,16 @@ fn MmVADCreate { startva endva prot offset sectionobject -- vad ok }
 	0 vad@ MmVAD_Prev + !
 	startva@ vad@ MmVAD_StartVA + !
 	endva@ vad@ MmVAD_EndVA + !
+	0 vad@ MmVAD_FurthestExtentMapped + !
 	prot@ vad@ MmVAD_PageProtection + !
+end
+
+fn MmVADDestroy { vad -- }
+	// destroys a VAD
+
+	vad@ MmVAD_SectionObject + @ ObObjectDereferenceByPointer drop
+
+	vad@ MmFree
 end
 
 fn MmVADListLock { processobject -- ok }
@@ -58,6 +67,8 @@ fn MmVADListUnlock { processobject -- }
 end
 
 fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
+	"MmVADFind: NEEDS REVIEW\n" KeCrash
+
 	// locate the VAD containing the given virtual address. if mustbestart is
 	// true, then the virtual address must be at the start of the VAD, and the
 	// length must match the length of the VAD, or else an error is returned.
@@ -72,9 +83,11 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 		processobject@ PsProcess_VADListHead + @ vad!
 	end
 
+	0 ok!
+
 	// fast check for if the hint is immediately the correct VAD (common)
-	if (vad@ MmVAD_StartVA + @ vaddr@ <=)
-		if (vad@ MmVAD_EndVA + @ vaddr@ >=)
+	if (vaddr@ vad@ MmVAD_StartVA + @ >=)
+		if (vaddr@ vad@ MmVAD_EndVA + @ <)
 			// found it
 
 			if (mustbestart@)
@@ -98,7 +111,59 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 	// hint was not the correct VAD, check if it is before or after the hint
 	// and search in the appropriate direction.
 
-	"MmVADFind: TODO\n" KeCrash
+	if (vaddr@ vad@ MmVAD_StartVA + @ >)
+		// after the hint, search forwards
+
+		while (vad@)
+			if (vaddr@ vad@ MmVAD_StartVA + @ <)
+				// vaddr was before this VAD which means we missed it, which
+				// means it's not mapped
+
+				STATUS_BAD_ADDRESS ok!
+
+				return
+			end
+
+			if (vaddr@ vad@ MmVAD_EndVA + @ <)
+				// found it!
+
+				if (mustbestart@ ~~)
+					vad@ processobject@ PsProcess_VADLookupHint + !
+				end
+
+				return
+			end
+
+			vad@ MmVAD_Next + @ vad!
+		end
+	end else
+		// before the hint, search backwards
+
+		while (vad@)
+			if (vaddr@ vad@ MmVAD_EndVA + @ >=)
+				// vaddr was after this VAD which means we missed it, which
+				// means it's not mapped
+
+				STATUS_BAD_ADDRESS ok!
+
+				return
+			end
+
+			if (vaddr@ vad@ MmVAD_StartVA + @ >=)
+				// found it!
+
+				if (mustbestart@ ~~)
+					vad@ processobject@ PsProcess_VADLookupHint + !
+				end
+
+				return
+			end
+
+			vad@ MmVAD_Prev + @ vad!
+		end
+	end
+
+	STATUS_BAD_ADDRESS ok!
 end
 
 fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }
@@ -262,4 +327,98 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	end
 
 	processobject@ MmVADListUnlock
+end
+
+fn MmVADUnmap { vad processobject -- }
+	"MmVADUnmap: NEEDS REVIEW\n" KeCrash
+
+	// assumes the caller locked the process VAD list.
+
+	// unmap all the pages associated with the VAD, then remove it from the
+	// process VAD list and destroy it.
+
+	auto pdir
+	processobject@ PsProcess_PCB + KeProcess_PageDirectory + @ pdir!
+
+	auto asid
+	processobject@ PsProcess_PCB + KeProcess_ASID + @ asid!
+
+	auto vaddr
+	vad@ MmVAD_StartVA + @ vaddr!
+
+	auto max
+	// only unmap up to the highest vaddr that was ever faulted in, as an
+	// optimization.
+	vad@ MmVAD_FurthestExtentMapped + @ PAGESIZE + max!
+
+	if (DEBUGCHECKS)
+		if (vaddr@ PAGEOFFSETMASK &)
+			vaddr@ "MmVADUnmap: vaddr wasn't page-aligned (0x%08x)\n" KeCrash
+		end
+
+		if (max@ PAGEOFFSETMASK &)
+			max@ "MmVADUnmap: max wasn't page-aligned (0x%08x)\n" KeCrash
+		end
+
+		if (vaddr@ MMHIGHESTUSERADDRESS >)
+			vaddr@ "MmVADUnmap: vaddr > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
+		end
+
+		if (max@ MMHIGHESTUSERADDRESS >)
+			max@ "MmVADUnmap: max > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
+		end
+	end
+
+	auto commitcharge
+	vad@ MmVAD_SectionObject + @ MmSection_NoCommit + @ ~~ commitcharge!
+
+	auto ok
+
+	while (vaddr@ max@ <)
+		vaddr@ // vaddr
+		asid@ // asid
+		pdir@ // pagemap
+		1 // canfree
+		1 // attempt
+		MmUnmapVirtualAddress ok! drop
+
+		if (ok@ ~~)
+			// unmapped a page, do accounting
+
+			if (commitcharge@)
+				1 processobject@ PsProcess_CommittedPageFrames + -=
+			end
+
+			1 processobject@ PsProcess_MappedPageFrames + -=
+		end
+
+		PAGESIZE vaddr +=
+	end
+
+	if (vad@ processobject@ PsProcess_VADLookupHint + @ ==)
+		0 processobject@ PsProcess_VADLookupHint + !
+	end
+
+	if (vad@ processobject@ PsProcess_VADMapHint + @ ==)
+		0 processobject@ PsProcess_VADMapHint + !
+	end
+
+	auto n
+	vad@ MmVAD_Next + @ n!
+
+	if (n@)
+		vad@ MmVAD_Prev + @ n@ MmVAD_Prev + !
+	end else // no next means we were the tail
+		vad@ MmVAD_Prev + @ processobject@ PsProcess_VADListTail + !
+	end
+
+	vad@ MmVAD_Prev + @ n!
+
+	if (n@)
+		vad@ MmVAD_Next + @ n@ MmVAD_Next + !
+	end else // no prev means we were the head
+		vad@ MmVAD_Next + @ processobject@ PsProcess_VADListHead + !
+	end
+
+	vad@ MmVADDestroy
 end

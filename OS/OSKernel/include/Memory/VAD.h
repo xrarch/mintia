@@ -1,11 +1,6 @@
-const VADTYPE_NORMAL 1
-const VADTYPE_COW    2
-
 struct MmVAD
 	4 Next
 	4 Prev
-
-	4 Type
 
 	4 StartVA
 	4 EndVA
@@ -17,18 +12,5 @@ struct MmVAD
 	4 SectionObject
 endstruct
 
-// COW pages are never shareable so they should get some special treatment here.
-
-struct MmVADCopyOnWrite
-	4 Next
-	4 Prev
-
-	4 Type
-
-	4 StartVA
-	4 EndVA
-
-	4 PageProtection
-endstruct
-
-extern MmVADCreate { startva endva prot offset sectionobject vadtype -- vad ok }
+extern MmVADCreate { startva endva prot offset sectionobject -- vad ok }
+extern MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }

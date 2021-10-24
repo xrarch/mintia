@@ -103,16 +103,16 @@ fn MmSectionUnprepare { sectionobject -- }
 	end
 end
 
-fn MmSectionMapViewProcessObject { length prefaddr sectionoffset sectionobject processobject pageprotection flags -- realaddr ok }
-	// check to make sure the offsets are sane for this architecture
-
+fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject processobject pageprotection flags -- realaddr ok }
 	if (sectionoffset@ PAGEOFFSETMASK &)
+		// requested section offset isn't page-aligned
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
 	end
 
-	if (prefaddr@ PAGEOFFSETMASK &)
+	if (startva@ PAGEOFFSETMASK &)
+		// requested startva isn't page-aligned
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
@@ -121,17 +121,16 @@ fn MmSectionMapViewProcessObject { length prefaddr sectionoffset sectionobject p
 	auto endofview
 	length@ sectionoffset@ + endofview!
 
-	if (endofview@ length@ <)
+	if (endofview@ sectionoffset@ <)
+		// length+sectionoffset overflows
 		STATUS_OVERFLOW ok!
 
 		return
 	end
 
-	if (endofview@ sectionoffset@ <)
-		// XXX I'm tired, is this overflow check even necessary if the first
-		// one passed?
-
-		STATUS_OVERFLOW ok!
+	if (length@ 0 ==)
+		// length is given as 0 which makes this a no-op
+		0 ok!
 
 		return
 	end
@@ -139,12 +138,33 @@ fn MmSectionMapViewProcessObject { length prefaddr sectionoffset sectionobject p
 	length@ PAGEOFFSETMASK + PAGENUMBERMASK & length!
 
 	if (length@ 0 ==)
+		// length overflowed
 		STATUS_OVERFLOW ok!
 
 		return
 	end
 
+	if (startva@ length@ + startva@ <)
+		// startva+length overflows
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (startva@ length@ + MMHIGHESTUSERADDRESS >)
+		// requested region goes outside userspace
+
+		if (flags@ OSMAPFLAG_FIXEDADDRESS &)
+			STATUS_UNAVAILABLE_ADDRESS ok!
+
+			return
+		end
+
+		0 startva!
+	end
+
 	if (sectionobject@ MmSection_PageProtection + @ pageprotection@ & pageprotection@ ~=)
+		// section doesn't have required permissions
 		STATUS_PERMISSION_DENIED ok!
 
 		return

@@ -21,61 +21,201 @@
 // routines for creating, destroying, and manipulating
 // Virtual Address Descriptors (VADs).
 
-fn MmVADCreate { startva endva prot offset sectionobject vadtype -- vad ok }
+fn MmVADCreate { startva endva prot offset sectionobject -- vad ok }
 	// allocates a VAD structure.
-
-	// if vadtype == VADTYPE_NORMAL it's a normal VAD, otherwise it's a COW
-	// VAD, which is a smaller structure.
-
 	// references the section object.
 
-	if (vadtype@ VADTYPE_NORMAL ==)
-		MmVAD_SIZEOF // bytes
-		'nVAD' // tag
-		MmAllocWithTag ok! vad!
+	MmVAD_SIZEOF // bytes
+	'nVAD' // tag
+	MmAllocWithTag ok! vad!
 
-		if (ok@)
-			return
-		end
-
-		sectionobject@ ObObjectReferenceByPointer drop
-
-		sectionobject@ vad@ MmVAD_SectionObject + !
-		offset@ vad@ MmVAD_OffsetInSection + !
-	end else
-		if (DEBUGCHECKS)
-			if (sectionobject@)
-				"MmVADCreate: COW VAD but section object provided\n" KeCrash
-			end
-
-			if (offset@)
-				"MmVADCreate: COW VAD but offset provided\n" KeCrash
-			end
-		end
-
-		MmVADCopyOnWrite_SIZEOF // bytes
-		'cVAD' // tag
-		MmAllocWithTag ok! vad!
-
-		if (ok@)
-			return
-		end
+	if (ok@)
+		return
 	end
+
+	sectionobject@ ObObjectReferenceByPointer drop
+
+	sectionobject@ vad@ MmVAD_SectionObject + !
+	offset@ vad@ MmVAD_OffsetInSection + !
 
 	0 vad@ MmVAD_Next + !
 	0 vad@ MmVAD_Prev + !
-	vadtype@ vad@ MmVAD_Type + !
 	startva@ vad@ MmVAD_StartVA + !
 	endva@ vad@ MmVAD_EndVA + !
 	prot@ vad@ MmVAD_PageProtection + !
 end
 
-fn MmVADFindFreeRegion { viewsize startva fixedva pageprotection sectionobject vadlisthead -- realva ok }
+fn MmVADListLock { processobject -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	processobject@ PsProcess_VADListMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn MmVADListUnlock { processobject -- }
+	processobject@ PsProcess_VADListMutex + KeMutexRelease drop
+end
+
+fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }
+	"MmVADFindAndMapFreeRegion: NEEDS REVIEW\n" KeCrash
+
 	// find a fitting region with a preferred virtual address of startva.
 	// if fixedva is true, then *only* this virtual address can be used; if
 	// it is not available an error will be returned.
-	// this region could be completely empty, or it could be populated with
-	// any number of compatible VADs.
+	// this region must be completely empty.
 
-	"MmVADFindFreeRegion: TODO: that\n" KeCrash
+	auto endva
+	// no overflow check, caller should have done that
+	startva@ viewsize@ + endva!
+
+	// stores last VAD that can hold the view after it.
+	// -1 means no space available, 0 means very start
+	auto lastsufficientvad
+	-1 lastsufficientvad!
+
+	auto lastvad
+	0 lastvad!
+
+	auto lastend
+	PAGESIZE lastend!
+
+	0 realva!
+
+	processobject@ MmVADListLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto vad
+	processobject@ PsProcess_VADListHead + @ vad!
+
+	while (vad@)
+		if (fixedva@)
+			if (vad@ MmVAD_StartVA + @ endva@ >)
+				// this VAD begins after our requested region, which means it
+				// either lies directly behind this VAD or doesn't exist.
+
+				if (startva@ lastend@ >=)
+					// found a space!
+					startva@ realva!
+					lastvad@ lastsufficientvad!
+					break
+				end
+
+				// this startva was mandatory...
+
+				processobject@ MmVADListUnlock
+
+				STATUS_UNAVAILABLE_ADDRESS ok!
+
+				return
+			end
+		end elseif (lastsufficientvad@ -1 ==)
+			if (vad@ MmVAD_StartVA + @ lastend@ - viewsize@ >=)
+				// the last space is big enough
+
+				lastend@ realva!
+				lastvad@ lastsufficientvad!
+
+				if (startva@ ~~)
+					// no startva preference, use it
+					break
+				end
+
+				if (vad@ MmVAD_StartVA + @ endva@ >)
+					if (startva@ lastend@ >=)
+						// found our preferred address!
+						startva@ realva!
+						lastvad@ lastsufficientvad!
+						break
+					end
+				end
+			end
+		end
+
+		vad@ MmVAD_EndVA + @ lastend!
+		vad@ lastvad!
+		vad@ MmVAD_Next + @ vad!
+	end
+
+	if (lastsufficientvad@ -1 ==)
+		// see if it can fit in the end
+
+		if (fixedva@)
+			// skip a check against MMHIGHESTUSERADDRESS because endva should
+			// have been sanity checked against it already by the caller
+
+			if (startva@ lastend@ >=)
+				// found a space!
+				startva@ realva!
+				lastvad@ lastsufficientvad!
+			end
+		end elseif (MMHIGHESTUSERADDRESS 1 + lastend@ - viewsize@ >=)
+			// fits!
+			lastend@ realva!
+			lastvad@ lastsufficientvad!
+		end
+
+		if (lastsufficientvad@ -1 ==)
+			processobject@ MmVADListUnlock
+
+			// still -1, didn't fit anywhere!
+
+			STATUS_UNAVAILABLE_ADDRESS ok!
+
+			return
+		end
+	end
+
+	// create the VAD for this mapping and insert it in the list just after
+	// lastsufficientvad (or before the head of the list if lastsufficientvad
+	// is 0)
+
+	realva@ // startva
+	realva@ viewsize@ + // endva
+	pageprotection@ // prot
+	sectionoffset@ // offset
+	sectionobject@ // sectionobject
+	MmVADCreate ok! vad!
+	
+	if (ok@)
+		processobject@ MmVADListUnlock
+
+		return
+	end
+
+	auto h
+
+	if (lastsufficientvad@ ~~)
+		// insert at head
+
+		processobject@ PsProcess_VADListHead + @ h!
+
+		if (h@)
+			vad@ h@ MmVAD_Prev + !
+			h@ vad@ MmVAD_Next + !
+		end else
+			vad@ processobject@ PsProcess_VADListTail + !
+		end
+
+		h@ processobject@ PsProcess_VADListHead + !
+	end else
+		// insert ahead of given VAD
+
+		lastsufficientvad@ MmVAD_Next + @ h!
+
+		if (h@)
+			vad@ h@ MmVAD_Prev + !
+			h@ vad@ MmVAD_Next + !
+		end else
+			vad@ processobject@ PsProcess_VADListTail + !
+		end
+
+		lastsufficientvad@ vad@ MmVAD_Prev + !
+		vad@ lastsufficientvad@ MmVAD_Next + !
+	end
+
+	processobject@ MmVADListUnlock
 end

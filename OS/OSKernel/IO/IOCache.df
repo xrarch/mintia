@@ -168,6 +168,9 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	// for each bucket, iterate all pages. if a page if modified, write it
 	// out to disk.
 
+	// ensure thread can't receive signals while writing out dirty pages
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
 	auto i
 	0 i!
 
@@ -195,6 +198,9 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 		1 i +=
 	end
 
+	// allow thread to receive signals again
+	KeThreadCurrent@ KeThreadAcceptKill drop
+
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockUnlock
 end
@@ -220,16 +226,16 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		// one or more page frames in this cache is currently in use.
 		// don't allow truncation for now.
 
-		rs@ HALCPUInterruptRestore
-
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockUnlock
-
 		if (DEBUGCHECKS)
 			if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ <)
 				"IOCacheInfoBlockTruncate: page references < modified page count\n" KeCrash
 			end
 		end
+
+		rs@ HALCPUInterruptRestore
+
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockUnlock
 
 		STATUS_IO_TRY_AGAIN_LATER ok!
 
@@ -256,6 +262,9 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	// and caller wanted us to write out dirty pages (writeout==1),
 	// write the page out first.
 
+	// ensure thread can't receive signals while writing out dirty pages
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
 	auto i
 	0 i!
 
@@ -276,33 +285,44 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 					if (pfdbe@ IOPageFrameEntryCache_References + @ 1 ~=)
 						pfdbe@
 						pfdbe@ IOPageFrameEntryCache_References + @
-						"IOCacheInfoBlockTruncate: found page with odd refcount %d (0x%08x)\n" KeCrash
+						"IOCacheInfoBlockTruncate: found page with strange refcount %d (0x%08x)\n" KeCrash
 					end
 				end elseif (pfdbe@ IOPageFrameEntryCache_References + @ 0 ~=)
 					pfdbe@
 					pfdbe@ IOPageFrameEntryCache_References + @
-					"IOCacheInfoBlockTruncate: found page with odd refcount %d (0x%08x)\n" KeCrash
+					"IOCacheInfoBlockTruncate: found page with strange refcount %d (0x%08x)\n" KeCrash
 				end
 			end
 
 			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
-				auto wroteout
-				0 wroteout!
-
 				if (writeout@)
 					if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-						// this is a modified page, and caller wants us to write them out to disk.
-						// the alternative is writeout==0, which means the caller says its fine
+						// this is a modified page, and caller wants us to
+						// write them out to disk. the alternative is
+						// writeout==0, which means the caller says its fine
 						// to ignore and throw them out.
 
 						1 // dontunbias
 						pfdbe@ // pfdbe
 						IOCachePageWriteModified drop
-
-						1 wroteout!
 					end
 				end else
-					pfdbe@ MmEvictablePageReference drop
+					if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+						// this is a modified page and the caller doesn't want
+						// us to write it to disk, so we need to clean it up
+						// ourselves by decrementing this cacheblock's
+						// modified page count and removing it from the
+						// modified list.
+
+						HALCPUInterruptDisable rs!
+						1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
+						rs@ HALCPUInterruptRestore
+
+						pfdbe@ IOCachePageRemoveModified
+					end else
+						// unmodified, remove from evictable list
+						pfdbe@ MmEvictablePageReference drop
+					end
 				end
 
 				auto npfdbe
@@ -326,9 +346,7 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 				MmPageFree
 
 				HALCPUInterruptDisable rs!
-
 				1 IOCachePagesUsed -=
-
 				rs@ HALCPUInterruptRestore
 			end
 
@@ -344,13 +362,21 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		1 i +=
 	end
 
-	0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
-	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
+	// fix all the stray referencing we just did
+
+	if (maxpage@ 0 ==)
+		0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
+		0 cacheblock@ IOCacheInfoBlock_PageReferences + !
+	end else
+		// XXX i only THINK this works
+		cacheblock@ IOCacheInfoBlock_ModifiedPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + !
+	end
+
+	// allow thread to receive signals again
+	KeThreadCurrent@ KeThreadAcceptKill drop
 
 	HALCPUInterruptDisable rs!
-
 	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=
-
 	rs@ HALCPUInterruptRestore
 
 	cacheblock@ // cacheblock
@@ -421,6 +447,9 @@ fn IOCachePageInsertModified { pfdbe -- }
 end
 
 fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
+	// XXX call with care: data loss could occur if thread can receive signals
+	// during this operation
+
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
@@ -465,8 +494,6 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
 
-	// perform the write operation
-
 	auto off
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
@@ -477,6 +504,8 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 			pfdbe@ "IOCachePageWriteModified: modified page offset beyond end of file (0x%08x)\n" KeCrash
 		end
 	end
+
+	// perform the write operation
 
 	fcb@ IOFileControlBlock_SizeInBytes + @ off@ -
 	PAGESIZE min len!

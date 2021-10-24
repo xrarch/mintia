@@ -26,7 +26,7 @@ struct IOPageFrameEntryCache
 	4 Context2
 	4 Context3
 	4 Context4
-	4 Context5
+	4 TrickPTE
 	4 ModifiedPTE
 	4 FCB
 	4 Flags

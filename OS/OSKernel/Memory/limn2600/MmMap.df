@@ -14,6 +14,14 @@
 #include "<ll>/OSDLL/OSStatus.h"
 
 extern HALLimn2500TLBFlush { vpn asid -- }
+extern HALLimn2500TLBFlushAll { -- }
+
+fn MmFlushUserTLBAll { -- }
+	// XXX we might be able to have this function flush only the userspace
+	// part of the TLB at some point.
+
+	HALLimn2500TLBFlushAll
+end
 
 fn MmGetPhysicalAddress { vaddr pagemap -- flags phyaddr ok }
 	IDENTITYSPACE pagemap |=
@@ -43,6 +51,13 @@ fn MmGetPhysicalAddress { vaddr pagemap -- flags phyaddr ok }
 	pte@ 31 & flags!
 	pte@ 5 >> 12 << phyaddr!
 	0 ok!
+end
+
+fn MmGetVirtualAddress { vaddr pagemap -- pte ok }
+	// get the PTE for a virtual address (for instances like, finding out if
+	// a page is in swap)
+
+	"MmGetVirtualAddress: TODO\n" KeCrash
 end
 
 fn MmMapVirtualAddress { phyaddr vaddr flags pagemap canalloc -- ok }
@@ -98,11 +113,19 @@ fn MmMapVirtualAddress { phyaddr vaddr flags pagemap canalloc -- ok }
 	1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
 end
 
-fn MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- phyaddr ok }
+fn MmSetVirtualAddress { pte vaddr pagemap canalloc -- ok }
+	// set the pte for the virtual address (for instances like, in order to
+	// keep track of where the page frame is in swap)
+
+	"MmSetVirtualAddress: TODO\n" KeCrash
+end
+
+fn MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- pte phyaddr ok }
 	// caller should take care of any locking
 
 	IDENTITYSPACE pagemap |=
 
+	0 pte!
 	0 ok!
 
 	auto pdi
@@ -122,29 +145,36 @@ fn MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- phyaddr ok }
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pdi!
 
-	if (pdi@@ PTE_V & ~~)
+	pdi@@ pte!
+
+	if (pte@ PTE_V & ~~)
 		if (attempt@)
 			// failing is fine
 			-1 ok!
 
-			return
+			if (pte@ 12 >> ~~)
+				return
+			end
+
+			// there was a swap offset, fall thru and dereference the page
+			// table.
+		end else
+			vaddr@ "MmUnmapVirtualAddress: 0x%08x wasn't mapped!\n" KeCrash
 		end
-
-		vaddr@ "MmUnmapVirtualAddress: 0x%08x wasn't mapped!\n" KeCrash
-	end
-
-	pdi@@ 5 >> PAGESHIFT << phyaddr!
-
-	0 pdi@!
-
-	if (asid@ 0 ==)
-		vaddr@ PAGESHIFT >> // vpn
-		0 // asid
-		HALLimn2500TLBFlush
 	end else
-		vaddr@ PAGESHIFT >> // vpn
-		asid@ 255 & 1 + // asid
-		HALLimn2500TLBFlush
+		pte@ 5 >> PAGESHIFT << phyaddr!
+
+		0 pdi@!
+
+		if (asid@ 0 ==)
+			vaddr@ PAGESHIFT >> // vpn
+			0 // asid
+			HALLimn2500TLBFlush
+		end else
+			vaddr@ PAGESHIFT >> // vpn
+			asid@ 255 & 1 + // asid
+			HALLimn2500TLBFlush
+		end
 	end
 
 	auto oldcount

@@ -36,9 +36,14 @@ endstruct
 
 struct PsThread
 	KeThread_SIZEOF TCB
+
+	4 UserStackBottom
+	4 UserStackTop
 endstruct
 
 struct PsOSDLLInfo
+	4 StartFunction
+
 	4 HeadSize
 
 	4 TextOffset
@@ -64,6 +69,8 @@ externptr PsOSDLLSectionObject
 
 extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
+
+extern PsThreadUserEntry { context1 context2 -- }
 
 extern PsProcessCreate { sectionobject inherithandles owninguser parentprocess permissions name -- processhandle ok }
 extern PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }

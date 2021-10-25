@@ -46,14 +46,6 @@ fn MmVADCreate { startva endva prot offset sectionobject -- vad ok }
 	prot@ vad@ MmVAD_PageProtection + !
 end
 
-fn MmVADDestroy { vad -- }
-	// destroys a VAD
-
-	vad@ MmVAD_SectionObject + @ ObObjectDereferenceByPointer drop
-
-	vad@ MmFree
-end
-
 fn MmVADListLock { processobject -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
@@ -169,8 +161,6 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 end
 
 fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }
-	"MmVADFindAndMapFreeRegion: NEEDS REVIEW\n" KeCrash
-
 	// find a fitting region with a preferred virtual address of startva.
 	// if fixedva is true, then *only* this virtual address can be used; if
 	// it is not available an error will be returned.
@@ -203,18 +193,31 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	processobject@ PsProcess_VADListHead + @ vad!
 
 	while (vad@)
-		if (fixedva@)
-			if (vad@ MmVAD_StartVA + @ endva@ >)
+		if (fixedva@ ~~)
+			if (lastsufficientvad@ -1 ==)
+				if (vad@ MmVAD_StartVA + @ lastend@ - viewsize@ >=)
+					// the last space is big enough
+
+					lastend@ realva!
+					lastvad@ lastsufficientvad!
+
+					if (startva@ ~~)
+						// no startva preference, use it
+						break
+					end
+				end
+			end
+		end
+
+		if (vad@ MmVAD_StartVA + @ endva@ >=)
+			if (startva@ lastend@ >=)
+				// found our preferred address!
+				startva@ realva!
+				lastvad@ lastsufficientvad!
+				break
+			end elseif (fixedva@)
 				// this VAD begins after our requested region, which means it
 				// either lies directly behind this VAD or doesn't exist.
-
-				if (startva@ lastend@ >=)
-					// found a space!
-					startva@ realva!
-					lastvad@ lastsufficientvad!
-					break
-				end
-
 				// this startva was mandatory...
 
 				processobject@ MmVADListUnlock
@@ -222,27 +225,6 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 				STATUS_UNAVAILABLE_ADDRESS ok!
 
 				return
-			end
-		end elseif (lastsufficientvad@ -1 ==)
-			if (vad@ MmVAD_StartVA + @ lastend@ - viewsize@ >=)
-				// the last space is big enough
-
-				lastend@ realva!
-				lastvad@ lastsufficientvad!
-
-				if (startva@ ~~)
-					// no startva preference, use it
-					break
-				end
-
-				if (vad@ MmVAD_StartVA + @ endva@ >)
-					if (startva@ lastend@ >=)
-						// found our preferred address!
-						startva@ realva!
-						lastvad@ lastsufficientvad!
-						break
-					end
-				end
 			end
 		end
 
@@ -311,7 +293,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			vad@ processobject@ PsProcess_VADListTail + !
 		end
 
-		h@ processobject@ PsProcess_VADListHead + !
+		vad@ processobject@ PsProcess_VADListHead + !
 	end else
 		// insert ahead of given VAD
 
@@ -338,6 +320,8 @@ fn MmVADUnmap { vad processobject -- }
 
 	// unmap all the pages associated with the VAD, then remove it from the
 	// process VAD list and destroy it.
+
+	// does NOT dereference the section object, caller must do that.
 
 	if (DEBUGCHECKS)
 		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
@@ -446,5 +430,5 @@ fn MmVADUnmap { vad processobject -- }
 		vad@ MmVAD_Next + @ processobject@ PsProcess_VADListHead + !
 	end
 
-	vad@ MmVADDestroy
+	vad@ MmFree
 end

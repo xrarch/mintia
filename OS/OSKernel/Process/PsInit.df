@@ -146,6 +146,58 @@ fn PsInitPhase1 { -- }
 	"initializing OSDLL.dll\n" "PsInitPhase1" HALLog
 
 	PsOSDLLInit
+
+	"creating SystemInit.exe process\n" "PsInitPhase1" HALLog
+
+	auto handle
+	auto ok
+
+	0 // sectionobject
+	0 // inherithandles
+	SeUserCurrentGet // owninguser
+	KeProcessCurrent // parentprocess
+	ACCESS_OWNER_ALL // permissions
+	"SystemInit.exe" // name
+	PsProcessCreate ok! handle!
+
+	if (ok@)
+		ok@ "PsInitPhase1: couldn't create 'SystemInit.exe' process (%i)\n" KeCrash
+	end
+
+	auto thhandle
+
+	0 // context1
+	0 // context2
+	pointerof PsThreadUserEntry // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"Main" // name
+	handle@ // processhandle
+	0 // processptr
+	PsThreadCreate ok! thhandle!
+
+	if (ok@)
+		ok@ "PsInitPhase1: couldn't create 'Main' thread for 'SystemInit.exe' process (%i)\n" KeCrash
+	end
+
+	thhandle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "PsInitPhase1: couldn't close 'Main' thread (%i)\n" KeCrash
+	end
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "PsInitPhase1: couldn't close 'SystemInit.exe' process (%i)\n" KeCrash
+	end
+end
+
+fn PsThreadUserEntry { context1 context2 -- }
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	KeThreadCurrent@ PsThread_UserStackTop + @ // ustack
+	PsOSDLLInformation PsOSDLLInfo_StartFunction + @ // entryfunc
+	HALCPUEnterUserMode
 end
 
 buffer PsOSDLLInformation PsOSDLLInfo_SIZEOF
@@ -243,6 +295,8 @@ fn PsOSDLLInit { -- }
 	if (ok@)
 		"PsOSDLLInit: couldn't find symbol '__OSDLLStart'\n" KeCrash
 	end
+
+	addr@ info@ PsOSDLLInfo_StartFunction + !
 
 	head@ MmFree
 

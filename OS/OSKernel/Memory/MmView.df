@@ -1,0 +1,395 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn MmUnmapViewProcess { length vaddr processobject -- ok }
+	if (vaddr@ length@ + vaddr@ <)
+		// vaddr+length overflows
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (vaddr@ length@ + MMHIGHESTUSERADDRESS >)
+		// requested region goes outside userspace
+
+		STATUS_FORBIDDEN_OPERATION ok!
+
+		return
+	end
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	processobject@ MmVADListLock ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"MmUnmapViewProcess: failed to lock\n" KeCrash
+		end
+	end
+
+	auto vad
+
+	vaddr@ // vaddr
+	length@ // length
+	1 // mustbestart
+	processobject@
+	MmVADFind ok! vad!
+
+	if (ok@)
+		processobject@ MmVADListUnlock
+
+		KeThreadCurrent@ KeThreadAcceptKill drop
+
+		return
+	end
+
+	vad@ // vad
+	processobject@ // processobject
+	MmVADUnmap
+
+	processobject@ MmVADListUnlock
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
+end
+
+fn MmProcessInitialize { sectionobject process -- ok }
+	// initialize virtual memory related fields
+
+	0 process@ PsProcess_PageFaultCount + !
+
+	0 process@ PsProcess_VADListHead + !
+	0 process@ PsProcess_VADListTail + !
+	0 process@ PsProcess_VADLookupHint + !
+	0 process@ PsProcess_VADMapHint + !
+
+	0 process@ PsProcess_MappedPageFrames + !
+	0 process@ PsProcess_CommittedPageFrames + !
+
+	"PsProcessVADListMutex" // name
+	KERNELMODE // mode
+	process@ PsProcess_VADListMutex + // mutex
+	KeMutexInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"MmProcessInitialize: couldn't initialize PsProcessVADListMutex\n" KeCrash
+		end
+	end
+
+	auto info
+	PsOSDLLInformation info!
+
+	// create mappings for OSDLL and PEB section
+
+	// map text section
+	info@ PsOSDLLInfo_TextSize + @ // length
+	info@ PsOSDLLInfo_TextVAddr + @ // startva
+	info@ PsOSDLLInfo_TextOffset + @ // sectionoffset
+	PsOSDLLSectionObject@ // sectionobject
+	process@ // processobject
+	PAGEACCESS_READ PAGEACCESS_EXEC | // pageprotection
+	OSMAPFLAG_FIXEDADDRESS // flags
+	MmSectionMapViewProcessObject ok! drop
+
+	if (ok@)
+		return
+	end
+
+	// map data section
+	info@ PsOSDLLInfo_DataSize + @ // length
+	info@ PsOSDLLInfo_DataVAddr + @ // startva
+	info@ PsOSDLLInfo_DataOffset + @ // sectionoffset
+	PsOSDLLSectionObject@ // sectionobject
+	process@ // processobject
+	PAGEACCESS_READ PAGEACCESS_EXEC | PAGEACCESS_WRITECOPY | // pageprotection
+	OSMAPFLAG_FIXEDADDRESS // flags
+	MmSectionMapViewProcessObject ok! drop
+
+	if (ok@)
+		info@ PsOSDLLInfo_TextSize + @ // length
+		info@ PsOSDLLInfo_TextVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 1 (%i)\n" KeCrash
+			end
+		end
+
+		return
+	end
+
+	// create bss section
+
+	auto bsssection
+
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	info@ PsOSDLLInfo_BSSSize + @ // anonsize
+	0 // fileobject
+	process@ PsProcess_OwningUser + @ // owninguser
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	MmSectionObjectCreateObject ok! bsssection!
+
+	if (ok@)
+		info@ PsOSDLLInfo_TextSize + @ // length
+		info@ PsOSDLLInfo_TextVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 2 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_DataSize + @ // length
+		info@ PsOSDLLInfo_DataVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 3 (%i)\n" KeCrash
+			end
+		end
+
+		return
+	end
+
+	// map bss section
+	info@ PsOSDLLInfo_BSSSize + @ // length
+	info@ PsOSDLLInfo_BSSVAddr + @ // startva
+	0 // sectionoffset
+	bsssection@ // sectionobject
+	process@ // processobject
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	OSMAPFLAG_FIXEDADDRESS // flags
+	MmSectionMapViewProcessObject ok! drop
+
+	bsssection@ ObObjectDereferenceByPointer drop
+
+	if (ok@)
+		info@ PsOSDLLInfo_TextSize + @ // length
+		info@ PsOSDLLInfo_TextVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 4 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_DataSize + @ // length
+		info@ PsOSDLLInfo_DataVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 5 (%i)\n" KeCrash
+			end
+		end
+
+		return
+	end
+
+	// map head
+	info@ PsOSDLLInfo_HeadSize + @ // length
+	OSDLLHEAD // startva
+	0 // sectionoffset
+	PsOSDLLSectionObject@ // sectionobject
+	process@ // processobject
+	PAGEACCESS_READ // pageprotection
+	OSMAPFLAG_FIXEDADDRESS // flags
+	MmSectionMapViewProcessObject ok! drop
+
+	if (ok@)
+		info@ PsOSDLLInfo_TextSize + @ // length
+		info@ PsOSDLLInfo_TextVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 6 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_DataSize + @ // length
+		info@ PsOSDLLInfo_DataVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 7 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_BSSSize + @ // length
+		info@ PsOSDLLInfo_BSSVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 8 (%i)\n" KeCrash
+			end
+		end
+
+		return
+	end
+
+	if (sectionobject@)
+		// map PEB
+		OSPEBSIZE // length
+		OSPEB // startva
+		0 // sectionoffset
+		sectionobject@ // sectionobject
+		process@ // processobject
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		OSMAPFLAG_FIXEDADDRESS // flags
+		MmSectionMapViewProcessObject ok! drop
+
+		if (ok@)
+			info@ PsOSDLLInfo_TextSize + @ // length
+			info@ PsOSDLLInfo_TextVAddr + @ // vaddr
+			process@ // processobject
+			MmUnmapViewProcess info!
+
+			if (DEBUGCHECKS)
+				if (info@)
+					info@ "MmProcessInitialize: failed to unmap 9 (%i)\n" KeCrash
+				end
+			end
+
+			info@ PsOSDLLInfo_DataSize + @ // length
+			info@ PsOSDLLInfo_DataVAddr + @ // vaddr
+			process@ // processobject
+			MmUnmapViewProcess info!
+
+			if (DEBUGCHECKS)
+				if (info@)
+					info@ "MmProcessInitialize: failed to unmap 10 (%i)\n" KeCrash
+				end
+			end
+
+			info@ PsOSDLLInfo_BSSSize + @ // length
+			info@ PsOSDLLInfo_BSSVAddr + @ // vaddr
+			process@ // processobject
+			MmUnmapViewProcess info!
+
+			if (DEBUGCHECKS)
+				if (info@)
+					info@ "MmProcessInitialize: failed to unmap 11 (%i)\n" KeCrash
+				end
+			end
+
+			info@ PsOSDLLInfo_HeadSize + @ // length
+			OSDLLHEAD // vaddr
+			process@ // processobject
+			MmUnmapViewProcess info!
+
+			if (DEBUGCHECKS)
+				if (info@)
+					info@ "MmProcessInitialize: failed to unmap 12 (%i)\n" KeCrash
+				end
+			end
+
+			return
+		end
+	end
+
+	// create process page directory
+	auto pdir
+	MmPageDirectoryAlloc ok! pdir!
+
+	if (ok@)
+		info@ PsOSDLLInfo_TextSize + @ // length
+		info@ PsOSDLLInfo_TextVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 13 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_DataSize + @ // length
+		info@ PsOSDLLInfo_DataVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 14 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_BSSSize + @ // length
+		info@ PsOSDLLInfo_BSSVAddr + @ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 15 (%i)\n" KeCrash
+			end
+		end
+
+		info@ PsOSDLLInfo_HeadSize + @ // length
+		OSDLLHEAD // vaddr
+		process@ // processobject
+		MmUnmapViewProcess info!
+
+		if (DEBUGCHECKS)
+			if (info@)
+				info@ "MmProcessInitialize: failed to unmap 16 (%i)\n" KeCrash
+			end
+		end
+
+		if (sectionobject@)
+			OSPEBSIZE // length
+			OSPEB // vaddr
+			process@ // processobject
+			MmUnmapViewProcess info!
+
+			if (DEBUGCHECKS)
+				if (info@)
+					info@ "MmProcessInitialize: failed to unmap 17 (%i)\n" KeCrash
+				end
+			end
+		end
+
+		return
+	end
+
+	pdir@ process@ PsProcess_PCB + KeProcess_PageDirectory + !
+end
+
+fn MmProcessUninitialize { process -- ok }
+	// destroy all VADs, free page tables, etc
+
+	"MmProcessUninitialize: TODO\n" KeCrash
+end

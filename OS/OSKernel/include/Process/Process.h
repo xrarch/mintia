@@ -39,6 +39,8 @@ struct PsThread
 endstruct
 
 struct PsOSDLLInfo
+	4 HeadSize
+
 	4 TextOffset
 	4 TextSize
 	4 TextVAddr

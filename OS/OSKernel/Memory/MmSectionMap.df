@@ -163,7 +163,10 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 		0 startva!
 	end
 
-	if (sectionobject@ MmSection_PageProtection + @ pageprotection@ & pageprotection@ ~=)
+	auto perm
+	pageprotection@ PAGEACCESS_ALL & perm!
+
+	if (sectionobject@ MmSection_PageProtection + @ perm@ & perm@ ~=)
 		// section doesn't have required permissions
 		STATUS_PERMISSION_DENIED ok!
 
@@ -202,4 +205,61 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 	end
 
 	// XXX is this really all we have to do???
+end
+
+fn MmUnmapViewProcess { length vaddr processobject -- ok }
+	if (vaddr@ length@ + vaddr@ <)
+		// vaddr+length overflows
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (vaddr@ length@ + MMHIGHESTUSERADDRESS >)
+		// requested region goes outside userspace
+
+		STATUS_FORBIDDEN_OPERATION ok!
+
+		return
+	end
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	processobject@ MmVADListLock ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"MmUnmapViewProcess: failed to lock\n" KeCrash
+		end
+	end
+
+	auto vad
+
+	vaddr@ // vaddr
+	length@ // length
+	1 // mustbestart
+	processobject@
+	MmVADFind ok! vad!
+
+	if (ok@)
+		processobject@ MmVADListUnlock
+
+		KeThreadCurrent@ KeThreadAcceptKill drop
+
+		return
+	end
+
+	auto sectionobject
+	vad@ MmVAD_SectionObject + @ sectionobject!
+
+	vad@ // vad
+	processobject@ // processobject
+	MmVADUnmap
+
+	processobject@ MmVADListUnlock
+
+	sectionobject@ MmSectionUnprepare
+	sectionobject@ ObObjectDereferenceByPointer drop
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end

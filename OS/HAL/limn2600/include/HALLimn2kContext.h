@@ -25,4 +25,7 @@ const RS_USER 1
 const RS_INT  2
 const RS_MMU  4
 
+const RS_KTHREAD (RS_INT RS_MMU |)
+const RS_UTHREAD (RS_INT RS_MMU | RS_USER |)
+
 const RS_INTOFFMASK 0xFFFD

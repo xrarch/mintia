@@ -19,3 +19,4 @@ extern MmVADListLock { processobject -- ok }
 extern MmVADListUnlock { processobject -- }
 extern MmVADFind { vaddr length mustbestart processobject -- vad ok }
 extern MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }
+extern MmVADUnmap { vad processobject -- }

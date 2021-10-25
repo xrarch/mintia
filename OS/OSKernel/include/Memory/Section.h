@@ -14,5 +14,4 @@ endstruct
 extern MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser permissions name -- sectionobject ok }
 extern MmSectionObjectCreate { pageprotection anonsize filehandle owninguser permissions name -- sectionhandle ok }
 
-extern MmProcessInitialize { sectionobject process -- ok }
-extern MmProcessUninitialize { process -- ok }
+extern MmSectionMapViewProcessObject { length startva sectionoffset sectionobject processobject pageprotection flags -- realva ok }

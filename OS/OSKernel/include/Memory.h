@@ -5,3 +5,4 @@
 #include "<inc>/Memory/VAD.h"
 #include "<inc>/Memory/Pool.h"
 #include "<inc>/Memory/VirtualMemory.h"
+#include "<inc>/Memory/View.h"

@@ -23,7 +23,10 @@ fn MmFlushUserTLBAll { -- }
 	HALLimn2500TLBFlushAll
 end
 
-fn MmGetPhysicalAddress { vaddr pagemap -- flags phyaddr ok }
+fn MmGetVirtualAddress { vaddr pagemap -- flags phyaddr pte ok }
+	// get the PTE for a virtual address (for instances like, finding out if
+	// a page is in swap)
+
 	IDENTITYSPACE pagemap |=
 
 	auto pdi
@@ -33,34 +36,28 @@ fn MmGetPhysicalAddress { vaddr pagemap -- flags phyaddr ok }
 
 	if (pagemap@ ~~)
 		-1 ok!
+		0 phyaddr!
+		0 flags!
+		0 pte!
 
 		return
 	end
 
 	IDENTITYSPACE pagemap |=
 
-	auto pte
 	vaddr@ 12 >> 1023 & 2 << pagemap@ + @ pte!
 
 	if (pte@ PTE_V & ~~)
 		-1 ok!
-
-		return
 	end
 
 	pte@ 31 & flags!
 	pte@ 5 >> 12 << phyaddr!
+
 	0 ok!
 end
 
-fn MmGetVirtualAddress { vaddr pagemap -- pte ok }
-	// get the PTE for a virtual address (for instances like, finding out if
-	// a page is in swap)
-
-	"MmGetVirtualAddress: TODO\n" KeCrash
-end
-
-fn MmMapVirtualAddress { phyaddr vaddr flags pagemap canalloc -- ok }
+fn MmMapVirtualAddress { phyaddr vaddr flags pagemap -- ok }
 	// caller should take care of any locking
 
 	IDENTITYSPACE pagemap |=
@@ -77,17 +74,10 @@ fn MmMapVirtualAddress { phyaddr vaddr flags pagemap canalloc -- ok }
 		// need to allocate this page table
 
 		auto pfdbe
+		ZEROMUST MUSTSUCCEED | // priority
+		MmPageAlloc ok! pt! pfdbe!
 
-		if (canalloc@)
-			ZEROMUST CANBLOCK | // priority
-			MmPageAlloc ok! pt! pfdbe!
-
-			if (ok@)
-				return
-			end
-		end else
-			STATUS_NO_MEMORY ok!
-
+		if (ok@)
 			return
 		end
 
@@ -113,7 +103,66 @@ fn MmMapVirtualAddress { phyaddr vaddr flags pagemap canalloc -- ok }
 	1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
 end
 
-fn MmSetVirtualAddress { pte vaddr pagemap canalloc -- ok }
+fn MmRemapVirtualAddress { phyaddr vaddr flags asid pagemap -- ok }
+	// caller should take care of any locking
+
+	IDENTITYSPACE pagemap |=
+
+	0 ok!
+
+	auto pdi
+	vaddr@ 22 >> 2 << pagemap@ + pdi!
+
+	auto pt
+	pdi@@ 5 >> PAGESHIFT << pt!
+
+	if (pt@ 0 ==)
+		// need to allocate this page table
+
+		auto pfdbe
+
+		ZEROMUST MUSTSUCCEED | // priority
+		MmPageAlloc ok! pt! pfdbe!
+
+		if (ok@)
+			return
+		end
+
+		0 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+
+		pt@ 5 << PTE_V | pdi@!
+
+		PAGESHIFT pt <<=
+		IDENTITYSPACE pt |=
+	end else
+		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		IDENTITYSPACE pt |=
+	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pdi!
+
+	if (pdi@@ PTE_V &)
+		if (pdi@@ 31 & flags@ ~=)
+			// flush TLB entry
+
+			if (DEBUGCHECKS)
+				if (asid@ 0 ==)
+					"MmRemapVirtualAddress: asid == 0\n" KeCrash
+				end
+			end
+
+			vaddr@ PAGESHIFT >> // vpn
+			asid@ 255 & 1 + // asid
+			HALLimn2500TLBFlush
+		end
+	end elseif (pdi@@ ~~)
+		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
+	end
+
+	phyaddr@ PAGESHIFT >> 5 << flags@ | pdi@!
+end
+
+fn MmSetVirtualAddress { pte vaddr pagemap -- ok }
 	// set the pte for the virtual address (for instances like, in order to
 	// keep track of where the page frame is in swap)
 
@@ -193,7 +242,7 @@ fn MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- pte phyaddr ok 
 			// there are no more mappings in this page table.
 			// it can be freed
 
-			pt@ PAGESHIFT >> MmPageFree
+			pfdbe@ MmPageFrameEntry_PFN + @ MmPageFree
 		end
 	end
 end

@@ -1,0 +1,287 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALInterrupt.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
+	HALCPUInterruptEnable
+
+	auto ipl
+	IPLAPC KeIPLRaise ipl!
+
+	writing@ // writing
+	badaddr@ // badaddr
+	trapframe@ // trapframe
+	MmSatisfyFault handled!
+
+	if (handled@ 1 ==)
+		// segfault (but handled successfully)
+		"MmPageFault: TODO: generate signal on user segfault or return from safecopy\n" KeCrash
+	end elseif (handled@ -1 ==)
+		// system error happened
+		0 handled!
+	end else
+		// was handled successfully
+		1 handled!
+	end
+
+	ipl@ KeIPLLower
+	HALCPUInterruptDisable drop
+end
+
+const FAULTACTIONNORMAL 1
+const FAULTACTIONDIRTY  2
+const FAULTACTIONCOW    3
+
+fn MmSatisfyFault { writing badaddr trapframe -- dosegfault }
+	0 dosegfault!
+
+	if (badaddr@ PAGESIZE <)
+		1 dosegfault!
+		return
+	end else
+		if (trapframe@ HALCPUIsUserTrapFrame)
+			if (badaddr@ MMHIGHESTUSERADDRESS >)
+				1 dosegfault!
+				return
+			end
+		end elseif (badaddr@ MMLOWESTSYSTEMADDRESS >=)
+			// kernel mode fault on kernel mode address... bad
+			-1 dosegfault!
+			return
+		end
+	end
+
+	auto process
+	KeProcessCurrent process!
+
+	auto ok
+	process@ MmVADListLock ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmSatisfyFault: failed to lock VAD list (%i)\n" KeCrash
+		end
+	end
+
+	auto pdir
+	process@ KeProcess_PageDirectory + @ pdir!
+
+	auto pte
+	auto phyaddr
+	auto flags
+
+	badaddr@ // vaddr
+	pdir@ // pagemap
+	MmGetVirtualAddress ok! pte! phyaddr! flags!
+
+	if (flags@ PTE_V &)
+		if (writing@ ~~)
+			// not writing and PTE is valid, nothing to do
+			process@ MmVADListUnlock
+			return
+		end elseif (flags@ PTE_W &)
+			// am writing but PTE is writable, nothing to do
+			process@ MmVADListUnlock
+			return
+		end
+	end elseif (pte@ MMPTEFLAG_COWINSWAP &)
+		"MmSatisfyFault: TODO: swap in COW page\n" KeCrash
+	end
+
+	auto vad
+	badaddr@ // vaddr
+	0 // length
+	0 // mustbestart
+	process@ // processobject
+	MmVADFind ok! vad!
+
+	if (ok@)
+		process@ MmVADListUnlock
+		1 dosegfault!
+		return
+	end
+
+	// reuse pte for this
+	FAULTACTIONNORMAL pte!
+
+	if (writing@)
+		// we are writing...
+		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE & ~~)
+			// but the VAD isn't writable...
+			if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY & ~~)
+				// nor is it COW. this is an access violation
+				process@ MmVADListUnlock
+				1 dosegfault!
+				return
+			end
+			// but is COW.
+			FAULTACTIONCOW pte!
+		end else
+			// and the VAD is writable...
+			if (flags@ PTE_W & ~~)
+				// but the PTE is readonly. we're dirtying something
+				FAULTACTIONDIRTY pte!
+			end // else -- can't happen, would have returned above
+		end
+	end
+
+	auto section
+	vad@ MmVAD_SectionObject + @ section!
+
+	auto sectoff
+	badaddr@ vad@ MmVAD_StartVA + @ - vad@ MmVAD_OffsetInSection + @ + sectoff!
+
+	auto pfdbe
+	0 pfdbe!
+
+	if (flags@ PTE_V & ~~)
+		if (section@ MmSection_FileObject + @)
+			vad@ // vad
+			section@ // sectionobject
+			sectoff@ // sectionoffset
+			badaddr@ // vaddr
+			process@ // processobject
+			MmSatisfyFileFault ok! phyaddr! pfdbe!
+		end else
+			vad@ // vad
+			section@ // sectionobject
+			sectoff@ // sectionoffset
+			badaddr@ // vaddr
+			process@ // processobject
+			MmSatisfyAnonFault ok! phyaddr! pfdbe!
+		end
+
+		if (ok@)
+			process@ MmVADListUnlock
+			1 dosegfault!
+			return
+		end
+	end elseif (section@ MmSection_NoCommit + @ ~~)
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+	end
+
+	auto ipl
+
+	if (pte@ FAULTACTIONDIRTY ==)
+		if (pfdbe@)
+			pfdbe@ MmEvictablePageModify ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"MmSatisfyFault: failed to modify page\n" KeCrash
+				end
+			end
+
+			"MmSatisfyFault: TODO: properly do modified PTE shenanigans\n" KeCrash
+		end
+	end elseif (pte@ FAULTACTIONCOW ==)
+		"MmSatisfyFault: TODO: COW\n" KeCrash
+	end
+
+	process@ MmVADListUnlock
+end
+
+fn MmSatisfyFileFault { vad sectionobject sectionoffset vaddr processobject -- pfdbe phyaddr ok }
+	auto fileobject
+	sectionobject@ MmSection_FileObject + @ fileobject!
+
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	0 ok!
+
+	auto flags
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+		// character device, like a framebuffer or something. will have its
+		// own method of mapping.
+
+		auto getpagefunc
+		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_GetPageAddress + @ getpagefunc!
+
+		if (DEBUGCHECKS)
+			if (getpagefunc@ ~~)
+				"MmSatisfyFileFault: no GetPageAddress\n" KeCrash
+			end
+		end
+
+		0 pfdbe!
+
+		sectionoffset@ // offset
+		fcb@ // fcb
+		getpagefunc@ IODispatchGetPageAddressFunction ok! phyaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmSatisfyFileFault: failed to get page address (%i)\n" KeCrash
+			end
+		end
+
+		PTE_V flags!
+
+		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+			PTE_W flags |=
+		end
+
+		phyaddr@ // phyaddr
+		vaddr@ // vaddr
+		flags@ // flags
+		processobject@ KeProcess_PageDirectory + @ // pagemap
+		MmMapVirtualAddress ok!
+
+		if (ok@)
+			return
+		end
+
+		1 processobject@ PsProcess_MappedPageFrames + +=
+	end else
+		// real file like a block device (or normal file). call into
+		// page cache.
+
+		0 // flags
+		sectionoffset@ PAGENUMBERMASK & // offset
+		fcb@ // fcb
+		IOCachePageRead ok! pfdbe! drop
+
+		if (ok@)
+			return
+		end
+
+		pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << phyaddr!
+
+		phyaddr@ // phyaddr
+		vaddr@ // vaddr
+		PTE_V // flags
+		processobject@ KeProcess_PageDirectory + @ // pagemap
+		MmMapVirtualAddress ok!
+
+		if (ok@)
+			pfdbe@ MmEvictablePageDereference drop
+			return
+		end
+
+		1 processobject@ PsProcess_CommittedPageFrames + +=
+		1 processobject@ PsProcess_MappedPageFrames + +=
+	end
+end
+
+fn MmSatisfyAnonFault { vad sectionobject sectionoffset vaddr processobject -- pfdbe phyaddr ok }
+	"MmSatisfyAnonFault: TODO\n" KeCrash
+end

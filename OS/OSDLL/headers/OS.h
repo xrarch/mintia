@@ -3,3 +3,4 @@
 #include "<ll>/OSDLL/OSFile.h"
 #include "<ll>/OSDLL/OSWait.h"
 #include "<ll>/OSDLL/OSMap.h"
+#include "<ll>/OSDLL/OSSignal.h"

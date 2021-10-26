@@ -25,19 +25,22 @@ fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 	auto ipl
 	IPLAPC KeIPLRaise ipl!
 
+	auto signal
+
 	writing@ // writing
 	badaddr@ // badaddr
 	trapframe@ // trapframe
-	MmSatisfyFault handled!
+	MmSatisfyFault signal!
 
-	if (handled@ 1 ==)
-		// segfault (but handled successfully)
-		"MmPageFault: TODO: generate signal on user segfault or return from safecopy\n" KeCrash
-	end elseif (handled@ -1 ==)
+	if (signal@ -1 ==)
 		// system error happened
 		0 handled!
+	end elseif (signal@)
+		// generate signal or return from safecopy
+		1 handled!
+		"MmPageFault: TODO: generate signal or return from safecopy\n" KeCrash
 	end else
-		// was handled successfully
+		// handled successfully
 		1 handled!
 	end
 
@@ -49,21 +52,21 @@ const FAULTACTIONNORMAL 1
 const FAULTACTIONDIRTY  2
 const FAULTACTIONCOW    3
 
-fn MmSatisfyFault { writing badaddr trapframe -- dosegfault }
-	0 dosegfault!
+fn MmSatisfyFault { writing badaddr trapframe -- signal }
+	0 signal!
 
 	if (badaddr@ PAGESIZE <)
-		1 dosegfault!
+		OSSIGNAL_SEGV signal!
 		return
 	end else
 		if (trapframe@ HALCPUIsUserTrapFrame)
 			if (badaddr@ MMHIGHESTUSERADDRESS >)
-				1 dosegfault!
+				OSSIGNAL_SEGV signal!
 				return
 			end
 		end elseif (badaddr@ MMLOWESTSYSTEMADDRESS >=)
 			// kernel mode fault on kernel mode address... bad
-			-1 dosegfault!
+			-1 signal!
 			return
 		end
 	end
@@ -114,7 +117,7 @@ fn MmSatisfyFault { writing badaddr trapframe -- dosegfault }
 
 	if (ok@)
 		process@ MmVADListUnlock
-		1 dosegfault!
+		OSSIGNAL_SEGV signal!
 		return
 	end
 
@@ -128,7 +131,7 @@ fn MmSatisfyFault { writing badaddr trapframe -- dosegfault }
 			if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY & ~~)
 				// nor is it COW. this is an access violation
 				process@ MmVADListUnlock
-				1 dosegfault!
+				OSSIGNAL_SEGV signal!
 				return
 			end
 			// but is COW.
@@ -170,7 +173,7 @@ fn MmSatisfyFault { writing badaddr trapframe -- dosegfault }
 
 		if (ok@)
 			process@ MmVADListUnlock
-			1 dosegfault!
+			OSSIGNAL_KILL signal!
 			return
 		end
 	end elseif (section@ MmSection_NoCommit + @ ~~)

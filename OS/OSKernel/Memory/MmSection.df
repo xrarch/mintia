@@ -51,6 +51,18 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	end
 end
 
+fn MmSectionPPTLock { sectionobject -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	sectionobject@ MmSection_PrototypePageTableMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn MmSectionPPTUnlock { sectionobject -- }
+	sectionobject@ MmSection_PrototypePageTableMutex + KeMutexRelease drop
+end
+
 fn MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser permissions name -- sectionobject ok }
 	auto fcb
 
@@ -61,10 +73,14 @@ fn MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser p
 			return
 		end
 
-		if (anonsize@ PAGEOFFSETMASK &)
-			// round up to next page boundary
+		// round up to next page boundary
+		anonsize@ PAGEOFFSETMASK + PAGENUMBERMASK & anonsize!
 
-			anonsize@ PAGESIZE + PAGENUMBERMASK & anonsize!
+		if (anonsize@ ~~)
+			// overflowed
+			STATUS_OVERFLOW ok!
+
+			return
 		end
 
 		if (pageprotection@ PAGEACCESS_WRITECOPY &)
@@ -115,6 +131,17 @@ fn MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser p
 	anonsize@ sectionobject@ MmSection_AnonSize + !
 	0 sectionobject@ MmSection_AnonPrototypePageTable + !
 	0 sectionobject@ MmSection_NoCommit + !
+
+	"MmSectionPrototypePageTableMutex" // name
+	KERNELMODE // mode
+	sectionobject@ MmSection_PrototypePageTableMutex + // mutex
+	KeMutexInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"MmSectionObjectCreateObject: couldn't initialize PrototypePageTableMutex\n" KeCrash
+		end
+	end
 
 	if (fileobject@)
 		// memory-mapped file. ref the file object and force caching.
@@ -191,4 +218,159 @@ fn MmSectionObjectCreate { pageprotection anonsize filehandle owninguser permiss
 
 		return
 	end
+end
+
+table MmAnonymousEvictableFunctions
+	pointerof MmAnonymousEvictionFunction // EvictionFunc
+	0 // ReferenceFunc
+	0 // DereferenceFunc
+	0 // ModifyFunc
+	0 // Reserved2
+	0 // Reserved3
+	0 // Reserved4
+	0 // Reserved5
+endtable
+public MmAnonymousEvictableFunctions
+
+fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
+	"MmAnonymousEvictionFunction: TODO swap\n" KeCrash
+end
+
+fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
+	"MmSectionPageGet: NEEDS REVIEW\n" KeCrash
+
+	// get specified page frame from section. will read it in if in swap, or
+	// demand zero if non-existent, or just return if resident.
+
+	if (DEBUGCHECKS)
+		if (sectionobject@ MmSection_AnonSize + @ ~~)
+			"MmSectionPageGet: anonsize==0\n" KeCrash
+		end
+	end
+
+	sectionobject@ MmSectionPPTLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto multilevel
+	0 multilevel!
+
+	auto anonsize
+	sectionobject@ MmSection_AnonSize + @ anonsize!
+
+	if (DEBUGCHECKS)
+		if (sectionoffset@ anonsize@ >=)
+			"MmSectionPageGet: offset>=anonsize\n" KeCrash
+		end
+	end
+	
+	if (anonsize@ 0x800000 >=)
+		1 multilevel!
+	end
+
+	auto ppt
+	sectionobject@ MmSection_AnonPrototypePageTable + @ ppt!
+
+	if (ppt@ ~~)
+		// needs to be created
+
+		if (multilevel@)
+			PAGESIZE // bytes
+			'mPPT' // tag
+			MmAllocWithTag ok! ppt!
+
+			if (ok@)
+				sectionobject@ MmSectionPPTUnlock
+				return
+			end
+
+			ppt@ // ptr
+			PAGESIZE // size
+			0 // word
+			memset
+		end else
+			// create linearly
+			anonsize@ PAGESHIFT >> 2 << // bytes
+			'lPPT' // tag
+			MmAllocWithTag ok! ppt!
+
+			if (ok@)
+				sectionobject@ MmSectionPPTUnlock
+				return
+			end
+
+			ppt@ // ptr
+			anonsize@ PAGESHIFT >> 2 << // size
+			0 // word
+			memset
+		end
+
+		ppt@ sectionobject@ MmSection_AnonPrototypePageTable + !
+	end
+
+	if (multilevel@)
+		auto pde
+		sectionoffset@ PDSHIFT >> 2 << ppt@ + pde!
+
+		if (pde@@ ~~)
+			// need to allocate this level
+
+			PAGESIZE // bytes
+			'nPPT' // tag
+			MmAllocWithTag ok! ppt!
+
+			if (ok@)
+				sectionobject@ MmSectionPPTUnlock
+				return
+			end
+
+			ppt@ // ptr
+			PAGESIZE // size
+			0 // word
+			memset
+
+			ppt@ pde@!
+		end
+
+		pde@@ sectionoffset@ PAGESHIFT 2 - >> PAGEOFFSETMASK & + ppt!
+	end else
+		sectionoffset@ PAGESHIFT 2 - >> ppt +=
+	end
+
+	auto ppte
+	ppt@@ ppte!
+
+	if (ppte@ PTE_V &)
+		// already present, return
+
+		ppte@ PAGESHIFT >> PAGESHIFT << phyaddr!
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		pfdbe@ MmEvictablePageReference drop
+	end elseif (ppte@ ~~)
+		// non-existent, demand zero
+
+		0 // flags
+		MmAnonymousEvictableFunctions // evictablefuncs
+		ZEROMUST CANBLOCK | // priority
+		MmEvictablePageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			sectionobject@ MmSectionPPTUnlock
+			return
+		end
+
+		PAGESHIFT phyaddr <<=
+
+		phyaddr@ PTE_V | ppt@!
+
+		0 pfdbe@ MmPageFrameEntryAnonymous_TrickPTE + !
+		ppt@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+	end elseif (ppte@ PTE_INSWAP &)
+		"MmSectionPageGet: TODO: swap in\n" KeCrash
+	end
+
+	sectionobject@ MmSectionPPTUnlock
 end

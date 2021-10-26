@@ -6,4 +6,5 @@ extern MmSetVirtualAddress { pte vaddr pagemap -- ok }
 extern MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- pte phyaddr ok }
 extern MmPageDirectoryInitialize { pagemap -- }
 
-const MMPTEFLAG_COWINSWAP 2
+const PTE_COWINSWAP 2
+const PTE_INSWAP    2

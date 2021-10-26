@@ -4,12 +4,14 @@
 
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALMap.h"
+#include "<inc>/HALInterrupt.h"
 
 #include "<inc>/HALDebug.h"
 
 const ECAUSEINTERRUPT 1
-
 const ECAUSENMI 6
+const ECAUSEPAGEFAULT 12
+const ECAUSEPAGEWRITE 13
 
 externptr HALLIMNstationInterruptHandlers
 
@@ -17,6 +19,9 @@ externptr HALLIMNstationLSICClaimComplete
 
 var HALInterruptFunction 0
 public HALInterruptFunction
+
+var HALPageFaultFunction 0
+public HALPageFaultFunction
 
 var HALThreadCurrentStackTop 0
 public HALThreadCurrentStackTop
@@ -494,11 +499,43 @@ fn HALLimn2500Exception { badaddr ecause tf -- }
 
 		return
 	end
-	
-	ecause@ excname@ badaddr@ tf@ Limn2500Context_epc + @ tf@ Limn2500Context_ers + @
-	"Fault: ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" HALCrash
+
+	// TODO call into kernel to generate signal on various actual faults
+
+	auto handled
+	0 handled!
+
+	auto pff
+	HALPageFaultFunction@ pff!
+
+	if (pff@)
+		if (ecause@ ECAUSEPAGEFAULT ==)
+			4 tf@ Limn2500Context_epc + -=
+
+			0 // writing
+			badaddr@ // badaddr
+			tf@ // trapframe
+			pff@ HALPageFaultHandler handled!
+		end elseif (ecause@ ECAUSEPAGEWRITE ==)
+			4 tf@ Limn2500Context_epc + -=
+
+			1 // writing
+			badaddr@ // badaddr
+			tf@ // trapframe
+			pff@ HALPageFaultHandler handled!
+		end
+	end
+
+	if (handled@ ~~)
+		ecause@ excname@ badaddr@ tf@ Limn2500Context_epc + @ tf@ Limn2500Context_ers + @
+		"Fault: ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" HALCrash
+	end
 
 	// while (1) end
+end
+
+fn HALCPUIsUserTrapFrame { tf -- user }
+	tf@ Limn2500Context_ers + @ RS_USER & user!
 end
 
 fn HALCPUContextInit { context1 context2 startfunc kstack -- ctx }

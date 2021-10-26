@@ -118,6 +118,8 @@ extern MmPageDirectoryFree { pdir -- }
 
 extern MmZeroPageWorker { -- }
 
+extern MmPageFault { writing badaddr trapframe -- handled }
+
 externptr MmPageFrameDatabase
 externptr MmPageFreeListHead
 externptr MmPageZeroListHead

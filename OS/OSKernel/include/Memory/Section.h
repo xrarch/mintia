@@ -8,9 +8,11 @@ struct MmSection
 	4 AnonSize
 	4 AnonPrototypePageTable
 
-	KeMutex_SIZEOF PrototypePageTableMutex
-
 	4 NoCommit
+
+	4 QuotaBlock
+
+	KeMutex_SIZEOF PrototypePageTableMutex
 endstruct
 
 extern MmSectionPPTLock { sectionobject -- ok }

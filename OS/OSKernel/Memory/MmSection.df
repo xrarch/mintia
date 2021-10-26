@@ -47,6 +47,15 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 			end
 		end
 
+		auto quotablock
+		object@ MmSection_QuotaBlock + @ quotablock!
+
+		anonsize@ // charge
+		quotablock@ // quota
+		MmQuotaBlockUnchargeVM
+
+		quotablock@ MmQuotaBlockDereference
+
 		"MmSectionObjectDelete: TODO cleanup anonymous\n" KeCrash
 	end
 end
@@ -65,6 +74,9 @@ end
 
 fn MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser permissions name -- sectionobject ok }
 	auto fcb
+
+	auto quotablock
+	KeProcessCurrent PsProcess_QuotaBlock + @ quotablock!
 
 	if (anonsize@)
 		if (fileobject@)
@@ -165,6 +177,22 @@ fn MmSectionObjectCreateObject { pageprotection anonsize fileobject owninguser p
 		end else
 			1 sectionobject@ MmSection_NoCommit + !
 		end
+
+		0 sectionobject@ MmSection_QuotaBlock + !
+	end else
+		quotablock@ sectionobject@ MmSection_QuotaBlock + !
+
+		anonsize@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockChargeVM ok!
+
+		if (ok@)
+			sectionobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+
+		quotablock@ MmQuotaBlockReference
 	end
 end
 
@@ -364,7 +392,6 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		phyaddr@ PTE_V | ppt@!
 
-		0 pfdbe@ MmPageFrameEntryAnonymous_TrickPTE + !
 		ppt@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
 	end elseif (ppte@ PTE_INSWAP &)
 		"MmSectionPageGet: TODO: swap in\n" KeCrash

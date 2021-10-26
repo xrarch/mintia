@@ -11,23 +11,26 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-fn MmQuotaBlockCreate { heapmax -- quota ok }
+fn MmQuotaBlockCreate { vmmax heapmax -- quota ok }
 	MmQuotaBlock_SIZEOF 'Quot' MmAllocWithTag ok! quota!
 
 	if (ok@)
 		return
 	end
 
-	heapmax@ quota@ MmQuotaBlockInitialize ok!
+	vmmax@ heapmax@ quota@ MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockInitialize { heapmax quota -- ok }
+fn MmQuotaBlockInitialize { vmmax heapmax quota -- ok }
 	0 ok!
 
 	1 quota@ MmQuotaBlock_References + !
 
 	0 quota@ MmQuotaBlock_HeapUsed + !
 	heapmax@ quota@ MmQuotaBlock_HeapMax + !
+
+	0 quota@ MmQuotaBlock_VMUsed + !
+	vmmax@ quota@ MmQuotaBlock_VMMax + !
 end
 
 fn MmQuotaBlockReference { quota -- }
@@ -136,8 +139,59 @@ fn MmQuotaBlockUncharge { charge quota -- }
 	rs@ HALCPUInterruptRestore
 end
 
+fn MmQuotaBlockChargeVM { charge quota -- ok }
+	if (charge@ 0 s<)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	0 ok!
+
+	auto vmmax
+	quota@ MmQuotaBlock_VMMax + @ vmmax!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quota@ MmQuotaBlock_VMUsed + @ oldcharge!
+
+	if (oldcharge@ charge@ + vmmax@ >)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_QUOTA_EXCEEDED ok!
+
+		return
+	end
+
+	oldcharge@ charge@ + quota@ MmQuotaBlock_VMUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaBlockUnchargeVM { charge quota -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quota@ MmQuotaBlock_VMUsed + @ oldcharge!
+
+	if (DEBUGCHECKS)
+		if (charge@ oldcharge@ >)
+			"MmQuotaBlockUnchargeVM: attempt to uncharge more than was charged\n" KeCrash
+		end
+	end
+
+	oldcharge@ charge@ - quota@ MmQuotaBlock_VMUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn MmQuotaBlockPrint { quota -- }
 	quota@ MmQuotaBlock_HeapUsed + @ "heapused = %d\n" Printf
 	quota@ MmQuotaBlock_HeapMax + @ "heapmax = %d\n" Printf
+	quota@ MmQuotaBlock_VMUsed + @ "vmused = %d\n" Printf
+	quota@ MmQuotaBlock_VMMax + @ "vmmax = %d\n" Printf
 	quota@ MmQuotaBlock_References + @ "references = %d\n" Printf
 end

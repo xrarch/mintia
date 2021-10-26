@@ -25,6 +25,6 @@ WIP: MINTIA is not currently in an even minimally usable state.
 1. Demand paging, memory-mapped files, etc. (in progress)
 2. Userspace processes and dynamic linking.
 3. AisixFS write support, FAT32 driver
-3. Mac OS 9-like window system.
+4. Mac OS 9-like window system.
 
 ![Running](https://i.imgur.com/dFxBZO5.png)

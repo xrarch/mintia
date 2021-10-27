@@ -593,31 +593,27 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		// try to grab a page from our own cache block.
 		// only try again with CANBLOCK if there are none available.
 
-		if (kflags@ IOCACHEGETFLAG_SWAPOUT &)
-			// this IOCachePageGet is needed for a swap-out operation.
-			// allow it to dip into the MUSTSUCCEED pages. this makes it far
-			// more privileged than normal IOCachePageGets whose CACHEALLOC
-			// flag prevent them from going below the low watermark,
-			// let alone the MUSTSUCCEED pool.
+		// this is done all complicated-like to avoid a deadlock, but this
+		// deadlock can only happen if this file fills up basically all of
+		// memory and may be such a corner case in practice that it's not
+		// worth doing it like this.
 
-			MUSTSUCCEED kflags!
-		end else
-			CACHEALLOC kflags!
-		end
+		// the alternative would be to just permit blocking on this allocation
+		// with CANBLOCK and not do the rest of the strange things.
 
 		if (filesize@ offset@ - PAGESIZE <)
 			// not a full page -- get zeroes because this might leak data
 
 			MMEVICTFLAG_FAST // flags
 			IOCacheEvictableFunctions // evictablefuncs
-			ZEROMUST kflags@ | // priority
+			ZEROMUST CACHEALLOC | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end else
 			// full page, get any random page that may or may not be zeroed
 
 			MMEVICTFLAG_FAST // flags
 			IOCacheEvictableFunctions // evictablefuncs
-			FREEFIRST kflags@ | // priority
+			FREEFIRST CACHEALLOC | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end
 
@@ -673,11 +669,17 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 				// not to do this in order to avoid waking the eviction thread
 				// unnecessarily. here, it might happen, and we might block.
 
-				if (kflags@ MUSTSUCCEED ==)
-					// this page was needed for a swap-out... deadlock may
-					// occur if allowed to continue here.
+				if (kflags@ IOCACHEGETFLAG_SWAPOUT &)
+					// this IOCachePageGet is needed for a swap-out operation
+					// (i.e., the filesystem driver is using it to cache disk
+					// structures and needs whatever is going to be read into
+					// this page to know where to swap the page out to).
 
-					"IOCachePageGet: failed to get page required for swap-out!\n" KeCrash
+					// allow it to dip into the MUSTSUCCEED pages.
+
+					MUSTSUCCEED kflags!
+				end else
+					CANBLOCK kflags!
 				end
 
 				if (filesize@ offset@ - PAGESIZE <)
@@ -685,18 +687,23 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 
 					MMEVICTFLAG_FAST // flags
 					IOCacheEvictableFunctions // evictablefuncs
-					ZEROMUST CANBLOCK | // priority
+					ZEROMUST kflags@ | // priority
 					MmEvictablePageAlloc ok! drop pfdbe!
 				end else
 					// full page, get any random page that may or may not be zeroed
 
 					MMEVICTFLAG_FAST // flags
 					IOCacheEvictableFunctions // evictablefuncs
-					FREEFIRST CANBLOCK | // priority
+					FREEFIRST kflags@ | // priority
 					MmEvictablePageAlloc ok! drop pfdbe!
 				end
 
 				if (ok@)
+					if (kflags@ MUSTSUCCEED ==)
+						// we needed this page for a swapout, system detonates
+						"IOCachePageGet: failed to get page needed for a swapout!\n" KeCrash
+					end
+
 					if (locked@ ~~)
 						cacheblock@ // cacheblock
 						IOCacheInfoBlockUnlock

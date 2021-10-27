@@ -135,7 +135,7 @@ externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
 
-const MMMUSTSUCCEEDPAGES 16
+const MMMUSTSUCCEEDPAGES 25
 
 // page allocation priorities
 

@@ -103,7 +103,7 @@ fn MmMapVirtualAddress { phyaddr vaddr flags pagemap -- ok }
 	1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
 end
 
-fn MmRemapVirtualAddress { phyaddr vaddr flags asid pagemap -- ok }
+fn MmRemapVirtualAddress { phyaddr vaddr flags asid pagemap -- pteaddr ok }
 	// caller should take care of any locking
 
 	IDENTITYSPACE pagemap |=
@@ -139,10 +139,10 @@ fn MmRemapVirtualAddress { phyaddr vaddr flags asid pagemap -- ok }
 		IDENTITYSPACE pt |=
 	end
 
-	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pdi!
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
 
-	if (pdi@@ PTE_V &)
-		if (pdi@@ 31 & flags@ ~=)
+	if (pteaddr@@ PTE_V &)
+		if (pteaddr@@ 31 & flags@ ~=)
 			// flush TLB entry
 
 			if (DEBUGCHECKS)
@@ -159,7 +159,7 @@ fn MmRemapVirtualAddress { phyaddr vaddr flags asid pagemap -- ok }
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
 	end
 
-	phyaddr@ PAGESHIFT >> 5 << flags@ | pdi@!
+	phyaddr@ PAGESHIFT >> 5 << flags@ | pteaddr@!
 end
 
 fn MmSetVirtualAddress { pte vaddr pagemap -- ok }
@@ -245,6 +245,19 @@ fn MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- pte phyaddr ok 
 			pfdbe@ MmPageFrameEntry_PFN + @ MmPageFree
 		end
 	end
+end
+
+fn MmMapUnmodifyPTE { pteaddr -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmMapUnmodifyPTE: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// clear writable bit
+	0xFFFFFFFD pteaddr@ &=
+
+	MmFlushUserTLBAll
 end
 
 fn MmPageDirectoryInitialize { pagemap -- }

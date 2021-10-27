@@ -1,13 +1,12 @@
 fnptr MmEvictionFunction { pfdbe -- evicted ok }
 fnptr MmReferenceFunction { oldcount pfdbe -- }
 fnptr MmDereferenceFunction { oldcount pfdbe -- }
-fnptr MmModifyFunction { pfdbe -- ok }
 
 struct MmEvictableFunctions
 	4 EvictionFunc
 	4 ReferenceFunc
 	4 DereferenceFunc
-	4 ModifyFunc
+	4 Reserved1
 	4 Reserved2
 	4 Reserved3
 	4 Reserved4
@@ -79,7 +78,6 @@ extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 extern MmPageEvict { pfdbe -- evicted ok }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }
-extern MmEvictablePageModify { pfdbe -- ok }
 
 externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail

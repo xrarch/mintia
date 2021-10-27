@@ -106,6 +106,8 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 		end
 	end elseif (pte@ PTE_COWINSWAP &)
 		"MmSatisfyFault: TODO: swap in COW page\n" KeCrash
+		process@ MmVADListUnlock
+		return
 	end
 
 	auto vad
@@ -184,7 +186,9 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 
 	if (pte@ FAULTACTIONDIRTY ==)
 		if (pfdbe@)
-			pfdbe@ MmEvictablePageModify ok!
+			IPLDPC KeIPLRaise ipl!
+
+			pfdbe@ IOCachePageModifyFunction ok!
 
 			if (DEBUGCHECKS)
 				if (ok@)
@@ -192,7 +196,26 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 				end
 			end
 
-			"MmSatisfyFault: TODO: properly do modified PTE shenanigans\n" KeCrash
+			phyaddr@ // phyaddr
+			badaddr@ // vaddr
+			PTE_V PTE_W | // flags
+			process@ KeProcess_ASID + @ // asid
+			process@ KeProcess_PageDirectory + @ // pagemap
+			MmRemapVirtualAddress ok! pte!
+
+			if (ok@)
+				ipl@ KeIPLLower
+				OSSIGNAL_KILL signal!
+				return
+			end
+
+			if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
+				pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmMapUnmodifyPTE
+			end
+
+			pte@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+
+			ipl@ KeIPLLower
 		end
 	end elseif (pte@ FAULTACTIONCOW ==)
 		"MmSatisfyFault: TODO: COW\n" KeCrash

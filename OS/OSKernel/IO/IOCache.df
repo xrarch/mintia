@@ -537,7 +537,7 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	end
 end
 
-fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
+fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	if (DEBUGCHECKS)
 		if (offset@ PAGEOFFSETMASK &)
 			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
@@ -593,19 +593,31 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 		// try to grab a page from our own cache block.
 		// only try again with CANBLOCK if there are none available.
 
+		if (kflags@ IOCACHEGETFLAG_SWAPOUT &)
+			// this IOCachePageGet is needed for a swap-out operation.
+			// allow it to dip into the MUSTSUCCEED pages. this makes it far
+			// more privileged than normal IOCachePageGets whose CACHEALLOC
+			// flag prevent them from going below the low watermark,
+			// let alone the MUSTSUCCEED pool.
+
+			MUSTSUCCEED kflags!
+		end else
+			CACHEALLOC kflags!
+		end
+
 		if (filesize@ offset@ - PAGESIZE <)
-			// not a full page -- get zeroes because this might leak data otherwise
+			// not a full page -- get zeroes because this might leak data
 
 			MMEVICTFLAG_FAST // flags
 			IOCacheEvictableFunctions // evictablefuncs
-			ZEROMUST CACHEALLOC | // priority
+			ZEROMUST kflags@ | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end else
 			// full page, get any random page that may or may not be zeroed
 
 			MMEVICTFLAG_FAST // flags
 			IOCacheEvictableFunctions // evictablefuncs
-			FREEFIRST CACHEALLOC | // priority
+			FREEFIRST kflags@ | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end
 
@@ -660,6 +672,13 @@ fn IOCachePageGet { locked offset fcb -- pageframe pfdbe ok }
 				// allows us to dip below the low watermark. normally, we try
 				// not to do this in order to avoid waking the eviction thread
 				// unnecessarily. here, it might happen, and we might block.
+
+				if (kflags@ MUSTSUCCEED ==)
+					// this page was needed for a swap-out... deadlock may
+					// occur if allowed to continue here.
+
+					"IOCachePageGet: failed to get page required for swap-out!\n" KeCrash
+				end
 
 				if (filesize@ offset@ - PAGESIZE <)
 					// not a full page -- get zeroes because this might leak data otherwise
@@ -959,7 +978,7 @@ fn IOCachePageModifyFunction { pfdbe -- ok }
 	ipl@ KeIPLLower
 end
 
-fn IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
+fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
@@ -975,6 +994,7 @@ fn IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
 		return
 	end
 
+	kflags@ // kflags
 	1 // locked
 	offset@ // offset
 	fcb@ // fcb
@@ -1008,6 +1028,7 @@ fn IOCachePageRead { flags offset fcb -- pageframe pfdbe ok }
 
 		OSWAIT_TIMEOUTINFINITE // timeout
 		flags@ // flags
+		0 // kflags
 		PAGESIZE // length
 		offset@ // offset
 		pageframe@ // buffer
@@ -1139,6 +1160,7 @@ fn IOCacheFileWrite { flags length offset buffer fcb -- byteswritten ok }
 		if (m@ PAGESIZE ==)
 			// writing a full page -- no need to read something we're about to overwrite
 
+			0 // kflags
 			0 // locked
 			pageno@ // offset
 			fcb@ // fcb
@@ -1154,6 +1176,7 @@ fn IOCacheFileWrite { flags length offset buffer fcb -- byteswritten ok }
 			// writing a partial page, may need to read the rest of the page
 
 			flags@ // flags
+			0 // kflags
 			pageno@ // offset
 			fcb@ // fcb
 			IOCachePageRead ok! pfdbe! pageframe!
@@ -1248,6 +1271,7 @@ fn IOCacheFileRead { flags length offset buffer fcb -- bytesread ok }
 		end
 
 		flags@ // flags
+		0 // kflags
 		pageno@ // offset
 		fcb@ // fcb
 		IOCachePageRead ok! pfdbe! pageframe!

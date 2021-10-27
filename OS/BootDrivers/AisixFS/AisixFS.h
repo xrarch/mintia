@@ -98,15 +98,15 @@ extern AFSFCBCacheUnlock { mount -- }
 extern AFSFCBCacheDestroy { mount -- ok }
 extern AFSFCBRead { inum mount -- fcb ok }
 
-extern AFSWalkFAT { growing startcount startblkno mount -- left blkno ok }
-extern AFSBlockMap { blkoff fcb -- blkno ok }
+extern AFSWalkFAT { growing startcount startblkno mount kflags -- left blkno ok }
+extern AFSBlockMap { blkoff fcb kflags -- blkno ok }
 
 extern AFSOpen { access fileobject -- ok }
 extern AFSClose { access fileobject -- ok }
 
 extern AFSParse { flags path initialfcb process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }
-extern AFSReadFile { timeout flags length offset buffer fcb lastmode -- bytesread ok }
+extern AFSReadFile { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
 extern AFSWriteFile { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }

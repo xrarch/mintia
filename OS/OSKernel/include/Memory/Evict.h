@@ -59,7 +59,7 @@ struct MmPageFrameEntryAnonymous
 	4 EvictionFlags
 	4 EvictableFunctions
 	4 References
-	4 Context2
+	4 SectionObject
 	4 Context3
 	4 PrototypePTE
 	4 Context5

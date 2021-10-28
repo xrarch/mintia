@@ -24,4 +24,5 @@ extern MmSectionObjectCreate { pageprotection anonsize filehandle owninguser per
 extern MmSectionMapViewProcessObject { length startva sectionoffset sectionobject processobject pageprotection flags -- realva ok }
 extern MmUnmapViewProcess { length vaddr processobject -- ok }
 
+extern MmAnonymousPageAlloc { sectionobject pte -- pfdbe pfn ok }
 extern MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }

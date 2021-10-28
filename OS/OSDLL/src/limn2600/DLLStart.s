@@ -1,12 +1,10 @@
+.extern DLLMain
+
 .section text
 
 __OSDLLStart:
 .global __OSDLLStart
-	la   t0, nonsense
-	mov  t0, long [t0]
-
-	la   t1, nonsense2
-	mov  t1, byte [t1]
+	jal  DLLMain
 
 .loop:
 	b    .loop
@@ -14,7 +12,7 @@ __OSDLLStart:
 .section data
 
 nonsense:
-	.dl 0xABCDEF00
+	.dl 0
 
 .section bss
 

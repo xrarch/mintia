@@ -186,6 +186,8 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 
 	if (pte@ FAULTACTIONDIRTY ==)
 		if (pfdbe@)
+			badaddr@ "0x%08x\n" KeCrash
+
 			IPLDPC KeIPLRaise ipl!
 
 			pfdbe@ IOCachePageModifyFunction ok!
@@ -205,6 +207,7 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 
 			if (ok@)
 				ipl@ KeIPLLower
+				process@ MmVADListUnlock
 				OSSIGNAL_KILL signal!
 				return
 			end
@@ -218,14 +221,46 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 			ipl@ KeIPLLower
 		end
 	end elseif (pte@ FAULTACTIONCOW ==)
-		"MmSatisfyFault: TODO: COW\n" KeCrash
+		auto cowpfdbe
+		auto cowaddr
+
+		0 // sectionobject
+		0 // pte
+		MmAnonymousPageAlloc ok! cowaddr! cowpfdbe!
+
+		if (ok@)
+			process@ MmVADListUnlock
+			OSSIGNAL_KILL signal!
+			return
+		end
+
+		PAGESHIFT cowaddr <<=
+
+		cowaddr@ IDENTITYSPACE | // dest
+		phyaddr@ IDENTITYSPACE | // src
+		PAGESIZE // size
+		memcpy
+
+		cowaddr@ // phyaddr
+		badaddr@ // vaddr
+		PTE_V PTE_W | // flags
+		process@ KeProcess_ASID + @ // asid
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmRemapVirtualAddress ok! drop
+
+		if (ok@)
+			process@ MmVADListUnlock
+			cowaddr@ PAGESHIFT >> MmPageFree
+			OSSIGNAL_KILL signal!
+			return
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
 	end
 
 	if (badaddr@ vad@ MmVAD_FurthestExtentMapped + @ >)
 		badaddr@ vad@ MmVAD_FurthestExtentMapped + !
 	end
-
-	1 process@ PsProcess_PageFaultCount + +=
 
 	process@ MmVADListUnlock
 end
@@ -316,6 +351,7 @@ fn MmSatisfyFileFault { vad sectionobject sectionoffset vaddr processobject -- p
 
 		1 processobject@ PsProcess_CommittedPageFrames + +=
 		1 processobject@ PsProcess_MappedPageFrames + +=
+		1 processobject@ PsProcess_PageFaultCount + +=
 	end
 end
 
@@ -323,6 +359,8 @@ fn MmSatisfyAnonFault { vad sectionobject sectionoffset vaddr processobject -- p
 	sectionoffset@ // sectionoffset
 	sectionobject@ // sectionobject
 	MmSectionPageGet ok! pfdbe! phyaddr!
+	
+	0 pfdbe!
 
 	if (ok@)
 		return
@@ -348,4 +386,5 @@ fn MmSatisfyAnonFault { vad sectionobject sectionoffset vaddr processobject -- p
 
 	1 processobject@ PsProcess_MappedPageFrames + +=
 	1 processobject@ PsProcess_CommittedPageFrames + +=
+	1 processobject@ PsProcess_PageFaultCount + +=
 end

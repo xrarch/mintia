@@ -30,10 +30,7 @@ Where there's a filename, it will interpret it as a path relative to the `/minti
 
 | Format         | Name         | Behavior                                                                                                                                                       |
 |----------------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| HAL=[filename] | HAL          | Specifies an alternate code module to load in the place of the default platform HAL.                                                                           |
-| DBG=[filename] | Debugger     | Specifies a kernel mode debugger to load.                                                                                                                      |
+| HAL=[filename] | HAL          | Specifies an alternate code module to load in the place of the default platform HAL. |
+| DBG=[filename] | Debugger     | Specifies a kernel mode debugger to load. |
 | -relink        | Force Relink | Forces Loader to relink all modules, even if they were successfully loaded at their preferred address. This can help diagnose strange boot DLL version issues. |
-| HEAPMAX=[KB]   | Heap Maximum | Changes the maximum size of the kernel heap, in kilobytes. Default is 2MB.                                                                                   |
-| HEAPMIN=[KB]   | Heap Minimum | Changes the minimum size of the kernel heap, in kilobytes. Default is 32KB.                                                                                    |
-| HEAPSHF=[N]    | Heap Shift   | Changes the proportion of memory to dedicate to the kernel heap (1/2^N). Default is 5 (1/32).                                                                  |
-| BOOT=[dev]     | Boot Device  | Explicitly specifies the name of the boot device.                                                                        |
+| BOOT=[dev]     | Boot Device  | Explicitly specifies the name of the boot device. Default is determined by the bootloader. |

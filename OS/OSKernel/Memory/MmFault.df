@@ -22,15 +22,33 @@
 fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 	HALCPUInterruptEnable
 
-	auto ipl
-	IPLAPC KeIPLRaise ipl!
-
 	auto signal
+	0 signal!
 
-	writing@ // writing
-	badaddr@ // badaddr
-	trapframe@ // trapframe
-	MmSatisfyFault signal!
+	if (badaddr@ PAGESIZE <)
+		OSSIGNAL_SEGV signal!
+	end else
+		if (trapframe@ HALCPUIsUserTrapFrame)
+			if (badaddr@ MMHIGHESTUSERADDRESS >)
+				OSSIGNAL_SEGV signal!
+			end
+		end elseif (badaddr@ MMLOWESTSYSTEMADDRESS >=)
+			// kernel mode fault on kernel mode address... bad
+			-1 signal!
+		end
+	end
+
+	if (signal@ ~~)
+		auto ipl
+		IPLAPC KeIPLRaise ipl!
+
+		writing@ // writing
+		badaddr@ // badaddr
+		trapframe@ // trapframe
+		MmSatisfyFault signal!
+
+		ipl@ KeIPLLower
+	end
 
 	if (signal@ -1 ==)
 		// system error happened
@@ -38,13 +56,12 @@ fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 	end elseif (signal@)
 		// generate signal or return from safecopy
 		1 handled!
-		"MmPageFault: TODO: generate signal or return from safecopy\n" KeCrash
+		"MmPageFault: TODO: generate signal or return from safecopy %d\n" KeCrash
 	end else
 		// handled successfully
 		1 handled!
 	end
 
-	ipl@ KeIPLLower
 	HALCPUInterruptDisable drop
 end
 
@@ -54,22 +71,6 @@ const FAULTACTIONCOW    3
 
 fn MmSatisfyFault { writing badaddr trapframe -- signal }
 	0 signal!
-
-	if (badaddr@ PAGESIZE <)
-		OSSIGNAL_SEGV signal!
-		return
-	end else
-		if (trapframe@ HALCPUIsUserTrapFrame)
-			if (badaddr@ MMHIGHESTUSERADDRESS >)
-				OSSIGNAL_SEGV signal!
-				return
-			end
-		end elseif (badaddr@ MMLOWESTSYSTEMADDRESS >=)
-			// kernel mode fault on kernel mode address... bad
-			-1 signal!
-			return
-		end
-	end
 
 	auto process
 	KeProcessCurrent process!

@@ -113,7 +113,13 @@ struct KeThread
 	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock
 
 	KeTimer_SIZEOF Timer
+
+	4 SafeAccessAbort
+	4 SafeAccessSP
 endstruct
+
+extern KeSafeCopyIn { dest src size -- ok }
+extern KeSafeCopyOut { dest src size -- ok }
 
 extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name asid process -- ok }

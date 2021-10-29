@@ -2,6 +2,7 @@ DISTIMAGE  := ./build/mintia-dist.img
 DISTIMGSZ  := 2048
 FST        := ../sdk/fstool.sh
 OBJTOOL    := ../sdk/link.sh
+SYSTOOL    := ../sdk/gensyscalls.sh
 
 DISKLABEL  := ./build/defaultdisklabel
 OFFSET     := 2

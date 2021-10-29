@@ -2,7 +2,7 @@
 
 .section text
 
-.extern OSPrintString
+.extern OSConsolePutCharacter
 
 OSCallCount:
 .global OSCallCount
@@ -11,20 +11,20 @@ OSCallCount:
 OSCallTable:
 .global OSCallTable
 	.dl 0                                                ;0
-	.dl OSTOSPrintString                                 ;1
+	.dl OSTOSConsolePutCharacter                         ;1
 
 
-OSTOSPrintString:
-.global OSTOSPrintString
+OSTOSConsolePutCharacter:
+.global OSTOSConsolePutCharacter
 	subi sp, sp, 8
 	mov  long [sp], zero
 	mov  long [sp + 4], lr
 
 	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
 
-	jal  OSPrintString
+	jal  OSConsolePutCharacter
 
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp + 4]
 	addi sp, sp, 8

@@ -12,9 +12,11 @@ struct MmVAD
 	4 OffsetInSection
 
 	4 SectionObject
+
+	4 QuotaBlock
 endstruct
 
-extern MmVADCreate { startva endva prot offset sectionobject -- vad ok }
+extern MmVADCreate { startva endva prot offset sectionobject quotablock -- vad ok }
 extern MmVADListLock { processobject -- ok }
 extern MmVADListUnlock { processobject -- }
 extern MmVADFind { vaddr length mustbestart processobject -- vad ok }

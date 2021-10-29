@@ -9,7 +9,8 @@
 #include "<inc>/HALDebug.h"
 
 const ECAUSEINTERRUPT 1
-const ECAUSENMI 6
+const ECAUSESYS       2
+const ECAUSENMI       6
 const ECAUSEPAGEFAULT 12
 const ECAUSEPAGEWRITE 13
 
@@ -25,6 +26,12 @@ public HALPageFaultFunction
 
 var HALThreadCurrentStackTop 0
 public HALThreadCurrentStackTop
+
+var HALCallCount 0
+public HALCallCount
+
+var HALCallTable 0
+public HALCallTable
 
 asm "
 
@@ -94,6 +101,9 @@ HALLimn2500ExceptionVector:
 
 	subi t0, a1, 1
 	beq  t0, .interrupt ; if the exception was an interrupt, jump to the fast-track code for that
+
+	subi t0, a1, 2
+	beq  t0, .syscall   ; if the exception was a syscall, jump to the fast-track code for that
 
 	mfcr a2, ebadaddr
 	mov  a0, sp ; give HALLimn2kException our context
@@ -182,6 +192,71 @@ HALLimn2500ExceptionVector:
 
 .interruptsdone:
 	addi sp, sp, 8 ; unwind the fake stack frame stub we added
+
+	mov  t0, long [sp + Limn2500Context_ers]
+	mtcr ers, t0
+
+	mov  t0, long [sp + Limn2500Context_epc]
+	mtcr epc, t0
+
+	mov  t0,  long [sp + Limn2500Context_t0]
+	mov  t1,  long [sp + Limn2500Context_t1]
+	mov  t2,  long [sp + Limn2500Context_t2]
+	mov  t3,  long [sp + Limn2500Context_t3]
+	mov  t4,  long [sp + Limn2500Context_t4]
+	mov  t5,  long [sp + Limn2500Context_t5]
+	mov  a0,  long [sp + Limn2500Context_a0]
+	mov  a1,  long [sp + Limn2500Context_a1]
+	mov  a2,  long [sp + Limn2500Context_a2]
+	mov  a3,  long [sp + Limn2500Context_a3]
+	mov  s0,  long [sp + Limn2500Context_s0]
+	mov  s1,  long [sp + Limn2500Context_s1]
+	mov  s2,  long [sp + Limn2500Context_s2]
+	mov  s3,  long [sp + Limn2500Context_s3]
+	mov  s4,  long [sp + Limn2500Context_s4]
+	mov  s5,  long [sp + Limn2500Context_s5]
+	mov  s6,  long [sp + Limn2500Context_s6]
+	mov  s7,  long [sp + Limn2500Context_s7]
+	mov  s8,  long [sp + Limn2500Context_s8]
+	mov  s9,  long [sp + Limn2500Context_s9]
+	mov  s10, long [sp + Limn2500Context_s10]
+	mov  s11, long [sp + Limn2500Context_s11]
+	mov  s12, long [sp + Limn2500Context_s12]
+	mov  s13, long [sp + Limn2500Context_s13]
+	mov  s14, long [sp + Limn2500Context_s14]
+	mov  s15, long [sp + Limn2500Context_s15]
+	mov  s16, long [sp + Limn2500Context_s16]
+	mov  s17, long [sp + Limn2500Context_s17]
+	mov  s18, long [sp + Limn2500Context_s18]
+
+	mov  lr, long [sp + Limn2500Context_lr]
+	mov  sp, long [sp + Limn2500Context_sp]
+
+	rfe
+
+.syscall:
+	mfcr s0, rs
+	ori  s0, s0, RS_INT
+	mtcr rs, s0
+
+	mov  s18, sp ;trampolines expect trapframe in s18
+
+	mov  t1, long [sp + Limn2500Context_t0]
+	beq  t1, .sysout
+
+	la   t0, HALCallCount
+	mov  t0, long [t0]
+	slt  t0, t0, t1
+	bne  t0, .sysout
+
+	la   t0, HALCallTable
+	mov  t0, long [t0]
+	mov  t0, long [t0 + t1 LSH 2]
+
+	jalr lr, t0, 0
+
+.sysout:
+	mtcr rs, s0
 
 LoadInitialContext:
 
@@ -536,6 +611,10 @@ end
 
 fn HALCPUIsUserTrapFrame { tf -- user }
 	tf@ Limn2500Context_ers + @ RS_USER & user!
+end
+
+fn HALCPUTrapFrameAbort { abort tf -- }
+	abort@ tf@ Limn2500Context_epc + !
 end
 
 fn HALCPUContextInit { context1 context2 startfunc kstack -- ctx }

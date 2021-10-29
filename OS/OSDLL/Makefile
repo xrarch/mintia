@@ -8,6 +8,7 @@ AS  =  ../../../sdk/asm.sh
 OBJTOOL = ../../../sdk/link.sh
 LD  =  ../../../sdk/link.sh link
 INS =  ../../../sdk/install.sh
+SYSTOOL = ../../../sdk/gensyscalls.sh
 
 all: obj/OSDLL.dll
 	cp -r obj/OSDLL.dll ../Library/OSDLL.dll
@@ -23,6 +24,9 @@ obj/OSDLL.dll: $(OBJ) $(SOBJ)
 
 %.o: %.s
 	$(AS) $< $@
+
+src/limn2600/OSCallStubs.s: ./headers/OSCalls.h 
+	$(SYSTOOL) ./headers/OSCalls.h ./src/limn2600/OSCallStubs.s NO
 
 cleanup:
 	rm -f $(OBJ) $(SOBJ) obj/*

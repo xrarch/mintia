@@ -21,9 +21,32 @@
 // routines for creating, destroying, and manipulating
 // Virtual Address Descriptors (VADs).
 
-fn MmVADCreate { startva endva prot offset sectionobject -- vad ok }
+fn MmVADCreate { startva endva prot offset sectionobject quotablock -- vad ok }
 	// allocates a VAD structure.
-	// references the section object.
+	// references the section object, and the quotablock if applicable.
+
+	if (sectionobject@ MmSection_AnonSize + @ ~~)
+		if (prot@ PAGEACCESS_WRITECOPY &)
+			// charge vm quota for this VAD because it has the potential to
+			// become lots of anonymous pages via COW
+
+			endva@ startva@ - // charge
+			quotablock@ // quotablock
+			MmQuotaBlockChargeVM ok!
+
+			if (ok@)
+				return
+			end
+
+			quotablock@ MmQuotaBlockReference
+
+			quotablock@ vad@ MmVAD_QuotaBlock + !
+		end else
+			0 quotablock!
+		end
+	end else
+		0 quotablock!
+	end
 
 	MmVAD_SIZEOF // bytes
 	'nVAD' // tag
@@ -44,6 +67,7 @@ fn MmVADCreate { startva endva prot offset sectionobject -- vad ok }
 	endva@ vad@ MmVAD_EndVA + !
 	0 vad@ MmVAD_FurthestExtentMapped + !
 	prot@ vad@ MmVAD_PageProtection + !
+	quotablock@ vad@ MmVAD_QuotaBlock + !
 end
 
 fn MmVADListLock { processobject -- ok }
@@ -283,6 +307,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	pageprotection@ // prot
 	sectionoffset@ // offset
 	sectionobject@ // sectionobject
+	processobject@ PsProcess_QuotaBlock + @ // quotablock
 	MmVADCreate ok! vad!
 	
 	if (ok@)
@@ -407,7 +432,7 @@ fn MmVADUnmap { vad processobject -- }
 
 			1 processobject@ PsProcess_MappedPageFrames + -=
 		end else
-			if (pte@ 12 >>)
+			if (pte@ PTE_COWINSWAP &)
 				// free COW page in swap
 
 				"MmVADUnmap: TODO: free COW page in swap\n" KeCrash
@@ -440,6 +465,17 @@ fn MmVADUnmap { vad processobject -- }
 		vad@ MmVAD_Next + @ n@ MmVAD_Next + !
 	end else // no prev means we were the head
 		vad@ MmVAD_Next + @ processobject@ PsProcess_VADListHead + !
+	end
+
+	auto quotablock
+	vad@ MmVAD_QuotaBlock + @ quotablock!
+
+	if (quotablock@)
+		vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargeVM
+
+		quotablock@ MmQuotaBlockDereference
 	end
 
 	vad@ MmFree

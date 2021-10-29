@@ -19,3 +19,7 @@ struct OSDirectoryEntry
 	256 Name
 	32  Reserved
 endstruct
+
+externptr OSStdIn
+externptr OSStdOut
+externptr OSStdErr

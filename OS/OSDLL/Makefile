@@ -16,7 +16,7 @@ all: obj/OSDLL.dll
 obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	mkdir -p obj
 	mkdir -p src
-	$(LD) obj/OSDLL.dll $(SOBJ) $(OBJ) -d ../Library/Dragonfruit.dll
+	$(LD) obj/OSDLL.dll $(SOBJ) $(OBJ) L/dfrt/dfrt.f.o
 	$(OBJTOOL) move obj/OSDLL.dll mintiadll text=0x1000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df

@@ -12,6 +12,7 @@ struct OSObjectQuery
 	4 GID
 endstruct
 
+const OSNONE           -1
 const OSCURRENTPROCESS -2
 const OSCURRENTTHREAD  -3
 

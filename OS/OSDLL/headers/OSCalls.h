@@ -12,3 +12,8 @@ extern OSClose { handle -- ok }
 
 // IO
 extern OSFileQuery { filehandle query -- ok }
+
+// Mm
+extern OSSectionCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
+extern OSSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
+extern OSUnmapView { length vaddr processhandle -- ok }

@@ -1067,7 +1067,7 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 	cacheblock@ IOCacheInfoBlockUnlock
 end
 
-fn IOCacheFileWrite { flags length offset buffer fcb -- byteswritten ok }
+fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 	auto pfdbe
 	auto pageframe
 
@@ -1202,10 +1202,29 @@ fn IOCacheFileWrite { flags length offset buffer fcb -- byteswritten ok }
 			end
 		end
 
-		pageframe@ pageoff@ + // dest
-		buffer@ // src
-		m@ // size
-		memcpy
+		if (lastmode@ USERMODE ==)
+			pageframe@ pageoff@ + // dest
+			buffer@ // src
+			m@ // size
+			KeSafeCopyIn ok!
+
+			if (ok@)
+				// page may have been partially written but this is an error
+				// state anyway so that data loss is probably not a big deal
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockDereference drop
+
+				return
+			end
+		end else
+			pageframe@ pageoff@ + // dest
+			buffer@ // src
+			m@ // size
+			memcpy
+		end
 
 		pfdbe@ IOCachePageModifyFunction ok!
 
@@ -1226,7 +1245,7 @@ fn IOCacheFileWrite { flags length offset buffer fcb -- byteswritten ok }
 	IOCacheInfoBlockDereference drop
 end
 
-fn IOCacheFileRead { flags length offset buffer fcb -- bytesread ok }
+fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 	auto pfdbe
 	auto pageframe
 
@@ -1296,10 +1315,26 @@ fn IOCacheFileRead { flags length offset buffer fcb -- bytesread ok }
 			return
 		end
 
-		buffer@ // dest
-		pageframe@ pageoff@ + // src
-		m@ // size
-		memcpy
+		if (lastmode@ USERMODE ==)
+			buffer@ // dest
+			pageframe@ pageoff@ + // src
+			m@ // size
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				pfdbe@ MmEvictablePageDereference drop
+
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockDereference drop
+
+				return
+			end
+		end else
+			buffer@ // dest
+			pageframe@ pageoff@ + // src
+			m@ // size
+			memcpy
+		end
 
 		pfdbe@ MmEvictablePageDereference drop
 

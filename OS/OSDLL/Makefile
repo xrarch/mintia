@@ -11,7 +11,7 @@ INS =  ../../../sdk/install.sh
 SYSTOOL = ../../../sdk/gensyscalls.sh
 
 all: obj/OSDLL.dll
-	cp -r obj/OSDLL.dll ../Library/OSDLL.dll
+	cp -r obj/OSDLL.dll ../SystemBin/OSDLL.dll
 
 obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	mkdir -p obj
@@ -19,10 +19,10 @@ obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	$(LD) obj/OSDLL.dll $(SOBJ) $(OBJ) L/dfrt/dfrt.f.o
 	$(OBJTOOL) move obj/OSDLL.dll mintiadll text=0x1000,data=text+text_size+align,bss=data+data_size+align
 
-%.o: %.df
+%.o: %.df ./headers/*
 	$(DC) $< $@ incdir=./headers/
 
-%.o: %.s
+%.o: %.s ./headers/*
 	$(AS) $< $@
 
 src/limn2600/OSCallStubs.s: ./headers/OSCalls.h 

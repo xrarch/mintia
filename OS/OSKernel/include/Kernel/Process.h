@@ -48,13 +48,13 @@ const THREADSTATUS_WAITINGUNALERTABLE 6
 const THREADSTATUS_TERMINATED         7
 
 const QUEUEFRONT 1
-const QUEUEBACK 0
+const QUEUEBACK  0
 
 const THREADDEFAULTQUANTUM 50 // in milliseconds
 
 const QUANTUMUNITSPERTICK 3
 
-const KETHREADNAMELEN 128
+const KETHREADNAMELEN   128
 const KETHREADSTACKSIZE 4096
 
 struct KeThread
@@ -120,6 +120,7 @@ endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }
 extern KeSafeCopyOut { dest src size -- ok }
+extern KeSafeStringCopyIn { dest src max -- ok }
 
 extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name asid process -- ok }

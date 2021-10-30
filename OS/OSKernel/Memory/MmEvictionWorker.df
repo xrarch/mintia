@@ -186,16 +186,14 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 			end
 
 			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-				if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-					MmEventLowMemory // event
-					KeEventReset drop
+				MmEventLowMemory // event
+				KeEventReset drop
 
-					ipl@ KeIPLLower
+				ipl@ KeIPLLower
 
-					1 done!
+				1 done!
 
-					return
-				end
+				return
 			end
 
 			// we will call an MmEvictionFunction defined by the PFDBE.
@@ -288,4 +286,92 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 
 	// at least half of the tries need to have worked
 	succeedcount@ trycount@ 2 / >= done!
+end
+
+fn MmEvictSinglePage { canbeslow -- pfdbe ok }
+	auto evictionfunc
+	auto evicted
+	auto ipl
+
+	STATUS_NO_MEMORY ok!
+
+	if (MmEvictableFastPageListHead@)
+		IPLDPC KeIPLRaise ipl!
+
+		MmEvictableFastPageListHead@ pfdbe!
+
+		while (pfdbe@)
+			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+			pfdbe@ // pfdbe
+			evictionfunc@ MmEvictionFunction drop evicted!
+
+			if (evicted@ ~~)
+				pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+				continue
+			end
+
+			// evicted, yoink
+
+			if (DEBUGCHECKS)
+				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
+					pfdbe@ MmPageFrameEntryEvictable_References + @
+					"MmEvictSinglePage: attempt to evict a page with %d references\n" KeCrash
+				end
+			end
+
+			pfdbe@ MmEvictablePageRemove
+
+			ipl@ KeIPLLower
+
+			0 ok!
+
+			return
+		end
+
+		ipl@ KeIPLLower
+	end
+
+	if (canbeslow@)
+		// can try the slow list
+
+		if (MmEvictablePageListHead@)
+			IPLDPC KeIPLRaise ipl!
+
+			MmEvictablePageListHead@ pfdbe!
+
+			while (pfdbe@)
+				pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+				MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+				pfdbe@ // pfdbe
+				evictionfunc@ MmEvictionFunction drop evicted!
+
+				if (evicted@ ~~)
+					pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+					continue
+				end
+
+				// evicted, yoink
+
+				if (DEBUGCHECKS)
+					if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
+						pfdbe@ MmPageFrameEntryEvictable_References + @
+						"MmPageAlloc: attempt to evict a page with %d references 2\n" KeCrash
+					end
+				end
+
+				pfdbe@ MmEvictablePageRemove
+
+				ipl@ KeIPLLower
+
+				0 ok!
+
+				return
+			end
+
+			ipl@ KeIPLLower
+		end
+	end
 end

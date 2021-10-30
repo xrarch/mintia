@@ -13,7 +13,8 @@ struct MmEvictableFunctions
 	4 Reserved5
 endstruct
 
-// should be kept in sync with IOPageFrameEntryCache
+// should be kept in sync with IOPageFrameEntryCache,
+// and the page frame entries below
 struct MmPageFrameEntryEvictable
 	4 Next
 	4 PFN
@@ -72,6 +73,7 @@ struct MmPageFrameEntryAnonymous
 endstruct
 
 const MMEVICTFLAG_FAST 1
+const MMEVICTFLAG_COW  16
 
 extern MmEvictionWorker { context1 context2 -- }
 extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }

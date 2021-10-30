@@ -351,8 +351,6 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 end
 
 fn MmVADUnmap { vad processobject -- }
-	"MmVADUnmap: NEEDS REVIEW\n" KeCrash
-
 	// assumes the caller locked the process VAD list.
 
 	// unmap all the pages associated with the VAD, then remove it from the
@@ -378,7 +376,7 @@ fn MmVADUnmap { vad processobject -- }
 	auto max
 	// only unmap up to the highest vaddr that was ever faulted in, as an
 	// optimization.
-	vad@ MmVAD_FurthestExtentMapped + @ PAGESIZE + max!
+	vad@ MmVAD_FurthestExtentMapped + @ PAGEOFFSETMASK + PAGENUMBERMASK & max!
 
 	if (DEBUGCHECKS)
 		if (vaddr@ PAGEOFFSETMASK &)
@@ -391,10 +389,6 @@ fn MmVADUnmap { vad processobject -- }
 
 		if (vaddr@ MMHIGHESTUSERADDRESS >)
 			vaddr@ "MmVADUnmap: vaddr > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
-		end
-
-		if (max@ MMHIGHESTUSERADDRESS >)
-			max@ "MmVADUnmap: max > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
 		end
 	end
 
@@ -425,9 +419,16 @@ fn MmVADUnmap { vad processobject -- }
 				phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 				// dereference page or free immediately if COW
-				// or zero out trick PTE pointer if trick
 
-				"MmVADUnmap: TODO: deref or free COW\n" KeCrash
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+					// is COW, free now
+
+					phyaddr@ PAGESHIFT >> MmPageFree
+				end else
+					// not COW, deref
+
+					pfdbe@ MmEvictablePageDereference drop
+				end
 			end
 
 			1 processobject@ PsProcess_MappedPageFrames + -=

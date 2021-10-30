@@ -60,4 +60,7 @@ extern IOFileControlBlockUnlockIO { fcb -- }
 extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 extern IOFileControlBlockAcquireCheck { flags fcb -- ok }
 
+extern IOFileInformationQueryObject { fileobject query -- ok }
+extern IOFileInformationQuery { filehandle query -- ok }
+
 externptr IOBootDevice

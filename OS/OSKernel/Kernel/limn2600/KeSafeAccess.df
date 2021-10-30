@@ -9,13 +9,15 @@
 #include "<inc>/Kernel.h"
 #include "<inc>/Memory.h"
 
+#include "<ll>/OSDLL/OSStatus.h"
+
 asm "
 
 ;a0 - sz
 ;a1 - src
 ;a2 - dest
 ;returns:
-;a0 - 0 if success, -1 if fault
+;a0 - 0 if success, STATUS_FAULT if fault
 KeSafeCopyIn:
 .global KeSafeCopyIn
 	la   t0, MMHIGHESTUSERADDRESS
@@ -38,14 +40,14 @@ KeSafeCopyIn:
 	ret
 
 .failure:
-	subi a0, zero, 1
+	la   a0, STATUS_FAULT
 	ret
 
 ;a0 - sz
 ;a1 - src
 ;a2 - dest
 ;returns:
-;a0 - 0 if success, -1 if fault
+;a0 - 0 if success, STATUS_FAULT if fault
 KeSafeCopyOut:
 .global KeSafeCopyOut
 	la   t0, MMHIGHESTUSERADDRESS
@@ -68,7 +70,37 @@ KeSafeCopyOut:
 	ret
 
 .failure:
-	subi a0, zero, 1
+	la   a0, STATUS_FAULT
+	ret
+
+;a0 - max
+;a1 - src
+;a2 - dest
+;returns:
+;a0 - 0 if success, STATUS_FAULT if fault
+KeSafeStringCopyIn:
+.global KeSafeStringCopyIn
+	la   t0, MMHIGHESTUSERADDRESS
+	slt  t1, t0, a1
+	bne  t1, .failure
+
+	la   t1, KeSafeAccessFailure
+	la   t0, KeThreadCurrent
+	mov  t0, long [t0]
+	mov  long [t0 + KeThread_SafeAccessAbort], t1
+	mov  long [t0 + KeThread_SafeAccessSP], lr
+
+	jal  strncpy
+
+	la   t0, KeThreadCurrent
+	mov  t0, long [t0]
+	mov  long [t0 + KeThread_SafeAccessAbort], zero
+	mov  lr, long [t0 + KeThread_SafeAccessSP]
+	li   a0, 0
+	ret
+
+.failure:
+	la   a0, STATUS_FAULT
 	ret
 
 KeSafeAccessFailure:
@@ -76,7 +108,7 @@ KeSafeAccessFailure:
 	mov  t0, long [t0]
 	mov  long [t0 + KeThread_SafeAccessAbort], zero
 	mov  lr, long [t0 + KeThread_SafeAccessSP]
-	subi a0, zero, 1
+	la   a0, STATUS_FAULT
 	ret
 
 "

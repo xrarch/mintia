@@ -1,0 +1,217 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSPEB.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSObject.h"
+
+fn OSGetCWD { cwd -- ok }
+	0 ok!
+
+	cwd@ // dest
+	OSPEB OSPEBs_CurrentDirectoryPath + // src
+	strcpy
+end
+
+buffer OSChangeCWDBuffer OSFILEPATHMAX
+
+fn OSChangeCWD { path -- ok }
+	// XXX not re-entrant but that should be fine
+
+	auto dirh
+	OSPEB OSPEBs_CurrentDirectory + @ dirh!
+
+	auto newh
+
+	0 // flags
+	ACCESS_READ ACCESS_EXEC | // access
+	path@ // path
+	OSFILETYPE_DIRECTORY // ftype
+	OSFileOpen ok! newh!
+
+	if (ok@)
+		return
+	end
+
+	path@ // path
+	OSChangeCWDBuffer // canon
+	OSFILEPATHMAX // max
+	OSRealPath ok!
+
+	if (ok@)
+		newh@ OSClose ok!
+
+		if (ok@)
+			"OSChangeCWD 2\n" OSAbort
+		end
+
+		return
+	end
+
+	if (dirh@ -1 ~=)
+		dirh@ OSClose ok!
+
+		if (ok@)
+			"OSChangeCWD 1\n" OSAbort
+		end
+	end
+
+	OSPEB OSPEBs_CurrentDirectoryPath + // dest
+	OSChangeCWDBuffer // src
+	strcpy
+
+	newh@ OSPEB OSPEBs_CurrentDirectory + !
+end
+
+fn OSRealPath { path canon max -- ok }
+	if (max@ 4 <)
+		-1 ok!
+	end
+
+	canon@ // ptr
+	max@ // size
+	0 // word
+	memset
+
+	auto pcomp
+	OSFILEPATHMAX alloc pcomp!
+
+	auto obpath
+	0 obpath!
+
+	0 ok!
+
+	if (path@ gb '/' ==)
+		if (path@ "//:/" 4 strncmp)
+			1 obpath!
+			3 path +=
+			canon@ // dest
+			"//:/" // src
+			strcpy
+		end else
+			'/' canon@ sb
+		end
+	end else
+		canon@ OSGetCWD ok!
+		if (ok@)
+			return
+		end
+	end
+
+	auto ci
+	canon@ strlen ci!
+
+	auto lenleft
+	max@ ci@ - lenleft!
+
+	while (1)
+		if (lenleft@ ~~)
+			-1 ok!
+			return
+		end
+
+		while (path@ gb '/' ==)
+			1 path +=
+		end
+
+		if (path@ gb 0 ==)
+			break
+		end
+
+		auto pr
+		0 pr!
+
+		while (1)
+			if (path@ gb '/' ==)
+				break
+			end
+
+			if (path@ gb 0 ==)
+				break
+			end
+
+			if (pr@ OSFILEPATHMAX 1 - <)
+				path@ gb pcomp@ pr@ + sb
+				1 pr +=
+			end
+
+			1 path +=
+		end
+
+		0 pcomp@ pr@ + sb
+
+		if (pcomp@ "." strcmp)
+			continue
+		end
+
+		if (pcomp@ ".." strcmp)
+			while (canon@ ci@ + gb '/' ~=)
+				if (ci@ 0 ==)
+					"OSRealPath\n" OSAbort
+				end
+
+				1 ci -=
+				1 lenleft +=
+			end
+
+			if (obpath@)
+				if (ci@ 3 ==)
+					'/' canon@ ci@ + sb
+					4 ci!
+				end
+			end else
+				if (ci@ 0 ==)
+					1 ci!
+				end
+			end
+
+			canon@ ci@ + strzero
+
+			continue
+		end
+
+		if (obpath@)
+			if (ci@ 4 >)
+				'/' canon@ ci@ + sb
+				1 ci +=
+				1 lenleft -=
+			end
+		end else
+			if (ci@ 1 >)
+				'/' canon@ ci@ + sb
+				1 ci +=
+				1 lenleft -=
+			end
+		end
+
+		pcomp@ strlen pr!
+
+		if (pr@ lenleft@ >=)
+			-1 ok!
+			return
+		end
+
+		canon@ ci@ + pcomp@ lenleft@ 1 - strncpy
+		pr@ ci +=
+		pr@ lenleft -=
+	end
+end
+
+fn OSOpen { flags access path -- handle ok }
+	auto dirh
+
+	if (path@ gb '/' ==)
+		-1 dirh!
+	end else
+		OSPEB OSPEBs_CurrentDirectory + @ dirh!
+	end
+
+	flags@ // flags
+	access@ // access
+	dirh@ // initialobjecthandle
+	path@ // path
+	OSObOpen ok! handle!
+end

@@ -8,15 +8,15 @@ OBJTOOL = ../../../sdk/link.sh
 LD      =  $(OBJTOOL) link
 SYSTOOL = ../../../sdk/gensyscalls.sh
 
-LIBDIR  = ../Library
+SYSBINDIR  = ../SystemBin
 
 DCFLAGS = incdir=./include/:../HAL/include
 
-all: OSKernel.exe
+all: $(SYSBINDIR)/OSKernel.exe
 
-OSKernel.exe: $(OBJ) ./Executive/limn2600/OSCallTrampolines.o
-	$(LD) OSKernel.exe $(OBJ) ./Executive/limn2600/OSCallTrampolines.o -d HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
-	$(OBJTOOL) move OSKernel.exe text=0x80001000,data=text+text_size+align,bss=data+data_size+align
+$(SYSBINDIR)/OSKernel.exe: $(OBJ) ./Executive/limn2600/OSCallTrampolines.o
+	$(LD) $(SYSBINDIR)/OSKernel.exe $(OBJ) ./Executive/limn2600/OSCallTrampolines.o -d HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(OBJTOOL) move $(SYSBINDIR)/OSKernel.exe text=0x80001000,data=text+text_size+align,bss=data+data_size+align
 
 Executive/limn2600/OSCallTrampolines.s: ../OSDLL/headers/OSCalls.h 
 	$(SYSTOOL) ../OSDLL/headers/OSCalls.h NO ./Executive/limn2600/OSCallTrampolines.s
@@ -28,4 +28,4 @@ Executive/limn2600/OSCallTrampolines.s: ../OSDLL/headers/OSCalls.h
 	$(AS) $< $@
 
 cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF OSKernel.exe
+	rm -f ${OBJ} *.a3x *.LOFF $(SYSBINDIR)/OSKernel.exe

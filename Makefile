@@ -10,33 +10,24 @@ OFFSET     := 2
 OS_DIR     := ./OS
 LOAD_DIR   := $(OS_DIR)/Loader/LIMNstation
 KERN_DIR   := $(OS_DIR)/OSKernel
-LIB_DIR    := $(OS_DIR)/Library
+SYSBIN_DIR := $(OS_DIR)/SystemBin
 HAL_DIR    := $(OS_DIR)/HAL
 DBG_DIR    := $(OS_DIR)/224Debug
 BR_DIR     := $(OS_DIR)/BootResources
 DRIVER_DIR := $(OS_DIR)/BootDrivers
 RTL_DIR    := $(OS_DIR)/OSDLL
+SYSINIT_DIR:= $(OS_DIR)/SystemInit
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
-dist: $(DISTIMAGE) bootable sysfiles kernel 224debug drivers
+dist: $(DISTIMAGE) bootable sysfiles
 
 bootable:
 	make -C $(LOAD_DIR)
 	dd if=$(LOAD_DIR)/BootSector.bin of=$(DISTIMAGE) bs=4096 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
 	dd if=$(LOAD_DIR)/Loader.a3x of=$(DISTIMAGE) bs=4096 conv=notrunc seek=$$((2 + $(OFFSET))) 2>/dev/null
 
-kernel:
-	make -C $(KERN_DIR)
-	$(FSTOOL) u /mintia/OSKernel.exe $(KERN_DIR)/OSKernel.exe
-	$(FSTOOL) chmod /mintia/OSKernel.exe 493
-
-224debug:
-	make -C $(DBG_DIR)
-	$(FSTOOL) u /mintia/224Debug.exe $(DBG_DIR)/224Debug.exe
-	$(FSTOOL) chmod /mintia/224Debug.exe 493
-
-sysfiles: $(LIB_DIR)/Dragonfruit.dll
+sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll
 	make -C $(RTL_DIR)
 
 	../sdk/install.sh $(RTL_DIR)
@@ -44,15 +35,19 @@ sysfiles: $(LIB_DIR)/Dragonfruit.dll
 	make -C $(HAL_DIR)
 	$(FSTOOL) u /mintia/BootResources.txt $(OS_DIR)/BootResources.txt
 	$(FSTOOL) u /mintia/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
-	make -C $(LIB_DIR)
-	make -C $(BR_DIR)
 
-drivers: $(LIB_DIR)/Dragonfruit.dll
+	make -C $(KERN_DIR)
+	make -C $(DBG_DIR)
 	make -C $(DRIVER_DIR)
 
-$(LIB_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
-	cp ../sdk/lib/dfrt/dfrt.f.o $(LIB_DIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(LIB_DIR)/Dragonfruit.dll mintiadll text=0x300000,data=text+text_size+align,bss=data+data_size+align
+	make -C $(SYSINIT_DIR)
+
+	make -C $(SYSBIN_DIR)
+	make -C $(BR_DIR)
+
+$(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
+	cp ../sdk/lib/dfrt/dfrt.f.o $(SYSBIN_DIR)/Dragonfruit.dll
+	$(OBJTOOL) move $(SYSBIN_DIR)/Dragonfruit.dll mintiadll text=0x300000,data=text+text_size+align,bss=data+data_size+align
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=4096 count=$(DISTIMGSZ) 2>/dev/null
@@ -62,4 +57,4 @@ $(DISTIMAGE):
 cleanup:
 	make -C $(OS_DIR) cleanup
 	rm -f $(DISTIMAGE)
-	rm -f OS/Library/*.dll
+	rm -f $(SYSBIN_DIR)/*.dll $(SYSBIN_DIR)/*.exe

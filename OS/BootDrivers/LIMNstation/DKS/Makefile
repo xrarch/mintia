@@ -7,14 +7,14 @@ AS      = ../../../../../sdk/asm.sh
 OBJTOOL = ../../../../../sdk/link.sh
 LD      =  $(OBJTOOL) link
 
-LIBDIR  = ../../../Library
+SYSBINDIR  = ../../../SystemBin
 
 DCFLAGS = incdir=../../../HAL/include/:../../../HAL/LIMNstation/include:../../../OSKernel/include/
 
 all: DKS.sys
 
 DKS.sys: $(OBJ)
-	$(LD) DKS.sys $(OBJ) -d ../../../OSKernel/OSKernel.exe HAL.dll:$(LIBDIR)/HALLIMNstation.dll $(LIBDIR)/Dragonfruit.dll
+	$(LD) DKS.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
 	$(OBJTOOL) move DKS.sys text=0x80800000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h

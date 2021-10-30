@@ -21,7 +21,7 @@ const AFSFCBBUCKETS 32 // must be a power of two
 const AFSFCBSHIFT 5 // 1<<AFSFCBSHIFT must equal AFSFCBBUCKETS
 const AFSFCBMASK (AFSFCBBUCKETS 1 -)
 
-const AFSFATMUTEXES 4 // must be a power of two
+const AFSFATMUTEXES 16 // must be a power of two
 const AFSFATMUTEXMASK (AFSFATMUTEXES 1 -)
 
 struct AFSData

@@ -2,21 +2,6 @@ const MMHIGHESTUSERADDRESS  0x7FFEFFFF
 // 64kb no-mans-land
 const MMLOWESTSYSTEMADDRESS 0x80000000
 
-struct MmHeapBlock
-	4 Magic
-	4 Next
-	4 Prev
-	4 BucketIndex
-	4 Tag
-endstruct
-
-const HEAPBLOCKMAGIC 0xC4FED33D
-
-const HEAPBLOCKFREE 'FREE'
-
-const BUCKETSPO2START 5 // start at 2^5=32 bytes
-const BUCKETS 23 // 2^(23+5=28)=256MB heap max
-
 struct MmPageFrameEntry
 	4 R1
 	4 PFN

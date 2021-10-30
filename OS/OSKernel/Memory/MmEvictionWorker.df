@@ -95,6 +95,7 @@ fn MmEvictionWorker { context1 context2 -- }
 		auto done
 
 		MMFASTPAGEEVICTCOUNT // trycount
+		1 // fast
 		MmEvictableFastPageListHead // listhead
 		MmEvictFromList ok! done!
 
@@ -130,6 +131,7 @@ fn MmEvictionWorker { context1 context2 -- }
 		end
 
 		MMSLOWPAGEEVICTCOUNT // trycount
+		0 // fast
 		MmEvictablePageListHead // listhead
 		MmEvictFromList ok! done!
 
@@ -150,7 +152,7 @@ fn MmEvictionWorker { context1 context2 -- }
 	end
 end
 
-fn MmEvictFromList { trycount listhead -- done ok }
+fn MmEvictFromList { trycount fast listhead -- done ok }
 	0 done!
 	0 ok!
 
@@ -160,101 +162,106 @@ fn MmEvictFromList { trycount listhead -- done ok }
 	auto i
 	0 i!
 
+	auto pfdbe
+	listhead@@ pfdbe!
+
 	auto ipl
 
-	while (i@ trycount@ <)
-		// check each page if the low memory situation is resolved
-
-		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-			IPLDPC KeIPLRaise ipl!
-
-			// recheck at IPLDPC -- this seemingly redundant check
-			// minimizes overhead in the more common case
-
-			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-				MmEventLowMemory // event
-				KeEventReset drop
-
-				ipl@ KeIPLLower
-
-				1 done!
-
-				return
-			end
-
-			ipl@ KeIPLLower
-		end
-
-		// low memory situation not resolved, attempt yoink
-
+	if (pfdbe@)
 		IPLDPC KeIPLRaise ipl!
 
-		auto pfdbe
 		listhead@@ pfdbe!
 
-		if (pfdbe@ ~~)
-			ipl@ KeIPLLower
+		while (i@ trycount@ <)
+			// check each page if the low memory situation is resolved
 
-			return
-		end
-
-		pfdbe@ MmEvictablePageReference drop
-
-		// we will call an MmEvictionFunction defined by the PFDBE.
-		// this function's primary job is to perform whatever actions
-		// are necessary to evict the page frame, such as writing it
-		// out to the page file.
-
-		// another equally important job of the MmEvictionFunction is
-		// to perform whatever synchronization is needed between any
-		// other parts of the system that make use of this page frame,
-		// and its eviction. if this synchronization is not possible
-		// for any reason, the function returns 0 in the 'evicted'
-		// return value.
-
-		auto evictionfuncs
-		pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
-
-		if (DEBUGCHECKS)
-			if (evictionfuncs@ ~~)
-				"MmEvictFromList: no eviction funcs for page\n" KeCrash
+			if (pfdbe@ ~~)
+				break
 			end
-		end
 
-		auto evictionfunc
-		evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+				if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+					MmEventLowMemory // event
+					KeEventReset drop
 
-		auto evicted
-		1 evicted!
+					ipl@ KeIPLLower
 
-		if (evictionfunc@)
-			pfdbe@ // pfdbe
-			evictionfunc@ MmEvictionFunction drop evicted!
-		end
+					1 done!
 
-		if (evicted@)
-			// evicted, free the page
-
-			if (DEBUGCHECKS)
-				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 ~=)
-					pfdbe@ MmPageFrameEntryEvictable_References + @
-					"MmEvictFromList: attempt to evict a page with %d references\n" KeCrash
+					return
 				end
 			end
 
-			1 succeedcount +=
+			// we will call an MmEvictionFunction defined by the PFDBE.
+			// this function's primary job is to perform whatever actions
+			// are necessary to evict the page frame, such as writing it
+			// out to the page file.
 
-			pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
-			MmPageFree
-		end else
-			// not evicted, dereference and re-place at back of LRU queue
+			// another equally important job of the MmEvictionFunction is
+			// to perform whatever synchronization is needed between any
+			// other parts of the system that make use of this page frame,
+			// and its eviction. if this synchronization is not possible
+			// for any reason, the function returns 0 in the 'evicted'
+			// return value.
 
-			pfdbe@ MmEvictablePageDereference drop
+			auto evictionfuncs
+			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+			if (DEBUGCHECKS)
+				if (evictionfuncs@ ~~)
+					"MmEvictFromList: no eviction funcs for page\n" KeCrash
+				end
+			end
+
+			auto evictionfunc
+			evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+			if (DEBUGCHECKS)
+				if (evictionfunc@ ~~)
+					"MmEvictFromList: no eviction func for page\n" KeCrash
+				end
+			end
+
+			auto evicted
+			pfdbe@ // pfdbe
+			evictionfunc@ MmEvictionFunction drop evicted!
+
+			if (evicted@)
+				// evicted, free the page
+
+				if (DEBUGCHECKS)
+					if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
+						pfdbe@ MmPageFrameEntryEvictable_References + @
+						"MmEvictFromList: attempt to evict a page with %d references\n" KeCrash
+					end
+				end
+
+				1 succeedcount +=
+
+				auto npfdbe
+
+				if (fast@)
+					pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
+				end else
+					// slow pages can't be trusted not to have dropped to
+					// IPLLOW which would mean anything could have happened
+					// to the evictable LRU and the next link is meaningless.
+
+					listhead@@ npfdbe!
+				end
+
+				pfdbe@ MmEvictablePageRemove
+
+				pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+				MmPageFree
+
+				npfdbe@ pfdbe!
+			end else
+				pfdbe@ MmPageFrameEntryEvictable_Next + @ pfdbe!
+			end
 		end
 
 		ipl@ KeIPLLower
-
-		1 i +=
 	end
 
 	// at least half of the tries need to have worked

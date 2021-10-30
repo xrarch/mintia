@@ -586,21 +586,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	end
 
 	if (pfdbe@ ~~)
-		// didn't find, need to allocate.
-		// try without blocking first. if this fails,
-		// try to grab a page from our own cache block.
-		// only try again with CANBLOCK if there are none available.
-
-		// this is done all complicated-like to avoid a deadlock, but this
-		// deadlock can only happen if this file fills up basically all of
-		// memory and may be such a corner case in practice that it's not
-		// worth doing it like this.
-
-		// the alternative would be to just permit blocking on this allocation
-		// with CANBLOCK and not do the rest of the strange things. but if the
-		// alternative is ever used, the author is advised to remember to deal
-		// with IOCACHEGETFLAG_SWAPOUT properly.
-
 		if (filesize@ offset@ - PAGESIZE <)
 			// not a full page -- get zeroes because this might leak data
 
@@ -617,6 +602,8 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end
 
+		auto rs
+
 		if (ok@)
 			if (DEBUGCHECKS)
 				if (ok@ STATUS_NO_MEMORY ~=)
@@ -624,99 +611,55 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 				end
 			end
 
-			// check each bucket from 0 to IOCACHEPAGEBUCKETS-1.
-			// for each bucket, check from the least recently used end, backwards.
-			// if a page with no references is found, yoink it.
+			// weren't able to find a reusable page. try to allocate again,
+			// but this time we can block.
 
-			auto i
-			0 i!
+			if (kflags@ IOCACHEGETFLAG_SWAPOUT &)
+				// this IOCachePageGet is needed for a swap-out operation
+				// (i.e., the filesystem driver is using it to cache disk
+				// structures and needs whatever is going to be read into
+				// this page to know where to swap the page out to).
 
-			while (i@ IOCACHEPAGEBUCKETS <)
-				// get bucket tail
-				cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + 4 + @ pfdbe!
+				// don't allow blocking, but do allow it to dip into the
+				// MUSTSUCCEED pages.
 
-				while (pfdbe@)
-					if (pfdbe@ IOPageFrameEntryCache_References + @ 0 ==)
-						// found one
-
-						pfdbe@ MmEvictablePageReference drop
-						cacheblock@ IOCacheInfoBlockDereference drop
-
-						pfdbe@ // pfdbe
-						cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + // buckethead
-						IOCachePageRemove
-
-						break
-					end
-
-					pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
-				end
-
-				if (pfdbe@)
-					break
-				end
-
-				1 i +=
+				MUSTSUCCEED kflags!
+			end else
+				CANBLOCK kflags!
 			end
 
-			0 ok!
+			if (filesize@ offset@ - PAGESIZE <)
+				// not a full page -- get zeroes because this might leak data otherwise
 
-			if (pfdbe@ ~~)
-				// weren't able to find a reusable page. try to allocate again,
-				// but this time we can block, without fear of deadlocking the
-				// eviction thread. we also do not specify CACHEALLOC here, which
-				// allows us to dip below the low watermark. normally, we try
-				// not to do this in order to avoid waking the eviction thread
-				// unnecessarily. here, it might happen, and we might block.
+				MMEVICTFLAG_FAST // flags
+				IOCacheEvictableFunctions // evictablefuncs
+				ZEROMUST kflags@ | // priority
+				MmEvictablePageAlloc ok! drop pfdbe!
+			end else
+				// full page, get any random page that may or may not be zeroed
 
-				if (kflags@ IOCACHEGETFLAG_SWAPOUT &)
-					// this IOCachePageGet is needed for a swap-out operation
-					// (i.e., the filesystem driver is using it to cache disk
-					// structures and needs whatever is going to be read into
-					// this page to know where to swap the page out to).
+				MMEVICTFLAG_FAST // flags
+				IOCacheEvictableFunctions // evictablefuncs
+				FREEFIRST kflags@ | // priority
+				MmEvictablePageAlloc ok! drop pfdbe!
+			end
 
-					// don't allow blocking, but do allow it to dip into the
-					// MUSTSUCCEED pages.
-
-					MUSTSUCCEED kflags!
-				end else
-					CANBLOCK kflags!
+			if (ok@)
+				if (kflags@ MUSTSUCCEED ==)
+					// we needed this page for a swapout, system detonates
+					"IOCachePageGet: failed to get page needed for a swapout!\n" KeCrash
 				end
 
-				if (filesize@ offset@ - PAGESIZE <)
-					// not a full page -- get zeroes because this might leak data otherwise
-
-					MMEVICTFLAG_FAST // flags
-					IOCacheEvictableFunctions // evictablefuncs
-					ZEROMUST kflags@ | // priority
-					MmEvictablePageAlloc ok! drop pfdbe!
-				end else
-					// full page, get any random page that may or may not be zeroed
-
-					MMEVICTFLAG_FAST // flags
-					IOCacheEvictableFunctions // evictablefuncs
-					FREEFIRST kflags@ | // priority
-					MmEvictablePageAlloc ok! drop pfdbe!
+				if (locked@ ~~)
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockUnlock
 				end
 
-				if (ok@)
-					if (kflags@ MUSTSUCCEED ==)
-						// we needed this page for a swapout, system detonates
-						"IOCachePageGet: failed to get page needed for a swapout!\n" KeCrash
-					end
-
-					if (locked@ ~~)
-						cacheblock@ // cacheblock
-						IOCacheInfoBlockUnlock
-					end
-
-					return
-				end else
-					auto rs
-					HALCPUInterruptDisable rs!
-					1 IOCachePagesUsed +=
-					rs@ HALCPUInterruptRestore
-				end
+				return
+			end else
+				HALCPUInterruptDisable rs!
+				1 IOCachePagesUsed +=
+				rs@ HALCPUInterruptRestore
 			end
 		end else
 			HALCPUInterruptDisable rs!
@@ -878,49 +821,13 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 
 	if (ok@ ~~)
 		// failed to lock -- don't wait.
-		// return so that the eviction thread can
+		// return so that the caller can
 		// immediately try the next page.
 
 		0 ok!
 		0 evicted!
 
 		return
-	end
-
-	// we come in here in IPLDPC for synchronization reasons, but now
-	// that we have the cacheblock locked, we can lower IPL. we just
-	// have to remember to raise it again when we leave!
-
-	IPLLOW KeIPLLower
-
-	0 ok!
-
-	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ==)
-			"IOCachePageEvictionFunction: refcount == 0\n" KeCrash
-		end
-	end
-
-	if (pfdbe@ MmPageFrameEntryEvictable_References + @ 1 >)
-		// no longer a candidate for eviction!
-
-		cacheblock@ IOCacheInfoBlockUnlock
-
-		0 evicted!
-
-		IPLDPC KeIPLRaise drop
-
-		return
-	end
-
-	if (DEBUGCHECKS)
-		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-			// we shouldn't be trying to evict a dirty page frame
-			// until the dirty page writer thread it is written out
-			// and dereferenced...
-
-			"IOCachePageEvictionFunction: tried to evict a dirty page frame\n" KeCrash
-		end
 	end
 
 	auto offset
@@ -938,15 +845,9 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	buckethead@ // buckethead
 	IOCachePageRemove
 
-	// earlier, the eviction thread incremented this refcount
-	// by ref'ing this page frame. undo that.
-	cacheblock@ IOCacheInfoBlockDereference drop
-
-	cacheblock@ IOCacheInfoBlockUnlock
-
 	1 evicted!
 
-	IPLDPC KeIPLRaise drop
+	cacheblock@ IOCacheInfoBlockUnlock
 end
 
 fn IOCachePageModifyFunction { pfdbe -- ok }

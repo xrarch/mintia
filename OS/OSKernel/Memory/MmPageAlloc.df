@@ -183,9 +183,97 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		blockon@ // threshold
 		MmPageGet ok! pfn! pfdbe!
 
+		auto ipl
+
+		if (ok@)
+			auto evictionfunc
+			auto evicted
+
+			if (MmEvictableFastPageListHead@)
+				IPLDPC KeIPLRaise ipl!
+
+				MmEvictableFastPageListHead@ pfdbe!
+
+				while (pfdbe@)
+					pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+					MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+					pfdbe@ // pfdbe
+					evictionfunc@ MmEvictionFunction drop evicted!
+
+					if (evicted@ ~~)
+						pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+						continue
+					end
+
+					// evicted, yoink
+
+					if (DEBUGCHECKS)
+						if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
+							pfdbe@ MmPageFrameEntryEvictable_References + @
+							"MmPageAlloc: attempt to evict a page with %d references\n" KeCrash
+						end
+					end
+
+					pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+					pfdbe@ MmEvictablePageRemove
+
+					ipl@ KeIPLLower
+
+					0 ok!
+
+					return
+				end
+
+				ipl@ KeIPLLower
+			end
+
+			if (priority@ CANBLOCK &)
+				// can try the slow list
+
+				if (MmEvictablePageListHead@)
+					IPLDPC KeIPLRaise ipl!
+
+					MmEvictablePageListHead@ pfdbe!
+
+					while (pfdbe@)
+						pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+						MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+						pfdbe@ // pfdbe
+						evictionfunc@ MmEvictionFunction drop evicted!
+
+						if (evicted@ ~~)
+							pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+							continue
+						end
+
+						// evicted, yoink
+
+						if (DEBUGCHECKS)
+							if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
+								pfdbe@ MmPageFrameEntryEvictable_References + @
+								"MmPageAlloc: attempt to evict a page with %d references 2\n" KeCrash
+							end
+						end
+
+						pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+						pfdbe@ MmEvictablePageRemove
+
+						ipl@ KeIPLLower
+
+						0 ok!
+
+						return
+					end
+
+					ipl@ KeIPLLower
+				end
+			end
+		end
+
 		if (ok@ ~~)
 			if (MmPageFreeCount@ MmPageFreeCountLow@ <)
-				auto ipl
 				IPLDPC KeIPLRaise ipl!
 
 				// recheck at IPLDPC -- this seemingly redundant check

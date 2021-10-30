@@ -13,6 +13,8 @@
 
 #include "<inc>/Executive.h"
 
+#include "<inc>/Memory.h"
+
 #include "<inc>/IO.h"
 
 const DKS_REALDISK  1
@@ -22,8 +24,26 @@ struct Disk
 	4 Type
 	4 DKSID
 	4 BlockOffset
+	4 BlockSize
 	4 Blocks
 endstruct
+
+const REQREAD  1
+const REQWRITE 2
+
+struct DKSRequest
+	4 Next
+
+	4 Type
+	4 Buffer
+	4 BlockNumber
+	4 Length
+	4 WakeEvent
+	4 Disk
+endstruct
+
+var DKSRequestListHead 0
+var DKSRequestListTail 0
 
 const DKSMAXDISKID 7
 
@@ -87,34 +107,12 @@ table DriverDKS
 	0                                    // reserved
 endtable
 
-buffer DKSMutex KeMutex_SIZEOF
-buffer DKSEvent KeEvent_SIZEOF
-
 buffer DKSDPC KeDPC_SIZEOF
 
 externptr HALLIMNstationDKSBuffer
 
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
-		"DKSMutex" // name
-		KERNELMODE // mode
-		DKSMutex // mutex
-		KeMutexInitialize ok!
-
-		if (ok@)
-			"DKSDriverInit: mutex initialization failed\n" KeCrash
-		end
-
-		0 // signaled
-		KEEVENT_SYNCH // type
-		"DKSEvent" // name
-		DKSEvent // event
-		KeEventInitialize ok!
-
-		if (ok@)
-			"DKSDriverInit: failed to initialize event\n" KeCrash
-		end
-
 		pointerof DriverDKSDPCFunction // function
 		DKSDPC // dpc
 		KeDPCInitialize ok!
@@ -188,6 +186,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 					diskid@ disk@ Disk_DKSID + !
 					0 disk@ Disk_BlockOffset + !
 					blocks@ disk@ Disk_Blocks + !
+					4096 disk@ Disk_BlockSize + !
 
 					auto partitiontable
 
@@ -232,6 +231,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 							diskid@ disk@ Disk_DKSID + !
 							pte@ IOPartitionEntry_BlockOffset + @ disk@ Disk_BlockOffset + !
 							blocks@ disk@ Disk_Blocks + !
+							4096 disk@ Disk_BlockSize + !
 
 							IOPartitionEntry_SIZEOF pte +=
 							1 pcount -=
@@ -250,11 +250,73 @@ fn (FDriverInit) DriverInit { stage -- ok }
 end
 
 fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
-	// actually wake up blocked readers following a disk transfer interrupt
+	// fulfill pending request
+
+	auto ior
+	DKSRequestListHead@ ior!
+
+	if (DEBUGCHECKS)
+		if (ior@ ~~)
+			"DriverDKSDPCFunction: no request\n" KeCrash
+		end
+	end
+
+	if (ior@ DKSRequest_Type + @ REQREAD ==)
+		ior@ DKSRequest_Buffer + @ // dest
+		HALLIMNstationDKSBuffer@ // src
+		ior@ DKSRequest_Length + @ // size
+		memcpy
+	end
 
 	IOBOOSTDISK // priboost
-	DKSEvent // event
+	ior@ DKSRequest_WakeEvent + @ // event
 	KeEventSignal drop
+
+	ior@ DKSRequest_Next + @ ior!
+
+	ior@ DKSRequestListHead!
+
+	if (ior@)
+		auto disk
+		ior@ DKSRequest_Disk + @ disk!
+
+		// start next one
+
+		// believe it or not its safe (and necessary) to return with
+		// interrupts disabled here because DPCs behave strangely in this
+		// operating system.
+
+		// the reason its necessary is to prevent loss of disk interrupts.
+
+		if (ior@ DKSRequest_Type + @ REQREAD ==)
+			HALCPUInterruptDisable drop
+
+			disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
+			DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
+
+			ior@ DKSRequest_BlockNumber + @ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
+			DKSCMDREAD DKSPORTCMD HALLIMNstationCitronCommandASync
+
+			return
+		end else
+			HALLIMNstationDKSBuffer@ // dest
+			ior@ DKSRequest_Buffer + @ // src
+			disk@ Disk_BlockSize + @ // size
+			memcpy
+
+			HALCPUInterruptDisable drop
+
+			disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
+			DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
+
+			ior@ DKSRequest_BlockNumber + @ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
+			DKSCMDWRITE DKSPORTCMD HALLIMNstationCitronCommandASync
+
+			return
+		end
+	end else
+		0 DKSRequestListTail!
+	end
 end
 
 fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
@@ -270,7 +332,7 @@ fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
 		DKSDPC dpc!
 
 		if (dpc@ KeDPC_Enqueued + @ ~~)
-			// defer waking up any blocked readers til later,
+			// defer doing fun work til later,
 			// otherwise we will BSOD since we're at IPLDISK
 
 			0 // context1
@@ -282,106 +344,91 @@ fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
 	end
 end
 
-fn DKSLock { -- ok }
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	DKSMutex // object
-	KeThreadWaitForObject ok!
+fn DKSBlockReadCommand { buf len blockno disk event ior -- ok }
+	0 ok!
+
+	REQREAD ior@ DKSRequest_Type + !
+	buf@ ior@ DKSRequest_Buffer + !
+	blockno@ ior@ DKSRequest_BlockNumber + !
+	len@ ior@ DKSRequest_Length + !
+	disk@ ior@ DKSRequest_Disk + !
+	0 ior@ DKSRequest_Next + !
+	event@ ior@ DKSRequest_WakeEvent + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto t
+	DKSRequestListTail@ t!
+
+	if (t@ ~~)
+		ior@ DKSRequestListHead!
+		ior@ DKSRequestListTail!
+
+		// no pending requests, start the disk
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
+		DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
+
+		blockno@ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
+		DKSCMDREAD DKSPORTCMD HALLIMNstationCitronCommandASync
+
+		rs@ HALCPUInterruptRestore
+	end else
+		ior@ t@ DKSRequest_Next + !
+		ior@ DKSRequestListTail!
+	end
+
+	ipl@ KeIPLLower
 end
 
-fn DKSUnlock { -- }
-	DKSMutex KeMutexRelease drop
-end
+fn DKSBlockWriteCommand { buf blockno disk event ior -- ok }
+	0 ok!
 
-var DKSLastDisk 0
-var DKSLastBlockNo 0
+	REQWRITE ior@ DKSRequest_Type + !
+	buf@ ior@ DKSRequest_Buffer + !
+	blockno@ ior@ DKSRequest_BlockNumber + !
+	0 ior@ DKSRequest_Length + ! // always blocksize
+	disk@ ior@ DKSRequest_Disk + !
+	0 ior@ DKSRequest_Next + !
+	event@ ior@ DKSRequest_WakeEvent + !
 
-fn DKSBlockReadCommand { blockno disk -- ok }
-	if (DEBUGCHECKS)
-		if (DKSMutex KeMutexIsLocked ~~)
-			"DKSBlockRead: DKSMutex should have been locked\n" KeCrash
-		end
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto t
+	DKSRequestListTail@ t!
+
+	if (t@ ~~)
+		ior@ DKSRequestListHead!
+		ior@ DKSRequestListTail!
+
+		// no pending requests, start the disk
+
+		HALLIMNstationDKSBuffer@ // dest
+		buf@ // src
+		disk@ Disk_BlockSize + @ // len
+		memcpy
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
+		DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
+
+		blockno@ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
+		DKSCMDWRITE DKSPORTCMD HALLIMNstationCitronCommandASync
+
+		rs@ HALCPUInterruptRestore
+	end else
+		ior@ t@ DKSRequest_Next + !
+		ior@ DKSRequestListTail!
 	end
 
-	if (DKSLastBlockNo@ blockno@ ==)
-		if (DKSLastDisk@ disk@ ==)
-			// utilize the DKS buffer memory as a one-block cache:
-			// if the contents of this block are already present in
-			// the buffer, just return. this should cut way down on
-			// redundant reads during uncached accesses.
-
-			0 ok!
-
-			return
-		end
-	end
-
-	// read blockno from disk into DKS buffer memory
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
-	DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
-
-	blockno@ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
-	DKSCMDREAD DKSPORTCMD HALLIMNstationCitronCommandASync
-
-	rs@ HALCPUInterruptRestore
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	DKSEvent // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "DKSBlockRead: couldn't wait on event (%i)\n" KeCrash
-		end
-	end
-
-	disk@ DKSLastDisk!
-	blockno@ DKSLastBlockNo!
-end
-
-fn DKSBlockWriteCommand { blockno disk -- ok }
-	if (DEBUGCHECKS)
-		if (DKSMutex KeMutexIsLocked ~~)
-			"DKSBlockRead: DKSMutex should have been locked\n" KeCrash
-		end
-	end
-
-	// write DKS buffer memory into blockno
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
-	DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
-
-	blockno@ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
-	DKSCMDWRITE DKSPORTCMD HALLIMNstationCitronCommandASync
-
-	rs@ HALCPUInterruptRestore
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	DKSEvent // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "DKSBlockWrite: couldn't wait on event (%i)\n" KeCrash
-		end
-	end
-
-	// update this since the buffer memory now contains the contents of this block.
-
-	disk@ DKSLastDisk!
-	blockno@ DKSLastBlockNo!
+	ipl@ KeIPLLower
 end
 
 fn (IODispatchIOControlFunction) DriverDKSIOControl { arg1 arg2 arg3 arg4 fcb -- ok }
@@ -389,8 +436,11 @@ fn (IODispatchIOControlFunction) DriverDKSIOControl { arg1 arg2 arg3 arg4 fcb --
 end
 
 // routines for I/O by byte offset.
-// these are only called when the device object is opened directly, either cached or uncached.
+// these are called when the device object is opened directly, either cached
+// (in which case the caller is the page cache) or uncached.
+
 // if caller isn't careful these can lead to some redundant reads and writes.
+// which are slow.
 
 fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
 	auto disk
@@ -410,47 +460,115 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 		return
 	end
 
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	KEEVENT_SYNCH // type
+	"DKSReadEvent" // name
+	event@ // event
+	KeEventInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"DriverDKSRead: failed to initialize event\n" KeCrash
+		end
+	end
+
+	auto ior
+	DKSRequest_SIZEOF alloc ior!
+
+	auto blockbuf
+	0 blockbuf!
+
+	if (lastmode@ USERMODE ==)
+		blocksize@ // bytes
+		'Bloc' // tag
+		MmAllocWithTag ok! blockbuf!
+
+		if (ok@)
+			return
+		end
+	end
+
 	bytesize@ offset@ -
 	length@
 	min length!
 
 	while (bytesread@ length@ <)
-		auto blockno
-		offset@ blocksize@ / blockno!
-
 		auto blockoff
 		offset@ blocksize@ % blockoff!
 
 		auto m
-
 		length@ bytesread@ -
 		blocksize@ blockoff@ -
 		min m!
 
-		DKSLock ok!
+		if (lastmode@ USERMODE ==)
+			// sadly for direct USERMODE reads we need to split the read
+			// operation between the disk request and the copy to userspace.
 
-		if (ok@)
-			return
+			blockbuf@ blockoff@ + // buf
+			m@ // len
+			offset@ blocksize@ / // blockno
+			disk@ // disk
+			event@ // event
+			ior@ // ior
+			DKSBlockReadCommand ok!
+
+			if (ok@)
+				blockbuf@ MmFree
+
+				return
+			end
+		end else
+			buffer@ blockoff@ + // buf
+			m@ // len
+			offset@ blocksize@ / // blockno
+			disk@ // disk
+			event@ // event
+			ior@ // ior
+			DKSBlockReadCommand ok!
+
+			if (ok@)
+				return
+			end
 		end
 
-		blockno@ disk@ DKSBlockReadCommand ok!
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject ok!
 
-		if (ok@)
-			DKSUnlock
-
-			return
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "DriverDKSRead: couldn't wait on event (%i)\n" KeCrash
+			end
 		end
 
-		buffer@ // dest
-		HALLIMNstationDKSBuffer@ blockoff@ + // src
-		m@ // size
-		memcpy
+		if (lastmode@ USERMODE ==)
+			buffer@ blockoff@ + // dest
+			blockbuf@ // src
+			m@ // size
+			KeSafeCopyOut ok!
 
-		DKSUnlock
+			if (ok@)
+				blockbuf@ MmFree
+
+				return
+			end
+		end
+
+		event@ KeEventReset drop
 
 		m@ buffer +=
 		m@ bytesread +=
 		m@ offset +=
+	end
+
+	if (blockbuf@)
+		blockbuf@ MmFree
 	end
 end
 
@@ -474,61 +592,121 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags length offset buffer fcb las
 		return
 	end
 
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	KEEVENT_SYNCH // type
+	"DKSWriteEvent" // name
+	event@ // event
+	KeEventInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"DriverDKSWrite: failed to initialize event\n" KeCrash
+		end
+	end
+
+	auto ior
+	DKSRequest_SIZEOF alloc ior!
+
+	auto blockbuf
+	0 blockbuf!
+
+	if (lastmode@ USERMODE ==)
+		blocksize@ // bytes
+		'Bloc' // tag
+		MmAllocWithTag ok! blockbuf!
+
+		if (ok@)
+			return
+		end
+	end
+
 	bytesize@ offset@ -
 	length@
 	min length!
 
 	while (byteswritten@ length@ <)
-		auto blockno
-		offset@ blocksize@ / blockno!
-
 		auto blockoff
 		offset@ blocksize@ % blockoff!
 
 		auto m
-
 		length@ byteswritten@ -
 		blocksize@ blockoff@ -
 		min m!
 
-		DKSLock ok!
+		if (m@ blocksize@ ~=)
+			if (blockbuf@)
+				blockbuf@ MmFree
+			end
 
-		if (ok@)
+			STATUS_IO_UNALIGNED ok!
+
 			return
 		end
 
-		if (m@ blocksize@ ~=)
-			// we aren't overwriting the whole block,
-			// so we need to read it in first in order to
-			// partially overwrite it...
+		if (lastmode@ USERMODE ==)
+			// sadly for direct USERMODE writes we need to split the write
+			// operation between the disk request and the copy from userspace.
 
-			blockno@ disk@ DKSBlockReadCommand ok!
+			blockbuf@ // dest
+			buffer@ // src
+			blocksize@ // size
+			KeSafeCopyIn ok!
 
 			if (ok@)
-				DKSUnlock
+				blockbuf@ MmFree
 
+				return
+			end
+
+			blockbuf@ // buf
+			offset@ blocksize@ / // blockno
+			disk@ // disk
+			event@ // event
+			ior@ // ior
+			DKSBlockWriteCommand ok!
+
+			if (ok@)
+				blockbuf@ MmFree
+
+				return
+			end
+		end else
+			buffer@ // buf
+			offset@ blocksize@ / // blockno
+			disk@ // disk
+			event@ // event
+			ior@ // ior
+			DKSBlockWriteCommand ok!
+
+			if (ok@)
 				return
 			end
 		end
 
-		HALLIMNstationDKSBuffer@ blockoff@ + // dest
-		buffer@ // src
-		m@ // size
-		memcpy
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject ok!
 
-		blockno@ disk@ DKSBlockWriteCommand ok!
-
-		if (ok@)
-			DKSUnlock
-
-			return
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "DriverDKSWrite: couldn't wait on event (%i)\n" KeCrash
+			end
 		end
 
-		DKSUnlock
+		event@ KeEventReset drop
 
 		m@ buffer +=
 		m@ byteswritten +=
 		m@ offset +=
+	end
+
+	if (blockbuf@)
+		blockbuf@ MmFree
 	end
 end
 
@@ -549,20 +727,46 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 		return
 	end
 
-	DKSLock ok!
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	KEEVENT_SYNCH // type
+	"DKSWriteBlockEvent" // name
+	event@ // event
+	KeEventInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"DriverDKSWriteBlock: failed to initialize event\n" KeCrash
+		end
+	end
+
+	auto ior
+	DKSRequest_SIZEOF alloc ior!
+
+	buffer@ // buf
+	blockno@ // blockno
+	disk@ // disk
+	event@ // event
+	ior@ // ior
+	DKSBlockWriteCommand ok!
 
 	if (ok@)
 		return
 	end
 
-	HALLIMNstationDKSBuffer@ // dest
-	buffer@ // src
-	blocksize@ // size
-	memcpy
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject ok!
 
-	blockno@ disk@ DKSBlockWriteCommand ok!
-
-	DKSUnlock
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "DriverDKSWriteBlock: couldn't wait on event (%i)\n" KeCrash
+		end
+	end
 end
 
 fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -- ok }
@@ -580,24 +784,45 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 		return
 	end
 
-	DKSLock ok!
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	KEEVENT_SYNCH // type
+	"DKSReadBlockEvent" // name
+	event@ // event
+	KeEventInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"DriverDKSReadBlock: failed to initialize event\n" KeCrash
+		end
+	end
+
+	auto ior
+	DKSRequest_SIZEOF alloc ior!
+
+	buffer@ // buf
+	blocksize@ // len
+	blockno@ // blockno
+	disk@ // disk
+	event@ // event
+	ior@ // ior
+	DKSBlockReadCommand ok!
 
 	if (ok@)
 		return
 	end
 
-	blockno@ disk@ DKSBlockReadCommand ok!
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject ok!
 
-	if (ok@)
-		DKSUnlock
-
-		return
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "DriverDKSReadBlock: couldn't wait on event (%i)\n" KeCrash
+		end
 	end
-
-	buffer@ // dest
-	HALLIMNstationDKSBuffer@ // src
-	blocksize@ // size
-	memcpy
-
-	DKSUnlock
 end

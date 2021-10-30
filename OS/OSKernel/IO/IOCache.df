@@ -294,9 +294,14 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 				end
 			end
 
+			auto npfdbe
+
+			// get this now, because who knows what will happen to it
+			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
+
 			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
-				if (writeout@)
-					if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+					if (writeout@)
 						// this is a modified page, and caller wants us to
 						// write them out to disk. the alternative is
 						// writeout==0, which means the caller says its fine
@@ -305,9 +310,7 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						1 // dontunbias
 						pfdbe@ // pfdbe
 						IOCachePageWriteModified drop
-					end
-				end else
-					if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+					end else
 						// this is a modified page and the caller doesn't want
 						// us to write it to disk, so we need to clean it up
 						// ourselves by decrementing this cacheblock's
@@ -319,13 +322,11 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						rs@ HALCPUInterruptRestore
 
 						pfdbe@ IOCachePageRemoveModified
-					end else
-						// unmodified, remove from evictable list
-						pfdbe@ MmEvictablePageReference drop
 					end
+				end else
+					// unmodified, remove from evictable list
+					pfdbe@ MmEvictablePageReference drop
 				end
-
-				auto npfdbe
 
 				if (maxpage@)
 					// we are slightly more sophisticated in our hash list
@@ -338,9 +339,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 					buckethead@ // buckethead
 					IOCachePageRemove
 				end
-
-				// get this now, because who knows what MmPageFree will do to the field where PrevCachePage is stored
-				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
 
 				pfdbe@ IOPageFrameEntryCache_PFN + @ // pfn
 				MmPageFree
@@ -730,6 +728,8 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
 		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+		0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
+		0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
 
 		pfdbe@ // pfdbe
 		buckethead@ // buckethead
@@ -816,6 +816,9 @@ fn IOCachePageRemove { pfdbe buckethead -- }
 	end else // no prev means we were the head
 		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
 	end
+
+	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
+	0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
 end
 
 fn IOCachePageInsert { pfdbe buckethead -- }

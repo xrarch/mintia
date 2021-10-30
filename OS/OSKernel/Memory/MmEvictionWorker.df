@@ -13,6 +13,10 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
+// some assumptions:
+// fast pages will never drop below IPLDPC while evicting.
+// slow pages will never have dropped below IPLDPC if eviction failed.
+
 const MMFASTPAGEEVICTCOUNT 128
 const MMSLOWPAGEEVICTCOUNT 32
 
@@ -170,7 +174,9 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 	if (pfdbe@)
 		IPLDPC KeIPLRaise ipl!
 
+		auto oldhead
 		listhead@@ pfdbe!
+		pfdbe@ oldhead!
 
 		while (i@ trycount@ <)
 			// check each page if the low memory situation is resolved
@@ -226,6 +232,8 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 			pfdbe@ // pfdbe
 			evictionfunc@ MmEvictionFunction drop evicted!
 
+			auto npfdbe
+
 			if (evicted@)
 				// evicted, free the page
 
@@ -238,8 +246,6 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 
 				1 succeedcount +=
 
-				auto npfdbe
-
 				if (fast@)
 					pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
 				end else
@@ -247,6 +253,7 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 					// IPLLOW which would mean anything could have happened
 					// to the evictable LRU and the next link is meaningless.
 
+					0 oldhead!
 					listhead@@ npfdbe!
 				end
 
@@ -254,11 +261,26 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 
 				pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
 				MmPageFree
-
-				npfdbe@ pfdbe!
 			end else
-				pfdbe@ MmPageFrameEntryEvictable_Next + @ pfdbe!
+				pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
+
+				// failed to evict, put on MRU end so that we don't try it
+				// again for a while
+
+				if (npfdbe@)
+					// if there wasn't npfdbe it'd already be on the tail.
+
+					pfdbe@ MmEvictablePageRemove
+					pfdbe@ MmEvictablePageInsert
+				end
 			end
+
+			if (npfdbe@ oldhead@ ==)
+				break
+			end
+
+			npfdbe@ pfdbe!
+			1 i +=
 		end
 
 		ipl@ KeIPLLower

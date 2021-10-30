@@ -81,6 +81,7 @@ extern MmPageEvict { pfdbe -- evicted ok }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }
 extern MmEvictablePageRemove { pfdbe -- }
+extern MmEvictablePageInsert { pfdbe -- }
 
 externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail

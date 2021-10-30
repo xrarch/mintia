@@ -77,11 +77,12 @@ const MMEVICTFLAG_COW  16
 
 extern MmEvictionWorker { context1 context2 -- }
 extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
-extern MmPageEvict { pfdbe -- evicted ok }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }
 extern MmEvictablePageRemove { pfdbe -- }
 extern MmEvictablePageInsert { pfdbe -- }
+
+extern MmEvictSinglePage { canbeslow -- pfdbe ok }
 
 externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail

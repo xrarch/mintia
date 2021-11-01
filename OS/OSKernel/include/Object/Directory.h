@@ -1,5 +1,7 @@
 extern ObRootDirectoryLockUnalertable { -- }
 extern ObRootDirectoryLock { -- ok }
+extern ObRootDirectoryLockShared { -- ok }
+extern ObRootDirectoryLockSharedUnalertable { -- }
 extern ObRootDirectoryUnlock { -- }
 
 extern ObDirectoryCreate { permissions name -- dirhandle ok }

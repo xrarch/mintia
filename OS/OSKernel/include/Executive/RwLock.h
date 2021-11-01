@@ -24,7 +24,7 @@ struct ExRwLock
 	4 ExclusiveSyncEvent
 endstruct
 
-extern ExRwLockInitialize { rwlock -- ok }
+extern ExRwLockInitialize { name rwlock -- ok }
 extern ExRwLockRelease { rwlock -- }
 extern ExRwLockReleaseForThread { thread rwlock -- }
 extern ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }

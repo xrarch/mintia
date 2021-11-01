@@ -19,7 +19,7 @@ endstruct
 
 externptr SeUserListHead
 externptr SeSystemUser
-externptr SeUserListMutex
+externptr SeUserListRwLock
 
 extern SeInitPhase0 { -- }
 extern SeInitPhase1 { -- }

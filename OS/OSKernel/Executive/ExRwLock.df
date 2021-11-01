@@ -73,6 +73,8 @@ fn ExRwLockReleaseForThread { thread rwlock -- }
 		return
 	end
 
+	// actually released
+	1 thread@ KeThread_KernelAPCDisableCount + -=
 	0 owner@ ExRwLockOwner_OwningThread + !
 
 	if (DEBUGCHECKS)
@@ -171,6 +173,7 @@ fn ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 		1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
 		current@ rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
 		1 rwlock@ ExRwLock_HeldCount + !
+		1 current@ KeThread_KernelAPCDisableCount + +=
 
 		ipl@ KeIPLLower
 
@@ -235,6 +238,7 @@ fn ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 	end
 
 	1 rwlock@ ExRwLock_ExclusiveWaitersCount + +=
+	1 current@ KeThread_KernelAPCDisableCount + +=
 
 	ipl@ KeIPLLower
 
@@ -291,6 +295,7 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 		1 rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_Locked + !
 		current@ rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_OwningThread + !
 		1 rwlock@ ExRwLock_HeldCount + !
+		1 current@ KeThread_KernelAPCDisableCount + +=
 
 		ipl@ KeIPLLower
 
@@ -348,7 +353,6 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 
 		if (exown@ ExRwLockOwner_OwningThread + @ current@ ==)
 			// yoink
-
 			1 exown@ ExRwLockOwner_Locked + +=
 			ipl@ KeIPLLower
 
@@ -363,6 +367,7 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 			current@ exown@ ExRwLockOwner_OwningThread + !
 			1 exown@ ExRwLockOwner_Locked + !
 			1 rwlock@ ExRwLock_HeldCount + +=
+			1 current@ KeThread_KernelAPCDisableCount + +=
 
 			ipl@ KeIPLLower
 
@@ -411,6 +416,7 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 	current@ exown@ ExRwLockOwner_OwningThread + !
 	1 exown@ ExRwLockOwner_Locked + !
 	1 rwlock@ ExRwLock_SharedWaitersCount + +=
+	1 current@ KeThread_KernelAPCDisableCount + +=
 
 	ipl@ KeIPLLower
 
@@ -435,6 +441,56 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 			rwlock@ ExRwLockRelease
 		end
 	end
+end
+
+fn ExRwLockDemoteToShared { rwlock -- ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (DEBUGCHECKS)
+		if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ KeThreadCurrent@ ~=)
+			"ExRwLockDemoteToShared: didn't own exclusively\n" KeCrash
+		end
+	end
+
+	// find a slot to put us in
+
+	auto owner
+	0 // thread
+	rwlock@ // rwlock
+	ExRwLockFindOwner ok! owner!
+
+	if (ok@)
+		ipl@ KeIPLLower
+		return
+	end
+
+	0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
+
+	KeThreadCurrent@ owner@ ExRwLockOwner_OwningThread + !
+	rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @ owner@ ExRwLockOwner_Locked + !
+
+	0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
+
+	auto waiters
+	rwlock@ ExRwLock_SharedWaitersCount + @ waiters!
+
+	if (waiters@)
+		waiters@ 1 + rwlock@ ExRwLock_HeldCount + !
+		0 rwlock@ ExRwLock_SharedWaitersCount + !
+
+		waiters@ // adjustment
+		rwlock@ ExRwLock_SharedSemaphore + @ // semaphore
+		KeSemaphoreRelease waiters!
+
+		if (DEBUGCHECKS)
+			if (waiters@)
+				waiters@ "ExRwLockDemoteToShared: couldn't release semaphore (%i)\n" KeCrash
+			end
+		end
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn ExRwLockWait { event rwlock -- ok }

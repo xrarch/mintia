@@ -203,14 +203,43 @@ fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesre
 		return
 	end
 
-	if (cacheblock@ ~~)
-		fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
+	auto rs
+
+	if (fileflags@ OSFILEFLAG_NOCACHE &)
+		HALCPUInterruptDisable rs!
+
+		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+		if (cacheblock@ ~~)
+			1 fcb@ IOFileControlBlock_UncachedIOCount + +=
+
+			rs@ HALCPUInterruptRestore
+		end else
+			rs@ HALCPUInterruptRestore
+
+			0 // wantcaching
+			fcb@ // fcb
+			IOFileControlBlockCacheCheck ok! cacheblock!
+
+			if (ok@)
+				return
+			end
+		end
+	end elseif (cacheblock@ ~~)
+		1 // wantcaching
 		fcb@ // fcb
 		IOFileControlBlockCacheCheck ok! cacheblock!
 
 		if (ok@)
 			return
 		end
+	end
+
+	fcb@ // fcb
+	IOFileControlBlockLockShared ok!
+
+	if (ok@)
+		return
 	end
 
 	if (cacheblock@ ~~)
@@ -226,9 +255,9 @@ fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesre
 		lastmode@ // lastmode
 		readfunc@ IODispatchReadFunction ok! bytesread!
 
-		// the FCB was not unlocked by IOFileCacheCheck because this read was uncached
-
-		fcb@ IOFileControlBlockUnlock
+		HALCPUInterruptDisable rs!
+		1 fcb@ IOFileControlBlock_UncachedIOCount + -=
+		rs@ HALCPUInterruptRestore
 	end else
 		// caching -- call into cache read function.
 
@@ -241,11 +270,10 @@ fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesre
 		IOCacheFileRead ok! bytesread!
 	end
 
-	auto rs
+	fcb@ IOFileControlBlockUnlock
+
 	HALCPUInterruptDisable rs!
-
 	bytesread@ fileobject@ IOFile_Offset + +=
-
 	rs@ HALCPUInterruptRestore
 end
 
@@ -378,14 +406,43 @@ fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten o
 		return
 	end
 
-	if (cacheblock@ ~~)
-		fileflags@ OSFILEFLAG_NOCACHE & ~~ // wantcaching
+	auto rs
+
+	if (fileflags@ OSFILEFLAG_NOCACHE &)
+		HALCPUInterruptDisable rs!
+
+		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+		if (cacheblock@ ~~)
+			1 fcb@ IOFileControlBlock_UncachedIOCount + +=
+
+			rs@ HALCPUInterruptRestore
+		end else
+			rs@ HALCPUInterruptRestore
+
+			0 // wantcaching
+			fcb@ // fcb
+			IOFileControlBlockCacheCheck ok! cacheblock!
+
+			if (ok@)
+				return
+			end
+		end
+	end elseif (cacheblock@ ~~)
+		1 // wantcaching
 		fcb@ // fcb
 		IOFileControlBlockCacheCheck ok! cacheblock!
 
 		if (ok@)
 			return
 		end
+	end
+
+	fcb@ // fcb
+	IOFileControlBlockLockShared ok!
+
+	if (ok@)
+		return
 	end
 
 	if (cacheblock@ ~~)
@@ -399,9 +456,9 @@ fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten o
 		lastmode@ // lastmode
 		writefunc@ IODispatchWriteFunction ok! byteswritten!
 
-		// the FCB was not unlocked by IOFileCacheCheck because this write was uncached
-
-		fcb@ IOFileControlBlockUnlock
+		HALCPUInterruptDisable rs!
+		1 fcb@ IOFileControlBlock_UncachedIOCount + -=
+		rs@ HALCPUInterruptRestore
 	end else
 		// caching -- call into cache write function.
 
@@ -414,10 +471,9 @@ fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten o
 		IOCacheFileWrite ok! byteswritten!
 	end
 
-	auto rs
+	fcb@ IOFileControlBlockUnlock
+
 	HALCPUInterruptDisable rs!
-
 	byteswritten@ fileobject@ IOFile_Offset + +=
-
 	rs@ HALCPUInterruptRestore
 end

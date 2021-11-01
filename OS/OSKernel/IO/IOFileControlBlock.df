@@ -36,22 +36,12 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- ok 
 	0 fcb@ IOFileControlBlock_Busy + !
 	0 fcb@ IOFileControlBlock_ParseCount + !
 
-	"FCBMutex" // name
-	KERNELMODE // mode
-	fcb@ IOFileControlBlock_Mutex + // mutex
-	KeMutexInitialize ok!
+	"FCBRwLock" // name
+	fcb@ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockInitialize ok!
 
 	if (ok@)
-		"IOFileControlBlockCreate: mutex initialization failed\n" KeCrash
-	end
-
-	"FCBIOMutex" // name
-	KERNELMODE // mode
-	fcb@ IOFileControlBlock_IOMutex + // mutex
-	KeMutexInitialize ok!
-
-	if (ok@)
-		"IOFileControlBlockCreate: IO mutex initialization failed\n" KeCrash
+		"IOFileControlBlockCreate: rwlock initialization failed\n" KeCrash
 	end
 
 	fcb@ IOFileControlBlock_AccessTime + // ptr
@@ -113,27 +103,22 @@ fn IOFileControlBlockDelete { writeout fcb -- }
 end
 
 fn IOFileControlBlockLock { fcb -- ok }
-	KERNELMODE // waitmode
 	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	fcb@ IOFileControlBlock_Mutex + // object
-	KeThreadWaitForObject ok!
+	0 // nowait
+	fcb@ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
 end
 
 fn IOFileControlBlockUnlock { fcb -- }
-	fcb@ IOFileControlBlock_Mutex + KeMutexRelease drop
+	fcb@ IOFileControlBlock_RwLock + ExRwLockRelease
 end
 
-fn IOFileControlBlockLockIO { fcb -- ok }
-	KERNELMODE // waitmode
+fn IOFileControlBlockLockShared { fcb -- ok }
 	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	fcb@ IOFileControlBlock_IOMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn IOFileControlBlockUnlockIO { fcb -- }
-	fcb@ IOFileControlBlock_IOMutex + KeMutexRelease drop
+	0 // nowait
+	0 // canstarve
+	fcb@ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
 end
 
 fn IOFileControlBlockReference { fcb -- oldcount }
@@ -178,6 +163,14 @@ fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 	if (wantcaching@)
+		if (fcb@ IOFileControlBlock_UncachedIOCount + @)
+			STATUS_IO_TRY_AGAIN_LATER ok!
+
+			fcb@ IOFileControlBlockUnlock
+
+			return
+		end
+
 		if (cacheblock@ ~~)
 			// still no cache block, plus we want there to be one.
 			// therefore, initiate caching
@@ -192,59 +185,26 @@ fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 				0 cacheblock!
 			end
 		end
-	end
+	end elseif (cacheblock@)
+		if (fcb@ IOFileControlBlock_References + @ 1 ==)
+			1 // writeout
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockDestroy ok!
 
-	if (cacheblock@)
-		// may or may not have wanted caching, but are getting it regardless.
-		// unlock the FCB
-
-		fcb@ IOFileControlBlockUnlock
-	end
-
-	// if we didn't want caching, and there was no cache block, the FCB remains locked
-	// for the duration of the operation.
-end
-
-fn IOFileControlBlockAcquireCheck { flags fcb -- ok }
-	fcb@ IOFileControlBlockLock ok!
-
-	if (ok@)
-		return
-	end
-
-	auto oldcount
-	fcb@ IOFileControlBlockReference oldcount!
-
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	if (flags@ OSFILEFLAG_NOCACHE &)
-		if (DEBUGCHECKS)
-			if (oldcount@ 0 ==)
-				"IOFileControlBlockAcquireCheck: refcount == 0\n" KeCrash
-			end
-		end
-
-		if (oldcount@ 1 ==)
-			// 1 because FS driver is expected to have biased the refcount for its
-			// own purposes
-
-			if (cacheblock@)
-				// we can destroy the cacheblock!
-
-				1 // writeout
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDestroy ok!
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						ok@ "IOFileControlBlockAcquireCheck: failed to destroy cacheblock (%i)\n" KeCrash
-					end
+			if (DEBUGCHECKS)
+				if (ok@)
+					ok@ "IOFileControlBlockAcquireCheck: failed to destroy cacheblock (%i)\n" KeCrash
 				end
-
-				0 fcb@ IOFileControlBlock_CacheInfoBlock + !
 			end
+
+			0 fcb@ IOFileControlBlock_CacheInfoBlock + !
+
+			0 cacheblock!
 		end
+	end
+
+	if (cacheblock@ ~~)
+		1 fcb@ IOFileControlBlock_UncachedIOCount + +=
 	end
 
 	fcb@ IOFileControlBlockUnlock

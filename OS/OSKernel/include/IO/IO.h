@@ -1,5 +1,3 @@
-// needs Kernel.h
-
 const IOVERSION_MAJOR 1
 const IOVERSION_MINOR 0
 
@@ -38,9 +36,9 @@ struct IOFileControlBlock
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 	4 Busy // busy with a mount operation
 	4 ParseCount
+	4 UncachedIOCount
 
-	KeMutex_SIZEOF Mutex
-	KeMutex_SIZEOF IOMutex
+	ExRwLock_SIZEOF RwLock
 
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
@@ -54,11 +52,9 @@ extern IOFileControlBlockReference { fcb -- oldcount }
 extern IOFileControlBlockDereference { fcb -- oldcount }
 extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
-extern IOFileControlBlockLockIO { fcb -- ok }
-extern IOFileControlBlockUnlockIO { fcb -- }
+extern IOFileControlBlockLockShared { fcb -- ok }
 
 extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
-extern IOFileControlBlockAcquireCheck { flags fcb -- ok }
 
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }

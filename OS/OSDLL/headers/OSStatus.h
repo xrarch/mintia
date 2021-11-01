@@ -32,6 +32,6 @@ const STATUS_UNAVAILABLE_ADDRESS   -30
 const STATUS_OVERFLOW              -31
 const STATUS_BAD_ADDRESS           -32
 const STATUS_FAULT                 -33
-// gap
+const STATUS_NOT_IMPLEMENTED       -34
 const STATUS_NOT_CORRECT_FILETYPE  -35
 const STATUS_IO_UNALIGNED          -36

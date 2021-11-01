@@ -1,0 +1,464 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+externptr HALCallCount
+externptr HALCallTable
+
+externptr OSCallCount
+externptr OSCallTable
+
+fn ExInitPhase0 { -- }
+	// initialize physical memory allocation
+
+	MmInitPhase0
+
+	// initialize security
+
+	SeInitPhase0
+
+	// initialize object manager
+
+	ObInitPhase0
+
+	// initialize syscall handling
+
+	OSCallCount@ HALCallCount!
+	OSCallTable HALCallTable!
+
+	// initialize process manager
+
+	PsInitPhase0
+
+	// become page zeroing thread
+
+	MmZeroPageWorker
+end
+
+externptr HALLoaderInfo
+
+buffer TestBuffer 4096
+
+buffer TestRwLock ExRwLock_SIZEOF
+
+table LinkedListItem1
+	0
+	pointerof LinkedListItem2
+endtable
+
+table LinkedListItem2
+	pointerof LinkedListItem1
+	pointerof LinkedListItem3
+endtable
+
+table LinkedListItem3
+	pointerof LinkedListItem2
+	pointerof LinkedListItem4
+endtable
+
+table LinkedListItem4
+	pointerof LinkedListItem3
+	0
+endtable
+
+struct LinkedListItem
+	4 Prev
+	4 Next
+endstruct
+
+var LinkedListHead 0
+var LinkedListTail 0
+
+fn ExInitPhase1 { context1 context2 -- }
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	// initialize object manager
+
+	ObInitPhase1
+
+	// initialize virtual memory
+
+	MmInitPhase1
+
+	// initialize I/O
+
+	IOInitPhase1
+
+	// initialize OSDLL and such
+
+	PsInitPhase1
+
+	// from this point on the kernel should exclusively use ExAlert facility
+	// for message logging.
+
+	LinkedListItem1 LinkedListHead!
+	LinkedListItem4 LinkedListTail!
+
+	auto ok
+	auto handle
+
+	TestRwLock // rwlock
+	ExRwLockInitialize ok!
+
+	if (ok@)
+		"a" KeCrash
+	end
+
+	0 // context1
+	0 // context2
+	pointerof TestKernelThread // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"Sierpinski" // name
+	0 // processhandle
+	PsSystemProcess@ // processptr
+	PsThreadCreate ok! handle!
+
+	if (ok@)
+		ok@ "couldn't create sierpinski thread (%i)\n" KeCrash
+	end
+
+	handle@ "sierpinski thread handle = %d\n" "ExInitPhase1" ExLog
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "couldn't close sierpinski thread (%i)\n" KeCrash
+	end
+
+	0 // context1
+	0 // context2
+	pointerof TestKernelThread2 // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"Test" // name
+	0 // processhandle
+	PsSystemProcess@ // processptr
+	PsThreadCreate ok! handle!
+
+	if (ok@)
+		ok@ "couldn't create test thread (%i)\n" KeCrash
+	end
+
+	handle@ "test thread handle = %d\n" "ExInitPhase1" ExLog
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "couldn't close test thread (%i)\n" KeCrash
+	end
+
+	0 // context1
+	0 // context2
+	pointerof TestKernelThread3 // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"Test2" // name
+	0 // processhandle
+	PsSystemProcess@ // processptr
+	PsThreadCreate ok! handle!
+
+	if (ok@)
+		ok@ "couldn't create test thread (%i)\n" KeCrash
+	end
+
+	handle@ "test thread handle = %d\n" "ExInitPhase1" ExLog
+
+	handle@ ObObjectClose ok!
+
+	if (ok@)
+		ok@ "couldn't close test thread (%i)\n" KeCrash
+	end
+
+	// ObRootDirectoryObject@ ObHeader_SIZEOF - 0 ObDirectoryDumpTree
+
+	"hey im forward cycle!\n" Printf
+
+	while (1)
+		1 // alertable
+		0 // nowait
+		TestRwLock // rwlock
+		ExRwLockAcquireExclusive ok!
+
+		"EXCLUSIVE " Printf
+
+		auto h
+		LinkedListHead@ h!
+
+		auto n
+		h@ LinkedListItem_Next + @ n!
+
+		n@ LinkedListHead!
+
+		0 n@ LinkedListItem_Prev + !
+
+		LinkedListTail@ h@ LinkedListItem_Prev + !
+		h@ LinkedListTail@ LinkedListItem_Next + !
+
+		0 h@ LinkedListItem_Next + !
+		h@ LinkedListTail!
+
+		TestRwLock ExRwLockRelease
+	end
+
+	"Post-boot memory statistics:\n" "ExInitPhase1" ExLog
+
+	MmUsageDump
+
+	if (DEBUGCHECKS)
+		// MmHeapCheck
+	end
+
+	while (1)
+		1000 KERNELMODE 0 KeThreadSleep drop
+
+		TestRwLock ExRwLockRelease
+	end
+end
+
+#include "../../Loader/LoaderGlobal.h"
+
+asm "
+
+SierpinskiCount:
+	.dl 0
+
+SierpinskiIter:
+	.dl 0
+
+SierpinskiFast:
+.global SierpinskiFast
+	subi sp, sp, 36
+
+	mov  long [sp], lr
+	mov  long [sp + 4], s0
+	mov  long [sp + 8], s1
+	mov  long [sp + 12], s2
+	mov  long [sp + 16], s3
+	mov  long [sp + 20], s4
+	mov  long [sp + 24], s5
+	mov  long [sp + 28], s6
+	mov  long [sp + 32], s7
+
+	li   s0, 0
+
+	li   s1, 126
+
+	li   s5, 15877
+
+	la   s7, HALLoaderInfo
+	mov  s7, long [s7]
+	mov  s7, long [s7 + LoaderInfo_HALConsoleFBWidth]
+
+	la   s2, SierpinskiIter
+	mov  s3, long [s2]
+
+	la   t0, SierpinskiCount
+	mov  s4, long [t0]
+
+	la   s6, HALLoaderInfo
+	mov  s6, long [s6]
+	mov  s6, long [s6 + LoaderInfo_HALConsoleFBAddr]
+
+	la   t0, HALLoaderInfo
+	mov  t0, long [t0]
+	mov  t1, long [t0 + LoaderInfo_HALConsoleFBHeight]
+
+	rshi t0, t1, 1
+	mul  t0, s7, t0
+	add  s6, s6, t0
+
+.loop:
+	div  t1, s0, s1
+	mod  t2, s0, s1
+
+	and  t3, t1, t2
+	bne  t3, .cont
+
+	rshi a2, t2, 1
+	nor  a2, a2, a2
+	sub  a2, t1, a2
+
+	sub  a1, s1, t2
+
+	xor  a0, t1, s4
+	xor  a0, a0, s3
+	xor  a0, a0, t2
+
+	mul  t0, a1, s7
+	lshi t0, t0, 1
+	lshi a2, a2, 1
+	add  t0, t0, a2
+	mov  int [s6 + t0], a0
+
+	addi s3, s3, 1
+
+.cont:
+	addi s0, s0, 1
+
+	sub  t0, s0, s5
+	blt  t0, .loop
+
+	mov  long [s2], s3
+
+	addi s4, s4, 1
+
+	la   t0, SierpinskiCount
+	mov  long [t0], s4
+	
+	mov  lr, long [sp]
+	mov  s0, long [sp + 4]
+	mov  s1, long [sp + 8]
+	mov  s2, long [sp + 12]
+	mov  s3, long [sp + 16]
+	mov  s4, long [sp + 20]
+	mov  s5, long [sp + 24]
+	mov  s6, long [sp + 28]
+	mov  s7, long [sp + 32]
+
+	addi sp, sp, 36
+	ret
+
+"
+
+extern SierpinskiFast { -- }
+
+
+
+fn TestKernelThread { context1 context2 -- }
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	auto starttime
+	KeTime_SIZEOF alloc starttime!
+
+	auto ok
+
+	"hey im forward traverse!\n" Printf
+
+	while (1)
+		1 // alertable
+		0 // nowait
+		0 // canstarve
+		TestRwLock // rwlock
+		ExRwLockAcquireShared ok!
+
+		"SHAREDSHAREDSHAREDSHARED " Printf
+
+		auto h
+		LinkedListHead@ h!
+
+		auto l
+		0 l!
+
+		while (h@)
+			if (h@ LinkedListItem_Prev + @ l@ ~=)
+				"forward traverse failed\n" KeCrash
+			end
+
+			h@ l!
+			h@ LinkedListItem_Next + @ h!
+		end
+
+		TestRwLock ExRwLockRelease
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	PRIORITY_LOWREALTIME 1 + KeThreadCurrent@ KeThreadPrioritySet
+
+	ipl@ KeIPLLower
+
+	while (1)
+		20 KERNELMODE 0 KeThreadSleep drop
+
+		SierpinskiFast
+	end
+end
+
+fn TestKernelThread2 { context1 context2 -- }
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	auto ok
+
+	"hey im backwards cycle!\n" Printf
+
+	while (1)
+		1 // alertable
+		0 // nowait
+		TestRwLock // rwlock
+		ExRwLockAcquireExclusive ok!
+
+		"EXCLUSIVE " Printf
+
+		auto t
+		LinkedListTail@ t!
+
+		auto p
+		t@ LinkedListItem_Prev + @ p!
+
+		p@ LinkedListTail!
+
+		0 p@ LinkedListItem_Next + !
+
+		LinkedListHead@ t@ LinkedListItem_Next + !
+		t@ LinkedListHead@ LinkedListItem_Prev + !
+
+		0 t@ LinkedListItem_Prev + !
+		t@ LinkedListHead!
+
+		TestRwLock ExRwLockRelease
+	end
+end
+
+fn TestKernelThread3 { context1 context2 -- }
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	auto ok
+
+	"hey im backwards traverse!\n" Printf
+
+	while (1)
+		1 // alertable
+		0 // nowait
+		0 // canstarve
+		TestRwLock // rwlock
+		ExRwLockAcquireShared ok!
+
+		"SHAREDSHAREDSHAREDSHARED " Printf
+
+		auto t
+		LinkedListTail@ t!
+
+		auto l
+		0 l!
+
+		while (t@)
+			if (t@ LinkedListItem_Next + @ l@ ~=)
+				"backward traverse failed\n" KeCrash
+			end
+
+			t@ l!
+			t@ LinkedListItem_Prev + @ t!
+		end
+
+		TestRwLock ExRwLockRelease
+	end
+end

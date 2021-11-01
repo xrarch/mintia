@@ -10,3 +10,5 @@ const KEEVENT_NOTIF 2
 extern KeEventInitialize { signaled type name event -- ok }
 extern KeEventReset { event -- signaled }
 extern KeEventSignal { priboost event -- ok }
+extern KeEventPulse { priboost event -- ok }
+extern KeEventSignalGetWaiter { priboost event -- waiter ok }

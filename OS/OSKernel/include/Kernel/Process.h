@@ -116,6 +116,9 @@ struct KeThread
 
 	4 SafeAccessAbort
 	4 SafeAccessSP
+
+	4 Signaled
+	4 AcceptMask
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }
@@ -135,6 +138,7 @@ extern KeThreadInitialize { context1 context2 startfunc process kstack name thre
 extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
+extern KeThreadIsKilled { mode alertable thread -- ok }
 extern KeThreadUserAPCDisable { thread -- oldcount }
 extern KeThreadUserAPCEnable { thread -- oldcount }
 extern KeThreadEnqueue { front thread -- }

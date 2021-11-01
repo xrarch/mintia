@@ -181,19 +181,15 @@ fn KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 	ipl@ KeIPLLower
 end
 
-// satisfies the highest priority, earliest wait on a dispatch object
-// this DOES NOT SIGNAL the object
+// satisfies the earliest wait on a dispatch object.
+// this signals the object if no thread was awoken and signal is 1.
+
+// XXX maybe this should wake up the *highest priority* earliest waiter?
+// that would require keeping the waitblock list insertion sorted to do
+// efficiently which I don't feel like working on right now.
 
 fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok }
 	0 ok!
-
-	0 wokenthread!
-
-	auto wthpri
-	0 wthpri!
-
-	auto wokewb
-	0 wokewb!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -201,35 +197,9 @@ fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok 
 	auto h
 	object@ KeDispatchHeader_WaitBlockListHead + @ h!
 
-	while (h@)
-		auto nw
-		h@ KeDispatchWaitBlock_Thread + @ nw!
-
-		auto npri
-
-		if (wokenthread@ ~~)
-			h@ wokewb!
-
-			nw@ wokenthread!
-
-			nw@ KeThread_BasePriority + @ wthpri!
-		end else
-			nw@ KeThread_BasePriority + @ npri!
-
-			if (npri@ wthpri@ >)
-				h@ wokewb!
-
-				nw@ wokenthread!
-
-				npri@ wthpri!
-			end
-		end
-
-		h@ KeDispatchWaitBlock_Next + @ h!
-	end
-
-	if (wokewb@)
-		waitstatus@ priboost@ wokewb@ KeDispatchWaitBlockSatisfy ok!
+	if (h@)
+		h@ KeDispatchWaitBlock_Thread + @ wokenthread!
+		waitstatus@ priboost@ h@ KeDispatchWaitBlockSatisfy ok!
 
 		if (DEBUGCHECKS)
 			if (ok@)
@@ -237,6 +207,7 @@ fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok 
 			end
 		end
 	end elseif (signal@)
+		0 wokenthread!
 		1 object@ KeDispatchHeader_Signaled + !
 	end
 
@@ -254,11 +225,33 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		"KeThreadWaitForMultipleObjects: objectcount>THREADWAITBLOCKS\n" KeCrash
 	end
 
+	if (waittype@ THREADWAITALL ==)
+		// THREADWAITALL is broken and requires a ~1 afternoon dispatcher
+		// overhaul to make work because I am bad. THREADWAITANY works fine,
+		// as far as I can tell.
+
+		STATUS_NOT_IMPLEMENTED ok!
+
+		return
+	end
+
 	auto current
 	KeThreadCurrent@ current!
 
 	auto waitipl
 	IPLDPC KeIPLRaise waitipl!
+
+	waitmode@ // mode
+	alertable@ // alertable
+	current@ // thread
+	KeThreadIsKilled ok!
+
+	if (ok@)
+		// thread was killed or received a signal that cannot be ignored
+		waitipl@ KeIPLLower
+
+		return
+	end
 
 	// XXX timeout will reset if interrupted by an APC
 
@@ -310,6 +303,18 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 					if (object@ KeDispatchHeader_Signaled + @)
 						if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
 							0 object@ KeDispatchHeader_Signaled + !
+						end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
+							if (DEBUGCHECKS)
+								if (object@ KeSemaphore_Count + @ 0 ==)
+									"KeThreadWaitForMultipleObjects: semaphore count==0\n" KeCrash
+								end
+							end
+
+							1 object@ KeSemaphore_Count + -=
+
+							if (object@ KeSemaphore_Count + @ 0 ==)
+								0 object@ KeDispatchHeader_Signaled + !
+							end
 						end
 
 						i@ ok!
@@ -403,13 +408,17 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		// the object may become signaled while this occurs, hence the check above.
 
 		if (ok@ STATUS_KERNEL_APC ==)
-			if (waitipl@ IPLLOW ==)
-				IPLLOW KeIPLLower
-
-				// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
-
-				IPLDPC KeIPLRaise drop
+			if (DEBUGCHECKS)
+				if (waitipl@ IPLAPC ==)
+					"KeThreadWaitForMultipleObjects: awoken for APC while waiting at IPLAPC\n" KeCrash
+				end
 			end
+
+			IPLLOW KeIPLLower
+
+			// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
+
+			IPLDPC KeIPLRaise drop
 		end else
 			break
 		end

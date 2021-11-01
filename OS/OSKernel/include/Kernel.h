@@ -8,6 +8,7 @@
 
 #include "<inc>/Kernel/Mutex.h"
 #include "<inc>/Kernel/Event.h"
+#include "<inc>/Kernel/Semaphore.h"
 
 #include "<inc>/Kernel/Process.h"
 

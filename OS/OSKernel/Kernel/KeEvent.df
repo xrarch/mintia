@@ -29,16 +29,8 @@ fn KeEventInitialize { signaled type name event -- ok }
 end
 
 fn KeEventReset { event -- signaled }
-	// XXX do interrupts actually have to be disabled here or am I being paranoid
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
 	event@ KeDispatchHeader_Signaled + @ signaled!
-
 	0 event@ KeDispatchHeader_Signaled + !
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn KeEventSignal { priboost event -- ok }
@@ -60,4 +52,44 @@ fn KeEventSignal { priboost event -- ok }
 	end else
 		event@ KeDispatchHeader_Type + @ "KeEventSignal: invalid dispatch type %d\n" KeCrash
 	end
+end
+
+fn KeEventPulse { priboost event -- ok }
+	0 ok!
+
+	if (event@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTNOTIF ==)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		0 // waitstatus
+		priboost@ // priboost
+		event@ // object
+		KeDispatchSatisfyAll ok! drop
+
+		0 event@ KeDispatchHeader_Signaled + !
+
+		ipl@ KeIPLLower
+	end elseif (event@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
+		0 // waitstatus
+		priboost@ // priboost
+		event@ // object
+		0 // signal
+		KeDispatchSatisfyFirst ok! drop
+	end else
+		event@ KeDispatchHeader_Type + @ "KeEventSignal: invalid dispatch type %d\n" KeCrash
+	end
+end
+
+fn KeEventSignalGetWaiter { priboost event -- waiter ok }
+	if (DEBUGCHECKS)
+		if (event@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ~=)
+			"KeEventSignalGetWaiter: event wasn't a synch event\n" KeCrash
+		end
+	end
+
+	0 // waitstatus
+	priboost@ // priboost
+	event@ // object
+	1 // signal
+	KeDispatchSatisfyFirst ok! waiter!
 end

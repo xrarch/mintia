@@ -207,7 +207,7 @@ end
 
 fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	// attempt to evict all of the cacheblock's page frames beyond newsize.
-	// caller should have locked the associated FCB as necessary.
+	// caller should have locked the associated FCB exclusively.
 
 	auto maxpage
 	newsize@ PAGEOFFSETMASK + PAGENUMBERMASK & maxpage!
@@ -978,22 +978,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 
 	0 byteswritten!
 
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"IOCacheFileWrite: attempt to write file with no cacheblock\n" KeCrash
-		end
-	end
-
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockTryReference ok! drop
-
-	if (ok@)
-		return
-	end
-
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
@@ -1004,9 +988,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 		// driver provides no way to grow this file
 
 		if (offset@ bytesize@ >=)
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockDereference drop
-
 			STATUS_IO_END_OF_DISK ok!
 
 			return
@@ -1018,10 +999,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 	end else
 		if (offset@ PAGENUMBERMASK >=)
 			// prevent underflow
-
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockDereference drop
-
 			STATUS_IO_END_OF_FILE ok!
 
 			return
@@ -1065,9 +1042,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 				truncfunc@ IODispatchTruncateFunction ok!
 
 				if (ok@)
-					cacheblock@ // cacheblock
-					IOCacheInfoBlockDereference drop
-
 					return
 				end
 			end
@@ -1083,9 +1057,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			IOCachePageGet ok! pfdbe! pageframe!
 
 			if (ok@)
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDereference drop
-
 				return
 			end
 		end else
@@ -1098,9 +1069,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			IOCachePageRead ok! pfdbe! pageframe!
 
 			if (ok@)
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDereference drop
-
 				return
 			end
 		end
@@ -1116,9 +1084,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 				// state anyway so that data loss is probably not a big deal
 
 				pfdbe@ MmEvictablePageDereference drop
-
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDereference drop
 
 				return
 			end
@@ -1143,9 +1108,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 		m@ byteswritten +=
 		m@ offset +=
 	end
-
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockDereference drop
 end
 
 fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
@@ -1156,29 +1118,10 @@ fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
 	0 bytesread!
 
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"IOCacheFileRead: attempt to read file with no cacheblock\n" KeCrash
-		end
-	end
-
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockTryReference ok! drop
-
-	if (ok@)
-		return
-	end
-
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 	if (offset@ bytesize@ >=)
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockDereference drop
-
 		return
 	end
 
@@ -1212,9 +1155,6 @@ fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 		IOCachePageRead ok! pfdbe! pageframe!
 
 		if (ok@)
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockDereference drop
-
 			return
 		end
 
@@ -1226,9 +1166,6 @@ fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
 			if (ok@)
 				pfdbe@ MmEvictablePageDereference drop
-
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDereference drop
 
 				return
 			end
@@ -1245,9 +1182,6 @@ fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 		m@ bytesread +=
 		m@ offset +=
 	end
-
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockDereference drop
 end
 
 fn IOCacheInitialize { fcb -- cacheblock ok }

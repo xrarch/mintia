@@ -67,7 +67,7 @@ externptr ObTypeObjectType
 externptr ObTypeDirectoryType
 externptr ObRootDirectoryObject
 externptr ObObjectTypesDirectoryObject
-externptr ObRootMutex
+externptr ObRootRwLock
 
 extern ObInitPhase0 { -- }
 extern ObInitPhase1 { -- }

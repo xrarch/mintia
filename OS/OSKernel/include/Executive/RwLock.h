@@ -29,3 +29,4 @@ extern ExRwLockRelease { rwlock -- }
 extern ExRwLockReleaseForThread { thread rwlock -- }
 extern ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 extern ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
+extern ExRwLockDemoteToShared { rwlock -- ok }

@@ -1,0 +1,75 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALRTC.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+// initializes a KeSemaphore
+
+fn KeSemaphoreInitialize { count name semaphore -- ok }
+	name@ DISPATCHOBJECT_SEMAPHORE semaphore@ KeDispatchInitialize ok!
+
+	if (ok@)
+		return
+	end
+
+	count@ semaphore@ KeSemaphore_Count + !
+
+	if (count@)
+		1 semaphore@ KeSemaphore_DispatchHeader + KeDispatchHeader_Signaled + !
+	end
+end
+
+fn KeSemaphoreRelease { adjustment semaphore -- ok }
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto count
+	semaphore@ KeSemaphore_Count + @ count!
+
+	if (DEBUGCHECKS)
+		if (KeDPCActive@)
+			"KeSemaphoreRelease: DPC active\n" KeCrash
+		end
+	end
+
+	if (count@ 0 ==)
+		while (adjustment@)
+			auto wth
+
+			0 // waitstatus
+			1 // priboost
+			semaphore@ // object
+			0 // signal
+			KeDispatchSatisfyFirst ok! wth!
+
+			if (wth@ ~~)
+				break
+			end
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeSemaphoreRelease: couldn't KeDispatchSatisfyFirst\n" KeCrash
+				end
+			end
+
+			1 adjustment -=
+		end
+	end
+
+	adjustment@ count +=
+
+	if (count@)
+		1 semaphore@ KeSemaphore_DispatchHeader + KeDispatchHeader_Signaled + !
+	end
+
+	count@ semaphore@ KeSemaphore_Count + !
+
+	ipl@ KeIPLLower
+end

@@ -7,6 +7,7 @@
 #include "<inc>/Kernel.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
+#include "<ll>/OSDLL/OSSignal.h"
 
 table KeThreadPriorityQueueHeads[PRIORITIES]
 public KeThreadPriorityQueueHeads
@@ -128,6 +129,9 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_SafeAccessAbort + !
 	0 thread@ KeThread_SafeAccessSP + !
 
+	0          thread@ KeThread_Signaled + !
+	0xCF66FFFF thread@ KeThread_AcceptMask + !
+
 	"NA" 0 thread@ KeThread_Timer + KeTimerInitialize ok!
 end
 
@@ -187,6 +191,67 @@ fn KeThreadAcceptKill { thread -- oldcount }
 	1 thread@ KeThread_IgnoreKill + -=
 
 	rs@ HALCPUInterruptRestore
+end
+
+fn KeThreadIsKilled { mode alertable thread -- ok }
+	// gives the status code that should be returned for the thread's signal
+	// state. this only determines what should interrupt a syscall and be
+	// passed to OSDLL; actual signal dispatch and certain actions like core
+	// dumping are performed in usermode OSDLL code.
+
+	auto sig
+	thread@ KeThread_Signaled + @ sig!
+
+	if (sig@ ~~)
+		// no signals, return now
+		0 ok!
+
+		return
+	end
+
+	if (thread@ KeThread_IgnoreKill + @)
+		// all signals are being hard-ignored by the system
+		0 ok!
+
+		return
+	end
+
+	if (alertable@ ~~)
+		if (mode@ KERNELMODE ==)
+			// kernel mode unalertable can block all signals
+			0 ok!
+
+			return
+		end
+	end
+
+	if (sig@ 1 OSSIGNAL_KILL << &)
+		// OSSIGNAL_KILL cannot be ignored
+		STATUS_KILLED ok!
+
+		return
+	end
+
+	if (sig@ 1 OSSIGNAL_STOP << &)
+		// OSSIGNAL_STOP cannot be ignored
+		STATUS_SIGNALLED ok!
+
+		return
+	end
+
+	if (alertable@ ~~)
+		// usermode unalertable can block all signals except OSSIGNAL_KILL and
+		// OSSIGNAL_STOP
+		0 ok!
+
+		return
+	end
+
+	if (thread@ KeThread_AcceptMask + @ sig@ &)
+		STATUS_SIGNALLED ok!
+	end else
+		0 ok!
+	end
 end
 
 fn KeThreadUserAPCDisable { thread -- oldcount }

@@ -64,20 +64,41 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 		return
 	end
 
-	"IOCacheInfoBlockMutex" // name
-	KERNELMODE // mode
-	cacheblock@ IOCacheInfoBlock_Mutex + // mutex
-	KeMutexInitialize ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			"IOCacheInfoBlockCreate: couldn't initialize mutex\n" KeCrash
-		end
-	end
-
 	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
 	0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
+
+	"IOCacheInfoBlockRwLock" // name
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"IOCacheInfoBlockCreate: couldn't initialize rwlock\n" KeCrash
+		end
+	end
+
+	auto buckets
+	IOCACHEPAGEBUCKETS buckets!
+
+	auto mutex
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + mutex!
+
+	while (buckets@)
+		"IOCacheInfoBucketMutex" // name
+		KERNELMODE // mode
+		mutex@ // mutex
+		KeMutexInitialize ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"IOCacheInfoBlockCreate: couldn't initialize mutex\n" KeCrash
+			end
+		end
+
+		KeMutex_SIZEOF mutex +=
+		1 buckets -=
+	end
 
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + // ptr
 	IOCACHEPAGEBUCKETS 8 * // size
@@ -86,23 +107,85 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 end
 
 fn IOCacheInfoBlockLock { cacheblock -- ok }
-	KERNELMODE // waitmode
 	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	cacheblock@ IOCacheInfoBlock_Mutex + // object
-	KeThreadWaitForObject ok!
+	0 // nowait
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
 end
 
-fn IOCacheInfoBlockTryLock { cacheblock -- locked }
-	KERNELMODE // waitmode
+fn IOCacheInfoBlockTryLock { cacheblock -- ok }
 	0 // alertable
-	0 // timeout
-	cacheblock@ IOCacheInfoBlock_Mutex + // object
-	KeThreadWaitForObject locked!
+	1 // nowait
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
+
+	if (ok@ 0 s<)
+		0 ok!
+	end
+end
+
+fn IOCacheInfoBlockLockShared { cacheblock -- ok }
+	1 // alertable
+	0 // nowait
+	0 // canstarve
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn IOCacheInfoBlockTryLockShared { cacheblock -- ok }
+	0 // alertable
+	1 // nowait
+	0 // canstarve
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
+
+	if (ok@ 0 s<)
+		0 ok!
+	end
 end
 
 fn IOCacheInfoBlockUnlock { cacheblock -- }
-	cacheblock@ IOCacheInfoBlock_Mutex + KeMutexRelease drop
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockRelease
+end
+
+fn IOCacheInfoBlockLockBucket { bucket cacheblock -- ok }
+	if (DEBUGCHECKS)
+		if (bucket@ IOCACHEPAGEBUCKETS >=)
+			"IOCacheInfoBlockLockBucket: bucket >= IOCACHEPAGEBUCKETS\n" KeCrash
+		end
+	end
+
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // object
+	KeThreadWaitForObject ok!
+end
+
+fn IOCacheInfoBlockTryLockBucket { bucket cacheblock -- locked }
+	if (DEBUGCHECKS)
+		if (bucket@ IOCACHEPAGEBUCKETS >=)
+			"IOCacheInfoBlockLockBucket: bucket >= IOCACHEPAGEBUCKETS\n" KeCrash
+		end
+	end
+
+	KERNELMODE // waitmode
+	1 // alertable
+	0 // timeout
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // object
+	KeThreadWaitForObject locked!
+end
+
+fn IOCacheInfoBlockUnlockBucket { bucket cacheblock -- }
+	if (DEBUGCHECKS)
+		if (bucket@ IOCACHEPAGEBUCKETS >=)
+			"IOCacheInfoBlockUnlockBucket: bucket >= IOCACHEPAGEBUCKETS\n" KeCrash
+		end
+	end
+
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // rwlock
+	KeMutexRelease drop
 end
 
 fn IOCacheInfoBlockReference { cacheblock -- oldcount }
@@ -233,9 +316,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 		rs@ HALCPUInterruptRestore
 
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockUnlock
-
 		STATUS_IO_TRY_AGAIN_LATER ok!
 
 		return
@@ -327,6 +407,10 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 					pfdbe@ MmEvictablePageReference drop
 				end
 
+				// in all cases above, the cacheblock's page references count is left biased.
+				// unbias it.
+				cacheblock@ IOCacheInfoBlockDereference drop
+
 				if (maxpage@)
 					// we are slightly more sophisticated in our hash list
 					// management when maxpage ~= 0 since it may not be empty
@@ -357,16 +441,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		end
 
 		1 i +=
-	end
-
-	// fix all the stray referencing we just did
-
-	if (maxpage@ 0 ==)
-		0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
-		0 cacheblock@ IOCacheInfoBlock_PageReferences + !
-	end else
-		// XXX i only THINK this works
-		cacheblock@ IOCacheInfoBlock_ModifiedPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + !
 	end
 
 	HALCPUInterruptDisable rs!
@@ -464,7 +538,12 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 
 	if (DEBUGCHECKS)
 		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY & ~~)
-			pfdbe@ "IOCachePageWriteModified: page wasn't dirty (0x%08x)\n" KeCrash
+			// can happen naturally, just turn this into a NOP
+
+			0 ok!			
+
+			return
+			// pfdbe@ "IOCachePageWriteModified: page wasn't dirty (0x%08x)\n" KeCrash
 		end
 	end
 
@@ -547,15 +626,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-	if (locked@ ~~)
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockLock ok!
-
-		if (ok@)
-			return
-		end
-	end
-
 	auto filesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ filesize!
 
@@ -567,6 +637,25 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 
 	auto bucket
 	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
+
+	if (locked@ ~~)
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockLockShared ok!
+
+		if (ok@)
+			return
+		end
+
+		bucket@ // bucket
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockLockBucket ok!
+
+		if (ok@)
+			cacheblock@ IOCacheInfoBlockUnlock
+
+			return
+		end
+	end
 
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
@@ -650,6 +739,10 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 				end
 
 				if (locked@ ~~)
+					bucket@ // bucket
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockUnlockBucket
+
 					cacheblock@ // cacheblock
 					IOCacheInfoBlockUnlock
 				end
@@ -705,6 +798,10 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	end
 
 	if (locked@ ~~)
+		bucket@ // bucket
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockUnlockBucket
+
 		cacheblock@ // cacheblock
 		IOCacheInfoBlockUnlock
 	end
@@ -816,7 +913,7 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	auto cacheblock
 	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-	cacheblock@ IOCacheInfoBlockTryLock ok!
+	cacheblock@ IOCacheInfoBlockTryLockShared ok!
 
 	if (ok@ ~~)
 		// failed to lock -- don't wait.
@@ -829,11 +926,28 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 		return
 	end
 
-	auto offset
-	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
-
 	auto bucket
 	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
+
+	bucket@ // bucket
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockTryLockBucket ok!
+
+	if (ok@ ~~)
+		// failed to lock bucket -- don't wait.
+		// return so that the caller can
+		// immediately try the next page.
+
+		0 ok!
+		0 evicted!
+
+		cacheblock@ IOCacheInfoBlockUnlock
+
+		return
+	end
+
+	auto offset
+	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
 
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
@@ -847,6 +961,10 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	1 IOCachePagesUsed -=
 
 	1 evicted!
+
+	bucket@ // bucket
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockUnlockBucket
 
 	cacheblock@ IOCacheInfoBlockUnlock
 end
@@ -903,9 +1021,22 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		end
 	end
 
-	cacheblock@ IOCacheInfoBlockLock ok!
+	cacheblock@ IOCacheInfoBlockLockShared ok!
 
 	if (ok@)
+		return
+	end
+
+	auto bucket
+	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
+
+	bucket@ // bucket
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockLockBucket ok!
+
+	if (ok@)
+		cacheblock@ IOCacheInfoBlockUnlock
+
 		return
 	end
 
@@ -916,6 +1047,10 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 	IOCachePageGet ok! pfdbe! pageframe!
 
 	if (ok@)
+		bucket@ // bucket
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockUnlockBucket
+
 		cacheblock@ IOCacheInfoBlockUnlock
 
 		return
@@ -927,16 +1062,10 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		auto readfunc
 		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
 
-		if (readfunc@ ~~)
-			// XXX should this not just cause a crash? honestly
-
-			pfdbe@ MmEvictablePageDereference drop
-
-			cacheblock@ IOCacheInfoBlockUnlock
-
-			STATUS_IO_NOT_SUPPORTED ok!
-
-			return
+		if (DEBUGCHECKS)
+			if (readfunc@ ~~)
+				"IOCachePageRead: no read function\n" KeCrash
+			end
 		end
 
 		// perform the read operation
@@ -956,6 +1085,10 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
 			pfdbe@ MmEvictablePageDereference drop
 
+			bucket@ // bucket
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockUnlockBucket
+
 			cacheblock@ IOCacheInfoBlockUnlock
 
 			return
@@ -965,6 +1098,10 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
 		IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
 	end
+
+	bucket@ // bucket
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockUnlockBucket
 
 	cacheblock@ IOCacheInfoBlockUnlock
 end

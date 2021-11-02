@@ -1,15 +1,15 @@
-// needs Kernel.h
-
 const IOCACHEPAGEBUCKETS 8 // must be a power of two
 const IOCACHEPAGESHIFT 3 // 1<<IOCACHEPAGESHIFT must equal IOCACHEPAGEBUCKETS
 const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
 
 struct IOCacheInfoBlock
-	KeMutex_SIZEOF Mutex
+	ExRwLock_SIZEOF RwLock
+
 	4 PageReferences
 	4 ModifiedPages
 	4 Flags
 
+	(IOCACHEPAGEBUCKETS KeMutex_SIZEOF *) PageBucketMutexes
 	(IOCACHEPAGEBUCKETS 8 *) PageBucketListHeads
 endstruct
 
@@ -46,18 +46,28 @@ extern IOModifiedPageWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
 
 extern IOCacheInit { -- }
-
 extern IOCacheDumpInfo { cacheblock -- }
+
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
+
 extern IOCacheInfoBlockLock { cacheblock -- ok }
-extern IOCacheInfoBlockTryLock { cacheblock -- locked }
+extern IOCacheInfoBlockLockShared { cacheblock -- ok }
+extern IOCacheInfoBlockTryLock { cacheblock -- ok }
+extern IOCacheInfoBlockTryLockShared { cacheblock -- ok }
 extern IOCacheInfoBlockUnlock { cacheblock -- }
+
+extern IOCacheInfoBlockLockBucket { bucket cacheblock -- ok }
+extern IOCacheInfoBlockTryLockBucket { bucket cacheblock -- locked }
+extern IOCacheInfoBlockUnlockBucket { bucket cacheblock -- }
+
 extern IOCacheInfoBlockReference { cacheblock -- oldcount }
 extern IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
 extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
+
 extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
+
 
 extern IOCachePageRemoveModified { pfdbe -- }
 extern IOCachePageInsertModified { pfdbe -- }
@@ -68,10 +78,13 @@ extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 extern IOCachePageModifyFunction { pfdbe -- ok }
 
+
 extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
+
 extern IOCacheInitialize { fcb -- cacheblock ok }
+
 
 externptr IOCacheModifiedPageListHead
 externptr IOCacheModifiedPageListTail

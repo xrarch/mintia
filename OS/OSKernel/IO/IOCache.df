@@ -46,12 +46,11 @@ public IOCachePagesUsed
 var IOCachePagesLowWatermark 0
 public IOCachePagesLowWatermark
 
-fn IOCacheInit { -- }
-	MmPageFreeCount@ 12 / 300 min IOCachePagesLowWatermark!
+var IOCachePagesModifiedMaximum 0
+public IOCachePagesModifiedMaximum
 
-	IOCachePagesLowWatermark@ PAGESHIFT <<
-	IOCachePagesLowWatermark@ "low watermark = %d cache pages (%d bytes)\n" "IOCacheInit" HALLog
-end
+var IOCachePagesModifiedCount 0
+public IOCachePagesModifiedCount
 
 fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	IOCacheInfoBlock_SIZEOF // bytes
@@ -171,7 +170,7 @@ fn IOCacheInfoBlockTryLockBucket { bucket cacheblock -- locked }
 	end
 
 	KERNELMODE // waitmode
-	1 // alertable
+	0 // alertable
 	0 // timeout
 	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // object
 	KeThreadWaitForObject locked!
@@ -316,6 +315,8 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 		rs@ HALCPUInterruptRestore
 
+		cacheblock@ IOCacheInfoBlockUnlock
+
 		STATUS_IO_TRY_AGAIN_LATER ok!
 
 		return
@@ -369,7 +370,7 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 				end elseif (pfdbe@ IOPageFrameEntryCache_References + @ 0 ~=)
 					pfdbe@
 					pfdbe@ IOPageFrameEntryCache_References + @
-					"IOCacheInfoBlockTruncate: found page with strange refcount %d (0x%08x)\n" KeCrash
+					"IOCacheInfoBlockTruncate: 2 found page with strange refcount %d (0x%08x)\n" KeCrash
 				end
 			end
 
@@ -389,6 +390,10 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						1 // dontunbias
 						pfdbe@ // pfdbe
 						IOCachePageWriteModified drop
+
+						HALCPUInterruptDisable rs!
+						1 cacheblock@ IOCacheInfoBlock_PageReferences + -=
+						rs@ HALCPUInterruptRestore
 					end else
 						// this is a modified page and the caller doesn't want
 						// us to write it to disk, so we need to clean it up
@@ -398,18 +403,18 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 						HALCPUInterruptDisable rs!
 						1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
+						1 cacheblock@ IOCacheInfoBlock_PageReferences + -=
 						rs@ HALCPUInterruptRestore
 
 						pfdbe@ IOCachePageRemoveModified
 					end
 				end else
 					// unmodified, remove from evictable list
-					pfdbe@ MmEvictablePageReference drop
-				end
 
-				// in all cases above, the cacheblock's page references count is left biased.
-				// unbias it.
-				cacheblock@ IOCacheInfoBlockDereference drop
+					HALCPUInterruptDisable rs!
+					pfdbe@ MmEvictablePageRemove
+					rs@ HALCPUInterruptRestore
+				end
 
 				if (maxpage@)
 					// we are slightly more sophisticated in our hash list
@@ -538,12 +543,7 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 
 	if (DEBUGCHECKS)
 		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY & ~~)
-			// can happen naturally, just turn this into a NOP
-
-			0 ok!			
-
-			return
-			// pfdbe@ "IOCachePageWriteModified: page wasn't dirty (0x%08x)\n" KeCrash
+			pfdbe@ "IOCachePageWriteModified: page wasn't dirty (0x%08x)\n" KeCrash
 		end
 	end
 
@@ -559,6 +559,7 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	end
 
 	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
+	1 IOCachePagesModifiedCount -=
 
 	// remove from modified list
 	pfdbe@ IOCachePageRemoveModified
@@ -926,6 +927,9 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 		return
 	end
 
+	auto offset
+	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
+
 	auto bucket
 	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
 
@@ -938,16 +942,13 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 		// return so that the caller can
 		// immediately try the next page.
 
+		cacheblock@ IOCacheInfoBlockUnlock
+
 		0 ok!
 		0 evicted!
 
-		cacheblock@ IOCacheInfoBlockUnlock
-
 		return
 	end
-
-	auto offset
-	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
 
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
@@ -1007,6 +1008,19 @@ fn IOCachePageModifyFunction { pfdbe -- ok }
 
 	// will be decremented when written out
 	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + +=
+	1 IOCachePagesModifiedCount +=
+
+	if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ >=)
+		0 // priboost
+		IOModifiedPageEvent // event
+		KeEventSignal ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "IOCachePageModifyFunction: couldn't signal event\n" KeCrash
+			end
+		end
+	end
 
 	ipl@ KeIPLLower
 end

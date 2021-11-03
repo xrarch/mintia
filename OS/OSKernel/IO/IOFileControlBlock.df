@@ -109,16 +109,39 @@ fn IOFileControlBlockLock { fcb -- ok }
 	ExRwLockAcquireExclusive ok!
 end
 
-fn IOFileControlBlockUnlock { fcb -- }
-	fcb@ IOFileControlBlock_RwLock + ExRwLockRelease
-end
-
 fn IOFileControlBlockLockShared { fcb -- ok }
 	1 // alertable
 	0 // nowait
 	0 // canstarve
 	fcb@ IOFileControlBlock_RwLock + // rwlock
 	ExRwLockAcquireShared ok!
+end
+
+fn IOFileControlBlockTryLock { fcb -- ok }
+	0 // alertable
+	1 // nowait
+	fcb@ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
+
+	if (ok@ 0 s<)
+		0 ok!
+	end
+end
+
+fn IOFileControlBlockTryLockShared { fcb -- ok }
+	0 // alertable
+	1 // nowait
+	0 // canstarve
+	fcb@ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
+
+	if (ok@ 0 s<)
+		0 ok!
+	end
+end
+
+fn IOFileControlBlockUnlock { fcb -- }
+	fcb@ IOFileControlBlock_RwLock + ExRwLockRelease
 end
 
 fn IOFileControlBlockReference { fcb -- oldcount }
@@ -182,7 +205,9 @@ fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 				// failed to initialize caching, do this I/O operation
 				// uncached and try again later...
 
-				0 cacheblock!
+				fcb@ IOFileControlBlockUnlock
+
+				return
 			end
 		end
 	end elseif (cacheblock@)
@@ -193,7 +218,7 @@ fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 
 			if (DEBUGCHECKS)
 				if (ok@)
-					ok@ "IOFileControlBlockAcquireCheck: failed to destroy cacheblock (%i)\n" KeCrash
+					ok@ "IOFileControlBlockCacheCheck: failed to destroy cacheblock (%i)\n" KeCrash
 				end
 			end
 

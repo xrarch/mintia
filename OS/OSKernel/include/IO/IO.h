@@ -51,8 +51,10 @@ extern IOFileControlBlockDelete { writeout fcb -- }
 extern IOFileControlBlockReference { fcb -- oldcount }
 extern IOFileControlBlockDereference { fcb -- oldcount }
 extern IOFileControlBlockLock { fcb -- ok }
-extern IOFileControlBlockUnlock { fcb -- }
 extern IOFileControlBlockLockShared { fcb -- ok }
+extern IOFileControlBlockTryLock { fcb -- ok }
+extern IOFileControlBlockTryLockShared { fcb -- ok }
+extern IOFileControlBlockUnlock { fcb -- }
 
 extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 

@@ -1,0 +1,222 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+// some assumptions:
+// fast pages will never drop below IPLDPC while evicting.
+// slow pages will never have dropped below IPLDPC if eviction failed.
+
+const MMFASTPAGEEVICTCOUNT 128
+const MMSLOWPAGEEVICTCOUNT 32
+
+fn MmEvictionWorker { context1 context2 -- }
+	PRIORITY_LOWREALTIME 1 + // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	// the eviction/swap thread
+
+	auto sleptonce
+	0 sleptonce!
+
+	auto pteinvlcount
+	0 pteinvlcount!
+
+	auto ipl
+
+	while (1)
+		auto ok
+
+		KERNELMODE // waitmode
+		0 // alertable
+		10000 // timeout (evict up to the high watermark every 10 seconds)
+		MmEventLowMemory // object
+		KeThreadWaitForObject ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				if (ok@ STATUS_WAIT_TIMEOUT ~=)
+					ok@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+				end
+			end
+		end
+
+		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+			IPLDPC KeIPLRaise ipl!
+
+			// recheck at IPLDPC -- this seemingly redundant check
+			// minimizes overhead in the more common case
+
+			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+				MmEventLowMemory // event
+				KeEventReset drop
+
+				ipl@ KeIPLLower
+
+				0 sleptonce!
+				0 pteinvlcount!
+
+				continue
+			end
+
+			ipl@ KeIPLLower
+		end
+
+		if (pteinvlcount@)
+			if (pteinvlcount@ 7 & ~~)
+				// we've been here a lot of times...
+				// giving up the processor for 75ms might untangle things and help
+				// us evict more pages...
+
+				75 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep ok!
+
+				if (DEBUGCHECKS)
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+					end
+				end
+
+				continue
+			end
+		end
+
+		auto done
+
+		MMFASTPAGEEVICTCOUNT // trycount
+		1 // fast
+		MmEvictableFastPageListHead // listhead
+		MmEvictFromList ok! done!
+
+		if (ok@)
+			ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
+		end
+
+		if (done@)
+			continue
+		end
+
+		if (sleptonce@ ~~)
+			if (IOCacheModifiedPageListHead@)
+				// there's some modified page frames.
+				// go to sleep for 25ms with the hope that the modified page writer will have freed some up by
+				// the time we wake up.
+
+				1 sleptonce!
+
+				25 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep ok!
+
+				if (DEBUGCHECKS)
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+					end
+				end
+
+				continue
+			end
+		end
+
+		MMSLOWPAGEEVICTCOUNT // trycount
+		0 // fast
+		MmEvictablePageListHead // listhead
+		MmEvictFromList ok! done!
+
+		if (ok@)
+			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
+		end
+
+		if (done@)
+			continue
+		end
+
+		// permit a sleep on the modified page list again
+		0 sleptonce!
+
+		1 pteinvlcount +=
+
+		"MmEvictionWorker: TODO: invalidate PTEs\n" KeCrash
+	end
+end
+
+fn MmZeroPageWorker { -- }
+	// the fate of the idle thread is to endlessly spin and check for page frames in the free list.
+	// if it finds any, it zeroes them out and places them on the zero list.
+	// if it doesn't, it halts the processor until next interrupt.
+
+	while (1)
+		auto pfdbe
+		MmPageFreeListHead@ pfdbe!
+
+		if (pfdbe@)
+			// there's a page, zero it
+
+			auto rs
+			HALCPUInterruptDisable rs!
+
+			MmPageFreeListHead@ pfdbe!
+
+			if (pfdbe@ ~~)
+				// make sure the free list didnt become empty in that brief timespan
+
+				rs@ HALCPUInterruptRestore
+
+				continue
+			end
+
+			// yoink off the list
+
+			auto pfn
+			pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+			pfdbe@ MmPageFrameEntryFree_Next + @ MmPageFreeListHead!
+			0 pfdbe@ MmPageFrameEntryFree_Next + !
+
+			// account for the absence of this page frame from either list while we're zeroing it
+
+			1 MmPageFreeCount -=
+
+			rs@ HALCPUInterruptRestore
+
+			// zero out this page frame
+
+			pfn@ PAGESHIFT << IDENTITYSPACE | // ptr
+			PAGESIZE // size
+			0 // word
+			memset
+
+			HALCPUInterruptDisable rs!
+
+			// place on zero list
+
+			MmPageZeroListHead@ pfdbe@ MmPageFrameEntryFree_Next + !
+			pfdbe@ MmPageZeroListHead!
+
+			1 MmPageFreeCount +=
+
+			rs@ HALCPUInterruptRestore
+		end else
+			// there are no free list pages for now, halt
+
+			HALCPUHalt
+		end
+	end
+end

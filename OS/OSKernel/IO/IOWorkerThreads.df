@@ -33,10 +33,10 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	auto ok
 
 	while (1)
-		// iterate all mounted filesystems every 10 seconds and ask them
+		// iterate all mounted filesystems every 25 seconds and ask them
 		// to flush any internal buffers to disk.
 
-		10000 // interval
+		25000 // interval
 		KERNELMODE // waitmode
 		0 // alertable
 		KeThreadSleep ok!
@@ -55,6 +55,9 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	end
 end
 
+buffer IOModifiedPageEvent KeEvent_SIZEOF
+public IOModifiedPageEvent
+
 fn IOModifiedPageWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
@@ -62,32 +65,38 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
+	auto objecttable
+	8 alloc objecttable!
+
+	MmEventLowMemory objecttable@!
+	IOModifiedPageEvent objecttable@ 4 + !
+
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	// the modified page writer
 
 	while (1)
-		// write out all modified pages every 15 seconds,
-		// or whenever the system is low on memory.
+		// write out all modified pages every 30 seconds,
+		// whenever the system is low on memory, and whenever
+		// the number of modified pages crosses the maximum.
 
 		// XXX we don't do this currently, but it's possible that
 		// it would be best to go to sleep for every, say, 64-128 pages written out,
 		// in order to avoid tying up the disk controller for too long.
-		// this is a high priority thread, so flushing a mass quantity of modified
-		// pages could stop any user processes from doing any disk I/O for a long
-		// period of time.
 
 		auto ok
 		auto waitok
 
 		KERNELMODE // waitmode
 		0 // alertable
-		15000 // timeout
-		MmEventLowMemory // object
-		KeThreadWaitForObject waitok!
+		THREADWAITANY // waittype
+		30000 // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		KeThreadWaitForMultipleObjects waitok!
 
 		if (DEBUGCHECKS)
-			if (waitok@)
+			if (waitok@ 0 s<)
 				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
 					waitok@ "IOModifiedPageWorker: failed to wait on low memory event (%i)\n" KeCrash
 				end
@@ -138,10 +147,10 @@ fn IOModifiedPageWorker { context1 context2 -- }
 					pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 					cacheblock@ // cacheblock
-					IOCacheInfoBlockTryReference ok! drop
+					IOCacheInfoBlockTryLockShared ok!
 
-					if (ok@ ~~)
-						// refed successfully
+					if (ok@)
+						// locked successfully
 
 						ipl@ KeIPLLower
 
@@ -152,11 +161,11 @@ fn IOModifiedPageWorker { context1 context2 -- }
 						IOCachePageWriteModified drop
 
 						cacheblock@ // cacheblock
-						IOCacheInfoBlockDereference drop
+						IOCacheInfoBlockUnlock
 
 						0 writescore!
 					end else
-						// ref failed, move this page to the tail so that we
+						// lock failed, move this page to the tail so that we
 						// don't try it infinitely
 
 						if (pfdbe@ IOCacheModifiedPageListTail@ ~=)
@@ -179,7 +188,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 			end
 
 			if (none@)
-				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
+				if (waitok@ 0 ==)
 					// low memory event woke us. sleep for 100ms
 					// to make sure we don't infinite loop here
 					// since there aren't any more modified pages.

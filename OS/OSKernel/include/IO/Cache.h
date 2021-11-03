@@ -45,7 +45,6 @@ const IOCACHEGETFLAG_SWAPOUT 1 // this IOCachePageGet is involved in a swap
 extern IOModifiedPageWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
 
-extern IOCacheInit { -- }
 extern IOCacheDumpInfo { cacheblock -- }
 
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
@@ -90,3 +89,8 @@ externptr IOCacheModifiedPageListHead
 externptr IOCacheModifiedPageListTail
 
 externptr IOCachePagesUsed
+
+externptr IOCachePagesLowWatermark
+externptr IOCachePagesModifiedMaximum
+
+externptr IOModifiedPageEvent

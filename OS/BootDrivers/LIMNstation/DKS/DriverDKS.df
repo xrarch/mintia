@@ -276,26 +276,24 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 
 	ior@ DKSRequestListHead!
 
+	auto rs
+
 	if (ior@)
 		auto disk
 		ior@ DKSRequest_Disk + @ disk!
 
 		// start next one
 
-		// believe it or not its safe (and necessary) to return with
-		// interrupts disabled here because DPCs behave strangely in this
-		// operating system.
-
-		// the reason its necessary is to prevent loss of disk interrupts.
-
 		if (ior@ DKSRequest_Type + @ REQREAD ==)
-			HALCPUInterruptDisable drop
+			HALCPUInterruptDisable rs!
 
 			disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
 			DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
 
 			ior@ DKSRequest_BlockNumber + @ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
 			DKSCMDREAD DKSPORTCMD HALLIMNstationCitronCommandASync
+
+			rs@ HALCPUInterruptRestore
 
 			return
 		end else
@@ -304,13 +302,15 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 			disk@ Disk_BlockSize + @ // size
 			memcpy
 
-			HALCPUInterruptDisable drop
+			HALCPUInterruptDisable rs!
 
 			disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
 			DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
 
 			ior@ DKSRequest_BlockNumber + @ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
 			DKSCMDWRITE DKSPORTCMD HALLIMNstationCitronCommandASync
+
+			rs@ HALCPUInterruptRestore
 
 			return
 		end
@@ -331,16 +331,20 @@ fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
 		auto dpc
 		DKSDPC dpc!
 
-		if (dpc@ KeDPC_Enqueued + @ ~~)
-			// defer doing fun work til later,
-			// otherwise we will BSOD since we're at IPLDISK
-
-			0 // context1
-			0 // context2
-			DPCLOWIMPORTANCE // importance
-			dpc@ // dpc
-			KeDPCEnqueue
+		if (DEBUGCHECKS)
+			if (dpc@ KeDPC_Enqueued + @)
+				"DriverDKSInterrupt: DPC was enqueued?\n" KeCrash
+			end
 		end
+
+		// defer doing fun work til later,
+		// otherwise we will BSOD since we're at IPLDISK
+
+		0 // context1
+		0 // context2
+		DPCLOWIMPORTANCE // importance
+		dpc@ // dpc
+		KeDPCEnqueue
 	end
 end
 

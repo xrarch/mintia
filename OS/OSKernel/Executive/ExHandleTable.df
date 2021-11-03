@@ -14,18 +14,69 @@
 
 #include "<inc>/HALDebug.h"
 
+fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
+	auto entrysize
+	4 entrysizelog@ << entrysize!
+
+	auto tabsize
+	ExHandleTableHeader_SIZEOF tabsize!
+
+	auto tab0size
+	INITIALENTRIES entrysize@ * tab0size!
+
+	tab0size@ tabsize +=
+
+	if (chargedprocess@)
+		tabsize@ MmChargeBytesGet
+		chargedprocess@ MmQuotaChargeProcess ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	tabsize@ 'HnTb' MmAllocWithTag ok! handletable!
+
+	if (ok@)
+		// allocation failed
+
+		if (chargedprocess@)
+			tabsize@ MmChargeBytesGet
+			chargedprocess@ MmQuotaUnchargeProcess
+		end
+
+		return
+	end
+
+	"ExHandleTableRwLock" // name
+	handletable@ ExHandleTableHeader_RwLock + // mutex
+	ExRwLockInitialize ok!
+
+	if (ok@)
+		"ExHandleTableCreate: RwLock initialization failed\n" KeCrash
+	end
+
+	entrysizelog@ handletable@ ExHandleTableHeader_EntrySizeLog + !
+
+	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
+
+	INITIALENTRIES handletable@ ExHandleTableHeader_Entries + !
+	INITIALENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
+
+	-1 handletable@ ExHandleTableHeader_RecycleHandle + !
+
+	0 handletable@ ExHandleTableHeader_Table + !
+
+	handletable@ ExHandleTableHeader_SIZEOF +
+	tab0size@
+	0
+	memset
+end
+
 fn ExHandleTableDelete { func handletable -- }
 	auto ok
 
-	if (DEBUGCHECKS)
-		// this check isnt foolproof or anything because nothing stops
-		// someone with a stray pointer from locking the mutex between
-		// here and the table's destruction, but its useful anyway
-
-		if (handletable@ ExHandleTableHeader_Mutex + KeMutexIsLocked)
-			"ExHandleTableDelete: attempt to delete handle table while locked\n" KeCrash
-		end
-	end
+	// handle table MUST be locked exclusively
 
 	auto i
 
@@ -218,76 +269,23 @@ fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok
 	handletablesrc@ ExHandleTableUnlock
 end
 
-fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
-	auto entrysize
-	4 entrysizelog@ << entrysize!
-
-	auto tabsize
-	ExHandleTableHeader_SIZEOF tabsize!
-
-	auto tab0size
-	INITIALENTRIES entrysize@ * tab0size!
-
-	tab0size@ tabsize +=
-
-	if (chargedprocess@)
-		tabsize@ MmChargeBytesGet
-		chargedprocess@ MmQuotaChargeProcess ok!
-
-		if (ok@)
-			return
-		end
-	end
-
-	tabsize@ 'HnTb' MmAllocWithTag ok! handletable!
-
-	if (ok@)
-		// allocation failed
-
-		if (chargedprocess@)
-			tabsize@ MmChargeBytesGet
-			chargedprocess@ MmQuotaUnchargeProcess
-		end
-
-		return
-	end
-
-	"HandleTableMutex" // name
-	KERNELMODE // mode
-	handletable@ ExHandleTableHeader_Mutex + // mutex
-	KeMutexInitialize ok!
-
-	if (ok@)
-		"ExHandleTableCreate: mutex initialization failed\n" KeCrash
-	end
-
-	entrysizelog@ handletable@ ExHandleTableHeader_EntrySizeLog + !
-
-	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
-
-	INITIALENTRIES handletable@ ExHandleTableHeader_Entries + !
-	INITIALENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
-
-	-1 handletable@ ExHandleTableHeader_RecycleHandle + !
-
-	0 handletable@ ExHandleTableHeader_Table + !
-
-	handletable@ ExHandleTableHeader_SIZEOF +
-	tab0size@
-	0
-	memset
+fn ExHandleTableLock { handletable -- ok }
+	1 // alertable
+	0 // nowait
+	handletable@ ExHandleTableHeader_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
 end
 
-fn ExHandleTableLock { handletable -- ok }
-	KERNELMODE // waitmode
+fn ExHandleTableLockShared { handletable -- ok }
 	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	handletable@ ExHandleTableHeader_Mutex + // object
-	KeThreadWaitForObject ok!
+	0 // nowait
+	0 // canstarve
+	handletable@ ExHandleTableHeader_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
 end
 
 fn ExHandleTableUnlock { handletable -- }
-	handletable@ ExHandleTableHeader_Mutex + KeMutexRelease drop
+	handletable@ ExHandleTableHeader_RwLock + ExRwLockRelease
 end
 
 fn ExHandleDelete { handle handletable locked -- entryptr entryvalue ok }
@@ -608,7 +606,7 @@ fn ExHandleLookup { handle handletable locked -- entryptr ok }
 	0 ok!
 
 	if (locked@ ~~)
-		handletable@ ExHandleTableLock ok!
+		handletable@ ExHandleTableLockShared ok!
 
 		if (ok@)
 			return

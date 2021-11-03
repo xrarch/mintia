@@ -1,8 +1,10 @@
+const OSENVIRONMENTSIZE 2048
+const OSPARAMETERSIZE   1024
+
 struct OSPEBs
-	1024 Environment
-	256 ImagePath
-	256 CurrentDirectoryPath
-	128 Parameters
+	OSENVIRONMENTSIZE Environment
+	OSPARAMETERSIZE Parameters
+	4 ParameterCount
 	4 StdIn
 	4 StdOut
 	4 StdErr

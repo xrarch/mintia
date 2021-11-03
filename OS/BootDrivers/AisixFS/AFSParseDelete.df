@@ -39,10 +39,10 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 	AFSDirEnt_SIZEOF alloc afsdirent!
 
 	auto mount
-	initialfcb@ IOFileControlBlock_DeviceObject + @ mount!
+	initialfcb@ IOFileControlBlockGetMount mount!
 
 	if (path@ gb)
-		if (initialfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+		if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 			STATUS_NOT_A_DIRECTORY ok!
 
 			return
@@ -70,11 +70,11 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			end
 
 			auto fcbdata
-			initialfcb@ IOFileControlBlock_FSContext + @ fcbdata!
+			initialfcb@ IOFileControlBlockGetContext fcbdata!
 
 			// more path, traverse
 
-			if (mount@ IOMount_Flags + @ OSMOUNT_NOUID & ~~)
+			if (mount@ IOMountGetFlags OSMOUNT_NOUID & ~~)
 				if (process@)
 					// check traverse rights (on behalf of the CALLING process,
 					// not the receiver of the handle)
@@ -109,7 +109,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					break
 				end
 
-				if (len@ 59 >=)
+				if (len@ 59 >)
 					initialfcb@ IOFileControlBlockUnlock
 					initialfcb@ AFSFCBDereference drop
 
@@ -134,14 +134,14 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 			if (pcomp@ ".." strcmp)
 				auto iparent
-				initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_IParent + @ iparent!
+				initialfcb@ IOFileControlBlockGetContext AFSFCBData_IParent + @ iparent!
 
-				if (iparent@ initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_INum + @ ==)
+				if (iparent@ initialfcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ ==)
 					continue
 				end
 
 				iparent@ // inum
-				initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+				initialfcb@ IOFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
 
 				initialfcb@ IOFileControlBlockUnlock
@@ -188,7 +188,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					// found the entry!
 
 					afsdirent@ AFSDirEnt_INum + @ // inum
-					initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+					initialfcb@ IOFileControlBlockGetMount // mount
 					AFSFCBRead ok! nextfcb!
 
 					initialfcb@ IOFileControlBlockUnlock
@@ -199,7 +199,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					end
 
 					if (path@ gb)
-						if (nextfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+						if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 							nextfcb@ AFSFCBDereference drop
 
 							STATUS_NOT_A_DIRECTORY ok!
@@ -208,7 +208,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 						end
 					end
 
-					if (nextfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
+					if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
 						nextfcb@ IOFileControlBlockLock ok!
 
 						if (ok@)
@@ -223,7 +223,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				end
 			end
 
-			if (initialfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+			if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 				break
 			end
 		end
@@ -235,10 +235,10 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 	auto owninguser
 
-	if (mount@ IOMount_Flags + @ OSMOUNT_NOUID &)
-		process@ PsProcess_OwningUser + @ owninguser!
+	if (mount@ IOMountGetFlags OSMOUNT_NOUID &)
+		process@ PsProcessGetOwner owninguser!
 	end else
-		initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_UID + @ // uid
+		initialfcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ // uid
 		0 // userlistlocked
 		SeUserGetByUID ok! owninguser!
 
@@ -251,33 +251,36 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 			// user not found... make calling process the owner
 
-			process@ PsProcess_OwningUser + @ owninguser!
+			process@ PsProcessGetOwner owninguser!
 		end
 	end
 
-	initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+	initialfcb@ IOFileControlBlockGetMount // mount
 	AFSMountReference drop
 
 	flags@ // flags
 	owninguser@ // owninguser
-	initialfcb@ IOFileControlBlock_FSContext + @ AFSFCBData_Permissions + @ // permissions
+	initialfcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ // permissions
 	initialfcb@ // fcb
 	IOFileCreateObject ok! object!
 
 	if (ok@)
 		initialfcb@ AFSFCBDereference drop
 
-		initialfcb@ IOFileControlBlock_DeviceObject + @ // mount
+		initialfcb@ IOFileControlBlockGetContext // mount
 		AFSMountDereference drop
 	end
 end
 
 fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	auto fcb
-	object@ IOFile_FileControlBlock + @ fcb!
+	object@ IOFileGetFileControlBlock fcb!
 
 	auto mount
-	fcb@ IOFileControlBlock_DeviceObject + @ mount!
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto mountctx
+	mount@ IOMountGetContext mountctx!
 
 	auto oldcount
 	fcb@ AFSFCBDereference oldcount!
@@ -285,7 +288,7 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	if (oldcount@ 1 ==)
 		// TODO: delete file if this is the last reference and a deletion is pending
 
-		if (mount@ IOMount_FSContext + @ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
+		if (mountctx@ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
 			// we're in a low-fcb condition, remove this one immediately if still possible
 
 			mount@ AFSFCBCacheLock ok!
@@ -296,19 +299,19 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 				end
 			end
 
-			if (fcb@ IOFileControlBlock_References + @ 0 ==)
-				if (mount@ IOMount_FSContext + @ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
+			if (fcb@ IOFileControlBlockGetReferences 0 ==)
+				if (mountctx@ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
 					// FCB refcount still 0, and still in low-fcb condition...
 					// nuke it.
 
 					auto fcbdata
-					fcb@ IOFileControlBlock_FSContext + @ fcbdata!
+					fcb@ IOFileControlBlockGetContext fcbdata!
 
 					auto bucket
 					fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
 
 					auto buckethead
-					mount@ IOMount_FSContext + @ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
+					mountctx@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
 
 					fcb@ // fcb
 					buckethead@ // buckethead
@@ -322,7 +325,7 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 
 					auto rs
 					HALCPUInterruptDisable rs!
-					1 mount@ IOMount_FSContext + @ AFSData_FCBUsedCount + -=
+					1 mountctx@ AFSData_FCBUsedCount + -=
 					rs@ HALCPUInterruptRestore
 				end
 			end

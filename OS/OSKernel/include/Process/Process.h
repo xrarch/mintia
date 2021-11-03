@@ -76,3 +76,5 @@ extern PsProcessCreate { sectionobject inherithandles owninguser parentprocess p
 extern PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
 extern PsProcessObjectDelete { object -- }
 extern PsThreadObjectDelete { object -- }
+
+extern PsProcessGetOwner { process -- owninguser }

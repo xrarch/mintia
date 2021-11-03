@@ -178,9 +178,9 @@ fn (FDriverInit) DriverInit { stage -- ok }
 						ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
 					end
 
-					4096 dev@ IODevice_BlockSize + !
+					4096 dev@ IODeviceSetBlockSize
 
-					dev@ IODevice_Extension + @ disk!
+					dev@ IODeviceGetExtension disk!
 
 					DKS_REALDISK disk@ Disk_Type + !
 					diskid@ disk@ Disk_DKSID + !
@@ -223,9 +223,9 @@ fn (FDriverInit) DriverInit { stage -- ok }
 								ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
 							end
 
-							4096 dev@ IODevice_BlockSize + !
+							4096 dev@ IODeviceSetBlockSize
 
-							dev@ IODevice_Extension + @ disk!
+							dev@ IODeviceGetExtension disk!
 
 							DKS_PARTITION disk@ Disk_Type + !
 							diskid@ disk@ Disk_DKSID + !
@@ -443,22 +443,30 @@ end
 // which are slow.
 
 fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
+	auto devobj
+	fcb@ IOFileControlBlockGetDeviceObject devobj!
+
 	auto disk
-	fcb@ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ disk!
+	devobj@ IODeviceGetExtension disk!
 
 	auto blocksize
-	fcb@ IOFileControlBlock_DeviceObject + @ IODevice_BlockSize + @ blocksize!
-
-	auto bytesize
-	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+	disk@ Disk_BlockSize + @ blocksize!
 
 	0 ok!
 
-	0 bytesread!
+	fcb@ IOFileControlBlockGetSize bytesread!
 
-	if (offset@ bytesize@ >=)
+	if (offset@ bytesread@ >=)
+		0 bytesread!
+
 		return
 	end
+
+	bytesread@ offset@ -
+	length@
+	min length!
+
+	0 bytesread!
 
 	auto event
 	KeEvent_SIZEOF alloc event!
@@ -490,10 +498,6 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 			return
 		end
 	end
-
-	bytesize@ offset@ -
-	length@
-	min length!
 
 	while (bytesread@ length@ <)
 		auto blockoff
@@ -574,13 +578,13 @@ end
 
 fn (IODispatchWriteFunction) DriverDKSWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 	auto disk
-	fcb@ IOFileControlBlock_DeviceObject + @ IODevice_Extension + @ disk!
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
 
 	auto blocksize
-	fcb@ IOFileControlBlock_DeviceObject + @ IODevice_BlockSize + @ blocksize!
+	disk@ Disk_BlockSize + @ blocksize!
 
 	auto bytesize
-	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+	fcb@ IOFileControlBlockGetSize bytesize!
 
 	0 ok!
 
@@ -716,10 +720,10 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 	// write by block
 
 	auto disk
-	devobject@ IODevice_Extension + @ disk!
+	devobject@ IODeviceGetExtension disk!
 
 	auto blocksize
-	devobject@ IODevice_BlockSize + @ blocksize!
+	disk@ Disk_BlockSize + @ blocksize!
 
 	if (blockno@ disk@ Disk_Blocks + @ >=)
 		STATUS_IO_END_OF_DISK ok!
@@ -773,10 +777,10 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 	// read by block
 
 	auto disk
-	devobject@ IODevice_Extension + @ disk!
+	devobject@ IODeviceGetExtension disk!
 
 	auto blocksize
-	devobject@ IODevice_BlockSize + @ blocksize!
+	disk@ Disk_BlockSize + @ blocksize!
 
 	if (blockno@ disk@ Disk_Blocks + @ >=)
 		STATUS_IO_END_OF_DISK ok!

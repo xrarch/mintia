@@ -1,7 +1,9 @@
-// needs KeDispatch.h
-
+// do NOT change the size of this
 struct KeEvent
 	KeDispatchHeader_SIZEOF DispatchHeader
+
+	4 Reserved1
+	4 Reserved2
 endstruct
 
 const KEEVENT_SYNCH 1

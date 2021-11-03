@@ -4,6 +4,7 @@ const DISPATCHOBJECT_EVENTNOTIF 3
 const DISPATCHOBJECT_EVENTSYNCH 4
 const DISPATCHOBJECT_SEMAPHORE  5
 
+// do NOT change the size of this
 struct KeDispatchHeader
 	4 Signaled
 
@@ -13,6 +14,9 @@ struct KeDispatchHeader
 	4 WaitBlockListTail
 
 	4 Name
+
+	4 Reserved1
+	4 Reserved2
 endstruct
 
 // a thread can wait on up to THREADWAITBLOCKS dispatcher objects at a time, and a

@@ -82,6 +82,7 @@ extern MmEvictablePageReference { pfdbe -- oldcount }
 extern MmEvictablePageRemove { pfdbe -- }
 extern MmEvictablePageInsert { pfdbe -- }
 
+extern MmEvictFromList { trycount fast listhead -- done ok }
 extern MmEvictSinglePage { canbeslow -- pfdbe ok }
 
 externptr MmEvictablePageListHead

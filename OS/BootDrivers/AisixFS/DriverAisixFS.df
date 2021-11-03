@@ -164,15 +164,26 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 
 	0 afsdata@ AFSData_WritableFiles + !
 
-	"AFSFCBCacheMutex" // name
-	KERNELMODE // mode
-	afsdata@ AFSData_FCBCacheMutex + // mutex
-	KeMutexInitialize ok!
+	auto i
+	0 i!
 
-	if (DEBUGCHECKS)
-		if (ok@)
-			"DriverAFSMount: couldn't initialize fcb cache mutex\n" KeCrash
+	auto mutex
+	afsdata@ AFSData_FCBCacheMutexes + mutex!
+
+	while (i@ AFSFCBBUCKETS <)
+		"AFSFCBCacheBucketMutex" // name
+		KERNELMODE // mode
+		mutex@ // mutex
+		KeMutexInitialize ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"DriverAFSMount: couldn't initialize fcb cache bucket mutex\n" KeCrash
+			end
 		end
+
+		KeMutex_SIZEOF mutex +=
+		1 i +=
 	end
 
 	afsdata@ AFSData_FCBBucketListHeads + // ptr
@@ -198,28 +209,6 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 
 	rootfcb@ mount@ IOMountSetRootFCB
 
-	auto i
-	0 i!
-
-	auto mutex
-	afsdata@ AFSData_FATMutexes + mutex!
-
-	while (i@ AFSFATMUTEXES <)
-		"AFSFATMutex" // name
-		KERNELMODE // mode
-		mutex@ // mutex
-		KeMutexInitialize ok!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"DriverAFSMount: couldn't initialize FAT mutex\n" KeCrash
-			end
-		end
-
-		1 i +=
-		KeMutex_SIZEOF mutex +=
-	end
-
 	0 ok!
 end
 
@@ -235,8 +224,9 @@ fn (IOFilesystemUnmountFunction) DriverAFSUnmount { mount -- ok }
 
 	mount@ IOMountGetRootFCB AFSFCBDereference drop
 
+	1 // destroy
 	mount@ // mount
-	AFSFCBCacheDestroy ok!
+	AFSFCBCacheFlush ok!
 
 	if (ok@)
 		ok@ "DriverAFSUnmount: cache destroy failed\n" KeCrash
@@ -287,6 +277,10 @@ fn (IOFilesystemUpdateFlagsFunction) DriverAFSUpdateFlags { newflags oldflags mo
 
 			// flush all modified pages to ensure the volume
 			// won't be written while read-only.
+
+			0 // destroy
+			mount@ // mount
+			AFSFCBCacheFlush drop
 
 			0 // trunc
 			mount@ // mount

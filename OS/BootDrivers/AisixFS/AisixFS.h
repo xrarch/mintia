@@ -41,10 +41,8 @@ struct AFSData
 	4 FCBReusableListHead
 	4 FCBReusableListTail
 
-	KeMutex_SIZEOF FCBCacheMutex
+	(AFSFCBBUCKETS KeMutex_SIZEOF *) FCBCacheMutexes
 	(AFSFCBBUCKETS 8 *) FCBBucketListHeads
-
-	(AFSFATMUTEXES KeMutex_SIZEOF *) FATMutexes
 endstruct
 
 struct AFSFCBData
@@ -93,9 +91,10 @@ extern AFSFCBDereference { fcb -- oldcount }
 extern AFSFCBRemove { fcb buckethead -- }
 extern AFSFCBInsert { fcb buckethead -- }
 
-extern AFSFCBCacheLock { mount -- ok }
-extern AFSFCBCacheUnlock { mount -- }
-extern AFSFCBCacheDestroy { mount -- ok }
+extern AFSFCBCacheLockBucket { bucket mount -- ok }
+extern AFSFCBCacheUnlockBucket { bucket mount -- }
+
+extern AFSFCBCacheFlush { destroy mount -- ok }
 extern AFSFCBRead { inum mount -- fcb ok }
 
 extern AFSWalkFAT { growing startcount startblkno mount kflags -- left blkno ok }

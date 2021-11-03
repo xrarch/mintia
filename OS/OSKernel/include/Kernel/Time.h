@@ -1,5 +1,4 @@
-// WARNING: changing the offset of the SecPart or MsPart field may break asm routines
-
+// do NOT change this
 struct KeTime
 	4 SecPart
 	4 MsPart

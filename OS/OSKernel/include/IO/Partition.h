@@ -11,15 +11,23 @@ endstruct
 
 const IOVOLUMELABELMAX 64
 
+// do NOT change the size of this
 struct IOPartitionTable
 	4 Format
 	IOVOLUMELABELMAX Label
 	4 PartitionCount
+	4 Reserved1
+	4 Reserved2
+	4 Reserved3
 endstruct
 
+// do NOT change the size of this
 struct IOPartitionEntry
 	IOVOLUMELABELMAX Label
 	4 BlockOffset
 	4 SizeInBlocks
 	4 ID
+	4 Reserved1
+	4 Reserved2
+	4 Reserved3
 endstruct

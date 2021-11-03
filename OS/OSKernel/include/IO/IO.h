@@ -45,6 +45,22 @@ struct IOFileControlBlock
 	KeTime_SIZEOF ChangeTime
 endstruct
 
+extern IOFileControlBlockGetReferences { fcb -- references }
+extern IOFileControlBlockGetContext { fcb -- context }
+extern IOFileControlBlockSetContext { context fcb -- }
+extern IOFileControlBlockGetMount { fcb -- mount }
+extern IOFileControlBlockGetDeviceObject { fcb -- devobj }
+extern IOFileControlBlockGetType { fcb -- filetype }
+extern IOFileControlBlockGetSize { fcb -- size }
+extern IOFileControlBlockSetSize { size fcb -- }
+extern IOFileControlBlockGetCacheInfoBlock { fcb -- cacheblock }
+
+extern IOFileControlBlockSetAccessTime { time fcb -- }
+extern IOFileControlBlockSetModifyTime { time fcb -- }
+extern IOFileControlBlockSetChangeTime { time fcb -- }
+
+extern IOFileControlBlockGetSizeof { -- sizeof }
+
 extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- ok }
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- }
@@ -57,6 +73,8 @@ extern IOFileControlBlockTryLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 
 extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
+
+extern IOFileGetFileControlBlock { fileobject -- fcb }
 
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }

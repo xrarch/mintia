@@ -44,21 +44,34 @@ fn AFSINodeRead { inum mount -- ptr pfdbe ok }
 	off@ AFSBLOCKOFFMASK & ptr +=
 end
 
-fn AFSFCBCacheLock { mount -- ok }
+fn AFSFCBCacheLockBucket { bucket mount -- ok }
+	if (DEBUGCHECKS)
+		if (bucket@ AFSFCBBUCKETS >=)
+			"AFSFCBCacheLockBucket: bucket >= AFSFCBBUCKETS\n" KeCrash
+		end
+	end
+
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMountGetContext AFSData_FCBCacheMutex + // object
+	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * + // object
 	KeThreadWaitForObject ok!
 end
 
-fn AFSFCBCacheUnlock { mount -- }
-	mount@ IOMountGetContext AFSData_FCBCacheMutex + KeMutexRelease drop
+fn AFSFCBCacheUnlockBucket { bucket mount -- }
+	if (DEBUGCHECKS)
+		if (bucket@ AFSFCBBUCKETS >=)
+			"AFSFCBCacheUnlockBucket: bucket >= AFSFCBBUCKETS\n" KeCrash
+		end
+	end
+
+	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * +
+	KeMutexRelease drop
 end
 
 fn AFSFCBRemove { fcb buckethead -- }
 	// remove from hash list.
-	// assumes fcb cache is locked.
+	// assumes fcb cache bucket is locked.
 
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
@@ -83,7 +96,7 @@ end
 
 fn AFSFCBInsert { fcb buckethead -- }
 	// insert into hash list on the recently-used end.
-	// assumes fcb cache is locked.
+	// assumes fcb cache bucket is locked.
 
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
@@ -217,17 +230,27 @@ fn AFSFCBDereference { fcb -- oldcount }
 	rs@ HALCPUInterruptRestore
 end
 
-fn AFSFCBCacheDestroy { mount -- ok }
+fn AFSFCBCacheFlush { destroy mount -- ok }
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
 
 	// iterate each bucket from 0 to AFSFCBBUCKETS-1.
-	// for each bucket, destroy the FCB.
+	// for each bucket, flush or destroy the FCB.
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto i
 	0 i!
 
 	while (i@ AFSFCBBUCKETS <)
+		i@ // bucket
+		mount@ // mount
+		AFSFCBCacheLockBucket ok!
+
+		if (ok@)
+			ok@ "AFSFCBCacheFlush: lock failed even though kill ignored (%i)\n" KeCrash
+		end
+
 		auto buckethead
 		afsdata@ AFSData_FCBBucketListHeads + i@ 3 << + buckethead!
 
@@ -235,29 +258,40 @@ fn AFSFCBCacheDestroy { mount -- ok }
 		buckethead@@ fcb!
 
 		while (fcb@)
-			if (DEBUGCHECKS)
-				if (fcb@ IOFileControlBlockGetReferences)
-					"AFSFCBCacheDestroy: fcb refcount > 0\n" KeCrash
-				end
-			end
-
 			auto fcbdata
 			fcb@ IOFileControlBlockGetContext fcbdata!
 
 			auto nextfcb
 			fcbdata@ AFSFCBData_NextFCB + @ nextfcb!
 
-			1 // writeout
-			fcb@ // fcb
-			IOFileControlBlockDelete
+			if (destroy@)
+				if (DEBUGCHECKS)
+					if (fcb@ IOFileControlBlockGetReferences)
+						"AFSFCBCacheFlush: destroy: fcb refcount > 0\n" KeCrash
+					end
+				end
 
-			fcbdata@ MmFree
+				1 // writeout
+				fcb@ // fcb
+				IOFileControlBlockDelete
+
+				fcbdata@ MmFree
+			end else
+				fcb@ IOFileControlBlockGetCacheInfoBlock // cacheblock
+				IOCacheInfoBlockFlush drop
+			end
 
 			nextfcb@ fcb!
 		end
 
+		i@ // bucket
+		mount@ // mount
+		AFSFCBCacheUnlockBucket
+
 		1 i +=
 	end
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn AFSFCBRead { inum mount -- fcb ok }
@@ -277,14 +311,16 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 	0 time@ KeTime_MsPart + !
 
-	mount@ AFSFCBCacheLock ok!
+	auto bucket
+	inum@ AFSFCBMASK & bucket!
+
+	bucket@ // bucket
+	mount@ // mount
+	AFSFCBCacheLockBucket ok!
 
 	if (ok@)
 		return
 	end
-
-	auto bucket
-	inum@ AFSFCBMASK & bucket!
 
 	auto buckethead
 	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
@@ -361,7 +397,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		AFSINodeRead ok! pfdbe! ptr!
 
 		if (ok@)
-			mount@ AFSFCBCacheUnlock
+			bucket@ // bucket
+			mount@ // mount
+			AFSFCBCacheUnlockBucket
 
 			return
 		end
@@ -377,7 +415,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			IOFileControlBlockCreate ok! fcb!
 
 			if (ok@)
-				mount@ AFSFCBCacheUnlock
+				bucket@ // bucket
+				mount@ // mount
+				AFSFCBCacheUnlockBucket
 
 				pfdbe@ MmEvictablePageDereference drop
 
@@ -395,7 +435,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 				fcb@ // fcb
 				IOFileControlBlockDelete
 
-				mount@ AFSFCBCacheUnlock
+				bucket@ // bucket
+				mount@ // mount
+				AFSFCBCacheUnlockBucket
 
 				pfdbe@ MmEvictablePageDereference drop
 
@@ -486,5 +528,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		fcb@ AFSFCBReference drop
 	end
 
-	mount@ AFSFCBCacheUnlock
+	bucket@ // bucket
+	mount@ // mount
+	AFSFCBCacheUnlockBucket
 end

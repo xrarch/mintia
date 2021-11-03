@@ -5,7 +5,7 @@ const INITIALENTRIES 16
 const EXTENDBYENTRIES 16
 
 struct ExHandleTableHeader
-	KeMutex_SIZEOF Mutex
+	ExRwLock_SIZEOF RwLock
 	4 EntrySizeLog
 	4 ChargedProcess
 
@@ -20,6 +20,7 @@ endstruct
 extern ExHandleTableDelete { func handletable -- }
 extern ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 extern ExHandleTableLock { handletable -- ok }
+extern ExHandleTableLockShared { handletable -- ok }
 extern ExHandleTableUnlock { handletable -- }
 extern ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok }
 

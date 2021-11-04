@@ -26,5 +26,8 @@ extern MmSectionMapView { length startva sectionoffset sectionhandle processhand
 extern MmUnmapViewProcess { length vaddr processobject -- ok }
 extern MmUnmapView { length vaddr processhandle -- ok }
 
+extern MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
+extern MmRemapView { pageprotection length vaddr processhandle -- ok }
+
 extern MmAnonymousPageAlloc { sectionobject pte -- pfdbe pfn ok }
 extern MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }

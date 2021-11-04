@@ -19,10 +19,10 @@ obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	$(LD) obj/OSDLL.dll $(SOBJ) $(OBJ) L/dfrt/dfrt.f.o
 	$(OBJTOOL) move obj/OSDLL.dll mintiadll text=0x1000,data=text+text_size+align,bss=data+data_size+align
 
-%.o: %.df ./headers/*
+%.o: %.df ./headers/* ./src/OSDLL.h
 	$(DC) $< $@ incdir=./headers/
 
-%.o: %.s ./headers/*
+%.o: %.s ./headers/* ./src/OSDLL.h
 	$(AS) $< $@
 
 src/limn2600/OSCallStubs.s: ./headers/OSCalls.h 

@@ -360,3 +360,97 @@ fn MmUnmapView { length vaddr processhandle -- ok }
 
 	processobject@ ObObjectDereferenceByPointer drop
 end
+
+fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & length!
+
+	if (length@ 0 ==)
+		// length overflowed
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (vaddr@ length@ + vaddr@ <)
+		// vaddr+length overflows
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (vaddr@ length@ + MMHIGHESTUSERADDRESS >)
+		// requested region goes outside userspace
+
+		STATUS_FORBIDDEN_OPERATION ok!
+
+		return
+	end
+
+	processobject@ MmVADListLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto vad
+
+	vaddr@ // vaddr
+	length@ // length
+	1 // mustbestart
+	processobject@
+	MmVADFind ok! vad!
+
+	if (ok@)
+		processobject@ MmVADListUnlock
+
+		return
+	end
+
+	auto sectionobject
+	vad@ MmVAD_SectionObject + @ sectionobject!
+
+	auto oldprot
+	vad@ MmVAD_PageProtection + @ oldprot!
+
+	if (oldprot@ pageprotection@ & pageprotection@ ~=)
+		processobject@ MmVADListUnlock
+
+		// not a subset
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	oldprot@ vad@ MmVAD_PageProtection + !
+
+	processobject@ MmVADListUnlock
+end
+
+fn MmRemapView { pageprotection length vaddr processhandle -- ok }
+	auto processobject
+	auto access
+
+	PsProcessObjectType@ // type
+	processhandle@ // handle
+	ObObjectReferenceByHandle ok! processobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	pageprotection@ // pageprotection
+	length@ // length
+	vaddr@ // vaddr
+	processobject@ // processobject
+	MmRemapViewProcess ok!
+
+	processobject@ ObObjectDereferenceByPointer drop
+end

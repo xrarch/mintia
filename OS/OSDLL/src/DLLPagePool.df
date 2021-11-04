@@ -1,0 +1,320 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
+
+#include "OSDLL.h"
+
+// usermode page-aligned allocator.
+// not the greatest implementation ever. try to invoke infrequently.
+
+// TODO protect with mutex
+
+buffer DLLPagePoolSegments (DLLHeapSegment_SIZEOF DLLHEAPINITIALSEGMENTS *)
+
+var DLLPagePoolNextSegmentSize DLLHEAPSEGMENTSIZEINITIAL
+
+fn DLLPagePoolAlloc { length -- vaddr ok }
+	if (length@ OSPAGESIZE <)
+		"DLLPagePoolAlloc: length < OSPAGESIZE\n" OSAbort
+	end
+
+	length@ OSPAGEOFFSETMASK + OSPAGENUMBERMASK & length!
+
+	auto seg
+
+	if (length@ DLLHEAPSEGMENTMAXSIZE 2 / >=)
+		// too big to stuff in a segment; directly allocate
+
+		length@ // length
+		DLLHEAPSEGMENT_DIRECT // type
+		DLLPagePoolSegmentAllocAndMap ok! seg! vaddr!
+
+		return
+	end else
+		// try stuffing in a segment
+
+		DLLPagePoolSegments seg!
+
+		OSPAGESHIFT length >>=
+
+		auto i
+		0 i!
+
+		auto slen
+
+		while (i@ DLLHEAPINITIALSEGMENTS <)
+			if (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_PAGE ==)
+				auto j
+				0 j!
+
+				auto run
+				0 run!
+
+				auto runstart
+				0 runstart!
+
+				seg@ DLLHeapSegment_Length + @ OSPAGESHIFT >> slen!
+
+				while (j@ slen@ <)
+					auto len
+					seg@ DLLHeapSegment_AllocLengthLookup + j@ + gb len!
+
+					if (len@ 0 ==)
+						1 run +=
+						1 j +=
+
+						if (run@ length@ ==)
+							// found a sufficient spot
+
+							length@ seg@ DLLHeapSegment_UsedCount + +=
+
+							length@ seg@ DLLHeapSegment_AllocLengthLookup + runstart@ + sb
+
+							seg@ DLLHeapSegment_VAddr + @ runstart@ OSPAGESHIFT << + vaddr!
+
+							0 ok!
+
+							return
+						end
+					end else
+						len@ j +=
+						0 run!
+						j@ runstart!
+					end
+				end
+			end
+
+			DLLHeapSegment_SIZEOF seg +=
+			1 i +=
+		end
+
+		// never found a sufficient segment, create one
+
+		OSPAGESHIFT length <<=
+
+		auto alloclen
+		length@ DLLPagePoolNextSegmentSize@ max alloclen!
+
+		alloclen@ // length
+		DLLHEAPSEGMENT_PAGE // type
+		DLLPagePoolSegmentAllocAndMap ok! seg! vaddr!
+
+		if (ok@ STATUS_VM_QUOTA_EXCEEDED ==)
+			while (ok@ STATUS_VM_QUOTA_EXCEEDED ==)
+				// strike 2 pages off the allocation and try again
+
+				if (alloclen@ OSPAGESIZE 2 * <=)
+					return
+				end
+
+				OSPAGESIZE 2 * alloclen -=
+
+				if (alloclen@ length@ <)
+					return
+				end
+
+				alloclen@ // length
+				DLLHEAPSEGMENT_PAGE // type
+				DLLPagePoolSegmentAllocAndMap ok! seg! vaddr!
+			end
+
+			if (ok@)
+				// some other error happened
+
+				return
+			end
+		end elseif (ok@)
+			// some other error happened
+
+			return
+		end else
+			DLLPagePoolNextSegmentSize@ 2 * DLLPagePoolNextSegmentSize!
+
+			if (DLLPagePoolNextSegmentSize@ DLLHEAPSEGMENTMAXSIZE >)
+				DLLHEAPSEGMENTMAXSIZE DLLPagePoolNextSegmentSize!
+			end
+		end
+
+		length@ OSPAGESHIFT >> seg@ DLLHeapSegment_UsedCount + !
+		length@ OSPAGESHIFT >> seg@ DLLHeapSegment_AllocLengthLookup + sb
+
+		return
+	end
+end
+
+fn DLLPagePoolFree { vaddr -- }
+	auto ok
+	auto seg
+
+	if (vaddr@ OSPAGEOFFSETMASK &)
+		"DLLPagePoolFree: vaddr not page-aligned\n" OSAbort
+	end
+
+	vaddr@ DLLPagePoolSegmentFind ok! seg!
+
+	if (ok@)
+		"DLLPagePoolFree: no segment\n" OSAbort
+	end
+
+	if (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_DIRECT ==)
+		if (vaddr@ seg@ DLLHeapSegment_VAddr + @ ~=)
+			"DLLPagePoolFree: not at beginning of direct segment\n" OSAbort
+		end
+
+		seg@ DLLPagePoolSegmentFree
+
+		return
+	end elseif (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_PAGE ==)
+		seg@ DLLHeapSegment_VAddr + @ vaddr -=
+		OSPAGESHIFT vaddr >>=
+
+		auto len
+		seg@ DLLHeapSegment_AllocLengthLookup + vaddr@ + gb len!
+
+		if (len@ 0 ==)
+			"DLLPagePoolFree: not allocated within segment\n" OSAbort
+		end elseif (len@ seg@ DLLHeapSegment_UsedCount + @ >)
+			"DLLPagePoolFree: len>usedcount\n" OSAbort
+		end
+
+		0 seg@ DLLHeapSegment_AllocLengthLookup + vaddr@ + sb
+		len@ seg@ DLLHeapSegment_UsedCount + -=
+
+		if (seg@ DLLHeapSegment_UsedCount + @ ~~)
+			seg@ DLLPagePoolSegmentFree
+		end
+	end else
+		seg@ DLLHeapSegment_Type + @ "DLLPagePoolFree: unknown type %d\n" OSAbort
+	end
+end
+
+fn DLLPagePoolSegmentFind { vaddr -- seg ok }
+	auto i
+	0 i!
+
+	-1 ok!
+
+	DLLPagePoolSegments seg!
+
+	while (i@ DLLHEAPINITIALSEGMENTS <)
+		if (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_FREE ~=)
+			if (vaddr@ seg@ DLLHeapSegment_VAddr + @ >=)
+				auto endv
+				seg@ DLLHeapSegment_VAddr + @ seg@ DLLHeapSegment_Length + @ + endv!
+
+				if (vaddr@ endv@ <)
+					// found it
+
+					0 ok!
+
+					return
+				end
+			end
+		end
+
+		DLLHeapSegment_SIZEOF seg +=
+		1 i +=
+	end
+end
+
+fn DLLPagePoolSegmentAllocAndMap { length type -- vaddr seg ok }
+	DLLPagePoolSegmentAlloc ok! seg!
+
+	if (ok@)
+		return
+	end
+
+	auto section
+
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	length@ // anonsize
+	OSNONE // filehandle
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ok! section!
+
+	if (ok@)
+		seg@ DLLPagePoolSegmentFree
+
+		return
+	end
+
+	length@ // length
+	HEAPSTART // startva
+	0 // sectionoffset
+	section@ // sectionhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSSectionMapView ok! vaddr!
+
+	section@ OSClose drop
+
+	if (ok@)
+		seg@ DLLPagePoolSegmentFree
+
+		return
+	end
+
+	type@ seg@ DLLHeapSegment_Type + !
+	length@ seg@ DLLHeapSegment_Length + !
+	vaddr@ seg@ DLLHeapSegment_VAddr + !
+end
+
+fn DLLPagePoolSegmentAlloc { -- seg ok }
+	auto i
+	0 i!
+
+	STATUS_NO_MEMORY ok!
+
+	DLLPagePoolSegments seg!
+
+	while (i@ DLLHEAPINITIALSEGMENTS <)
+		if (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_FREE ==)
+			seg@ DLLHeapSegment_AllocLengthLookup + // ptr
+			DLLHEAPSEGMENTLENGTHLOOKUPSIZE // size
+			0 // word
+			memset
+
+			0 seg@ DLLHeapSegment_UsedCount + !
+
+			DLLHEAPSEGMENT_UNINITIALIZED seg@ DLLHeapSegment_Type + !
+
+			0 seg@ DLLHeapSegment_VAddr + !
+			0 seg@ DLLHeapSegment_Length + !
+
+			0 ok!
+
+			return
+		end
+
+		DLLHeapSegment_SIZEOF seg +=
+		1 i +=
+	end
+end
+
+fn DLLPagePoolSegmentFree { seg -- }
+	if (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_FREE ==)
+		"DLLPagePoolSegmentFree: type==DLLHEAPSEGMENT_FREE\n" OSAbort
+	end
+
+	if (seg@ DLLHeapSegment_Type + @ DLLHEAPSEGMENT_UNINITIALIZED ~=)
+		auto ok
+
+		seg@ DLLHeapSegment_Length + @ // length
+		seg@ DLLHeapSegment_VAddr + @ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "DLLPagePoolSegmentFree: failed to unmap (%s)\n" OSAbort
+		end
+	end
+
+	DLLHEAPSEGMENT_FREE seg@ DLLHeapSegment_Type + !
+end

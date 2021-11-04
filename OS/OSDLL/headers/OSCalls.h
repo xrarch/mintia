@@ -17,3 +17,4 @@ extern OSFileQuery { filehandle query -- ok }
 extern OSSectionCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
 extern OSSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
 extern OSUnmapView { length vaddr processhandle -- ok }
+extern OSRemapView { pageprotection length vaddr processhandle -- ok }

@@ -123,3 +123,17 @@ OSUnmapView:
 
 	ret
 
+OSRemapView:
+.global OSRemapView
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 10
+	sys  0
+
+	mov  a0, t1
+
+	ret
+

@@ -7,3 +7,4 @@
 #include "<ll>/OSDLL/OSCalls.h"
 #include "<ll>/OSDLL/OSAbort.h"
 #include "<ll>/OSDLL/OSObject.h"
+#include "<ll>/OSDLL/OSAlloc.h"

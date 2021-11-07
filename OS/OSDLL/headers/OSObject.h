@@ -16,5 +16,9 @@ const OSNONE           -1
 const OSCURRENTPROCESS -2
 const OSCURRENTTHREAD  -3
 
+extern OSGetStdIn { -- fd }
+extern OSGetStdOut { -- fd }
+extern OSGetStdErr { -- fd }
+
 extern OSRealPath { path canon bufsize -- ok }
 extern OSOpen { flags access path -- handle ok }

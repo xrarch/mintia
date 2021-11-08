@@ -21,7 +21,7 @@ extern OSGetStdOut { -- fd }
 extern OSGetStdErr { -- fd }
 
 extern OSLastComponent { path -- lcomp }
-extern OSDirName { path dirname bufsize -- ok }
+extern OSDirectoryName { path dirname bufsize -- ok }
 extern OSRealPath { path canon bufsize -- ok }
 
 extern OSOpen { flags access path -- handle ok }

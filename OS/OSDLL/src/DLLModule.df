@@ -1,0 +1,976 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSModule.h"
+#include "<inc>/OSAlloc.h"
+#include "<inc>/OSWait.h"
+
+#include "OSDLL.h"
+#include "LOFF.h"
+
+// TODO protect with usermode mutex
+
+// TODO use tons of hash tables and stuff so this isn't the slowest thing ever
+
+fn DLLModuleCreate { name -- dll ok }
+	OSModule_SIZEOF // bytes
+	OSHeapAllocate ok! dll!
+
+	if (ok@)
+		return
+	end
+
+	auto namelen
+	name@ strlen namelen!
+
+	auto namebuf
+	namelen@ 1 + // bytes
+	OSHeapAllocate ok! namebuf!
+
+	if (ok@)
+		dll@ OSHeapFree
+
+		return
+	end
+
+	namebuf@ name@ strcpy
+
+	namebuf@ dll@ OSModule_Name + !
+
+	0 dll@ OSModule_Next + !
+	0 dll@ OSModule_Prev + !
+
+	0 dll@ OSModule_LoadCount + !
+
+	0 dll@ OSModule_HeadVAddr + !
+	0 dll@ OSModule_HeadLength + !
+
+	0 dll@ OSModule_Format + !
+
+	0 dll@ OSModule_Flags + !
+end
+
+fn DLLModuleDelete { dll -- }
+	dll@ OSModule_Name + @ OSHeapFree
+
+	dll@ OSHeapFree
+end
+
+fn DLLModuleFindByName { name -- dll ok }
+	STATUS_NOT_FOUND ok!
+
+	OSPEB OSPEBs_DLLListHead + @ dll!
+
+	while (dll@)
+		if (dll@ OSModule_Name + @ name@ strcmp)
+			0 ok!
+
+			return
+		end
+
+		dll@ OSModule_Next + @ dll!
+	end
+end
+
+// try to open module file by name.
+// search order is system directory, parent directory of executable, and then
+// user libraries directory.
+
+fn DLLModuleOpenFile { name -- handle ok }
+	if (name@ gb '/' ==)
+		// it's a straight absolute path, just use it.
+
+		0 // flags
+		ACCESS_READ ACCESS_EXEC | // access
+		name@ // path
+		OSFILETYPE_FILE // ftype
+		OSFileOpen ok! handle!
+
+		return
+	end
+
+	auto fullpath
+	OSFILEPATHMAX alloc fullpath!
+
+	fullpath@ // dest
+	"/mintia/" // src
+	strcpy
+
+	fullpath@ 8 + // dest
+	name@ // src
+	strcpy
+
+	0 // flags
+	ACCESS_READ ACCESS_EXEC | // access
+	fullpath@ // path
+	OSFILETYPE_FILE // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@ ~~)
+		// found it
+		return
+	end
+
+	// didn't find it, try user libraries directory
+
+	fullpath@ // dest
+	"/mintia/Libraries/" // src
+	strcpy
+
+	fullpath@ 18 + // dest
+	name@ // src
+	strcpy
+
+	0 // flags
+	ACCESS_READ ACCESS_EXEC | // access
+	fullpath@ // path
+	OSFILETYPE_FILE // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@ ~~)
+		// found it
+		return
+	end
+
+	// didn't find it, try executable parent directory
+
+	// this gets our executable path. don't ask
+	OSPEB OSPEBs_Parameters + @ // path
+	fullpath@ // dirname
+	OSFILEPATHMAX // bufsize
+	OSDirName ok!
+
+	if (ok@)
+		return
+	end
+
+	auto flen
+	fullpath@ strlen flen!
+
+	fullpath@ flen@ + // dest
+	name@ // src
+	strcpy
+
+	0 // flags
+	ACCESS_READ ACCESS_EXEC | // access
+	fullpath@ // path
+	OSFILETYPE_FILE // ftype
+	OSFileOpen ok! handle!
+end
+
+fn DLLModuleDoImports { dll -- ok }
+	// iterate import table and recursively load any modules this one depends
+	// upon.
+
+	0 ok!
+
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto count
+	head@ LOFFHeader_ImportCount + @ count!
+
+	auto ptr
+	head@ LOFFHeader_ImportTableOffset + @ head@ + ptr!
+
+	auto strtab
+	head@ LOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	auto sectionheader
+
+	auto rebased
+	0 rebased!
+
+	auto i
+	0 i!
+
+	while (i@ count@ <)
+		auto dllp
+
+		ptr@ LOFFImport_Name + @ strtab@ + // name
+		OSModuleLoad ok! dllp!
+
+		if (ok@)
+			// failed to load dependency
+
+			i@ dll@ DLLModuleUndoImports
+
+			return
+		end
+
+		auto headp
+		dllp@ OSModule_HeadVAddr + @ headp!
+
+		// resolve import
+		dllp@ ptr@ LOFFImport_Name + !
+
+		if (rebased@ ~~)
+			// check for all the cases that necessitate a rebasing.
+
+			// use a cursed while loop here for easier control flow
+
+			while (1)
+				if (headp@ LOFFHeader_Timestamp + @ ptr@ LOFFImport_Timestamp + @ ~=)
+					OSMODULEFLAGS_REBASE dll@ OSModule_Flags + |=
+					1 rebased!
+					break
+				end
+
+				headp@ LOFFHeader_TextHeader + @ headp@ + sectionheader!
+				if (sectionheader@ LOFFSectionHeader_LinkedAddress + @ ptr@ LOFFImport_ExpectedText + @ ~=)
+					OSMODULEFLAGS_REBASE dll@ OSModule_Flags + |=
+					1 rebased!
+					break
+				end
+
+				headp@ LOFFHeader_DataHeader + @ headp@ + sectionheader!
+				if (sectionheader@ LOFFSectionHeader_LinkedAddress + @ ptr@ LOFFImport_ExpectedData + @ ~=)
+					OSMODULEFLAGS_REBASE dll@ OSModule_Flags + |=
+					1 rebased!
+					break
+				end
+
+				headp@ LOFFHeader_BSSHeader + @ headp@ + sectionheader!
+				if (sectionheader@ LOFFSectionHeader_LinkedAddress + @ ptr@ LOFFImport_ExpectedBSS + @ ~=)
+					OSMODULEFLAGS_REBASE dll@ OSModule_Flags + |=
+					1 rebased!
+					break
+				end
+
+				break
+			end
+		end
+
+		1 i +=
+		LOFFImport_SIZEOF ptr +=
+	end
+end
+
+fn DLLModuleUndoImports { upto dll -- }
+	// unload all the modules imported by this one, up to (and not including)
+	// the index given in upto.
+
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto count
+	head@ LOFFHeader_ImportCount + @ count!
+
+	auto ptr
+	head@ LOFFHeader_ImportTableOffset + @ head@ + ptr!
+
+	auto i
+	0 i!
+
+	while (i@ upto@ <)
+		if (i@ count@ >=)
+			break
+		end
+
+		ptr@ LOFFImport_Name + @ OSModuleUnload
+
+		1 i +=
+		LOFFImport_SIZEOF ptr +=
+	end
+end
+
+fn DLLModuleMap { section dll -- ok }
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto realva
+
+	auto sectionheader
+	head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+
+	if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+		// map data section
+
+		sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+		sectionheader@ LOFFSectionHeader_LinkedAddress + @ // startva
+		sectionheader@ LOFFSectionHeader_SectionOffset + @ // sectionoffset
+		section@ // sectionhandle
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITECOPY | // pageprotection
+		0 // flags
+		OSSectionMapView ok! realva!
+
+		if (ok@)
+			return
+		end
+
+		if (realva@ sectionheader@ LOFFSectionHeader_LinkedAddress + @ ~=)
+			// couldn't map at preferred address, mark module rebased and update
+			// the header field
+
+			OSMODULEFLAGS_REBASESELF dll@ OSModule_Flags + |=
+
+			realva@ sectionheader@ LOFFSectionHeader_LinkedAddress + !
+		end
+	end
+
+	head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
+
+	if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+		// create bss section
+
+		auto bsssection
+
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		sectionheader@ LOFFSectionHeader_SectionSize + @ // anonsize
+		OSNONE // filehandle
+		ACCESS_OWNER_ALL // permissions
+		0 // name
+		OSSectionCreate ok! bsssection!
+
+		if (ok@)
+			// hhhhh unmap data section I guess, really annoying clean-up
+
+			head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+
+			if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+				sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+				sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+				OSCURRENTPROCESS // processhandle
+				OSUnmapView drop
+			end
+
+			return
+		end
+
+		// map bss section
+
+		sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+		sectionheader@ LOFFSectionHeader_LinkedAddress + @ // startva
+		0 // sectionoffset
+		bsssection@ // sectionhandle
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		0 // flags
+		OSSectionMapView ok! realva!
+
+		bsssection@ OSClose drop
+
+		if (ok@)
+			// unmap data section
+
+			head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+
+			if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+				sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+				sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+				OSCURRENTPROCESS // processhandle
+				OSUnmapView drop
+			end
+
+			return
+		end
+
+		if (realva@ sectionheader@ LOFFSectionHeader_LinkedAddress + @ ~=)
+			// couldn't map at preferred address, mark module rebased and update
+			// the header field
+
+			OSMODULEFLAGS_REBASESELF dll@ OSModule_Flags + |=
+
+			realva@ sectionheader@ LOFFSectionHeader_LinkedAddress + !
+		end
+	end
+
+	head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+
+	if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+		// if we don't already know we need rebasing, try to map non-COW first
+		// in order to avoid incurring virtual memory quota unnecessarily.
+		// if that fails, then map COW.
+
+		STATUS_UNAVAILABLE_ADDRESS ok!
+
+		if (dll@ OSModule_Flags + @ OSMODULEFLAGS_REBASEEITHER & ~~)
+			sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+			sectionheader@ LOFFSectionHeader_LinkedAddress + @ // startva
+			sectionheader@ LOFFSectionHeader_SectionOffset + @ // sectionoffset
+			section@ // sectionhandle
+			OSCURRENTPROCESS // processhandle
+			PAGEACCESS_READ PAGEACCESS_EXEC | // pageprotection
+			OSMAPFLAG_FIXEDADDRESS // flags
+			OSSectionMapView ok! drop
+		end
+
+		if (ok@)
+			// couldn't map, try again COW...
+
+			sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+			sectionheader@ LOFFSectionHeader_LinkedAddress + @ // startva
+			sectionheader@ LOFFSectionHeader_SectionOffset + @ // sectionoffset
+			section@ // sectionhandle
+			OSCURRENTPROCESS // processhandle
+			PAGEACCESS_READ PAGEACCESS_EXEC | PAGEACCESS_WRITECOPY | // pageprotection
+			OSMAPFLAG_FIXEDADDRESS // flags
+			OSSectionMapView ok! realva!
+
+			if (ok@)
+				// unmap data
+
+				head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+
+				if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+					sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+					sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+					OSCURRENTPROCESS // processhandle
+					OSUnmapView drop
+				end
+
+				// unmap bss
+
+				head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
+
+				if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+					sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+					sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+					OSCURRENTPROCESS // processhandle
+					OSUnmapView drop
+				end
+
+				return
+			end
+
+			if (realva@ sectionheader@ LOFFSectionHeader_LinkedAddress + @ ~=)
+				// couldn't map at preferred address, mark module rebased and update
+				// the header field
+
+				OSMODULEFLAGS_REBASESELF dll@ OSModule_Flags + |=
+
+				realva@ sectionheader@ LOFFSectionHeader_LinkedAddress + !
+			end
+		end
+	end
+end
+
+fn DLLModuleUnmap { dll -- }
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+
+	if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+		sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+		sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+	end
+
+	head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
+
+	if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+		sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+		sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+	end
+
+	head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+
+	if (sectionheader@ LOFFSectionHeader_SectionSize + @)
+		sectionheader@ LOFFSectionHeader_SectionSize + @ // length
+		sectionheader@ LOFFSectionHeader_LinkedAddress + @ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+	end
+end
+
+fn DLLGetSymbol { name dll -- symbol ok }
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ LOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ LOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	STATUS_NOT_FOUND ok!
+
+	while (i@ count@ <)
+		if (symbol@ LOFFSymbol_Type + @ LOFFGLOBAL ==)
+			auto sname
+			symbol@ LOFFSymbol_NameOffset + @ strtab@ + sname!
+
+			if (sname@ name@ strcmp)
+				0 ok!
+
+				return
+			end
+		end
+
+		LOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+end
+
+fn OSGetSymbolAddress { name dll -- address ok }
+	auto symbol
+	name@ dll@ DLLGetSymbol ok! symbol!
+
+	if (ok@)
+		return
+	end
+
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto sectionheader
+
+	if (symbol@ LOFFSymbol_Section + @ LOFFTEXT ==)
+		head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+	end elseif (symbol@ LOFFSymbol_Section + @ LOFFDATA ==)
+		head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+	end elseif (symbol@ LOFFSymbol_Section + @ LOFFBSS ==)
+		head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
+	end else
+		STATUS_BAD_EXECUTABLE ok!
+
+		return
+	end
+
+	symbol@ LOFFSymbol_Value + @ address!
+
+	sectionheader@ LOFFSectionHeader_LinkedAddress + @ address +=
+end
+
+fn DLLModuleResolveSymbols { dll -- ok }
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto symbol
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ LOFFHeader_SymbolCount + @ count!
+
+	auto importtab
+	head@ LOFFHeader_ImportTableOffset + @ head@ + importtab!
+
+	auto strtab
+	head@ LOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	while (i@ count@ <)
+		if (symbol@ LOFFSymbol_Type + @ LOFFEXTERN ==)
+			auto name
+			symbol@ LOFFSymbol_NameOffset + @ strtab@ + name!
+
+			auto import
+			symbol@ LOFFSymbol_ImportIndex + @ import!
+
+			importtab@ import@ 1 - LOFFImport_SIZEOF * + import!
+
+			auto addr
+			name@ // name
+			import@ LOFFImport_Name + @ // dll
+			OSGetSymbolAddress ok! addr!
+
+			if (ok@)
+				return
+			end
+
+			LOFFRESOLVED symbol@ LOFFSymbol_Type + !
+			addr@ symbol@ LOFFSymbol_Value + !
+		end
+
+		LOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+
+	0 ok!
+end
+
+fn DLLModuleApplyFixups { sectionheader id dll -- ok }
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto fixup
+	sectionheader@ LOFFSectionHeader_FixupTableOffset + @ head@ + fixup!
+
+	auto symtab
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + symtab!
+
+	auto count
+	sectionheader@ LOFFSectionHeader_FixupCount + @ count!
+
+	0 ok!
+
+	auto i
+	0 i!
+
+	auto base
+	sectionheader@ LOFFSectionHeader_LinkedAddress + @ base!
+
+	while (i@ count@ <)
+		auto symbol
+		fixup@ LOFFFixup_SymbolIndex + @ LOFFSymbol_SIZEOF * symtab@ + symbol!
+
+		if (symbol@ LOFFSymbol_Type + @ LOFFRESOLVED ==)
+			fixup@ LOFFFixup_Offset + @ base@ + // ptr
+			symbol@ LOFFSymbol_Value + @ // value
+			fixup@ LOFFFixup_Type + @ // type
+			DLLDoFixup ok!
+
+			if (ok@)
+				return
+			end
+		end elseif (symbol@ LOFFSymbol_Type + @ LOFFEXTERN ~=) // this fixup refers to this code module
+			if (dll@ OSModule_Flags + @ OSMODULEFLAGS_REBASESELF &)
+				if (symbol@ LOFFSymbol_Section + @ id@ ~=)
+					auto q
+
+					if (symbol@ LOFFSymbol_Section + @ LOFFTEXT ==)
+						head@ LOFFHeader_TextHeader + @ head@ + q!
+					end elseif (symbol@ LOFFSymbol_Section + @ LOFFDATA ==)
+						head@ LOFFHeader_DataHeader + @ head@ + q!
+					end elseif (symbol@ LOFFSymbol_Section + @ LOFFBSS ==)
+						head@ LOFFHeader_BSSHeader + @ head@ + q!
+					end else
+						STATUS_BAD_EXECUTABLE ok!
+
+						return
+					end
+
+					fixup@ LOFFFixup_Offset + @ base@ + // ptr
+					symbol@ LOFFSymbol_Value + @ q@ LOFFSectionHeader_LinkedAddress + @ + // value
+					fixup@ LOFFFixup_Type + @ // type
+					DLLDoFixup ok!
+
+					if (ok@)
+						return
+					end
+				end else
+					fixup@ LOFFFixup_Offset + @ base@ + // ptr
+					symbol@ LOFFSymbol_Value + @ base@ + // value
+					fixup@ LOFFFixup_Type + @ // type
+					DLLDoFixup ok!
+
+					if (ok@)
+						return
+					end
+				end
+			end
+		end
+
+		LOFFFixup_SIZEOF fixup +=
+		1 i +=
+	end
+
+	0 ok!
+end
+
+fn DLLModuleRebase { dll -- ok }
+	if (dll@ OSModule_Flags + @ OSMODULEFLAGS_REBASE &)
+		dll@ DLLModuleResolveSymbols ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	head@ LOFFHeader_TextHeader + @ head@ + // sectionheader
+	LOFFTEXT // id
+	dll@ // dll
+	DLLModuleApplyFixups ok!
+
+	if (ok@)
+		return
+	end
+
+	head@ LOFFHeader_DataHeader + @ head@ + // sectionheader
+	LOFFDATA // id
+	dll@ // dll
+	DLLModuleApplyFixups ok!
+end
+
+fn OSModuleLoad { name -- dll ok }
+	name@ DLLModuleFindByName ok! dll!
+
+	if (ok@ ~~)
+		// already loaded, increment load count and return
+
+		1 dll@ OSModule_LoadCount + +=
+
+		return
+	end
+
+	// not loaded. load it
+
+	auto handle
+	name@ DLLModuleOpenFile ok! handle!
+
+	if (ok@)
+		return
+	end
+
+	auto header
+	LOFFHeader_SIZEOF alloc header!
+
+	auto bytesread
+
+	// read in header
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	LOFFHeader_SIZEOF // length
+	header@ // buffer
+	handle@ // filehandle
+	OSFileRead ok! bytesread!
+
+	if (ok@)
+		handle@ OSClose drop
+
+		return
+	end
+
+	// verify parameters
+
+	if (bytesread@ LOFFHeader_SIZEOF <)
+		handle@ OSClose drop
+
+		STATUS_BAD_EXECUTABLE ok!
+		return
+	end
+
+	if (header@ LOFFHeader_Magic + @ LOFFMAGIC ~=)
+		handle@ OSClose drop
+
+		STATUS_BAD_EXECUTABLE ok!
+		return
+	end
+
+	if (header@ LOFFHeader_TargetArchitecture + @ LOFFARCHITECTURE ~=)
+		handle@ OSClose drop
+
+		STATUS_EXEC_NOT_FOR_ARCH ok!
+		return
+	end
+
+	// create a module block
+
+	name@ DLLModuleCreate ok! dll!
+
+	if (ok@)
+		handle@ OSClose drop
+
+		return
+	end
+
+	auto section
+
+	// create section
+
+	PAGEACCESS_READ PAGEACCESS_EXEC | // pageprotection
+	0 // anonsize
+	handle@ // filehandle
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ok! section!
+
+	// don't need file handle anymore
+	handle@ OSClose drop
+
+	if (ok@)
+		dll@ DLLModuleDelete
+
+		return
+	end
+
+	// find out head size
+
+	auto headsz
+	header@ LOFFHeader_BSSHeader + @ LOFFSectionHeader_SIZEOF + headsz!
+
+	auto head
+
+	// map in the head
+
+	headsz@ // length
+	OSDLLHEAD // startva
+	0 // sectionoffset
+	section@ // sectionhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITECOPY | // pageprotection
+	0 // flags
+	OSSectionMapView ok! head!
+
+	if (ok@)
+		dll@ DLLModuleDelete
+
+		section@ OSClose drop
+
+		return
+	end
+
+	// initialize module block.
+
+	head@ dll@ OSModule_HeadVAddr + !
+	headsz@ dll@ OSModule_HeadLength + !
+	OSMODULEFORMAT_LOFF dll@ OSModule_Format + !
+	1 dll@ OSModule_LoadCount + !
+
+	dll@ DLLModuleDoImports ok!
+
+	if (ok@)
+		dll@ DLLModuleDelete
+
+		headsz@ // length
+		head@ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+
+		section@ OSClose drop
+
+		return
+	end
+
+	if (name@ "OSDLL.dll" strcmp ~~)
+		// map module sections.
+		// skip this part for OSDLL since the kernel maps that in for us.
+
+		section@ // section
+		dll@ // dll
+		DLLModuleMap ok!
+
+		// don't need section handle anymore
+
+		section@ OSClose drop
+
+		if (ok@)
+			-1 dll@ DLLModuleUndoImports
+
+			dll@ DLLModuleDelete
+
+			headsz@ // length
+			head@ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+
+			return
+		end
+	end else
+		section@ OSClose drop
+	end
+
+	if (dll@ OSModule_Flags + @ OSMODULEFLAGS_REBASEEITHER &)
+		// needs to be rebased
+
+		dll@ DLLModuleRebase ok!
+
+		if (ok@)
+			dll@ DLLModuleUnmap
+
+			-1 dll@ DLLModuleUndoImports
+
+			dll@ DLLModuleDelete
+
+			headsz@ // length
+			head@ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+
+			return
+		end
+	end
+
+	// add to tail of module list.
+
+	auto ospeb
+	OSPEB ospeb!
+
+	auto t
+	ospeb@ OSPEBs_DLLListTail + @ t!
+
+	if (t@ ~~)
+		0 dll@ OSModule_Next + !
+		0 dll@ OSModule_Prev + !
+
+		dll@ ospeb@ OSPEBs_DLLListHead + !
+		dll@ ospeb@ OSPEBs_DLLListTail + !
+	end else
+		0 dll@ OSModule_Next + !
+
+		t@ dll@ OSModule_Prev + !
+		dll@ t@ OSModule_Next + !
+		dll@ ospeb@ OSPEBs_DLLListTail + !
+	end
+end
+
+fn OSModuleUnload { dll -- }
+	// unloads an already fully loaded module
+
+	if (dll@ OSModule_LoadCount + @ 0 ==)
+		"OSModuleUnload: underflow\n" OSAbort
+	end
+
+	1 dll@ OSModule_LoadCount + -=
+
+	if (dll@ OSModule_LoadCount + @)
+		// still has references
+
+		return
+	end
+
+	// no more references
+
+	if (dll@ OSModule_Name + @ "OSDLL.dll" strcmp ~~)
+		// unmap sections
+		dll@ DLLModuleUnmap
+	end
+
+	// unload dependencies
+	-1 dll@ DLLModuleUndoImports
+
+	// unmap head
+	dll@ OSModule_HeadLength + @ // length
+	dll@ OSModule_HeadVAddr + @ // vaddr
+	OSCURRENTPROCESS // processhandle
+	OSUnmapView drop
+
+	// unlink from module list
+
+	auto ls
+	dll@ OSModule_Prev + @ ls!
+
+	auto ns
+	dll@ OSModule_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ OSModule_Next + !
+	end else
+		ns@ OSPEB OSPEBs_DLLListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ OSModule_Prev + !
+	end else
+		ls@ OSPEB OSPEBs_DLLListTail + !
+	end
+
+	0 dll@ OSModule_Prev + !
+	0 dll@ OSModule_Next + !
+
+	// destroy
+	dll@ DLLModuleDelete
+end

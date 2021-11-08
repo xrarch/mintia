@@ -8,6 +8,9 @@
 .extern OSObQuery
 .extern OSClose
 .extern OSFileQuery
+.extern OSFileSeek
+.extern OSFileRead
+.extern OSFileWrite
 .extern OSSectionCreate
 .extern OSSectionMapView
 .extern OSUnmapView
@@ -15,7 +18,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 10
+	.dl 13
 
 OSCallTable:
 .global OSCallTable
@@ -26,10 +29,13 @@ OSCallTable:
 	.dl OSTOSObQuery                                     ;4
 	.dl OSTOSClose                                       ;5
 	.dl OSTOSFileQuery                                   ;6
-	.dl OSTOSSectionCreate                               ;7
-	.dl OSTOSSectionMapView                              ;8
-	.dl OSTOSUnmapView                                   ;9
-	.dl OSTOSRemapView                                   ;10
+	.dl OSTOSFileSeek                                    ;7
+	.dl OSTOSFileRead                                    ;8
+	.dl OSTOSFileWrite                                   ;9
+	.dl OSTOSSectionCreate                               ;10
+	.dl OSTOSSectionMapView                              ;11
+	.dl OSTOSUnmapView                                   ;12
+	.dl OSTOSRemapView                                   ;13
 
 
 OSTOSConsolePutCharacter:
@@ -131,6 +137,68 @@ OSTOSFileQuery:
 	jal  OSFileQuery
 
 	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp + 4]
+	addi sp, sp, 8
+	ret
+
+OSTOSFileSeek:
+.global OSTOSFileSeek
+	subi sp, sp, 8
+	mov  long [sp], zero
+	mov  long [sp + 4], lr
+
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+
+	jal  OSFileSeek
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp + 4]
+	addi sp, sp, 8
+	ret
+
+OSTOSFileRead:
+.global OSTOSFileRead
+	subi sp, sp, 12
+	mov  long [sp], zero
+	mov  long [sp + 4], lr
+
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
+
+	mov  t0, long [s18 + 20] ;t5
+	mov  long [sp + 8], t0
+
+	jal  OSFileRead
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp + 4]
+	addi sp, sp, 12
+	ret
+
+OSTOSFileWrite:
+.global OSTOSFileWrite
+	subi sp, sp, 8
+	mov  long [sp], zero
+	mov  long [sp + 4], lr
+
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
+
+	jal  OSFileWrite
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp + 4]
 	addi sp, sp, 8

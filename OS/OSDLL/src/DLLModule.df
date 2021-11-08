@@ -862,6 +862,8 @@ fn OSModuleLoad { name -- dll ok }
 	end
 
 	if (name@ "OSDLL.dll" strcmp ~~)
+		OSMODULEFLAGS_SHOULDINIT dll@ OSModule_Flags + |=
+
 		// map module sections.
 		// skip this part for OSDLL since the kernel maps that in for us.
 
@@ -931,6 +933,28 @@ fn OSModuleLoad { name -- dll ok }
 		dll@ t@ OSModule_Next + !
 		dll@ ospeb@ OSPEBs_DLLListTail + !
 	end
+
+	// call init function
+
+	auto func
+
+	if (dll@ OSModule_Flags + @ OSMODULEFLAGS_SHOULDINIT &)
+		"DLLMain" // name
+		dll@ // dll
+		OSGetSymbolAddress ok! func!
+
+		if (ok@ ~~)
+			func@ OSModuleMainFunction ok!
+
+			if (ok@)
+				dll@ OSModuleUnload
+
+				return
+			end
+		end
+
+		0 ok!
+	end
 end
 
 fn OSModuleUnload { dll -- }
@@ -948,12 +972,26 @@ fn OSModuleUnload { dll -- }
 		return
 	end
 
-	// no more references
+	// no more references, unload for real
 
-	if (dll@ OSModule_Name + @ "OSDLL.dll" strcmp ~~)
-		// unmap sections
-		dll@ DLLModuleUnmap
+	if (dll@ OSModule_Name + @ "OSDLL.dll" strcmp)
+		"OSModuleUnload: trying to unload myself\n" OSAbort
 	end
+
+	auto ok
+	auto func
+
+	// call unload function
+	"DLLUnload" // name
+	dll@ // dll
+	OSGetSymbolAddress ok! func!
+
+	if (ok@ ~~)
+		func@ OSModuleUnloadFunction
+	end
+
+	// unmap sections
+	dll@ DLLModuleUnmap
 
 	// unload dependencies
 	-1 dll@ DLLModuleUndoImports

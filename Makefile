@@ -42,6 +42,8 @@ sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll
 
 	make -C $(SYSINIT_DIR)
 
+	make -C $(OS_DIR)/TestDLL
+
 	make -C $(SYSBIN_DIR)
 	make -C $(BR_DIR)
 

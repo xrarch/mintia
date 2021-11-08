@@ -6,9 +6,9 @@ const OSPAGESHIFT 12
 const OSPEB     0x7FFE0000
 const OSPEBSIZE OSPAGESIZE
 
-const OSDLLHEAD 0x7FEE0000
+const OSDLLHEAD 0x7FE00000
 
-const USTACKS   0x7FCE0000 // preferred, to keep them out of the way
+const USTACKS   0x7FC00000 // preferred, to keep them out of the way
 const USTACKSZ  131072
 
 const HEAPSTART 0x70000000

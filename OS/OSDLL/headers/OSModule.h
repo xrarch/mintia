@@ -6,6 +6,8 @@ const OSMODULEFLAGS_REBASE     2
 
 const OSMODULEFLAGS_REBASEEITHER (OSMODULEFLAGS_REBASE OSMODULEFLAGS_REBASESELF |)
 
+const OSMODULEFLAGS_SHOULDINIT 4
+
 struct OSModule
 	4 Next
 	4 Prev
@@ -21,6 +23,9 @@ struct OSModule
 
 	4 Format
 endstruct
+
+fnptr OSModuleMainFunction { -- ok }
+fnptr OSModuleUnloadFunction { -- }
 
 extern OSModuleLoad { name -- dll ok }
 extern OSModuleUnload { dll -- }

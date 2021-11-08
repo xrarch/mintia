@@ -38,5 +38,6 @@ const STATUS_IO_UNALIGNED          -36
 const STATUS_VM_QUOTA_EXCEEDED     -37
 const STATUS_BAD_EXECUTABLE        -38
 const STATUS_EXEC_NOT_FOR_ARCH     -39
+const STATUS_NO_SYMBOL             -40
 
 extern OSStatusGetName { status -- name }

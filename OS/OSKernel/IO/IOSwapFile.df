@@ -21,8 +21,13 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+// TODO something like a godawful OOM killer for when swap gets pathologically
+// low
+
 var IOSwapPagesUsed 0
 public IOSwapPagesUsed
+
+var IOSwapPageHint 0
 
 var IOSwapFileObject 0
 
@@ -82,6 +87,29 @@ fn IOSwapFileCreateObject { fileobject -- ok }
 		return
 	end
 
+	auto cacheblock
+
+	0 // wantcaching
+	fcb@ // fcb
+	IOFileControlBlockCacheCheck ok! cacheblock!
+
+	// the swapfile will be left with UncachedIOCount biased to prevent page
+	// cache accesses to it.
+
+	if (ok@)
+		bitmap@ MmFree
+
+		return
+	end
+
+	if (cacheblock@)
+		bitmap@ MmFree
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
 	sizeinpages@ // sizeinbits
 	bitmap@ // data
 	IOSwapBitmap // header
@@ -106,12 +134,21 @@ end
 
 fn IOSwapFileCreate { filehandle -- ok }
 	auto fileobject
+	auto access
 
 	IOFileTypeObject@ // type
 	filehandle@ // handle
-	ObObjectReferenceByHandle ok! fileobject! drop
+	ObObjectReferenceByHandle ok! fileobject! access!
 
 	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE ACCESS_READ | SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
 		return
 	end
 
@@ -119,4 +156,138 @@ fn IOSwapFileCreate { filehandle -- ok }
 	IOSwapFileCreateObject ok!
 
 	fileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IOSwapPageFree { pno -- }
+	// frees a page in swap
+
+	if (DEBUGCHECKS)
+		if (IOSwapFileObject@ ~~)
+			"IOSwapPageFree: no swapfile\n" KeCrash
+		end
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 // runlength
+	pno@ // index
+	IOSwapBitmap // header
+	ExBitmapClearBits
+
+	1 IOSwapPagesUsed -=
+
+	ipl@ KeIPLLower
+end
+
+fn IOSwapPageWrite { pageframe -- pno ok }
+	// writes the pageframe to swap and returns the offset in pno.
+
+	if (DEBUGCHECKS)
+		if (pageframe@ PAGEOFFSETMASK &)
+			"IOSwapPageWrite: pageframe wasn't page-aligned\n" KeCrash
+		end
+
+		if (IOSwapFileObject@ ~~)
+			"IOSwapPageWrite: no swapfile\n" KeCrash
+		end
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	// find a free swap page
+
+	IOSwapPageHint@ // hint
+	1 // runlength
+	IOSwapBitmap // header
+	ExBitmapFindRun ok! pno!
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		// no free swap pages
+
+		STATUS_NO_SWAP ok!
+
+		return
+	end
+
+	pno@ IOSwapPageHint!
+
+	1 // runlength
+	pno@ // index
+	IOSwapBitmap // header
+	ExBitmapSetBits
+
+	1 IOSwapPagesUsed +=
+
+	ipl@ KeIPLLower
+
+	auto fcb
+	IOSwapFileObject@ IOFile_FileControlBlock + @ fcb!
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	// perform the write operation
+
+	0 // flags
+	PAGESIZE // length
+	pno@ PAGESHIFT << // offset
+	pageframe@ // buffer
+	fcb@ // fcb
+	KERNELMODE // lastmode
+	writefunc@ IODispatchWriteFunction ok! drop
+
+	if (ok@)
+		// write failed!
+
+		auto rs
+		HALCPUInterruptDisable rs!
+		1 IOSwapPagesUsed -=
+		rs@ HALCPUInterruptRestore
+
+		pno@ IOSwapPageFree
+
+		return
+	end
+end
+
+fn IOSwapPageRead { pageframe pno -- ok }
+	// reads swap page at pno into pageframe and frees it in swap
+
+	if (DEBUGCHECKS)
+		if (pageframe@ PAGEOFFSETMASK &)
+			"IOSwapPageRead: pageframe wasn't page-aligned\n" KeCrash
+		end
+
+		if (IOSwapFileObject@ ~~)
+			"IOSwapPageRead: no swapfile\n" KeCrash
+		end
+	end
+
+	auto fcb
+	IOSwapFileObject@ IOFile_FileControlBlock + @ fcb!
+
+	auto readfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
+
+	// perform the read operation
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	0 // kflags
+	PAGESIZE // length
+	pno@ PAGESHIFT << // offset
+	pageframe@ // buffer
+	fcb@ // fcb
+	KERNELMODE // lastmode
+	readfunc@ IODispatchReadFunction ok! drop
+
+	if (ok@)
+		return
+	end
+
+	pno@ IOSwapPageFree
 end

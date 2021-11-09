@@ -70,6 +70,14 @@ fn MmSectionPPTLock { sectionobject -- ok }
 	KeThreadWaitForObject ok!
 end
 
+fn MmSectionPPTTryLock { sectionobject -- ok }
+	KERNELMODE // waitmode
+	0 // alertable
+	0 // timeout
+	sectionobject@ MmSection_PrototypePageTableMutex + // object
+	KeThreadWaitForObject ok!
+end
+
 fn MmSectionPPTUnlock { sectionobject -- }
 	sectionobject@ MmSection_PrototypePageTableMutex + KeMutexRelease drop
 end
@@ -271,23 +279,61 @@ endtable
 public MmAnonymousEvictableFunctions
 
 fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
-	"MmAnonymousEvictionFunction: TODO swap\n" KeCrash
+	// try our best to swap out this page
+
+	if (DEBUGCHECKS)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+			"MmAnonymousEvictionFunction: tried to swap out COW, should happen in list populator\n" KeCrash
+		end
+	end
+
+	auto sectionobject
+	pfdbe@ MmPageFrameEntryAnonymous_SectionObject + @ sectionobject!
+
+	sectionobject@ MmSectionPPTTryLock ok!
+
+	if (ok@)
+		// failed to lock PPT
+
+		0 evicted!
+		0 ok!
+
+		return
+	end
+
+	IPLLOW KeIPLLower
+
+	1 evicted!
+
+	// write out to swapfile
+
+	auto pno
+	pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << IDENTITYSPACE | // pageframe
+	IOSwapPageWrite ok! pno!
+
+	if (ok@)
+		ok@ "Failed to swap out page (%i). Try expanding the swapfile!\n" KeCrash
+	end
+
+	auto ppte
+	pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ ppte!
+
+	pno@ PAGESHIFT << PTE_INSWAP | ppte@!
+
+	sectionobject@ MmSectionPPTUnlock
+
+	IPLDPC KeIPLRaise drop
 end
 
-fn MmAnonymousPageAlloc { sectionobject pte -- pfdbe pfn ok }
-	auto pri
+fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
 	auto flags
 
 	// an anonymous page is known to be a COW page by lacking a sectionobject.
 
 	if (sectionobject@)
 		0 flags!
-		ZEROMUST pri!
 	end else
-		// can be free because we know its going to be totally copied over
-		// (COW)
 		MMEVICTFLAG_COW flags!
-		FREEFIRST pri!
 	end
 
 	flags@ // flags
@@ -421,6 +467,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		sectionobject@ // sectionobject
 		ppt@ // pte
+		ZEROMUST // pri
 		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
 
 		if (ok@)
@@ -432,7 +479,31 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		phyaddr@ PTE_V | ppt@!
 	end elseif (ppte@ PTE_INSWAP &)
-		"MmSectionPageGet: TODO: swap in\n" KeCrash
+		// swapped out, bring back in
+
+		sectionobject@ // sectionobject
+		ppt@ // pte
+		FREEFIRST // pri
+		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			sectionobject@ MmSectionPPTUnlock
+			return
+		end
+
+		PAGESHIFT phyaddr <<=
+
+		phyaddr@ IDENTITYSPACE | // pageframe
+		ppte@ PAGESHIFT >> // pno
+		IOSwapPageRead ok!
+
+		if (ok@)
+			sectionobject@ MmSectionPPTUnlock
+			phyaddr@ PAGESHIFT >> MmPageFree
+			return
+		end
+
+		phyaddr@ PTE_V | ppt@!
 	end
 
 	sectionobject@ MmSectionPPTUnlock

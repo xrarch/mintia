@@ -40,5 +40,6 @@ const STATUS_BAD_EXECUTABLE        -38
 const STATUS_EXEC_NOT_FOR_ARCH     -39
 const STATUS_NO_SYMBOL             -40
 const STATUS_SWAP_TOO_SMALL        -41
+const STATUS_NO_SWAP               -42
 
 extern OSStatusGetName { status -- name }

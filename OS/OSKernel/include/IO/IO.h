@@ -37,6 +37,7 @@ struct IOFileControlBlock
 	4 Busy // busy with a mount operation
 	4 ParseCount
 	4 UncachedIOCount
+	4 SystemFile
 
 	ExRwLock_SIZEOF RwLock
 

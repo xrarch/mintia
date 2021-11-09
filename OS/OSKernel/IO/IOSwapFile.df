@@ -3,6 +3,7 @@
 #include "<inc>/HALLog.h"
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
 
 #include "<inc>/Kernel.h"
 
@@ -12,10 +13,110 @@
 
 #include "<inc>/Object.h"
 
+#include "<inc>/Security.h"
+
 #include "<inc>/Process.h"
 
 #include "<inc>/IO.h"
 
 #include "<ll>/OSDLL/OS.h"
 
-// stub
+var IOSwapPagesUsed 0
+public IOSwapPagesUsed
+
+var IOSwapFileObject 0
+
+buffer IOSwapBitmap ExBitmapHeader_SIZEOF
+
+fn IOSwapFileCreateObject { fileobject -- ok }
+	if (SeUserCurrentGet SeSystemUser@ ~=)
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	if (IOSwapFileObject@)
+		STATUS_FORBIDDEN_OPERATION ok!
+
+		return
+	end
+
+	// XXX doesn't lock a mutex on the swap file information because it is
+	// currently assumed that this function will only be called once by
+	// SystemInit.exe, and it cannot be called again after that (assuming it
+	// successfully established the swap file).
+
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_BLOCKDEVICE ==)
+		// disk or otherwise
+	end elseif (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_FILE ==)
+		// file
+	end else
+		// bad
+
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	auto sizeinpages
+	fcb@ IOFileControlBlock_SizeInBytes + @ PAGESHIFT >> sizeinpages!
+
+	if (sizeinpages@ 256 <)
+		// needs to be at least 256 pages (1MB with 4KB pages)
+
+		STATUS_SWAP_TOO_SMALL ok!
+
+		return
+	end
+
+	auto bitmap
+
+	sizeinpages@ 7 + 3 >> // bytes
+	'SwBm' // tag
+	MmAllocWithTag ok! bitmap!
+
+	if (ok@)
+		return
+	end
+
+	sizeinpages@ // sizeinbits
+	bitmap@ // data
+	IOSwapBitmap // header
+	ExBitmapInitialize
+
+	IOSwapBitmap // header
+	ExBitmapClear
+
+	// bias refcount
+	fileobject@ ObObjectReferenceByPointer drop
+
+	// set system file
+	1 fcb@ IOFileControlBlock_SystemFile + !
+
+	// set as swapfile
+	fileobject@ IOSwapFileObject!
+
+	0 ok!
+
+	return
+end
+
+fn IOSwapFileCreate { filehandle -- ok }
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	filehandle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! drop
+
+	if (ok@)
+		return
+	end
+
+	fileobject@ // fileobject
+	IOSwapFileCreateObject ok!
+
+	fileobject@ ObObjectDereferenceByPointer drop
+end

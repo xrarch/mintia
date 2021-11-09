@@ -20,7 +20,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmSectionPrepare { endofview sectionobject -- ok }
+fn MmSectionPrepare { prot endofview sectionobject -- ok }
 	// helper function
 
 	0 ok!
@@ -38,34 +38,43 @@ fn MmSectionPrepare { endofview sectionobject -- ok }
 		auto fcb
 		fileobject@ IOFile_FileControlBlock + @ fcb!
 
-		auto cacheblock
-		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+		if (endofview@ fcb@ IOFileControlBlock_SizeInBytes + @ >)
+			STATUS_INVALID_ARGUMENT ok!
 
-		if (cacheblock@ ~~)
-			// initialize caching on mapped FCB
+			return
+		end
 
-			1 // wantcaching
-			fcb@ // fcb
-			IOFileControlBlockCacheCheck ok! cacheblock!
+		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+			if (prot@ PAGEACCESS_WRITECOPY &)
+				// can't COW character devices, that's a weird thing to do.
+				// and also bypasses our swap algo (for now).
+
+				STATUS_INVALID_ARGUMENT ok!
+
+				return
+			end
+		end else
+			auto cacheblock
+			fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+			if (cacheblock@ ~~)
+				// initialize caching on mapped FCB
+
+				1 // wantcaching
+				fcb@ // fcb
+				IOFileControlBlockCacheCheck ok! cacheblock!
+
+				if (ok@)
+					return
+				end
+			end
+
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockTryReference ok! drop
 
 			if (ok@)
 				return
 			end
-		end
-
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockTryReference ok! drop
-
-		if (ok@)
-			return
-		end
-
-		if (endofview@ fcb@ IOFileControlBlock_SizeInBytes + @ >)
-			cacheblock@ IOCacheInfoBlockDereference drop
-
-			STATUS_INVALID_ARGUMENT ok!
-
-			return
 		end
 	end else
 		if (DEBUGCHECKS)
@@ -92,16 +101,18 @@ fn MmSectionUnprepare { sectionobject -- }
 		auto fcb
 		fileobject@ IOFile_FileControlBlock + @ fcb!
 
-		auto cacheblock
-		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
+			auto cacheblock
+			fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-		if (DEBUGCHECKS)
-			if (cacheblock@ ~~)
-				"MmSectionUnprepare: no cacheblock\n" KeCrash
+			if (DEBUGCHECKS)
+				if (cacheblock@ ~~)
+					"MmSectionUnprepare: no cacheblock\n" KeCrash
+				end
 			end
-		end
 
-		cacheblock@ IOCacheInfoBlockDereference drop
+			cacheblock@ IOCacheInfoBlockDereference drop
+		end
 	end
 end
 
@@ -179,6 +190,7 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 	// reference the cacheblock so that it can't be truncated.
 	// this is done in MmSectionPrepare.
 
+	pageprotection@ // prot
 	endofview@ // endofview
 	sectionobject@ // sectionobject
 	MmSectionPrepare ok!
@@ -421,7 +433,7 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 		return
 	end
 
-	oldprot@ vad@ MmVAD_PageProtection + !
+	pageprotection@ vad@ MmVAD_PageProtection + !
 
 	processobject@ MmVADListUnlock
 end

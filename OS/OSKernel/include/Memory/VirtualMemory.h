@@ -7,5 +7,5 @@ extern MmUnmapVirtualAddress { vaddr asid pagemap canfree attempt -- pte phyaddr
 extern MmMapUnmodifyPTE { pteaddr -- }
 extern MmPageDirectoryInitialize { pagemap -- }
 
-const PTE_COWINSWAP 2
-const PTE_INSWAP    2
+// XXX platform specific insofar as it needs to NOT overlap with the valid bit
+const PTE_INSWAP 2

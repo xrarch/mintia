@@ -110,6 +110,7 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 	auto pte
 	auto phyaddr
 	auto flags
+	auto pfdbe
 
 	badaddr@ // vaddr
 	pdir@ // pagemap
@@ -125,8 +126,50 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 			process@ MmVADListUnlock
 			return
 		end
-	end elseif (pte@ PTE_COWINSWAP &)
-		"MmSatisfyFault: TODO: swap in COW page\n" KeCrash
+	end elseif (pte@ PTE_INSWAP &)
+		// swap in COW page
+
+		0 // sectionobject
+		0 // pte
+		FREEFIRST // pri
+		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			process@ MmVADListUnlock
+			return
+		end
+
+		PAGESHIFT phyaddr <<=
+
+		phyaddr@ IDENTITYSPACE | // pageframe
+		pte@ PAGESHIFT >> // pno
+		IOSwapPageRead ok!
+
+		if (ok@)
+			process@ MmVADListUnlock
+			phyaddr@ PAGESHIFT >> MmPageFree
+			return
+		end
+
+		phyaddr@ // phyaddr
+		badaddr@ // vaddr
+		PTE_V PTE_W | // flags
+		process@ KeProcess_ASID + @ // asid
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmRemapVirtualAddress ok! drop
+
+		if (ok@)
+			phyaddr@ PAGESHIFT >> MmPageFree
+
+			// funny enough, we actually just completely lost the COW page
+			// with no good way to keep it around, so the process should just
+			// be murdered at this point.
+
+			process@ MmVADListUnlock
+			OSSIGNAL_KILL signal!
+			return
+		end
+
 		process@ MmVADListUnlock
 		return
 	end
@@ -174,10 +217,11 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 	auto sectoff
 	badaddr@ vad@ MmVAD_StartVA + @ - vad@ MmVAD_OffsetInSection + @ + sectoff!
 
-	auto pfdbe
 	0 pfdbe!
 
 	if (flags@ PTE_V & ~~)
+		// pte was truly invalid and needs faulting in
+
 		if (section@ MmSection_FileObject + @)
 			vad@ // vad
 			section@ // sectionobject
@@ -200,6 +244,8 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 			return
 		end
 	end elseif (section@ MmSection_NoCommit + @ ~~)
+		// pte was valid but something else caused the fault like a dirty
+
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 	end
 
@@ -211,37 +257,42 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 		// that as a "dirty".
 
 		if (section@ MmSection_FileObject + @)
-			IPLDPC KeIPLRaise ipl!
+			// pfdbe is zeroed out for things where this isn't applicable like
+			// a mapped character device.
 
-			pfdbe@ IOCachePageModifyFunction ok!
+			if (pfdbe@)
+				IPLDPC KeIPLRaise ipl!
 
-			if (DEBUGCHECKS)
-				if (ok@)
-					"MmSatisfyFault: failed to modify page\n" KeCrash
+				pfdbe@ IOCachePageModifyFunction ok!
+
+				if (DEBUGCHECKS)
+					if (ok@)
+						"MmSatisfyFault: failed to modify page\n" KeCrash
+					end
 				end
-			end
 
-			phyaddr@ // phyaddr
-			badaddr@ // vaddr
-			PTE_V PTE_W | // flags
-			process@ KeProcess_ASID + @ // asid
-			process@ KeProcess_PageDirectory + @ // pagemap
-			MmRemapVirtualAddress ok! pte!
+				phyaddr@ // phyaddr
+				badaddr@ // vaddr
+				PTE_V PTE_W | // flags
+				process@ KeProcess_ASID + @ // asid
+				process@ KeProcess_PageDirectory + @ // pagemap
+				MmRemapVirtualAddress ok! pte!
 
-			if (ok@)
+				if (ok@)
+					ipl@ KeIPLLower
+					process@ MmVADListUnlock
+					OSSIGNAL_KILL signal!
+					return
+				end
+
+				if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
+					pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmMapUnmodifyPTE
+				end
+
+				pte@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+
 				ipl@ KeIPLLower
-				process@ MmVADListUnlock
-				OSSIGNAL_KILL signal!
-				return
 			end
-
-			if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
-				pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmMapUnmodifyPTE
-			end
-
-			pte@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
-
-			ipl@ KeIPLLower
 		end
 	end elseif (pte@ FAULTACTIONCOW ==)
 		auto cowpfdbe

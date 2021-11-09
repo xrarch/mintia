@@ -1,0 +1,1 @@
+extern IOSwapFileCreate { filehandle -- ok }

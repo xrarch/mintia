@@ -121,6 +121,17 @@ OSFileWrite:
 
 	ret
 
+OSSwapFileCreate:
+.global OSSwapFileCreate
+	mov  t1, a0
+
+	li   t0, 10
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSSectionCreate:
 .global OSSectionCreate
 	mov  t1, a0
@@ -129,7 +140,7 @@ OSSectionCreate:
 	mov  t4, a3
 	mov  t5, long [sp + 8]
 
-	li   t0, 10
+	li   t0, 11
 	sys  0
 
 	mov  a1, t2
@@ -147,7 +158,7 @@ OSSectionMapView:
 	mov  a0, long [sp + 12]
 	mov  a1, long [sp + 16]
 
-	li   t0, 11
+	li   t0, 12
 	sys  0
 
 	mov  a1, t2
@@ -161,7 +172,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 12
+	li   t0, 13
 	sys  0
 
 	mov  a0, t1
@@ -175,7 +186,18 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 13
+	li   t0, 14
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSThreadSleep:
+.global OSThreadSleep
+	mov  t1, a0
+
+	li   t0, 15
 	sys  0
 
 	mov  a0, t1

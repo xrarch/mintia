@@ -349,6 +349,27 @@ fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
 	pte@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
 end
 
+fn MmAnonymousSwapIn { sectionobject pte pno -- pfdbe pfn ok }
+	sectionobject@ // sectionobject
+	pte@ // pte
+	FREEFIRST // pri
+	MmAnonymousPageAlloc ok! pfn! pfdbe!
+
+	if (ok@)
+		return
+	end
+
+	pfn@ PAGESHIFT << IDENTITYSPACE | // pageframe
+	pno@ // pno
+	IOSwapPageRead ok!
+
+	if (ok@)
+		pfn@ MmPageFree
+
+		return
+	end
+end
+
 fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 	// get specified page frame from section. will read it in if in swap, or
 	// demand zero if non-existent, or just return if resident.
@@ -458,7 +479,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 	if (ppte@ PTE_V &)
 		// already present, return
 
-		ppte@ PAGESHIFT >> PAGESHIFT << phyaddr!
+		ppte@ PAGENUMBERMASK & phyaddr!
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 		pfdbe@ MmEvictablePageReference drop
@@ -483,8 +504,8 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		sectionobject@ // sectionobject
 		ppt@ // pte
-		FREEFIRST // pri
-		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+		ppte@ PAGESHIFT >> // pno
+		MmAnonymousSwapIn ok! phyaddr! pfdbe!
 
 		if (ok@)
 			sectionobject@ MmSectionPPTUnlock
@@ -492,16 +513,6 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		end
 
 		PAGESHIFT phyaddr <<=
-
-		phyaddr@ IDENTITYSPACE | // pageframe
-		ppte@ PAGESHIFT >> // pno
-		IOSwapPageRead ok!
-
-		if (ok@)
-			sectionobject@ MmSectionPPTUnlock
-			phyaddr@ PAGESHIFT >> MmPageFree
-			return
-		end
 
 		phyaddr@ PTE_V | ppt@!
 	end

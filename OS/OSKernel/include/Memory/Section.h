@@ -29,5 +29,7 @@ extern MmUnmapView { length vaddr processhandle -- ok }
 extern MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 extern MmRemapView { pageprotection length vaddr processhandle -- ok }
 
+extern MmAnonymousSwapIn { sectionobject pte pno -- pfdbe pfn ok }
+
 extern MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
 extern MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }

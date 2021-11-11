@@ -20,6 +20,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+const MMSECTIONMULTILEVELTHRESHOLD 0x800000
+
 fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	// if anonymous, free all associated page frames (in main memory and in swap).
 	// if memory-mapped file, dereference the file object.
@@ -58,7 +60,75 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 		quotablock@ MmQuotaBlockDereference
 
-		"MmSectionObjectDelete: TODO cleanup anonymous\n" KeCrash
+		// walk the prototype page tables and free all pages, in swap or in
+		// RAM. then free the prototype page tables.
+
+		auto multilevel
+		anonsize@ MMSECTIONMULTILEVELTHRESHOLD >= multilevel!
+
+		auto ppt
+		object@ MmSection_AnonPrototypePageTable + @ ppt!
+
+		if (ppt@)
+			auto ppte
+
+			auto count
+
+			if (multilevel@)
+				PAGESIZE 2 >> count!
+
+				auto ppde
+
+				// iterate top level table
+				while (count@)
+					ppt@@ ppde!
+
+					if (ppde@)
+						auto j
+						PAGESIZE 2 >> j!
+
+						// iterate bottom level table
+
+						while (j@)
+							ppde@@ ppte!
+
+							if (ppte@ PTE_V &)
+								// free in RAM
+								ppte@ PAGESHIFT >> MmPageFree
+							end elseif (ppte@ PTE_INSWAP &)
+								// free in swap
+								ppte@ PAGESHIFT >> IOSwapPageFree
+							end
+
+							4 ppde +=
+							1 j -=
+						end
+					end
+
+					4 ppt +=
+					1 count -=
+				end
+			end else
+				anonsize@ PAGESHIFT >> count!
+
+				while (count@)
+					ppt@@ ppte!
+
+					if (ppte@ PTE_V &)
+						// free in RAM
+						ppte@ PAGESHIFT >> MmPageFree
+					end elseif (ppte@ PTE_INSWAP &)
+						// free in swap
+						ppte@ PAGESHIFT >> IOSwapPageFree
+					end
+
+					4 ppt +=
+					1 count -=
+				end
+			end
+
+			object@ MmSection_AnonPrototypePageTable + @ MmFree
+		end
 	end
 end
 
@@ -390,9 +460,6 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		return
 	end
 
-	auto multilevel
-	0 multilevel!
-
 	auto anonsize
 	sectionobject@ MmSection_AnonSize + @ anonsize!
 
@@ -402,9 +469,8 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		end
 	end
 	
-	if (anonsize@ 0x800000 >=)
-		1 multilevel!
-	end
+	auto multilevel
+	anonsize@ MMSECTIONMULTILEVELTHRESHOLD >= multilevel!
 
 	auto ppt
 	sectionobject@ MmSection_AnonPrototypePageTable + @ ppt!

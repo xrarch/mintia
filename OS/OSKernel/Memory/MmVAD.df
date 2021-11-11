@@ -20,12 +20,43 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+var MmVADListHead 0
+public MmVADListHead
+
+var MmVADListTail 0
+public MmVADListTail
+
 // routines for creating, destroying, and manipulating
 // Virtual Address Descriptors (VADs).
 
-fn MmVADCreate { startva endva prot offset sectionobject quotablock -- vad ok }
+fn MmVADCreate { startva endva prot offset processobject sectionobject quotablock -- vad ok }
 	// allocates a VAD structure.
 	// references the section object, and the quotablock if applicable.
+
+	quotablock@ MmQuotaBlockReference
+
+	auto qcharge
+	MmVAD_SIZEOF MmChargeBytesGet qcharge!
+
+	qcharge@ // charge
+	quotablock@ // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		return
+	end
+
+	MmVAD_SIZEOF // bytes
+	'nVAD' // tag
+	MmAllocWithTag ok! vad!
+
+	if (ok@)
+		qcharge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		return
+	end
 
 	if (prot@ PAGEACCESS_WRITECOPY &)
 		// charge vm quota for this VAD because it has the potential to
@@ -36,22 +67,16 @@ fn MmVADCreate { startva endva prot offset sectionobject quotablock -- vad ok }
 		MmQuotaBlockChargeVM ok!
 
 		if (ok@)
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUncharge
+
 			return
 		end
 
-		quotablock@ MmQuotaBlockReference
-
-		quotablock@ vad@ MmVAD_QuotaBlock + !
+		1 vad@ MmVAD_ChargeVMQuota + !
 	end else
-		0 quotablock!
-	end
-
-	MmVAD_SIZEOF // bytes
-	'nVAD' // tag
-	MmAllocWithTag ok! vad!
-
-	if (ok@)
-		return
+		0 vad@ MmVAD_ChargeVMQuota + !
 	end
 
 	sectionobject@ ObObjectReferenceByPointer drop
@@ -66,6 +91,7 @@ fn MmVADCreate { startva endva prot offset sectionobject quotablock -- vad ok }
 	0 vad@ MmVAD_FurthestExtentMapped + !
 	prot@ vad@ MmVAD_PageProtection + !
 	quotablock@ vad@ MmVAD_QuotaBlock + !
+	processobject@ vad@ MmVAD_ProcessObject + !
 end
 
 fn MmVADListLock { processobject -- ok }
@@ -82,6 +108,11 @@ fn MmVADListTryLock { processobject -- ok }
 	0 // timeout
 	processobject@ PsProcess_VADListMutex + // object
 	KeThreadWaitForObject ok!
+end
+
+fn MmVADListIsLocked { processobject -- locked }
+	processobject@ PsProcess_VADListMutex + // mutex
+	KeMutexIsLocked locked!
 end
 
 fn MmVADListUnlock { processobject -- }
@@ -314,6 +345,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	realva@ viewsize@ + // endva
 	pageprotection@ // prot
 	sectionoffset@ // offset
+	processobject@ // processobject
 	sectionobject@ // sectionobject
 	processobject@ PsProcess_QuotaBlock + @ // quotablock
 	MmVADCreate ok! vad!
@@ -355,7 +387,62 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 		vad@ lastsufficientvad@ MmVAD_Next + !
 	end
 
+	// insert at tail of global VAD list (used for evictions)
+	vad@ MmVADInsert
+
 	processobject@ MmVADListUnlock
+end
+
+fn MmVADInsert { vad -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto t
+	MmVADListTail@ t!
+
+	if (t@ ~~)
+		0 vad@ MmVAD_NextGlobal + !
+		0 vad@ MmVAD_PrevGlobal + !
+
+		vad@ MmVADListHead!
+		vad@ MmVADListTail!
+	end else
+		0 vad@ MmVAD_NextGlobal + !
+
+		t@ vad@ MmVAD_PrevGlobal + !
+		vad@ t@ MmVAD_NextGlobal + !
+		vad@ MmVADListTail!
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmVADRemove { vad -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto ls
+	vad@ MmVAD_PrevGlobal + @ ls!
+
+	auto ns
+	vad@ MmVAD_NextGlobal + @ ns!
+
+	if (ls@)
+		ns@ ls@ MmVAD_NextGlobal + !
+	end else
+		ns@ MmVADListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ MmVAD_PrevGlobal + !
+	end else
+		ls@ MmVADListTail!
+	end
+
+	0 vad@ MmVAD_PrevGlobal + !
+	0 vad@ MmVAD_NextGlobal + !
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn MmVADUnmap { vad processobject -- }
@@ -479,13 +566,19 @@ fn MmVADUnmap { vad processobject -- }
 	auto quotablock
 	vad@ MmVAD_QuotaBlock + @ quotablock!
 
-	if (quotablock@)
+	MmVAD_SIZEOF MmChargeBytesGet // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUncharge
+
+	if (vad@ MmVAD_ChargeVMQuota + @)
 		vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUnchargeVM
-
-		quotablock@ MmQuotaBlockDereference
 	end
+
+	quotablock@ MmQuotaBlockDereference
+
+	vad@ MmVADRemove
 
 	vad@ MmFree
 end

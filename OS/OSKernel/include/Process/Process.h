@@ -32,6 +32,7 @@ struct PsProcess
 	4 CommittedPageFrames
 
 	4 PageFaultCount
+	4 ThrottleFaultCount
 endstruct
 
 struct PsThread

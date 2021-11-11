@@ -193,11 +193,22 @@ OSRemapView:
 
 	ret
 
+OSSetSwappiness:
+.global OSSetSwappiness
+	mov  t1, a0
+
+	li   t0, 15
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 15
+	li   t0, 16
 	sys  0
 
 	mov  a0, t1

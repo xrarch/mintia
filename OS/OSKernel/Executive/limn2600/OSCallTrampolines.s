@@ -16,11 +16,12 @@
 .extern OSSectionMapView
 .extern OSUnmapView
 .extern OSRemapView
+.extern OSSetSwappiness
 .extern OSThreadSleep
 
 OSCallCount:
 .global OSCallCount
-	.dl 15
+	.dl 16
 
 OSCallTable:
 .global OSCallTable
@@ -39,7 +40,8 @@ OSCallTable:
 	.dl OSTOSSectionMapView                              ;12
 	.dl OSTOSUnmapView                                   ;13
 	.dl OSTOSRemapView                                   ;14
-	.dl OSTOSThreadSleep                                 ;15
+	.dl OSTOSSetSwappiness                               ;15
+	.dl OSTOSThreadSleep                                 ;16
 
 
 OSTOSConsolePutCharacter:
@@ -306,6 +308,22 @@ OSTOSRemapView:
 	mov  a3, long [s18 + 16] ;t4
 
 	jal  OSRemapView
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp + 4]
+	addi sp, sp, 8
+	ret
+
+OSTOSSetSwappiness:
+.global OSTOSSetSwappiness
+	subi sp, sp, 8
+	mov  long [sp], zero
+	mov  long [sp + 4], lr
+
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSSetSwappiness
 
 	mov  long [s18 + 4], a0 ;t1
 

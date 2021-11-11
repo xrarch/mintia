@@ -15,8 +15,10 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-const MMFASTPAGEEVICTCOUNT 128
-const MMSLOWPAGEEVICTCOUNT 32
+// fraction over 128 of the number of evicted pages that should be written to
+// swap.
+var MmSwappiness 0
+public MmSwappiness
 
 fn MmEvictionWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
@@ -37,105 +39,152 @@ fn MmEvictionWorker { context1 context2 -- }
 
 	while (1)
 		auto ok
+		auto reason
+		auto evictcount
 
 		KERNELMODE // waitmode
 		0 // alertable
-		10000 // timeout (evict up to the high watermark every 10 seconds)
+		60000 // timeout (evict up to the high watermark every 60 seconds)
 		MmEventLowMemory // object
-		KeThreadWaitForObject ok!
+		KeThreadWaitForObject reason!
 
 		if (DEBUGCHECKS)
-			if (ok@)
-				if (ok@ STATUS_WAIT_TIMEOUT ~=)
-					ok@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+			if (reason@)
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
 				end
 			end
 		end
+
+		IPLDPC KeIPLRaise ipl!
 
 		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-			IPLDPC KeIPLRaise ipl!
-
-			// recheck at IPLDPC -- this seemingly redundant check
-			// minimizes overhead in the more common case
-
-			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-				MmEventLowMemory // event
-				KeEventReset drop
-
-				ipl@ KeIPLLower
-
-				0 sleptonce!
-				0 failcount!
-
-				continue
-			end
+			MmEventLowMemory // event
+			KeEventReset drop
 
 			ipl@ KeIPLLower
+
+			0 sleptonce!
+			0 failcount!
+
+			continue
+		end else
+			MmPageFreeCountSufficient@ MmPageFreeCount@ - evictcount!
 		end
 
-		if (failcount@)
-			if (failcount@ 7 & ~~)
-				// we've been here a lot of times...
-				// giving up the processor for 75ms might untangle things and help
-				// us evict more pages...
+		ipl@ KeIPLLower
 
-				75 // interval
-				KERNELMODE // waitmode
-				0 // alertable
-				KeThreadSleep ok!
+		1 failcount +=
 
-				if (DEBUGCHECKS)
-					if (ok@ STATUS_WAIT_TIMEOUT ~=)
-						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
-					end
+		if (failcount@ 8 >=)
+			// we've been here a lot of times...
+			// giving up the processor for 25ms might untangle things and help
+			// us evict more pages...
+
+			25 // interval
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep ok!
+
+			if (DEBUGCHECKS)
+				if (ok@ STATUS_WAIT_TIMEOUT ~=)
+					ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
 				end
+			end
 
-				continue
+			0 failcount!
+
+			continue
+		end
+
+		auto slowcount
+
+		// in normal person speak this is
+		// swapcount = evictcount * (MmSwappiness/128)
+		evictcount@ 7 << MmSwappiness@ * 14 >> slowcount!
+
+		auto fastcount
+		evictcount@ slowcount@ - fastcount!
+
+		if (reason@ STATUS_WAIT_TIMEOUT ~=)
+			if (sleptonce@ ~~)
+				if (IOCacheModifiedPageListHead@)
+					// there's some modified page frames.
+					// go to sleep for 50ms with the hope that the modified page writer will have freed some up by
+					// the time we wake up.
+
+					// we may do this only once per eviction period.
+
+					1 sleptonce!
+
+					50 // interval
+					KERNELMODE // waitmode
+					0 // alertable
+					KeThreadSleep ok!
+
+					if (DEBUGCHECKS)
+						if (ok@ STATUS_WAIT_TIMEOUT ~=)
+							ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+						end
+					end
+
+					continue
+				end
+			end
+
+			// ensure we can progress by putting a minimum on these
+			if (MmSwappiness@)
+				slowcount@ 20 max slowcount!
+			end
+			fastcount@ 32 max fastcount!
+		end
+
+		// attempt to collect enough pages in both lists to satisfy these
+		// targets
+
+		auto succeedcount
+
+		slowcount@ // slowneeded
+		fastcount@ // fastneeded
+		MmPopulateLists succeedcount!
+
+		if (succeedcount@)
+			0 failcount!
+		end
+
+		if (DEBUGCHECKS)
+			if (succeedcount@ slowcount@ >)
+				"MmEvictionWorker: succeedcount > slowcount\n" KeCrash
 			end
 		end
+
+		// decrement by the amount of COW pages that were swapped out
+		succeedcount@ slowcount -=
 
 		auto done
 
-		MMFASTPAGEEVICTCOUNT // trycount
+		fastcount@ // trycount
 		1 // fast
 		MmEvictableFastPageListHead // listhead
-		MmEvictFromList ok! done!
+		MmEvictFromList ok! done! succeedcount!
 
 		if (ok@)
 			ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
 		end
 
 		if (done@)
+			// free page count became sufficient while evicting
 			continue
 		end
 
-		if (sleptonce@ ~~)
-			if (IOCacheModifiedPageListHead@)
-				// there's some modified page frames.
-				// go to sleep for 25ms with the hope that the modified page writer will have freed some up by
-				// the time we wake up.
-
-				1 sleptonce!
-
-				25 // interval
-				KERNELMODE // waitmode
-				0 // alertable
-				KeThreadSleep ok!
-
-				if (DEBUGCHECKS)
-					if (ok@ STATUS_WAIT_TIMEOUT ~=)
-						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
-					end
-				end
-
-				continue
-			end
+		if (succeedcount@)
+			0 failcount!
 		end
 
-		MMSLOWPAGEEVICTCOUNT // trycount
+		slowcount@ // trycount
 		0 // fast
 		MmEvictablePageListHead // listhead
-		MmEvictFromList ok! done!
+		MmEvictFromList ok! done! succeedcount!
 
 		if (ok@)
 			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
@@ -145,19 +194,202 @@ fn MmEvictionWorker { context1 context2 -- }
 			continue
 		end
 
-		// permit a sleep on the modified page list again
-		0 sleptonce!
-
-		1 failcount +=
-
-		"MmEvictionWorker: TODO: invalidate PTEs\n" KeCrash
+		if (succeedcount@)
+			0 failcount!
+		end
 	end
 end
 
+fn MmPopulateLists { slowneeded fastneeded -- cowswapped }
+	// aims towards getting at least slowneeded and fastneeded pages in each
+	// list. swaps out found COW pages immediately (if slowneeded remaining).
+
+	0 cowswapped!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	// check if we need to populate the lists at all judging by their current
+	// sizes and the given slowneeded and fastneeded.
+
+	if (fastneeded@ MmEvictableFastPageCount@ >)
+		MmEvictableFastPageCount@ fastneeded -=
+	end else
+		0 fastneeded!
+	end
+
+	if (slowneeded@ MmEvictableSlowPageCount@ >)
+		MmEvictableSlowPageCount@ slowneeded -=
+	end else
+		0 fastneeded!
+	end
+
+	if (fastneeded@ ~~)
+		if (slowneeded@ ~~)
+			ipl@ KeIPLLower
+
+			return
+		end
+	end
+
+	// go through global VAD LRU list and invalidate PTEs in order to try and
+	// place more pages on the slow and fast evictable lists.
+
+	auto vad
+	MmVADListHead@ vad!
+
+	while (vad@)
+		if (fastneeded@ ~~)
+			if (slowneeded@ ~~)
+				ipl@ KeIPLLower
+
+				return
+			end
+		end
+
+		// if we need slow and fast pages, try this VAD.
+
+		// if we only need fast pages, only try this VAD if it's a
+		// memory-mapped file.
+
+		// if we only need slow pages, try this VAD if it's either anonymous
+		// or is (or has ever been) a COW-mapped file (VM quota charged).
+
+		auto sectionobject
+		vad@ MmVAD_SectionObject + @ sectionobject!
+
+		if (sectionobject@ MmSection_NoCommit + @ ~~)
+			auto asid
+			vad@ MmVAD_ProcessObject + @ KeProcess_ASID + @ asid!
+
+			auto pdir
+			vad@ MmVAD_ProcessObject + @ KeProcess_PageDirectory + @ pdir!
+
+			auto skip
+			1 skip!
+
+			if (fastneeded@)
+				if (sectionobject@ MmSection_FileObject + @)
+					0 skip!
+				end
+			end
+
+			if (skip@)
+				if (slowneeded@)
+					if (sectionobject@ MmSection_AnonSize + @)
+						0 skip!
+					end elseif (vad@ MmVAD_ChargeVMQuota + @)
+						0 skip!
+					end
+				end
+			end
+
+			if (skip@ ~~)
+				vad@ MmVAD_ProcessObject + @ MmVADListTryLock skip!
+
+				if (skip@)
+					// locked it, yeet this one
+
+					ipl@ KeIPLLower
+
+					auto vaddr
+					vad@ MmVAD_StartVA + @ vaddr!
+
+					auto endva
+					vad@ MmVAD_FurthestExtentMapped + @ endva!
+
+					auto phyaddr
+					auto pfdbe
+					auto oldcount
+
+					while (vaddr@ endva@ <)
+						// use skip to hold ok
+
+						slowneeded@ // invcow
+						vaddr@ // vaddr
+						asid@ // asid
+						pdir@ // pagemap
+						MmInvalidateVirtualAddress skip! phyaddr!
+
+						if (DEBUGCHECKS)
+							if (skip@)
+								skip@ "MmPopulateLists: MmInvalidateVirtualAddress failed (%i)\n" KeCrash
+							end
+						end
+
+						if (phyaddr@)
+							phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+							if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+								// found a COW page! must swap out immediately
+
+								auto pno
+								phyaddr@ IDENTITYSPACE | // pageframe
+								IOSwapPageWrite skip! pno!
+
+								if (skip@)
+									skip@ "Failed to swap out COW page (%i). Try expanding the swapfile!\n" KeCrash
+								end
+
+								1 cowswapped +=
+								1 slowneeded -=
+
+								phyaddr@ PAGESHIFT >> MmPageFree
+
+								pno@ PAGESHIFT << PTE_INSWAP | // pte
+								vaddr@ // vaddr
+								pdir@ // pagemap
+								MmSetVirtualAddress skip!
+
+								if (DEBUGCHECKS)
+									if (skip@)
+										skip@ "MmPopulateLists: MmSetVirtualAddress failed (%i)\n" KeCrash
+									end
+								end
+							end else
+								IPLDPC KeIPLRaise ipl!
+
+								pfdbe@ MmEvictablePageDereference oldcount!
+
+								if (oldcount@ 1 ==)
+									// we managed to put this page on a list!
+
+									if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+										if (fastneeded@)
+											1 fastneeded -=
+										end
+									end else
+										if (slowneeded@)
+											1 slowneeded -=
+										end
+									end
+								end
+
+								ipl@ KeIPLLower
+							end
+						end
+
+						PAGESIZE vaddr +=
+					end
+
+					IPLDPC KeIPLRaise ipl!
+
+					vad@ MmVAD_ProcessObject + @ MmVADListUnlock
+				end
+			end
+		end
+
+		vad@ MmVAD_NextGlobal + @ vad!
+	end
+
+	ipl@ KeIPLLower
+end
+
 fn MmZeroPageWorker { -- }
-	// the fate of the idle thread is to endlessly spin and check for page frames in the free list.
-	// if it finds any, it zeroes them out and places them on the zero list.
-	// if it doesn't, it halts the processor until next interrupt.
+	// the fate of the idle thread is to endlessly spin and check for page
+	// frames in the free list. if it finds any, it zeroes them out and places
+	// them on the zero list. if it doesn't, it halts the processor until next
+	// interrupt.
 
 	while (1)
 		auto pfdbe

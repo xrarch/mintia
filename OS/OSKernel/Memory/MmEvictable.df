@@ -27,6 +27,12 @@ public MmEvictableFastPageListTail
 var MmEvictablePageCount 0
 public MmEvictablePageCount
 
+var MmEvictableFastPageCount 0
+public MmEvictableFastPageCount
+
+var MmEvictableSlowPageCount 0
+public MmEvictableSlowPageCount
+
 fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 	priority@ // priority
 	MmPageAlloc ok! pfn! pfdbe!
@@ -36,7 +42,7 @@ fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 	end
 
 	1 pfdbe@ MmPageFrameEntryEvictable_References + !
-	
+
 	0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 	0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
 
@@ -53,6 +59,8 @@ fn MmEvictablePageInsert { pfdbe -- }
 	auto t
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+		1 MmEvictableFastPageCount +=
+
 		MmEvictableFastPageListTail@ t!
 
 		if (t@ ~~)
@@ -69,6 +77,8 @@ fn MmEvictablePageInsert { pfdbe -- }
 			pfdbe@ MmEvictableFastPageListTail!
 		end
 	end else
+		1 MmEvictableSlowPageCount +=
+
 		MmEvictablePageListTail@ t!
 
 		if (t@ ~~)
@@ -132,6 +142,12 @@ fn MmEvictablePageRemove { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
 	1 MmEvictablePageCount -=
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+		1 MmEvictableFastPageCount -=
+	end else
+		1 MmEvictableSlowPageCount -=
+	end
 
 	auto ls
 	pfdbe@ MmPageFrameEntryEvictable_Prev + @ ls!
@@ -202,11 +218,9 @@ end
 // fast pages will never drop below IPLDPC while evicting.
 // slow pages will never have dropped below IPLDPC if eviction failed.
 
-fn MmEvictFromList { trycount fast listhead -- done ok }
+fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 	0 done!
 	0 ok!
-
-	auto succeedcount
 	0 succeedcount!
 
 	auto i
@@ -245,7 +259,7 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 			// we will call an MmEvictionFunction defined by the PFDBE.
 			// this function's primary job is to perform whatever actions
 			// are necessary to evict the page frame, such as writing it
-			// out to the page file.
+			// out to the swapfile.
 
 			// another equally important job of the MmEvictionFunction is
 			// to perform whatever synchronization is needed between any
@@ -254,17 +268,9 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 			// for any reason, the function returns 0 in the 'evicted'
 			// return value.
 
-			auto evictionfuncs
-			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
-
-			if (DEBUGCHECKS)
-				if (evictionfuncs@ ~~)
-					"MmEvictFromList: no eviction funcs for page\n" KeCrash
-				end
-			end
-
 			auto evictionfunc
-			evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
 
 			if (DEBUGCHECKS)
 				if (evictionfunc@ ~~)
@@ -292,19 +298,24 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 
 				if (fast@)
 					pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
+
+					pfdbe@ MmEvictablePageRemove
+
+					pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+					MmPageFree
 				end else
 					// slow pages can't be trusted not to have dropped to
 					// IPLLOW which would mean anything could have happened
 					// to the evictable LRU and the next link is meaningless.
 
+					pfdbe@ MmEvictablePageRemove
+
+					pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+					MmPageFree
+
 					0 oldhead!
 					listhead@@ npfdbe!
 				end
-
-				pfdbe@ MmEvictablePageRemove
-
-				pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
-				MmPageFree
 			end else
 				pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
 
@@ -329,9 +340,6 @@ fn MmEvictFromList { trycount fast listhead -- done ok }
 
 		ipl@ KeIPLLower
 	end
-
-	// at least half of the tries need to have worked
-	succeedcount@ trycount@ 2 / >= done!
 end
 
 fn MmEvictSinglePage { canbeslow -- pfdbe ok }
@@ -404,7 +412,7 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 				if (DEBUGCHECKS)
 					if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
 						pfdbe@ MmPageFrameEntryEvictable_References + @
-						"MmPageAlloc: attempt to evict a page with %d references 2\n" KeCrash
+						"MmEvictSinglePage: attempt to evict a page with %d references 2\n" KeCrash
 					end
 				end
 

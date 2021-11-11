@@ -2,7 +2,15 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fnptr TestDLLExplicitLinkTest { -- }
+var Seed 0x12AB34CD
+
+fn SimpleRandom { -- num }
+	Seed@ num!
+
+	num@ 1103515245 * 12345 + 0xFFFFFFFF % num!
+
+	num@ Seed!
+end
 
 fn Main { ... -- ret }
 	"SystemInit.exe: Hello from dynamically-linked userspace!\n" Printf
@@ -43,9 +51,42 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 
 	handle@ OSClose drop
 
+	// aim to swap out 32/128 = 25% of evicted pages.
+	// before this call, the swappiness starts at 0, which means swap is never
+	// used.
+	32 OSSetSwappiness ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "SystemInit.exe: failed to set swappiness: %s\n" OSAbort
+	end
+
 	query@ OSFileInformation_Size + @ OSPAGESHIFT >>
 	query@ OSFileInformation_Size + @
 	"SystemInit.exe: swapfile is %d bytes (%d pages).\n" Printf
+
+	auto hugeareasize
+	12 1024 * 1024 * hugeareasize!
+
+	auto hugearea
+	hugeareasize@ Malloc hugearea!
+
+	auto ptr
+	hugearea@ ptr!
+
+	SimpleRandom ptr@!
+
+	4 ptr +=
+	4 hugeareasize -=
+
+	while (hugeareasize@)
+		SimpleRandom ptr@!
+
+		4 ptr +=
+		4 hugeareasize -=
+	end
+
+	"wrote a 12MB region with random data even though we don't even have that much RAM!\n" Printf
+	"behold the power of swap\n" Printf
 
 	while (1)
 		1000 OSThreadSleep drop

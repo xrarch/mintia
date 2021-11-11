@@ -41,6 +41,7 @@ const THREADWAITANY 2
 const THREADWAITBLOCKS 4
 
 extern KeDispatchInitialize { name type dobject -- ok }
+extern KeDispatchIsSignaled { dobject -- signaled }
 extern KeDispatchWaitBlockInitialize { thread waitblock -- ok }
 extern KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 extern KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok }

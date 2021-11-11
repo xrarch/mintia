@@ -95,6 +95,21 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 	auto process
 	KeProcessCurrent process!
 
+	if (MmEventLowMemory KeDispatchIsSignaled)
+		if (process@ PsProcess_ThrottleFaultCount + @ 32 >=)
+			// system is in a low memory state and this process has page-
+			// -faulted 32 times, throttle this thread for the same number
+			// of milliseconds multiplied by two (but capped at 300)
+
+			process@ PsProcess_ThrottleFaultCount + @ 2 * 300 min // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+		end
+	end else
+		0 process@ PsProcess_ThrottleFaultCount + !
+	end
+
 	auto ok
 	process@ MmVADListLock ok!
 
@@ -201,6 +216,12 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 		end
 	end
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+	vad@ MmVADRemove
+	vad@ MmVADInsert
+	ipl@ KeIPLLower
+
 	auto section
 	vad@ MmVAD_SectionObject + @ section!
 
@@ -238,8 +259,6 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 	end
-
-	auto ipl
 
 	if (pte@ FAULTACTIONDIRTY ==)
 		// if there's no file object, this is really just an anon page getting
@@ -419,6 +438,7 @@ fn MmSatisfyFileFault { vad sectionobject sectionoffset vaddr processobject -- p
 		1 processobject@ PsProcess_CommittedPageFrames + +=
 		1 processobject@ PsProcess_MappedPageFrames + +=
 		1 processobject@ PsProcess_PageFaultCount + +=
+		1 processobject@ PsProcess_ThrottleFaultCount + +=
 	end
 end
 
@@ -452,4 +472,5 @@ fn MmSatisfyAnonFault { vad sectionobject sectionoffset vaddr processobject -- p
 	1 processobject@ PsProcess_MappedPageFrames + +=
 	1 processobject@ PsProcess_CommittedPageFrames + +=
 	1 processobject@ PsProcess_PageFaultCount + +=
+	1 processobject@ PsProcess_ThrottleFaultCount + +=
 end

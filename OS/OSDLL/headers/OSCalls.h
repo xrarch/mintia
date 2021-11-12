@@ -5,8 +5,8 @@ extern OSConsolePutCharacter { c -- ok }
 extern OSSystemAbort { num1 num2 msg -- ok }
 
 // Ob
-extern OSObOpen { flags access initialobjecthandle path -- handle ok }
-extern OSObQuery { handle query -- ok }
+extern OSObjectOpen { flags access initialobjecthandle path -- handle ok }
+extern OSQuery { handle query -- ok }
 
 extern OSClose { handle -- ok }
 

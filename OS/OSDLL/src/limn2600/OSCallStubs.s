@@ -26,8 +26,8 @@ OSSystemAbort:
 
 	ret
 
-OSObOpen:
-.global OSObOpen
+OSObjectOpen:
+.global OSObjectOpen
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
@@ -41,8 +41,8 @@ OSObOpen:
 
 	ret
 
-OSObQuery:
-.global OSObQuery
+OSQuery:
+.global OSQuery
 	mov  t1, a0
 	mov  t2, a1
 

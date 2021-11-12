@@ -4,8 +4,8 @@
 
 .extern OSConsolePutCharacter
 .extern OSSystemAbort
-.extern OSObOpen
-.extern OSObQuery
+.extern OSObjectOpen
+.extern OSQuery
 .extern OSClose
 .extern OSFileQuery
 .extern OSFileSeek
@@ -28,8 +28,8 @@ OSCallTable:
 	.dl 0                                                ;0
 	.dl OSTOSConsolePutCharacter                         ;1
 	.dl OSTOSSystemAbort                                 ;2
-	.dl OSTOSObOpen                                      ;3
-	.dl OSTOSObQuery                                     ;4
+	.dl OSTOSObjectOpen                                  ;3
+	.dl OSTOSQuery                                       ;4
 	.dl OSTOSClose                                       ;5
 	.dl OSTOSFileQuery                                   ;6
 	.dl OSTOSFileSeek                                    ;7
@@ -78,8 +78,8 @@ OSTOSSystemAbort:
 	addi sp, sp, 8
 	ret
 
-OSTOSObOpen:
-.global OSTOSObOpen
+OSTOSObjectOpen:
+.global OSTOSObjectOpen
 	subi sp, sp, 8
 	mov  long [sp], zero
 	mov  long [sp + 4], lr
@@ -89,7 +89,7 @@ OSTOSObOpen:
 	mov  a2, long [s18 + 12] ;t3
 	mov  a3, long [s18 + 16] ;t4
 
-	jal  OSObOpen
+	jal  OSObjectOpen
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
@@ -98,8 +98,8 @@ OSTOSObOpen:
 	addi sp, sp, 8
 	ret
 
-OSTOSObQuery:
-.global OSTOSObQuery
+OSTOSQuery:
+.global OSTOSQuery
 	subi sp, sp, 8
 	mov  long [sp], zero
 	mov  long [sp + 4], lr
@@ -107,7 +107,7 @@ OSTOSObQuery:
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 
-	jal  OSObQuery
+	jal  OSQuery
 
 	mov  long [s18 + 4], a0 ;t1
 

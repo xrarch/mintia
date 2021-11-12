@@ -12,7 +12,7 @@ externptr IODevicesDirectoryObject
 externptr IODeviceTypeObject
 externptr IOFileTypeObject
 
-extern IOFileCreateObject { flags owninguser permissions fcb -- fileobject ok }
+extern IOFileCreateObject { openedpath flags owninguser permissions fcb -- fileobject ok }
 extern IOFileOpenObject { access object process -- ok }
 extern IOFileCloseObject { access object process -- }
 extern IOFileDeleteObject { object -- }
@@ -21,6 +21,7 @@ struct IOFile
 	4 FileControlBlock
 	4 Offset
 	4 Flags
+	4 OpenedPath
 endstruct
 
 // sort of like a unix vnode

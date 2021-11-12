@@ -14,9 +14,13 @@
 
 #include "<inc>/Object.h"
 
+#include "<inc>/IO.h"
+
 #include "<inc>/Process.h"
 
 #include "../Loader/LoaderGlobal.h"
+
+#include "<ll>/OSDLL/OS.h"
 
 const COMMANDS 15
 
@@ -477,6 +481,25 @@ fn DebugCommandHeapBlock { p -- halt }
 	heapblock@ MmHeapDumpBlockInfo
 end
 
+table DebugProtBits
+	"---"
+	"--x"
+	"-w-"
+	"-wx"
+	"r--"
+	"r-x"
+	"rw-"
+	"rwx"
+	"-c-"
+	"-cx"
+	"-?-"
+	"-?x"
+	"rc-"
+	"rcx"
+	"r?-"
+	"r?x"
+endtable
+
 fn DebugCommandMap { p -- halt }
 	0 halt!
 
@@ -493,16 +516,38 @@ fn DebugCommandMap { p -- halt }
 	auto vad
 	proc@ PsProcess_VADListHead + @ vad!
 
-	"PROT" "SECTION" "SECTOFF" "ENDVA" "STARTVA" "VAD" "%8s %8s %8s %8s %8s %4s\n" Printf
+	"OBJECT" "PROT" "SECTOFF" "ENDVA" "STARTVA" "VAD" "%8s %8s %8s %8s %4s %8s\n" Printf
 
 	while (vad@)
 		vad@ MmVAD_PageProtection + @
-		vad@ MmVAD_SectionObject + @
 		vad@ MmVAD_OffsetInSection + @
 		vad@ MmVAD_EndVA + @
 		vad@ MmVAD_StartVA + @
 		vad@
-		"%08x %08x %08x %08x %08x %04x\n" Printf
+		"%08x %08x %08x %08x " Printf
+
+		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_NONCACHED &)
+			'n' Putc
+		end else
+			'-' Putc
+		end
+
+		[vad@ MmVAD_PageProtection + @ 15 &]DebugProtBits@ "%s " Printf
+
+		if (vad@ MmVAD_SectionObject + @ MmSection_AnonSize + @)
+			vad@ MmVAD_SectionObject + @ "%08x (anon)\n" Printf
+		end else
+			auto fobj
+			vad@ MmVAD_SectionObject + @ MmSection_FileObject + @ fobj!
+
+			if (fobj@)
+				if (fobj@ IOFile_OpenedPath + @)
+					fobj@ IOFile_OpenedPath + @ "%s\n" Printf
+				end else
+					vad@ MmVAD_SectionObject + @ "%08x (file)\n" Printf
+				end
+			end
+		end
 
 		vad@ MmVAD_Next + @ vad!
 	end

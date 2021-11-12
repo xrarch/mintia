@@ -60,6 +60,15 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 		quotablock@ MmQuotaBlockDereference
 
+		auto ok
+		object@ MmSectionPPTLock ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmSectionObjectDelete: failed to lock PPT (%i)\n" KeCrash
+			end
+		end
+
 		// walk the prototype page tables and free all pages, in swap or in
 		// RAM. then free the prototype page tables.
 
@@ -72,7 +81,11 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 		if (ppt@)
 			auto ppte
 
+			auto pfdbe
+
 			auto count
+
+			auto rs
 
 			if (multilevel@)
 				PAGESIZE 2 >> count!
@@ -82,6 +95,7 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 				// iterate top level table
 				while (count@)
 					ppt@@ ppde!
+					ppde@ multilevel!
 
 					if (ppde@)
 						auto j
@@ -94,6 +108,20 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 							if (ppte@ PTE_V &)
 								// free in RAM
+
+								ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+								if (DEBUGCHECKS)
+									if (pfdbe@ MmPageFrameEntryEvictable_References + @)
+										pfdbe@ MmPageFrameEntryEvictable_References + @
+										"MmSectionObjectDelete: 1 tried to delete page with %d references\n" KeCrash
+									end
+								end
+
+								HALCPUInterruptDisable rs!
+								pfdbe@ MmEvictablePageRemove
+								rs@ HALCPUInterruptRestore
+
 								ppte@ PAGESHIFT >> MmPageFree
 							end elseif (ppte@ PTE_INSWAP &)
 								// free in swap
@@ -103,6 +131,8 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 							4 ppde +=
 							1 j -=
 						end
+
+						multilevel@ MmFree
 					end
 
 					4 ppt +=
@@ -116,6 +146,20 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 					if (ppte@ PTE_V &)
 						// free in RAM
+
+						ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+						if (DEBUGCHECKS)
+							if (pfdbe@ MmPageFrameEntryEvictable_References + @)
+								pfdbe@ MmPageFrameEntryEvictable_References + @
+								"MmSectionObjectDelete: 2 tried to delete page with %d references\n" KeCrash
+							end
+						end
+
+						HALCPUInterruptDisable rs!
+						pfdbe@ MmEvictablePageRemove
+						rs@ HALCPUInterruptRestore
+
 						ppte@ PAGESHIFT >> MmPageFree
 					end elseif (ppte@ PTE_INSWAP &)
 						// free in swap
@@ -129,6 +173,8 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 			object@ MmSection_AnonPrototypePageTable + @ MmFree
 		end
+
+		object@ MmSectionPPTUnlock
 	end
 end
 

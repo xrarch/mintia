@@ -22,7 +22,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn IOFileCreateObject { flags owninguser permissions fcb -- fileobject ok }
+fn IOFileCreateObject { openedpath flags owninguser permissions fcb -- fileobject ok }
 	// just shorthand for creating a file object, doesn't open it.
 	// also does NOT ref the FCB -- caller must do that.
 
@@ -35,9 +35,34 @@ fn IOFileCreateObject { flags owninguser permissions fcb -- fileobject ok }
 	IOFileTypeObject@ // type
 	ObObjectCreate ok! fileobject!
 
+	if (ok@)
+		return
+	end
+
 	fcb@   fileobject@ IOFile_FileControlBlock + !
 	0      fileobject@ IOFile_Offset + !
 	flags@ fileobject@ IOFile_Flags + !
+
+	auto path
+	0 path!
+
+	if (openedpath@)
+		auto namelen
+		openedpath@ strlen namelen!
+
+		namelen@ 1 + // bytes
+		'fNam'
+		MmAllocWithTag ok! path!
+
+		if (ok@)
+			// failed to allocate, don't bother
+			0 path!
+		end else
+			path@ openedpath@ strcpy
+		end
+	end
+	
+	path@ fileobject@ IOFile_OpenedPath + !
 end
 
 // these next 3 are object manager routines -- these are not called directly.
@@ -110,6 +135,10 @@ fn (ObTypeDeleteFunction) IOFileDeleteObject { object -- }
 				ok@ "IOFileDelete: failed to delete (%i)\n" KeCrash
 			end
 		end
+	end
+
+	if (object@ IOFile_OpenedPath + @)
+		object@ IOFile_OpenedPath + @ MmFree
 	end
 end
 

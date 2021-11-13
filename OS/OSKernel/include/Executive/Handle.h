@@ -12,8 +12,6 @@ struct ExHandleTableHeader
 	4 Entries
 	4 FreeEntries
 
-	4 RecycleHandle
-
 	4 Table
 endstruct
 

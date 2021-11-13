@@ -70,8 +70,6 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 	INITIALENTRIES handletable@ ExHandleTableHeader_Entries + !
 	INITIALENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
 
-	-1 handletable@ ExHandleTableHeader_RecycleHandle + !
-
 	0 handletable@ ExHandleTableHeader_Table + !
 
 	handletable@ ExHandleTableHeader_SIZEOF +
@@ -185,6 +183,8 @@ fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok
 	handletablesrc@ ExHandleTableHeader_SIZEOF + // src
 	tabsize@ // size
 	memcpy
+
+	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
 
 	auto tab
 	handletablesrc@ ExHandleTableHeader_Table + @ tab!
@@ -327,8 +327,6 @@ fn ExHandleDelete { handle handletable locked -- entryptr entryvalue ok }
 
 	0 entryptr@!
 
-	handle@ handletable@ ExHandleTableHeader_RecycleHandle + !
-
 	1 handletable@ ExHandleTableHeader_FreeEntries + +=
 
 	if (locked@ ~~)
@@ -345,7 +343,7 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		end
 	end
 
-	// lock handle table mutex
+	// lock handle table rwlock
 
 	if (locked@ ~~)
 		handletable@ ExHandleTableLock ok!
@@ -366,56 +364,6 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 	auto tab
 	handletable@ ExHandleTableHeader_Table + @ tab!
-
-	handletable@ ExHandleTableHeader_RecycleHandle + @ handle!
-
-	if (handle@ -1 ~=)
-		// we can reuse the last freed handle instead of searching for one
-
-		if (handle@ INITIALENTRIES <)
-			handletable@ ExHandleTableHeader_SIZEOF +
-			handle@ logsize@ << + entryptr!
-
-			-1 handletable@ ExHandleTableHeader_RecycleHandle + !
-		end else
-			if (DEBUGCHECKS)
-				if (tab@ ~~)
-					"ExHandleCreate: table is null 1\n" KeCrash
-				end
-			end
-
-			tab@ handle@ INITIALENTRIES - logsize@ << + entryptr!
-
-			if (handle@ 1 + entries@ <)
-				// its very common for there to be a free handle here.
-				// if so, save it in RecycleHandle
-
-				if (entryptr@ 1 logsize@ << + @ ~~)
-					handle@ 1 + handletable@ ExHandleTableHeader_RecycleHandle + !
-				end else
-					-1 handletable@ ExHandleTableHeader_RecycleHandle + !
-				end
-			end else
-				-1 handletable@ ExHandleTableHeader_RecycleHandle + !
-			end
-		end
-
-		if (DEBUGCHECKS)
-			if (entryptr@@)
-				"ExHandleCreate: recyclable handle was already used\n" KeCrash
-			end
-		end
-
-		entryvalue@ entryptr@!
-
-		1 handletable@ ExHandleTableHeader_FreeEntries + -=
-
-		if (locked@ ~~)
-			handletable@ ExHandleTableUnlock
-		end
-
-		return
-	end
 
 	0 handle!
 
@@ -590,15 +538,6 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 	while (handle@ entries@ <)
 		if (entryptr@@ ~~)
-			if (handle@ 1 + entries@ <)
-				// its very common for there to be a free handle here.
-				// if so, save it in RecycleHandle
-
-				if (entryptr@ 1 logsize@ << + @ ~~)
-					handle@ 1 + handletable@ ExHandleTableHeader_RecycleHandle + !
-				end
-			end
-
 			entryvalue@ entryptr@!
 
 			1 handletable@ ExHandleTableHeader_FreeEntries + -=

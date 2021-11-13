@@ -10,19 +10,15 @@ endstruct
 
 const MMQUOTAINFINITE -1
 
-extern MmQuotaBlockCreate { vmmax heapmax -- quota ok }
-extern MmQuotaBlockInitialize { vmmax heapmax quota -- ok }
-extern MmQuotaBlockReference { quota -- }
-extern MmQuotaBlockDereference { quota -- }
+extern MmQuotaBlockCreate { vmmax heapmax -- quotablock ok }
+extern MmQuotaBlockInitialize { vmmax heapmax quotablock -- ok }
+extern MmQuotaBlockReference { quotablock -- }
+extern MmQuotaBlockDereference { quotablock -- }
 
-extern MmQuotaCharge { charge -- ok }
-extern MmQuotaChargeProcess { charge process -- ok }
-extern MmQuotaBlockCharge { charge quota -- ok }
-extern MmQuotaUncharge { charge -- }
-extern MmQuotaUnchargeProcess { charge process -- }
-extern MmQuotaBlockUncharge { charge quota -- }
-extern MmQuotaBlockPrint { quota -- }
-extern MmQuotaBlockChargeVM { charge quota -- ok }
-extern MmQuotaBlockUnchargeVM { charge quota -- }
+extern MmQuotaBlockCharge { charge quotablock -- ok }
+extern MmQuotaBlockUncharge { charge quotablock -- }
+extern MmQuotaBlockChargeVM { charge quotablock -- ok }
+extern MmQuotaBlockUnchargeVM { charge quotablock -- }
+extern MmQuotaBlockPrint { quotablock -- }
 
 externptr MmQuotaSystem

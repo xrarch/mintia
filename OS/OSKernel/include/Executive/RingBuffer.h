@@ -7,7 +7,7 @@ struct ExRingBuffer
 	4 WritePointer
 	4 SynchIPL
 	4 ValueSizeLog
-	4 ChargedProcess
+	4 QuotaBlock
 
 	KeEvent_SIZEOF WriterEvent
 	KeEvent_SIZEOF ReaderEvent
@@ -24,13 +24,10 @@ const EXRINGWAIT     1
 const EXRINGWITUALRT 2
 
 extern ExRingBufferWakeReader { priboost ringbuffer -- }
-
 extern ExRingBufferWakeWriter { priboost ringbuffer -- }
 
-extern ExRingBufferCreate { sizelog valuesizelog synchipl chargedprocess -- ringbuffer ok }
-
+extern ExRingBufferCreate { sizelog valuesizelog synchipl quotablock -- ringbuffer ok }
 extern ExRingBufferDelete { ringbuffer -- }
 
 extern ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ringbuffer -- valueptr ok }
-
 extern ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valueptr ok }

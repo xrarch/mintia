@@ -46,26 +46,22 @@ OSCallTable:
 
 OSTOSConsolePutCharacter:
 .global OSTOSConsolePutCharacter
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSConsolePutCharacter
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSSystemAbort:
 .global OSTOSSystemAbort
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
@@ -74,16 +70,14 @@ OSTOSSystemAbort:
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSObjectOpen:
 .global OSTOSObjectOpen
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
@@ -94,16 +88,14 @@ OSTOSObjectOpen:
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSQuery:
 .global OSTOSQuery
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 
@@ -111,32 +103,28 @@ OSTOSQuery:
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSClose:
 .global OSTOSClose
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSClose
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSFileQuery:
 .global OSTOSFileQuery
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 
@@ -144,16 +132,14 @@ OSTOSFileQuery:
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSFileSeek:
 .global OSTOSFileSeek
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
@@ -163,39 +149,35 @@ OSTOSFileSeek:
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSFileRead:
 .global OSTOSFileRead
-	subi sp, sp, 12
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 8
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
 	mov  a3, long [s18 + 16] ;t4
 
 	mov  t0, long [s18 + 20] ;t5
-	mov  long [sp + 8], t0
+	mov  long [sp + 4], t0
 
 	jal  OSFileRead
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 12
+	mov  lr, long [sp]
+	addi sp, sp, 8
 	ret
 
 OSTOSFileWrite:
 .global OSTOSFileWrite
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
@@ -206,84 +188,76 @@ OSTOSFileWrite:
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSSwapFileCreate:
 .global OSTOSSwapFileCreate
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSSwapFileCreate
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSSectionCreate:
 .global OSTOSSectionCreate
-	subi sp, sp, 12
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 8
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
 	mov  a3, long [s18 + 16] ;t4
 
 	mov  t0, long [s18 + 20] ;t5
-	mov  long [sp + 8], t0
+	mov  long [sp + 4], t0
 
 	jal  OSSectionCreate
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 12
+	mov  lr, long [sp]
+	addi sp, sp, 8
 	ret
 
 OSTOSSectionMapView:
 .global OSTOSSectionMapView
-	subi sp, sp, 20
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 16
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
 	mov  a3, long [s18 + 16] ;t4
 
 	mov  t0, long [s18 + 20] ;t5
-	mov  long [sp + 8], t0
+	mov  long [sp + 4], t0
 
 	mov  t0, long [s18 + 24] ;a0
-	mov  long [sp + 12], t0
+	mov  long [sp + 8], t0
 
 	mov  t0, long [s18 + 28] ;a1
-	mov  long [sp + 16], t0
+	mov  long [sp + 12], t0
 
 	jal  OSSectionMapView
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 20
+	mov  lr, long [sp]
+	addi sp, sp, 16
 	ret
 
 OSTOSUnmapView:
 .global OSTOSUnmapView
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
@@ -292,16 +266,14 @@ OSTOSUnmapView:
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSRemapView:
 .global OSTOSRemapView
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
@@ -311,39 +283,35 @@ OSTOSRemapView:
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSSetSwappiness:
 .global OSTOSSetSwappiness
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSSetSwappiness
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 
 OSTOSThreadSleep:
 .global OSTOSThreadSleep
-	subi sp, sp, 8
-	mov  long [sp], zero
-	mov  long [sp + 4], lr
-
+	subi sp, sp, 4
+	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSThreadSleep
 
 	mov  long [s18 + 4], a0 ;t1
 
-	mov  lr, long [sp + 4]
-	addi sp, sp, 8
+	mov  lr, long [sp]
+	addi sp, sp, 4
 	ret
 

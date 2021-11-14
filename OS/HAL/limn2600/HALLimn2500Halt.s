@@ -2,17 +2,12 @@
 
 HALCPUHalt:
 .global HALCPUHalt
-	mov  t0, sp
-
-	; create a dumb stack frame so that we can stacktrace out of here properly
-	subi sp, sp, 8
-	mov  long [sp + 4], lr
-	mov  long [sp], t0
+	subi sp, sp, 4
+	mov  long [sp], lr
 
 	hlt
 
-	addi sp, sp, 8
-
+	addi sp, sp, 4
 	ret
 
 HALLimn2500Reset:

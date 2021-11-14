@@ -9,12 +9,12 @@
 ;sp+16 - foreground
 HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 .global HALCPUFastDrawGlyphBackwards
-	mov  t5, long [sp + 8]
+	mov  t5, long [sp + 4]
 
 .yloop:
 	subi a3, a3, 1
 
-	mov  t1, long [sp + 12]
+	mov  t1, long [sp + 8]
 
 	mov  t2, byte [a0]
 
@@ -27,7 +27,7 @@ HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 	andi t3, t2, 1
 	beq  t3, .nopix
 
-	mov  t4, long [sp + 16]
+	mov  t4, long [sp + 12]
 
 .nopix:
 	mov  int [a2], t4
@@ -50,12 +50,12 @@ HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 ;sp+16 - foreground
 HALCPUFastDrawGlyph: ;highest bit is leftmost
 .global HALCPUFastDrawGlyph
-	mov  t5, long [sp + 8]
+	mov  t5, long [sp + 4]
 
 .yloop:
 	subi a3, a3, 1
 
-	mov  t1, long [sp + 12]
+	mov  t1, long [sp + 8]
 
 	mov  t2, byte [a0]
 
@@ -68,7 +68,7 @@ HALCPUFastDrawGlyph: ;highest bit is leftmost
 	andi t3, t3, 1
 	beq  t3, .nopix
 
-	mov  t4, long [sp + 16]
+	mov  t4, long [sp + 12]
 
 .nopix:
 	mov  int [a2], t4

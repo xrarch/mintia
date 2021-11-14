@@ -96,7 +96,7 @@ OSFileRead:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	mov  t5, long [sp + 8]
+	mov  t5, long [sp + 4]
 
 	li   t0, 8
 	sys  0
@@ -138,7 +138,7 @@ OSSectionCreate:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	mov  t5, long [sp + 8]
+	mov  t5, long [sp + 4]
 
 	li   t0, 11
 	sys  0
@@ -154,9 +154,9 @@ OSSectionMapView:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	mov  t5, long [sp + 8]
-	mov  a0, long [sp + 12]
-	mov  a1, long [sp + 16]
+	mov  t5, long [sp + 4]
+	mov  a0, long [sp + 8]
+	mov  a1, long [sp + 12]
 
 	li   t0, 12
 	sys  0

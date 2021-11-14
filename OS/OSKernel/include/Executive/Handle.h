@@ -1,16 +1,16 @@
 fnptr ExHandleEnumFunction { entryptr handle handletable -- ok }
 
-const INITIALENTRIES 16
-
 const EXTENDBYENTRIES 16
 
 struct ExHandleTableHeader
 	ExRwLock_SIZEOF RwLock
 	4 EntrySizeLog
-	4 ChargedProcess // XXX remember to replace this with direct quotablock pointer when handletables are reimplemented
+	4 ChargedProcess
 
 	4 Entries
 	4 FreeEntries
+
+	4 FreeListHead
 
 	4 Table
 endstruct

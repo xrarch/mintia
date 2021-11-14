@@ -20,19 +20,11 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 	auto entrysize
 	4 entrysizelog@ << entrysize!
 
-	auto tabsize
-	ExHandleTableHeader_SIZEOF tabsize!
-
-	auto tab0size
-	INITIALENTRIES entrysize@ * tab0size!
-
-	tab0size@ tabsize +=
-
 	// chargedprocess instead of keeping track of the quotablock itself is
 	// fine, because the handle table will never outlive its charged process.
 
 	if (chargedprocess@)
-		tabsize@ MmChargeBytesGet // charge
+		ExHandleTableHeader_SIZEOF MmChargeBytesGet // charge
 		chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
 		MmQuotaBlockCharge ok!
 
@@ -41,13 +33,13 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 		end
 	end
 
-	tabsize@ 'HnTb' MmAllocWithTag ok! handletable!
+	ExHandleTableHeader_SIZEOF 'HnTb' MmAllocWithTag ok! handletable!
 
 	if (ok@)
 		// allocation failed
 
 		if (chargedprocess@)
-			tabsize@ MmChargeBytesGet // charge
+			ExHandleTableHeader_SIZEOF MmChargeBytesGet // charge
 			chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
 			MmQuotaBlockUncharge
 		end
@@ -67,15 +59,12 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 
 	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
 
-	INITIALENTRIES handletable@ ExHandleTableHeader_Entries + !
-	INITIALENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
+	0 handletable@ ExHandleTableHeader_Entries + !
+	0 handletable@ ExHandleTableHeader_FreeEntries + !
+
+	0 handletable@ ExHandleTableHeader_FreeListHead + !
 
 	0 handletable@ ExHandleTableHeader_Table + !
-
-	handletable@ ExHandleTableHeader_SIZEOF +
-	tab0size@
-	0
-	memset
 end
 
 fn ExHandleTableDelete { func handletable -- }
@@ -174,23 +163,13 @@ fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok
 	entries@ handletable@ ExHandleTableHeader_Entries + !
 	handletablesrc@ ExHandleTableHeader_FreeEntries + @ handletable@ ExHandleTableHeader_FreeEntries + !
 
-	// copy initial table
-
-	auto tabsize
-	INITIALENTRIES entrysize@ * tabsize!
-
-	handletable@ ExHandleTableHeader_SIZEOF + // dest
-	handletablesrc@ ExHandleTableHeader_SIZEOF + // src
-	tabsize@ // size
-	memcpy
-
 	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
 
 	auto tab
 	handletablesrc@ ExHandleTableHeader_Table + @ tab!
 
 	if (tab@)
-		// we need to allocate and copy the extended table
+		// we need to allocate and copy the table
 
 		if (chargedprocess@)
 			tab@ MmBlockChargeGet // charge
@@ -210,18 +189,19 @@ fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok
 			end
 		end
 
-		INITIALENTRIES entries -=
-
 		if (DEBUGCHECKS)
 			if (entries@ 0 s<=)
 				"ExHandleTableDuplicate: bad number of extended entries (0x%08x)\n" KeCrash
 			end
 		end
 
+		auto tabsize
 		entries@ entrysize@ * tabsize!
 
 		auto newtab
-		tabsize@ 'HnTd' MmAllocWithTag ok! newtab!
+		tabsize@ // bytes
+		'HnTd' // tag
+		MmAllocWithTag ok! newtab!
 
 		if (ok@)
 			if (chargedprocess@)
@@ -245,6 +225,8 @@ fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok
 		memcpy
 
 		newtab@ handletable@ ExHandleTableHeader_Table + !		
+	end else
+		0 handletable@ ExHandleTableHeader_Table + !
 	end
 
 	auto i
@@ -419,7 +401,7 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 			EXTENDBYENTRIES entries +=
 
-			INITIALENTRIES handle! // start search at extended table
+			0 handle!
 		end else
 			// grow
 
@@ -427,7 +409,7 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 			EXTENDBYENTRIES entries +=
 
-			entries@ INITIALENTRIES - logsize@ << tabsize!
+			entries@ logsize@ << tabsize!
 
 			auto nquota
 			tabsize@ MmChargeBytesGet tab@ MmBlockChargeGet - nquota!
@@ -481,10 +463,10 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 			newtab@
 			tab@
-			entries@ INITIALENTRIES - EXTENDBYENTRIES - logsize@ <<
+			entries@ EXTENDBYENTRIES - logsize@ <<
 			memcpy
 
-			newtab@ entries@ INITIALENTRIES - EXTENDBYENTRIES - logsize@ << +
+			newtab@ entries@ EXTENDBYENTRIES - logsize@ << +
 			EXTENDBYENTRIES logsize@ <<
 			0
 			memset
@@ -504,37 +486,13 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 	auto entrysize
 	1 logsize@ << entrysize!
 
-	if (handle@ INITIALENTRIES <)
-		// search initial table first
-
-		handletable@ ExHandleTableHeader_SIZEOF +
-		handle@ logsize@ << + entryptr!
-
-		while (handle@ INITIALENTRIES <)
-			if (entryptr@@ ~~)
-				entryvalue@ entryptr@!
-
-				1 handletable@ ExHandleTableHeader_FreeEntries + -=
-
-				if (locked@ ~~)
-					handletable@ ExHandleTableUnlock
-				end
-
-				return
-			end
-
-			entrysize@ entryptr +=
-			1 handle +=
-		end
-	end
-
 	if (DEBUGCHECKS)
 		if (tab@ ~~)
 			"ExHandleCreate: table is null 2\n" KeCrash
 		end
 	end
 
-	handle@ INITIALENTRIES - logsize@ << tab@ + entryptr!
+	handle@ logsize@ << tab@ + entryptr!
 
 	while (handle@ entries@ <)
 		if (entryptr@@ ~~)
@@ -583,23 +541,16 @@ fn ExHandleLookup { handle handletable locked -- entryptr ok }
 		return
 	end
 
-	if (handle@ INITIALENTRIES <)
-		handletable@ ExHandleTableHeader_SIZEOF +
-		handle@ logsize@ << + entryptr!
-	end else
-		auto tab
-		handletable@ ExHandleTableHeader_Table + @ tab!
+	auto tab
+	handletable@ ExHandleTableHeader_Table + @ tab!
 
-		if (DEBUGCHECKS)
-			if (tab@ ~~)
-				"ExHandleLookup: table is null\n" KeCrash
-			end
+	if (DEBUGCHECKS)
+		if (tab@ ~~)
+			"ExHandleLookup: table is null\n" KeCrash
 		end
-
-		INITIALENTRIES handle -=
-
-		tab@ handle@ logsize@ << + entryptr!
 	end
+
+	tab@ handle@ logsize@ << + entryptr!
 
 	if (entryptr@@ ~~)
 		STATUS_INVALID_HANDLE ok!

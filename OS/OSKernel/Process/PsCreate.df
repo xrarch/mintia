@@ -20,11 +20,12 @@
 
 #include "<inc>/HALDebug.h"
 
-fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permissions name -- processhandle ok }
+fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess permissions name -- processobject ok }
 	auto initial
-	0 initial!
 
-	if (parentprocess@ ~~)
+	if (parentprocess@)
+		0 initial!
+	end else
 		if (KeProcessCurrent KeProcessIdleProcess ~=)
 			"PsProcessCreate: no parent process specified but not the idle process\n" KeCrash
 		end
@@ -34,8 +35,6 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 		1 initial!
 	end
 
-	auto process
-
 	name@ // name
 	0 // flags
 	permissions@ // permissions
@@ -43,19 +42,19 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 	0 // quotabias
 	PsProcess_SIZEOF // bodysize
 	PsProcessObjectType@ // type
-	ObObjectCreate ok! process!
+	ObObjectCreate ok! processobject!
 
 	if (ok@)
 		return
 	end
 
-	owninguser@ process@ PsProcess_OwningUser + !
+	owninguser@ processobject@ PsProcess_OwningUser + !
 
 	auto quotablock
 	parentprocess@ PsProcess_QuotaBlock + @ quotablock!
 
 	quotablock@ MmQuotaBlockReference
-	quotablock@ process@ PsProcess_QuotaBlock + !
+	quotablock@ processobject@ PsProcess_QuotaBlock + !
 
 	auto handletable
 
@@ -63,25 +62,25 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 		if (inherithandles@)
 			pointerof ObHandleInheritFunction // func
 			parentprocess@ PsProcess_HandleTable + @ // handletablesrc
-			process@ // chargedprocess
+			processobject@ // chargedprocess
 			ExHandleTableDuplicate ok! handletable!
 
 			if (ok@)
 				quotablock@ MmQuotaBlockDereference
 
-				process@ ObObjectDeallocate
+				processobject@ ObObjectDeallocate
 
 				return
 			end
 		end else
-			process@ // chargedprocess
+			processobject@ // chargedprocess
 			OBHANDLEENTRYSIZELOG // entrysizelog
 			ExHandleTableCreate ok! handletable!
 
 			if (ok@)
 				quotablock@ MmQuotaBlockDereference
 
-				process@ ObObjectDeallocate
+				processobject@ ObObjectDeallocate
 
 				return
 			end
@@ -91,7 +90,7 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 		parentprocess@ PsProcess_HandleTable + @ handletable!
 	end
 
-	handletable@ process@ PsProcess_HandleTable + !
+	handletable@ processobject@ PsProcess_HandleTable + !
 
 	auto pid
 
@@ -100,7 +99,7 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 	// any operations that take a process's PID
 	// until this process is fully initialized.
 
-	process@ // entryvalue
+	processobject@ // entryvalue
 	PsProcessTable@ // handletable
 	0 // locked
 	ExHandleCreate ok! drop pid!
@@ -112,12 +111,12 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 			0 handletable@ ExHandleTableDelete
 		end
 
-		process@ ObObjectDeallocate
+		processobject@ ObObjectDeallocate
 
 		return
 	end
 
-	pid@ process@ PsProcess_PID + !
+	pid@ processobject@ PsProcess_PID + !
 
 	// put it on the global process list
 
@@ -129,17 +128,17 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 	PsProcessListHead@ h!
 
 	if (h@)
-		process@ h@ PsProcess_GlobalListPrev + !
-		h@ process@ PsProcess_GlobalListNext + !
+		processobject@ h@ PsProcess_GlobalListPrev + !
+		h@ processobject@ PsProcess_GlobalListNext + !
 	end
 
-	process@ PsProcessListHead!
+	processobject@ PsProcessListHead!
 
 	rs@ HALCPUInterruptRestore
 
 	name@ // name
 	pid@ // asid
-	process@ // process
+	processobject@ // process
 	KeProcessInitialize ok!
 
 	if (DEBUGCHECKS)
@@ -150,69 +149,65 @@ fn PsProcessCreate { sectionobject inherithandles owninguser parentprocess permi
 
 	if (initial@ ~~)
 		sectionobject@ // sectionobject
-		process@ // process
+		processobject@ // process
 		MmProcessInitialize ok!
 
 		if (ok@)
 			// just dereference and let PsProcessObjectDelete take care of the cleanup
 
-			process@ ObObjectDereferenceByPointer drop
+			processobject@ ObObjectDereferenceByPointer drop
 
 			return
 		end
 	end
+end
+
+fn PsProcessCreate { sectionhandle inherithandles permissions name -- processhandle ok }
+	auto sectionobject
+	auto access
+
+	MmSectionObjectType@ // type
+	sectionhandle@ // handle
+	ObObjectReferenceByHandle ok! sectionobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_READ ACCESS_WRITE | SeCheckAccess ok!
+
+	if (ok@)
+		sectionobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto processobject
+
+	auto curproc
+	KeProcessCurrent curproc!
+
+	sectionobject@ // sectionobject
+	inherithandles@ // inherithandles
+	curproc@ PsProcess_OwningUser + @ // owninguser
+	curproc@ // parentprocess
+	permissions@ // permissions
+	name@ // name
+	PsProcessCreateObject ok! processobject!
 
 	1 // nocheck
 	ACCESS_ALL // permissions
-	process@ // process
+	processobject@ // object
 	ObObjectOpen ok! processhandle!
 
 	if (ok@)
-		// just dereference and let PsProcessObjectDelete take care of the cleanup
-
-		process@ ObObjectDereferenceByPointer drop
+		processobject@ ObObjectDereferenceByPointer drop
 
 		return
 	end
 end
 
-fn PsThreadCreate { context1 context2 startfunc permissions name processhandle processptr -- threadhandle ok }
-	if (processhandle@ OSNONE ~=)
-		if (processptr@)
-			STATUS_INVALID_ARGUMENT ok!
-
-			return
-		end
-
-		// use threadhandle to contain access bits here
-
-		PsProcessObjectType@ // type
-		processhandle@ // handle
-		ObObjectReferenceByHandle ok! processptr! threadhandle!
-
-		if (ok@)
-			return
-		end
-
-		threadhandle@ ACCESS_WRITE SeCheckAccess ok!
-
-		if (ok@)
-			processptr@ ObObjectDereferenceByPointer drop
-
-			return
-		end
-	end else
-		if (processptr@ ~~)
-			STATUS_INVALID_ARGUMENT ok!
-
-			return
-		end
-
-		processptr@ ObObjectReferenceByPointer drop
-	end
-
-	auto threadptr
-
+fn PsThreadCreateObject { context1 context2 startfunc permissions name processobject -- threadobject ok }
 	name@ // name
 	0 // flags
 	permissions@ // permissions
@@ -220,11 +215,9 @@ fn PsThreadCreate { context1 context2 startfunc permissions name processhandle p
 	KETHREADSTACKSIZE // quotabias
 	PsThread_SIZEOF // bodysize
 	PsThreadObjectType@ // type
-	ObObjectCreate ok! threadptr!
+	ObObjectCreate ok! threadobject!
 
 	if (ok@)
-		processptr@ ObObjectDereferenceByPointer drop
-
 		return
 	end
 
@@ -232,9 +225,7 @@ fn PsThreadCreate { context1 context2 startfunc permissions name processhandle p
 	MmKernelStackAlloc ok! kstack!
 
 	if (ok@)
-		processptr@ ObObjectDereferenceByPointer drop
-
-		threadptr@ ObObjectDeallocate
+		threadobject@ ObObjectDeallocate
 
 		return
 	end
@@ -242,64 +233,84 @@ fn PsThreadCreate { context1 context2 startfunc permissions name processhandle p
 	context1@ // context1
 	context2@ // context2
 	startfunc@ // startfunc
-	processptr@ // process
+	processobject@ // process
 	kstack@ // kstack
 	name@ // name
-	threadptr@ // thread
+	threadobject@ // thread
 	KeThreadInitialize ok!
 
 	if (DEBUGCHECKS)
 		if (ok@)
-			"PsThreadCreate: failed to initialize thread\n" KeCrash
+			"PsThreadCreateObject: failed to initialize thread\n" KeCrash
 		end
 	end
 
 	if (startfunc@ pointerof PsThreadUserEntry ==)
-		threadptr@ MmThreadInitialize ok!
+		threadobject@ MmThreadInitialize ok!
 
 		if (ok@)
-			processptr@ ObObjectDereferenceByPointer drop
-
 			kstack@ MmKernelStackFree
 
-			threadptr@ KeThreadUninitialize
+			threadobject@ KeThreadUninitialize
 
-			threadptr@ ObObjectDeallocate
+			threadobject@ ObObjectDeallocate
 
 			return
 		end
-	end
-
-	1 // nocheck
-	ACCESS_ALL // permissions
-	threadptr@ // thread
-	ObObjectOpen ok! threadhandle!
-
-	if (ok@)
-		processptr@ ObObjectDereferenceByPointer drop
-
-		threadptr@ MmThreadUninitialize threadhandle!
-
-		if (DEBUGCHECKS)
-			if (threadhandle@)
-				"PsThreadCreate: failed to uninitialize thread\n" KeCrash
-			end
-		end
-
-		// just dereference and let PsThreadObjectDelete take care of the cleanup
-
-		threadptr@ ObObjectDereferenceByPointer drop
-
-		return
 	end
 
 	// bias reference count: this gets decremented when the thread is reaped.
 	// note that the associated process object is also left referenced.
 	// the process is dereferenced when the thread object is deleted.
 
-	threadptr@ ObObjectReferenceByPointer drop
+	processobject@ ObObjectReferenceByPointer drop
+	threadobject@ ObObjectReferenceByPointer drop
 
-	QUEUEBACK threadptr@ KeThreadReady
+	// TODO be able to create suspended
+
+	QUEUEBACK threadobject@ KeThreadReady
+end
+
+fn PsThreadCreate { context1 context2 startfunc permissions name processhandle -- threadhandle ok }
+	auto processobject
+	auto access
+
+	PsProcessObjectType@ // type
+	processhandle@ // handle
+	ObObjectReferenceByHandle ok! processobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto threadobject
+
+	context1@ // context1
+	context2@ // context2
+	startfunc@ // startfunc
+	permissions@ // permissions
+	name@ // name
+	processobject@ // processobject
+	PsThreadCreateObject ok! threadobject!
+
+	1 // nocheck
+	ACCESS_ALL // permissions
+	threadobject@ // object
+	ObObjectOpen ok! threadhandle!
+
+	if (ok@)
+		threadobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
 end
 
 fn PsProcessGetOwner { process -- owninguser }

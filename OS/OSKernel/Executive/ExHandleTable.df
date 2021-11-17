@@ -33,7 +33,9 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 		end
 	end
 
-	ExHandleTableHeader_SIZEOF 'HnTb' MmAllocWithTag ok! handletable!
+	ExHandleTableHeader_SIZEOF // bytes
+	'HnTb' // tag
+	MmAllocWithTag ok! handletable!
 
 	if (ok@)
 		// allocation failed
@@ -62,7 +64,7 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 	0 handletable@ ExHandleTableHeader_Entries + !
 	0 handletable@ ExHandleTableHeader_FreeEntries + !
 
-	0 handletable@ ExHandleTableHeader_FreeListHead + !
+	-1 handletable@ ExHandleTableHeader_FreeListHead + !
 
 	0 handletable@ ExHandleTableHeader_Table + !
 end
@@ -162,6 +164,7 @@ fn ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok
 
 	entries@ handletable@ ExHandleTableHeader_Entries + !
 	handletablesrc@ ExHandleTableHeader_FreeEntries + @ handletable@ ExHandleTableHeader_FreeEntries + !
+	handletablesrc@ ExHandleTableHeader_FreeListHead + @ handletable@ ExHandleTableHeader_FreeListHead + !
 
 	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
 
@@ -307,7 +310,8 @@ fn ExHandleDelete { handle handletable locked -- entryptr entryvalue ok }
 
 	entryptr@@ entryvalue!
 
-	0 entryptr@!
+	handletable@ ExHandleTableHeader_FreeListHead + @ entryptr@!
+	handle@ handletable@ ExHandleTableHeader_FreeListHead + !
 
 	1 handletable@ ExHandleTableHeader_FreeEntries + +=
 
@@ -325,9 +329,8 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		end
 	end
 
-	// lock handle table rwlock
-
 	if (locked@ ~~)
+		// lock handle table rwlock exclusively
 		handletable@ ExHandleTableLock ok!
 
 		if (ok@)
@@ -335,11 +338,30 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		end
 	end
 
-	auto chargedprocess
-	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
-
 	auto logsize
 	handletable@ ExHandleTableHeader_EntrySizeLog + @ 2 + logsize!
+
+	handletable@ ExHandleTableHeader_FreeListHead + @ handle!
+
+	if (handle@ -1 ~=)
+		// yoink free entry
+
+		// FreeListHead is a handle number
+		handletable@ ExHandleTableHeader_Table + @ handle@ logsize@ << + entryptr!
+
+		entryptr@@ handletable@ ExHandleTableHeader_FreeListHead + !
+
+		entryvalue@ entryptr@!
+
+		if (locked@ ~~)
+			handletable@ ExHandleTableUnlock
+		end
+
+		return
+	end
+
+	auto chargedprocess
+	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
 
 	auto entries
 	handletable@ ExHandleTableHeader_Entries + @ entries!
@@ -347,19 +369,75 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 	auto tab
 	handletable@ ExHandleTableHeader_Table + @ tab!
 
-	0 handle!
-
 	auto tabsize
-	EXTENDBYENTRIES logsize@ << tabsize!
 
-	if (handletable@ ExHandleTableHeader_FreeEntries + @ ~~)
-		// create or grow the extended table
+	// no free entry, create or grow the table
 
-		if (tab@ ~~)
-			// create
+	if (tab@ ~~)
+		// create
+
+		0 handle!
+
+		EXTENDBYENTRIES logsize@ << tabsize!
+
+		if (chargedprocess@)
+			tabsize@ MmChargeBytesGet // charge
+			chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
+			MmQuotaBlockCharge ok!
+
+			if (ok@)
+				// insufficient quota
+
+				if (locked@ ~~)
+					handletable@ ExHandleTableUnlock
+				end
+
+				return
+			end
+		end
+
+		tabsize@ 'HnTd' MmAllocWithTag ok! tab!
+
+		if (ok@)
+			// allocation failed
 
 			if (chargedprocess@)
 				tabsize@ MmChargeBytesGet // charge
+				chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
+				MmQuotaBlockUncharge
+			end
+
+			if (locked@ ~~)
+				handletable@ ExHandleTableUnlock
+			end
+
+			return
+		end
+
+		tab@ handletable@ ExHandleTableHeader_Table + !
+
+		EXTENDBYENTRIES entries!
+	end else
+		// grow
+
+		entries@ handle!
+
+		EXTENDBYENTRIES entries +=
+
+		entries@ logsize@ << tabsize!
+
+		auto nquota
+		tabsize@ MmChargeBytesGet tab@ MmBlockChargeGet - nquota!
+
+		if (DEBUGCHECKS)
+			if (nquota@ 0 s<)
+				"ExHandleCreate: nquota < 0\n" KeCrash
+			end
+		end
+
+		if (chargedprocess@)
+			if (nquota@)
+				nquota@ // charge
 				chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
 				MmQuotaBlockCharge ok!
 
@@ -373,132 +451,23 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 					return
 				end
 			end
+		end
 
-			tabsize@ 'HnTd' MmAllocWithTag ok! tab!
+		auto newtab
+		tabsize@ 'HnTd' MmAllocWithTag ok! newtab!
 
-			if (ok@)
-				// allocation failed
-
-				if (chargedprocess@)
-					tabsize@ MmChargeBytesGet // charge
-					chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
-					MmQuotaBlockUncharge
-				end
-
-				if (locked@ ~~)
-					handletable@ ExHandleTableUnlock
-				end
-
-				return
-			end
-
-			tab@ handletable@ ExHandleTableHeader_Table + !
-
-			tab@ // ptr
-			tabsize@ // size
-			0 // word
-			memset
-
-			EXTENDBYENTRIES entries +=
-
-			0 handle!
-		end else
-			// grow
-
-			entries@ handle! // start search at new entries
-
-			EXTENDBYENTRIES entries +=
-
-			entries@ logsize@ << tabsize!
-
-			auto nquota
-			tabsize@ MmChargeBytesGet tab@ MmBlockChargeGet - nquota!
-
-			if (DEBUGCHECKS)
-				if (nquota@ 0 s<)
-					"ExHandleCreate: nquota < 0\n" KeCrash
-				end
-			end
+		if (ok@)
+			// allocation failed
 
 			if (chargedprocess@)
+				// undo the shenanigans we just did with the quota charge
+
 				if (nquota@)
 					nquota@ // charge
 					chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
-					MmQuotaBlockCharge ok!
-
-					if (ok@)
-						// insufficient quota
-
-						if (locked@ ~~)
-							handletable@ ExHandleTableUnlock
-						end
-
-						return
-					end
+					MmQuotaBlockUncharge
 				end
 			end
-
-			auto newtab
-			tabsize@ 'HnTd' MmAllocWithTag ok! newtab!
-
-			if (ok@)
-				// allocation failed
-
-				if (chargedprocess@)
-					// undo the shenanigans we just did with the quota charge
-
-					if (nquota@)
-						nquota@ // charge
-						chargedprocess@ PsProcess_QuotaBlock + @ // quotablock
-						MmQuotaBlockUncharge
-					end
-				end
-
-				if (locked@ ~~)
-					handletable@ ExHandleTableUnlock
-				end
-
-				return
-			end
-
-			newtab@
-			tab@
-			entries@ EXTENDBYENTRIES - logsize@ <<
-			memcpy
-
-			newtab@ entries@ EXTENDBYENTRIES - logsize@ << +
-			EXTENDBYENTRIES logsize@ <<
-			0
-			memset
-
-			tab@ MmFree
-
-			newtab@ tab!
-
-			tab@ handletable@ ExHandleTableHeader_Table + !
-		end
-
-		EXTENDBYENTRIES handletable@ ExHandleTableHeader_FreeEntries + !
-
-		entries@ handletable@ ExHandleTableHeader_Entries + !
-	end
-
-	auto entrysize
-	1 logsize@ << entrysize!
-
-	if (DEBUGCHECKS)
-		if (tab@ ~~)
-			"ExHandleCreate: table is null 2\n" KeCrash
-		end
-	end
-
-	handle@ logsize@ << tab@ + entryptr!
-
-	while (handle@ entries@ <)
-		if (entryptr@@ ~~)
-			entryvalue@ entryptr@!
-
-			1 handletable@ ExHandleTableHeader_FreeEntries + -=
 
 			if (locked@ ~~)
 				handletable@ ExHandleTableUnlock
@@ -507,11 +476,53 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			return
 		end
 
-		entrysize@ entryptr +=
-		1 handle +=
+		newtab@
+		tab@
+		entries@ EXTENDBYENTRIES - logsize@ <<
+		memcpy
+
+		tab@ MmFree
+
+		newtab@ tab!
+
+		tab@ handletable@ ExHandleTableHeader_Table + !
 	end
 
-	"ExHandleCreate: there should have been free entries\n" KeCrash
+	EXTENDBYENTRIES 1 - handletable@ ExHandleTableHeader_FreeEntries + !
+
+	entries@ handletable@ ExHandleTableHeader_Entries + !
+
+	auto entrysize
+	1 logsize@ << entrysize!
+
+	handle@ 1 + logsize@ << tab@ + entryptr!
+
+	auto last
+	-1 last!
+
+	auto ihandle
+	handle@ 1 + ihandle!
+
+	// initialize the free list
+
+	while (ihandle@ entries@ <)
+		last@ entryptr@!
+
+		ihandle@ last!
+		entrysize@ entryptr +=
+		1 ihandle +=
+	end
+
+	last@ handletable@ ExHandleTableHeader_FreeListHead + !
+
+	// return first free handle
+
+	handle@ logsize@ << tab@ + entryptr!
+	entryvalue@ entryptr@!
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableUnlock
+	end
 end
 
 fn ExHandleLookup { handle handletable locked -- entryptr ok }

@@ -148,10 +148,6 @@ fn ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ringbuff
 	auto wp
 	ringbuffer@ ExRingBuffer_WritePointer + @ wp!
 
-	if (wp@ 0xFFFFFFFF ==)
-		"ExRingBufferWriteValue: rp overflow\n" KeCrash
-	end
-
 	if (wp@ rp@ - size@ >=)
 		if (waitonfull@)
 			auto alertable
@@ -187,7 +183,7 @@ fn ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ringbuff
 			end else
 				oldipl@ KeIPLLower
 
-				STATUS_IO_NOT_AVAILABLE ok!
+				STATUS_RING_FULL ok!
 
 				return
 			end
@@ -204,7 +200,29 @@ fn ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ringbuff
 		value@ valueptr@ !
 	end
 
-	wp@ 1 + ringbuffer@ ExRingBuffer_WritePointer + !
+	if (wp@ 0xFFFFFFFF ==)
+		// overflow! here's how we cope instead of seething:
+		// copy the region of the ringbuffer between rp and wp to the
+		// physical bottom of the ringbuffer.
+		// then set wp to wp - rp and set rp to 0.
+
+		// depending on how big the ringbuffer is, this could be pretty slow.
+		// but this will only happen once every 4 billion insertions, and only
+		// if the read pointer never ever catches up during the time, so it is
+		// considered a small price to pay.
+
+		wp@ rp@ - wp!
+
+		bufdata@ // dest
+		bufdata@ rp@ offmask@ & valuesizelog@ << + // src
+		wp@ valuesizelog@ << // size
+		memcpy
+
+		wp@ ringbuffer@ ExRingBuffer_WritePointer + !
+		0 ringbuffer@ ExRingBuffer_ReadPointer + !
+	end else
+		wp@ 1 + ringbuffer@ ExRingBuffer_WritePointer + !
+	end
 
 	oldipl@ KeIPLLower
 
@@ -240,10 +258,6 @@ fn ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valu
 
 	auto rp
 	ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
-
-	if (rp@ 0xFFFFFFFF ==)
-		"ExRingBufferReadValue: rp overflow\n" KeCrash
-	end
 
 	auto wp
 	ringbuffer@ ExRingBuffer_WritePointer + @ wp!
@@ -282,7 +296,7 @@ fn ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valu
 		end else
 			oldipl@ KeIPLLower
 
-			STATUS_IO_NOT_AVAILABLE ok!
+			STATUS_RING_EMPTY ok!
 
 			return
 		end
@@ -296,6 +310,12 @@ fn ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valu
 		valueptr@ gi value!
 	end else
 		valueptr@ @ value!
+	end
+
+	if (DEBUGCHECKS)
+		if (rp@ 0xFFFFFFFF ==)
+			"ExRingBufferReadValue: rp overflow\n" KeCrash
+		end
 	end
 
 	rp@ 1 + ringbuffer@ ExRingBuffer_ReadPointer + !

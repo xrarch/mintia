@@ -41,5 +41,7 @@ const STATUS_EXEC_NOT_FOR_ARCH     -39
 const STATUS_NO_SYMBOL             -40
 const STATUS_SWAP_TOO_SMALL        -41
 const STATUS_NO_SWAP               -42
+const STATUS_RING_FULL             -43
+const STATUS_RING_EMPTY            -44
 
 extern OSStatusGetName { status -- name }

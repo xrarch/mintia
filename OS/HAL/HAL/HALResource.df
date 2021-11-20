@@ -9,6 +9,7 @@ var HALResourceKeepHeaders 0
 public HALResourceKeepHeaders
 
 var HALResourceListHead 0
+public HALResourceListHead
 
 fn HALResourceInit { ldrinfo -- ok }
 	ldrinfo@ LoaderInfo_ResourceListHead + @ HALResourceListHead!
@@ -38,89 +39,4 @@ fn HALResourceData { rsrc -- data }
 	rsrc@ BootResource_Data + @ data!
 end
 
-// free up memory by eliminating the bitmap allocations for any resources marked jettisonable
-// this is done before the kernel sets up its memory allocator using the bootloader's initial bitmap
-// so we need the support routine HALJettisonClearBits to accomplish this
-
-fn HALResourceJettison { ldrinfo -- }
-	auto bmp
-	ldrinfo@ LoaderInfo_InitMemBmp + @ bmp!
-
-	auto rsrc
-	HALResourceListHead@ rsrc!
-
-	auto sz
-
-	auto start
-
-	while (rsrc@)
-		if (rsrc@ BootResource_Jettison + @)
-			rsrc@ BootResource_Size + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
-			rsrc@ BootResource_Data + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
-
-			sz@ // runlength
-			start@ // index
-			bmp@ // bmp
-			HALJettisonClearBits
-
-			0 rsrc@ BootResource_Data + ! // mark jettisoned
-		end
-
-		rsrc@ BootResource_Next + @ rsrc!
-	end
-
-	if (HALResourceKeepHeaders@ ~~)
-		auto dll
-		ldrinfo@ LoaderInfo_DLLListHead + @ dll!
-
-		while (dll@)
-			dll@ DLL_LOFF + LOFFLoaded_HeaderSize + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
-			dll@ DLL_LOFF + LOFFLoaded_Base + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
-
-			sz@ // runlength
-			start@ // index
-			bmp@ // bmp
-			HALJettisonClearBits
-
-			dll@ DLL_Next + @ dll!
-		end
-	end
-end
-
-fn HALJettisonClearBits { runlength index bmp -- }
-	// taken from ExBitmapClearBits
-
-	if (runlength@ 0 ==)
-		return
-	end
-
-	auto bitoffset
-	index@ 31 & bitoffset!
-
-	auto curlongptr
-	bmp@ index@ 5 >> 2 << + curlongptr!
-
-	if (bitoffset@ runlength@ + 32 <=)
-		// you are expected to understand this
-
-		curlongptr@@ 0xFFFFFFFF 32 runlength@ - >> bitoffset@ << ~ & curlongptr@! 
-
-		return
-	end
-
-	curlongptr@@ 0xFFFFFFFF bitoffset@ << ~ & curlongptr@!
-
-	4 curlongptr +=
-	32 bitoffset@ - runlength -=
-
-	while (runlength@ 32 >=)
-		0 curlongptr@!
-
-		4 curlongptr +=
-		32 runlength -=
-	end
-
-	if (runlength@)
-		curlongptr@@ 0xFFFFFFFF runlength@ << & curlongptr@!
-	end
-end
+// jettisoning resources moved to OSKernel's Mm

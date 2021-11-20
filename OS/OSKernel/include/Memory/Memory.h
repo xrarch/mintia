@@ -83,6 +83,8 @@ extern MmUsageDump { -- }
 extern MmInitPhase0 { -- }
 extern MmInitPhase1 { -- }
 
+extern MmResourceJettison { -- }
+
 extern MmPoolInit { -- }
 
 extern MmPageAlloc { priority -- pfdbe pfn ok }

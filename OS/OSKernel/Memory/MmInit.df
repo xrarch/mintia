@@ -2,6 +2,10 @@
 
 #include "<inc>/HALLog.h"
 #include "<inc>/HALMap.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALResource.h"
+
+#include "../../Loader/LoaderGlobal.h"
 
 #include "<inc>/Kernel.h"
 
@@ -23,6 +27,9 @@ externptr HALLoaderInitialBitmapSize
 externptr HALLoaderTotalRAM
 externptr HALLoaderHeap
 externptr HALLoaderHeapSize
+
+externptr HALResourceKeepHeaders
+externptr HALLoaderInfo
 
 externptr HALPageFaultFunction
 
@@ -263,6 +270,64 @@ fn MmInitPhase1 { -- }
 	end
 end
 
+fn MmResourceJettison { -- }
+	auto rsrc
+	HALResourceListHead@ rsrc!
+
+	auto sz
+
+	auto start
+
+	auto rs
+
+	while (rsrc@)
+		if (rsrc@ BootResource_Jettison + @)
+			rsrc@ BootResource_Size + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
+			rsrc@ BootResource_Data + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
+
+			while (sz@)
+				start@ MmPageFree
+
+				HALCPUInterruptDisable rs!
+				// the page is now un-wired
+				1 MmPageTotal +=
+				rs@ HALCPUInterruptRestore
+
+				1 start +=
+				1 sz -=
+			end
+
+			0 rsrc@ BootResource_Data + ! // mark jettisoned
+		end
+
+		rsrc@ BootResource_Next + @ rsrc!
+	end
+
+	if (HALResourceKeepHeaders@ ~~)
+		auto dll
+		HALLoaderInfo@ LoaderInfo_DLLListHead + @ dll!
+
+		while (dll@)
+			dll@ DLL_LOFF + LOFFLoaded_HeaderSize + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
+			dll@ DLL_LOFF + LOFFLoaded_Base + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
+
+			while (sz@)
+				start@ MmPageFree
+
+				HALCPUInterruptDisable rs!
+				// the page is now un-wired
+				1 MmPageTotal +=
+				rs@ HALCPUInterruptRestore
+
+				1 start +=
+				1 sz -=
+			end
+
+			dll@ DLL_Next + @ dll!
+		end
+	end
+end
+
 fn MmUsageDump { -- }
 	auto pageswired
 	MmPageTotalTotal@ MmPageTotal@ - pageswired!
@@ -272,7 +337,7 @@ fn MmUsageDump { -- }
 
 	pageswired@ PAGESHIFT << 1024 /
 	MmPageTotalTotal@ PAGESHIFT << 1024 /
-	pagesused@ PAGESHIFT << 1024 / " PHYS: %dKB/%dKB used (%dKB permanently reserved kernel data)\n" Printf
+	pagesused@ PAGESHIFT << 1024 / " PHYS: %dKB/%dKB used (%dKB unswappable kernel data)\n" Printf
 	MmSlabBytesUsedExternally@
 	MmSlabBytesUsedInternally@ " SLAB: %d bytes used, occupying %d bytes in memory\n" Printf
 	MmPoolBytesUsed@ " POOL: %d bytes used\n" Printf

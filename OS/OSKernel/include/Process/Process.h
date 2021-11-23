@@ -42,6 +42,7 @@ struct PsProcess
 	4 WorkingSetMinimum
 	4 WorkingSetMaximum
 
+	4 WorkingSetFreeListHead
 	4 WorkingSetMaximumIndex
 	4 WorkingSetReplacementIndex
 

@@ -492,8 +492,10 @@ fn MmVADUnmap { vad processobject -- }
 
 	auto ok
 
-	auto pte
 	auto phyaddr
+	auto pteaddr
+	auto flags
+	auto pte
 
 	auto pfdbe
 
@@ -505,39 +507,56 @@ fn MmVADUnmap { vad processobject -- }
 		// getting moved WAY up on the schedule)
 
 		vaddr@ // vaddr
-		asid@ // asid
 		pdir@ // pagemap
-		1 // canfree
-		1 // attempt
-		MmUnmapVirtualAddress ok! phyaddr! pte!
+		MmVirtualtoPTEAddress ok! pteaddr!
 
 		if (ok@ ~~)
-			// unmapped a page, do accounting
+			pteaddr@@ pte!
 
-			if (commitcharge@)
-				1 processobject@ PsProcess_CommittedPageFrames + -=
+			0 // phyaddr
+			0 // flags
+			vaddr@ // vaddr
+			pteaddr@ // pteaddr
+			asid@ // asid
+			MmPTEUpdate ok! flags! phyaddr!
 
-				phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+			if (flags@ PTE_V &)
+				// unmapped a page, do accounting
 
-				// dereference page or free immediately if COW
+				if (commitcharge@)
+					1 processobject@ PsProcess_CommittedPageFrames + -=
 
-				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-					// is COW, free now
+					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-					phyaddr@ PAGESHIFT >> MmPageFree
-				end else
-					// not COW, deref
+					// dereference page or free immediately if COW
 
-					pfdbe@ MmEvictablePageDereference drop
+					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+						// is COW, free now
+
+						phyaddr@ PAGESHIFT >> MmPageFree
+					end else
+						// not COW, deref
+
+						pfdbe@ MmEvictablePageDereference drop
+					end
+				end
+
+				1 processobject@ PsProcess_MappedPageFrames + -=
+			end else
+				if (pte@ PTE_INSWAP &)
+					// free COW page in swap
+
+					pte@ PAGESHIFT >> IOSwapPageFree
 				end
 			end
 
-			1 processobject@ PsProcess_MappedPageFrames + -=
-		end else
-			if (pte@ PTE_INSWAP &)
-				// free COW page in swap
+			if (pte@)
+				// there was a PTE containing some information, so delete it.
 
-				pte@ PAGESHIFT >> IOSwapPageFree
+				pteaddr@ // pteaddr
+				vaddr@ // vaddr
+				pdir@ // pagemap
+				MmPTEDelete drop
 			end
 		end
 

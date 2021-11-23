@@ -313,67 +313,83 @@ fn MmPopulateLists { slowneeded fastneeded -- cowswapped }
 						// as part of the working set overhaul (which is
 						// getting moved WAY up on the schedule)
 
-						slowneeded@ // invcow
+						auto pteaddr
+
 						vaddr@ // vaddr
-						asid@ // asid
 						pdir@ // pagemap
-						MmInvalidateVirtualAddress skip! phyaddr!
+						MmVirtualtoPTEAddress skip! pteaddr!
 
-						if (DEBUGCHECKS)
-							if (skip@)
-								skip@ "MmPopulateLists: MmInvalidateVirtualAddress failed (%i)\n" KeCrash
-							end
-						end
+						if (skip@ ~~)
+							pteaddr@ // pteaddr
+							MmPTEInterpret skip! drop phyaddr!
 
-						if (phyaddr@)
-							phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+							if (skip@ ~~)
+								// valid. invalidate if not COW, OR if we have
+								// slow pages left to evict. delete PTE unless
+								// COW.
 
-							if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-								// found a COW page! must swap out immediately
+								phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-								auto pno
-								phyaddr@ IDENTITYSPACE | // pageframe
-								IOSwapPageWrite skip! pno!
+								if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+									if (slowneeded@)
+										// found a COW page! invalidate and swap out immediately
 
-								if (skip@)
-									skip@ "Failed to swap out COW page (%i). Try expanding the swapfile!\n" KeCrash
-								end
+										0 // phyaddr
+										0 // flags
+										vaddr@ // vaddr
+										pteaddr@ // pteaddr
+										asid@ // asid
+										MmPTEUpdate drop drop drop
 
-								1 cowswapped +=
-								1 slowneeded -=
+										auto pno
+										phyaddr@ IDENTITYSPACE | // pageframe
+										IOSwapPageWrite skip! pno!
 
-								phyaddr@ PAGESHIFT >> MmPageFree
-
-								pno@ PAGESHIFT << PTE_INSWAP | // pte
-								vaddr@ // vaddr
-								pdir@ // pagemap
-								MmSetVirtualAddress skip!
-
-								if (DEBUGCHECKS)
-									if (skip@)
-										skip@ "MmPopulateLists: MmSetVirtualAddress failed (%i)\n" KeCrash
-									end
-								end
-							end else
-								IPLDPC KeIPLRaise ipl!
-
-								pfdbe@ MmEvictablePageDereference oldcount!
-
-								if (oldcount@ 1 ==)
-									// we managed to put this page on a list!
-
-									if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
-										if (fastneeded@)
-											1 fastneeded -=
+										if (skip@)
+											// TODO don't crash here
+											skip@ "Failed to swap out COW page (%i). Try expanding the swapfile!\n" KeCrash
 										end
-									end else
-										if (slowneeded@)
-											1 slowneeded -=
+
+										1 cowswapped +=
+										1 slowneeded -=
+
+										phyaddr@ PAGESHIFT >> MmPageFree
+
+										pno@ PAGESHIFT << PTE_INSWAP | pteaddr@!
+									end
+								end else
+									0 // phyaddr
+									0 // flags
+									vaddr@ // vaddr
+									pteaddr@ // pteaddr
+									asid@ // asid
+									MmPTEUpdate drop drop drop
+
+									IPLDPC KeIPLRaise ipl!
+
+									pfdbe@ MmEvictablePageDereference oldcount!
+
+									if (oldcount@ 1 ==)
+										// we managed to put this page on a list!
+
+										if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+											if (fastneeded@)
+												1 fastneeded -=
+											end
+										end else
+											if (slowneeded@)
+												1 slowneeded -=
+											end
 										end
 									end
-								end
 
-								ipl@ KeIPLLower
+									ipl@ KeIPLLower
+
+									pteaddr@ // pteaddr
+									vaddr@ // vaddr
+									pdir@ // pagemap
+									MmPTEDelete drop
+								end
 							end
 						end
 

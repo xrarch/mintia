@@ -1,0 +1,273 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+extern HALLimn2500TLBFlush { vpn asid -- }
+extern HALLimn2500TLBFlushAll { -- }
+
+fn MmFlushUserTLBAll { -- }
+	// XXX we might be able to have this function flush only the userspace
+	// part of the TLB at some point.
+
+	HALLimn2500TLBFlushAll
+end
+
+// do NOT change the size of this struct
+struct MmPageFrameEntryPageTable
+	4 PTECount
+	4 PFN
+	4 R3
+	4 R4
+	4 R5
+	4 R6
+	4 R7
+	4 R8
+	4 R9
+	4 R10
+	4 R11
+	4 R12
+	4 R13
+	4 R14
+	4 R15
+	4 R16
+endstruct
+
+// PTE addresses are given and returned as virtual addresses.
+// pagemap addresses are given as physical addresses.
+// synchronization regarding the pagemap is a responsibility of the caller.
+
+fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
+	// create an empty PTE for the vaddr in the given pagemap.
+	// if the page table exists, it is referenced. otherwise it is created and
+	// initialized with a refcount of 1.
+
+	IDENTITYSPACE pagemap |=
+
+	0 ok!
+
+	auto ent
+	vaddr@ 22 >> 2 << pagemap@ + ent!
+
+	auto pt
+	ent@@ 5 >> PAGESHIFT << pt!
+
+	auto pfdbe
+
+	if (pt@ 0 ==)
+		// need to allocate this page table.
+		// dip into MUSTSUCCEEDL2 pool to increase odds of successfully
+		// satisfying a page fault in high memory pressure conditions.
+
+		auto flags
+
+		if (canblock@)
+			ZEROMUST CANBLOCK | flags!
+		end else
+			ZEROMUST MUSTSUCCEEDL2 | flags!
+		end
+
+		flags@ // priority
+		MmPageAlloc ok! pt! pfdbe!
+
+		if (ok@)
+			return
+		end
+
+		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+
+		pt@ 5 << PTE_V | ent@!
+
+		PAGESHIFT pt <<=
+	end else
+		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
+	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@)
+			pteaddr@@ vaddr@ "MmPTECreate: 0x%08x already has a PTE (pte=0x%08x)!\n" KeCrash
+		end
+	end
+end
+
+fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
+	// delete a PTE from the pagemap and dereference the page table.
+	// free the page table if its refcount hits 0.
+
+	IDENTITYSPACE pagemap |=
+
+	0 ok!
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@)
+			pteaddr@@ vaddr@ "MmPTEDelete: vaddr=0x%08x pte=0x%08x\n" KeCrash
+		end
+	end
+
+	auto pfn
+	pteaddr@ IDENTITYSPACEMASK & PAGESHIFT >> pfn!
+
+	auto pfdbe
+	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	auto oldcount
+	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ ~~)
+			"MmPTEDelete: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+
+	if (oldcount@ 1 ==)
+		// last PTE. free the page table.
+
+		auto ent
+		vaddr@ 22 >> 2 << pagemap@ + ent!
+
+		// zero out the pde for the page table.
+		0 ent@!
+
+		pfn@ MmPageFree
+	end
+end
+
+fn MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr ok }
+	// get the address of a PTE based on a vaddr and pagemap.
+
+	// returns -1 if the PTE is known not to exist. may succeed erroneously
+	// if the PTE hasn't been Create'd if the related page table already
+	// exists, because it's simply based here on whether the page table exists
+	// or not. to be sure, check that the returned PTE has the PTE_V flag with
+	// MmPTEInterpret.
+
+	IDENTITYSPACE pagemap |=
+
+	0 ok!
+
+	auto ent
+	vaddr@ 22 >> 2 << pagemap@ + ent!
+
+	auto pt
+	ent@@ 5 >> PAGESHIFT << pt!
+
+	auto pfdbe
+
+	if (pt@ 0 ==)
+		// no such PTE.
+		-1 ok!
+		return
+	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
+end
+
+fn MmPTEInterpret { pteaddr -- phyaddr flags ok }
+	// interpret arch-specific PTE contents into physical address and generic
+	// flags. returns -1 if the PTE is not valid.
+
+	0 ok!
+
+	auto pte
+	pteaddr@@ pte!
+
+	if (pte@ 1 & ~~)
+		0 flags!
+		-1 ok!
+		return
+	end
+
+	// limn2600 PTEs JUST SO HAPPEN to line up with the generic PTE flags, so
+	// just mask those off and return them directly.
+	pte@ 31 & flags!
+
+	pte@ 5 >> PAGESHIFT << phyaddr!
+end
+
+fn MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflags ok }
+	auto pteaddr
+
+	vaddr@ // vaddr
+	pagemap@ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (ok@)
+		return
+	end
+
+	phyaddr@ // phyaddr
+	flags@ // flags
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	asid@ // asid
+	MmPTEUpdate ok! oldflags! oldphyaddr!
+end
+
+fn MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
+	// update a PTE based on a physical address and generic flags. this could
+	// do a number of things:
+	// 1. mapping   - pte was invalid and flags are valid.
+	// 2. unmapping - pte was valid and flags are invalid.
+	// 3. remapping - pte was valid and flags are valid.
+
+	0 ok!
+
+	auto pte
+	pteaddr@@ pte!
+
+	pte@ 31 & oldflags!
+	pte@ 5 >> PAGESHIFT << oldphyaddr!
+
+	phyaddr@ PAGESHIFT >> 5 << flags@ 31 & | pteaddr@!
+
+	if (pte@ 1 &)
+		// either remapping or unmapping, flush
+
+		if (asid@ 0 ==)
+			vaddr@ PAGESHIFT >> // vpn
+			0 // asid
+			HALLimn2500TLBFlush
+		end else
+			vaddr@ PAGESHIFT >> // vpn
+			asid@ 255 & 1 + // asid
+			HALLimn2500TLBFlush
+		end
+	end elseif (flags@ PTE_V &)
+		// mapping, don't flush
+	end else
+		// invalidated but was already invalid
+	end
+end
+
+fn MmPTEValid { pteaddr -- valid }
+	pteaddr@@ PTE_V & valid!
+end
+
+fn MmPTEUnmodify { pteaddr -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmPTEUnmodify: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// clear writable bit
+	0xFFFFFFFD pteaddr@ &=
+
+	MmFlushUserTLBAll
+end

@@ -106,6 +106,9 @@ externptr MmSectionObjectType
 const MMMUSTSUCCEEDL2PAGES 18
 const MMMUSTSUCCEEDPAGES   25
 
+const MMWORKINGSETDEFAULTMINIMUM 8
+const MMWORKINGSETDEFAULTMAXIMUM 64
+
 // page allocation priorities
 
 const ZEROMUST    1

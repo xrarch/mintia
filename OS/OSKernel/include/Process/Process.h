@@ -1,3 +1,5 @@
+const WORKINGSETLISTCOUNT 8
+
 struct PsProcess
 	KeProcess_SIZEOF PCB
 
@@ -33,6 +35,17 @@ struct PsProcess
 
 	4 PageFaultCount
 	4 ThrottleFaultCount
+
+	KeMutex_SIZEOF WorkingSetMutex
+
+	4 WorkingSetSize
+	4 WorkingSetMinimum
+	4 WorkingSetMaximum
+
+	4 WorkingSetMaximumIndex
+	4 WorkingSetReplacementIndex
+
+	(WORKINGSETLISTCOUNT 4 *) WorkingSetListPointers
 endstruct
 
 struct PsThread

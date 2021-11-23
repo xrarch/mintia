@@ -266,11 +266,15 @@ fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 			// other parts of the system that make use of this page frame,
 			// and its eviction. if this synchronization is not possible
 			// for any reason, the function returns 0 in the 'evicted'
-			// return value.
+			// return value. if the function had to drop below IPLDPC to
+			// accomplish its work, it returns 1 in the 'dropped' return
+			// value.
+
+			auto evictionfuncs
+			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
 
 			auto evictionfunc
-			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
-			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+			evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
 
 			if (DEBUGCHECKS)
 				if (evictionfunc@ ~~)
@@ -279,10 +283,14 @@ fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 			end
 
 			auto evicted
+			auto dropped
+
 			pfdbe@ // pfdbe
-			evictionfunc@ MmEvictionFunction drop evicted!
+			evictionfunc@ MmEvictionFunction drop evicted! dropped!
 
 			auto npfdbe
+
+			pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
 
 			if (evicted@)
 				// evicted, free the page
@@ -296,38 +304,31 @@ fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 
 				1 succeedcount +=
 
-				if (fast@)
-					pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
+				pfdbe@ MmEvictablePageRemove
 
-					pfdbe@ MmEvictablePageRemove
-
-					pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
-					MmPageFree
-				end else
-					// slow pages can't be trusted not to have dropped to
-					// IPLLOW which would mean anything could have happened
-					// to the evictable LRU and the next link is meaningless.
-
-					pfdbe@ MmEvictablePageRemove
-
-					pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
-					MmPageFree
-
-					0 oldhead!
-					listhead@@ npfdbe!
-				end
+				pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
+				MmPageFree
 			end else
-				pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
-
 				// failed to evict, put on MRU end so that we don't try it
-				// again for a while
+				// again for a while.
 
 				if (npfdbe@)
-					// if there wasn't npfdbe it'd already be on the tail.
-
 					pfdbe@ MmEvictablePageRemove
 					pfdbe@ MmEvictablePageInsert
 				end
+			end
+
+			if (dropped@)
+				if (DEBUGCHECKS)
+					if (fast@)
+						"MmEvictFromList: fast page eviction dropped below IPLDPC\n" KeCrash
+					end
+				end
+
+				// dropped, anything could have happened to the LRU so reset these
+
+				0 oldhead!
+				listhead@@ npfdbe!
 			end
 
 			if (npfdbe@ oldhead@ ==)
@@ -345,6 +346,7 @@ end
 fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 	auto evictionfunc
 	auto evicted
+	auto dropped
 	auto ipl
 
 	STATUS_NO_MEMORY ok!
@@ -359,7 +361,13 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
 
 			pfdbe@ // pfdbe
-			evictionfunc@ MmEvictionFunction drop evicted!
+			evictionfunc@ MmEvictionFunction drop evicted! dropped!
+
+			if (DEBUGCHECKS)
+				if (dropped@)
+					"MmEvictSinglePage: fast page eviction dropped below IPLDPC\n" KeCrash
+				end
+			end
 
 			if (evicted@ ~~)
 				pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
@@ -387,6 +395,9 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 		ipl@ KeIPLLower
 	end
 
+	auto trycap
+	32 trycap!
+
 	if (canbeslow@)
 		// can try the slow list
 
@@ -396,14 +407,27 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 			MmEvictablePageListHead@ pfdbe!
 
 			while (pfdbe@)
+				if (trycap@ ~~)
+					ipl@ KeIPLLower
+
+					return
+				end
+
 				pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
 				MmEvictableFunctions_EvictionFunc + @ evictionfunc!
 
 				pfdbe@ // pfdbe
-				evictionfunc@ MmEvictionFunction drop evicted!
+				evictionfunc@ MmEvictionFunction drop evicted! dropped!
 
 				if (evicted@ ~~)
-					pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+					if (dropped@)
+						1 trycap -=
+
+						MmEvictablePageListHead@ pfdbe!
+					end else
+						pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+					end
+
 					continue
 				end
 

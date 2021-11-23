@@ -1,4 +1,4 @@
-fnptr MmEvictionFunction { pfdbe -- evicted ok }
+fnptr MmEvictionFunction { pfdbe -- dropped evicted ok }
 fnptr MmReferenceFunction { oldcount pfdbe -- }
 fnptr MmDereferenceFunction { oldcount pfdbe -- }
 

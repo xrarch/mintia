@@ -394,7 +394,7 @@ table MmAnonymousEvictableFunctions
 endtable
 public MmAnonymousEvictableFunctions
 
-fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
+fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- dropped evicted ok }
 	// try our best to swap out this page
 
 	if (DEBUGCHECKS)
@@ -402,6 +402,10 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
 			"MmAnonymousEvictionFunction: tried to swap out COW, should happen in list populator\n" KeCrash
 		end
 	end
+
+	0 evicted!
+	0 dropped!
+	0 ok!
 
 	auto sectionobject
 	pfdbe@ MmPageFrameEntryAnonymous_SectionObject + @ sectionobject!
@@ -411,19 +415,12 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
 	if (ok@ ~~)
 		// failed to lock PPT
 
-		0 evicted!
-		0 ok!
-
 		return
 	end
 
 	IPLLOW KeIPLLower
 
-	// XXX we CAN'T return 0 in evicted now that we've gone to IPLLOW due to
-	// weird implementation details in the swap algorithm. this is bad and
-	// annoying and means it should be reimplemented at some point.
-
-	1 evicted!
+	1 dropped!
 
 	// write out to swapfile
 
@@ -432,8 +429,16 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
 	IOSwapPageWrite ok! pno!
 
 	if (ok@)
-		ok@ "Failed to swap out page (%i). Try expanding the swapfile!\n" KeCrash
+		// uh-oh, failed to write to swapfile
+
+		IPLDPC KeIPLRaise drop
+
+		sectionobject@ MmSectionPPTUnlock
+
+		return
 	end
+
+	1 evicted!
 
 	auto ppte
 	pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ ppte!

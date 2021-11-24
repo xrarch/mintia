@@ -22,7 +22,7 @@ struct MmPageFrameEntryEvictable
 	4 EvictionFlags
 	4 EvictableFunctions
 	4 References
-	4 Context2
+	4 WorkingSetIndexHint
 	4 Context3
 	4 Context4
 	4 Context5
@@ -41,7 +41,7 @@ struct MmPageFrameEntrySlab
 	4 EvictionFlags
 	4 EvictableFunctions
 	4 References
-	4 BucketIndex
+	4 WorkingSetIndexHint
 	4 Context3
 	4 Context4
 	4 Context5
@@ -50,7 +50,7 @@ struct MmPageFrameEntrySlab
 	4 Context8
 	4 Context9
 	4 Context10
-	4 Context11
+	4 BucketIndex
 endstruct
 
 struct MmPageFrameEntryAnonymous
@@ -60,16 +60,16 @@ struct MmPageFrameEntryAnonymous
 	4 EvictionFlags
 	4 EvictableFunctions
 	4 References
-	4 SectionObject
+	4 WorkingSetIndexHint
 	4 Context3
-	4 PrototypePTE
+	4 Context4
 	4 Context5
 	4 Context6
 	4 Context7
 	4 Context8
 	4 Context9
-	4 Context10
-	4 Context11
+	4 SectionObject
+	4 PrototypePTE
 endstruct
 
 const MMEVICTFLAG_FAST 1

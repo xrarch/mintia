@@ -11,17 +11,17 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-fn MmQuotaBlockCreate { vmmax heapmax -- quotablock ok }
+fn MmQuotaBlockCreate { wsmax vmmax heapmax -- quotablock ok }
 	MmQuotaBlock_SIZEOF 'Quot' MmAllocWithTag ok! quotablock!
 
 	if (ok@)
 		return
 	end
 
-	vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
+	wsmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockInitialize { vmmax heapmax quotablock -- ok }
+fn MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
 	0 ok!
 
 	1 quotablock@ MmQuotaBlock_References + !
@@ -31,6 +31,9 @@ fn MmQuotaBlockInitialize { vmmax heapmax quotablock -- ok }
 
 	0 quotablock@ MmQuotaBlock_VMUsed + !
 	vmmax@ quotablock@ MmQuotaBlock_VMMax + !
+
+	0 quotablock@ MmQuotaBlock_WorkingSetUsed + !
+	wsmax@ quotablock@ MmQuotaBlock_WorkingSetMax + !
 end
 
 fn MmQuotaBlockReference { quotablock -- }
@@ -164,10 +167,61 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 	rs@ HALCPUInterruptRestore
 end
 
+fn MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
+	if (charge@ 0 s<)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	0 ok!
+
+	auto wsmax
+	quotablock@ MmQuotaBlock_WorkingSetMax + @ wsmax!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
+
+	if (oldcharge@ charge@ + wsmax@ >)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_WS_QUOTA_EXCEEDED ok!
+
+		return
+	end
+
+	oldcharge@ charge@ + quotablock@ MmQuotaBlock_WorkingSetUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
+
+	if (DEBUGCHECKS)
+		if (charge@ oldcharge@ >)
+			"MmQuotaBlockUnchargeWorkingSet: attempt to uncharge more than was charged\n" KeCrash
+		end
+	end
+
+	oldcharge@ charge@ - quotablock@ MmQuotaBlock_WorkingSetUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn MmQuotaBlockPrint { quotablock -- }
 	quotablock@ MmQuotaBlock_HeapUsed + @ "heapused = %d\n" Printf
 	quotablock@ MmQuotaBlock_HeapMax + @ "heapmax = %d\n" Printf
 	quotablock@ MmQuotaBlock_VMUsed + @ "vmused = %d\n" Printf
 	quotablock@ MmQuotaBlock_VMMax + @ "vmmax = %d\n" Printf
+	quotablock@ MmQuotaBlock_WorkingSetUsed + @ "wsused = %d\n" Printf
+	quotablock@ MmQuotaBlock_WorkingSetMax + @ "wsmax = %d\n" Printf
 	quotablock@ MmQuotaBlock_References + @ "references = %d\n" Printf
 end

@@ -23,7 +23,7 @@ struct IOPageFrameEntryCache
 	4 EvictionFlags
 	4 EvictionFunction
 	4 References
-	4 Context2
+	4 WorkingSetIndexHint
 	4 Context3
 	4 Context4
 	4 Context5

@@ -43,5 +43,6 @@ const STATUS_SWAP_TOO_SMALL        -41
 const STATUS_NO_SWAP               -42
 const STATUS_RING_FULL             -43
 const STATUS_RING_EMPTY            -44
+const STATUS_WS_QUOTA_EXCEEDED     -45
 
 extern OSStatusGetName { status -- name }

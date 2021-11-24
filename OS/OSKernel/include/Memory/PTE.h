@@ -17,4 +17,5 @@ const PTE_NC 8  // non-cacheable
 const PTE_G  16 // global
 
 // XXX platform specific insofar as it needs to NOT overlap with the valid bit
-const PTE_INSWAP 2
+const PTE_INSWAP     2
+const PTE_TRANSITION 4

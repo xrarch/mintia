@@ -20,9 +20,10 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-const MMWORKINGSETENTRY_VALID    1
-const MMWORKINGSETENTRY_RESERVED 2
-const MMWORKINGSETENTRY_NOTFREE  (MMWORKINGSETENTRY_VALID MMWORKINGSETENTRY_RESERVED |)
+const MMWORKINGSETENTRY_VALID 1
+const MMWORKINGSETENTRY_FILE  2
+
+const MMWORKINGSETTABLESIZE (128 MmPoolSlab_SIZEOF -)
 
 fn MmWorkingSetLock { processobject -- ok }
 	KERNELMODE // waitmode
@@ -63,6 +64,7 @@ fn MmWorkingSetListInitialize { process -- ok }
 	0 process@ PsProcess_WorkingSetFreeListHead + !
 	0 process@ PsProcess_WorkingSetMaximumIndex + !
 	0 process@ PsProcess_WorkingSetReplacementIndex + !
+	0 process@ PsProcess_WorkingSetTrimFaultCount + !
 
 	process@ PsProcess_WorkingSetListPointers + // ptr
 	WORKINGSETLISTCOUNT 4 * // size
@@ -100,10 +102,25 @@ fn MmWorkingSetTrim { pages process -- trimmed }
 
 end
 
+fn MmWorkingSetEntryUpdate { vaddr isfilepage wsleptr -- }
+	if (DEBUGCHECKS)
+		if (vaddr@ PAGEOFFSETMASK &)
+			"MmWorkingSetEntryUpdate: unaligned vaddr\n" KeCrash
+		end
+	end
+
+	auto wsle
+	vaddr@ MMWORKINGSETENTRY_VALID | wsle!
+
+	if (isfilepage@)
+		MMWORKINGSETENTRY_FILE wsle |=
+	end
+
+	wsle@ wsleptr@!
+end
+
 fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 	// first we check to see if the working set can take a page:
-	//
-	// - if the process's working set quota is at its maximum, it can't.
 	//
 	// - if the working set size is below the minimum, it can.
 	//
@@ -115,53 +132,309 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 	// since the last time it was trimmed, and the system has at least
 	// MmPageFreeCountSufficient free pages.
 	//
+	// - if the process's working set quota is at its maximum, it can't.
+	//
 	// if it can, we yoink the first free entry, mark it reserved, and return
 	// the index in wsli.
 	//
 	// if it can't, we try to replace another entry in the working set at
 	// random.
 
+	auto room
+	0 room!
 
+	0 ok!
+
+	auto wssize
+	process@ PsProcess_WorkingSetSize + @ wssize!
+
+	if (wssize@ process@ PsProcess_WorkingSetMinimum + @ <)
+		// below minimum, there's always room
+		1 room!
+	end elseif (wssize@ process@ PsProcess_WorkingSetMaximum + @ <)
+		// between minimum and maximum
+		if (MmEventLowMemory KeDispatchIsSignaled ~~)
+			if (process@ PsProcess_PageFaultCount + @ process@ PsProcess_WorkingSetTrimFaultCount + @ - 20 >)
+				1 room!
+			end
+		end
+	end else
+		// above maximum
+		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+			if (process@ PsProcess_PageFaultCount + @ process@ PsProcess_WorkingSetTrimFaultCount + @ - 100 >)
+				1 room!
+			end
+		end
+	end
+
+	if (room@)
+		1 // charge
+		process@ PsProcess_QuotaBlock + @ // quotablock
+		MmQuotaBlockChargeWorkingSet ok!
+
+		if (ok@)
+			0 room!
+			0 ok!
+		end
+	end
+
+	while (1)
+		if (room@ ~~)
+			// no room, kick one out
+
+
+		end
+
+		process@ PsProcess_WorkingSetFreeListHead + @ wsli!
+
+		if (wsli@ -1 ~=)
+			// yoink
+
+
+		end
+
+		// no free entries, allocate a new working set array
+
+		// loop with room=0 if failed to allocate
+
+		break
+	end
 end
 
 fn MmWorkingSetEntryRemove { wsleptr process -- }
-	// remove the specified entry from the working set.
+	// remove the specified entry from the working set. deletes the PTE unless
+	// COW.
+
 	// unmap it from the process's pagemap, and decrement its refcount.
 	// if COW, set transition PTE pointers.
 	// if file, clear any associated modified PTE pointer.
-	// does NOT free the entry, caller must do that if it desires.
+	// DOES remove the valid bit, but does NOT free the entry; caller must do
+	// that if it wants that to happen.
 
+	if (DEBUGCHECKS)
+		if (wsleptr@@ MMWORKINGSETENTRY_VALID & ~~)
+			"MmWorkingSetEntryRemove: not valid\n" KeCrash
+		end
+	end
 
+	auto vaddr
+	wsleptr@@ PAGENUMBERMASK & vaddr!
+
+	auto isfile
+	wsleptr@@ MMWORKINGSETENTRY_FILE & isfile!
+
+	auto pteaddr
+	auto ok
+
+	vaddr@ // vaddr
+	process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"MmWorkingSetEntryRemove: no PTE\n" KeCrash
+		end
+	end
+
+	auto phyaddr
+	auto pfdbe
+	auto flags
+
+	pteaddr@ // pteaddr
+	MmPTEInterpret ok! flags! phyaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"MmWorkingSetEntryRemove: invalid PTE\n" KeCrash
+		end
+	end
+
+	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	auto ipl
+	-1 ipl!
+
+	if (isfile@)
+		if (flags@ PTE_W &)
+			IPLDPC KeIPLRaise ipl!
+
+			if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ pteaddr@ ==)
+				0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+				
+				// DONT unmodify the PTE, just leave IPL raised and allow it
+				// to be unmapped below
+
+				// pteaddr@ MmPTEUnmodify
+			end else
+				ipl@ KeIPLLower
+
+				-1 ipl!
+			end
+		end
+	end
+
+	// unmap
+
+	0 // phyaddr
+	0 // flags
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	process@ PsProcess_PCB + KeProcess_ASID + @ // asid
+	MmPTEUpdate drop drop drop
+
+	if (ipl@ -1 ~=)
+		ipl@ KeIPLLower
+	end
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+		// create transition PTE and link back
+
+		pteaddr@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+		phyaddr@ PTE_TRANSITION | pteaddr@!
+	end else
+		pteaddr@ // pteaddr
+		vaddr@ // vaddr
+		process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
+		MmPTEDelete drop
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
+
+	MMWORKINGSETENTRY_VALID ~ wsleptr@ &=
 end
+
+const MMWORKINGSETENTRIESPERTABLE (MMWORKINGSETTABLESIZE 4 /)
 
 fn MmWorkingSetEntryFindByIndex { wsli process -- wsleptr ok }
 	// look up a working set index in the working set and return the pointer.
 	// return -1 in ok if the index is beyond the end of valid indices.
 
+	if (wsli@ process@ PsProcess_WorkingSetMaximumIndex + @ >)
+		-1 ok!
+		return
+	end
 
+	0 ok!
+
+	auto ix
+	wsli@ MMWORKINGSETENTRIESPERTABLE / ix!
+
+	auto off
+	wsli@ MMWORKINGSETENTRIESPERTABLE % off!
+
+	auto tab
+	process@ PsProcess_WorkingSetListPointers + ix@ 2 << + @ tab!
+
+	if (DEBUGCHECKS)
+		if (tab@ ~~)
+			"MmWorkingSetEntryFindByIndex: no table despite being <= maximum index\n" KeCrash
+		end
+	end
+
+	tab@ off@ 2 << + wsleptr!
 end
 
 fn MmWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok }
 	// look up a virtual address in the working set and return the pointer.
 	// return -1 in ok if the virtual address is not part of the working set.
 
-
+	// caller must make sure the vaddr points to a physical page frame.
 
 	// look up vaddr in process's pagemap, if it's not valid we know it's not
 	// in the working set.
 
+	if (DEBUGCHECKS)
+		if (vaddr@ PAGEOFFSETMASK &)
+			"MmWorkingSetEntryFindByVirtualAddress: unaligned vaddr\n" KeCrash
+		end
+	end
 
+	auto pteaddr
+
+	vaddr@ // vaddr
+	process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (ok@)
+		return
+	end
+
+	auto pfdbe
+
+	pteaddr@ // pteaddr
+	MmPTEInterpret ok! drop pfdbe!
+
+	if (ok@)
+		return
+	end
+
+	pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 	// it is valid. look in pfdbe for working set index hint and see if it
-	// resides in that entry. if not, search the entire working set up to the
-	// last valid index.
+	// resides in that entry.
 
+	pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + @ wsli!
 
+	wsli@ // wsli
+	process@ // process
+	MmWorkingSetEntryFindByIndex ok! wsleptr!
+
+	auto wsle
+
+	if (ok@ ~~)
+		wsleptr@@ wsle!
+
+		if (wsle@ MMWORKINGSETENTRY_VALID &)
+			if (wsle@ PAGENUMBERMASK & vaddr@ ==)
+				// found it!
+
+				return
+			end
+		end
+	end
+
+	// not there. search the entire working set up to the last valid index.
+
+	0 wsli!
+
+	auto tabptr
+	process@ PsProcess_WorkingSetListPointers + tabptr!
+
+	tabptr@@ wsleptr!
+
+	auto leftintable
+	MMWORKINGSETENTRIESPERTABLE leftintable!
+
+	auto maxi
+	process@ PsProcess_WorkingSetMaximumIndex + @ maxi!
+
+	while (wsli@ maxi@ <=)
+		if (leftintable@ ~~)
+			4 tabptr +=
+			tabptr@@ wsleptr!
+			MMWORKINGSETENTRIESPERTABLE leftintable!
+		end
+
+		wsleptr@@ wsle!
+
+		if (wsle@ MMWORKINGSETENTRY_VALID &)
+			if (wsle@ PAGENUMBERMASK & vaddr@ ==)
+				// found it!
+
+				return
+			end
+		end
+
+		1 leftintable -=
+		4 wsleptr +=
+		1 wsli +=
+	end
 end
 
-fn MmWorkingSetEntryFree { wsleptr process -- }
-	// mark a working set entry free by pointer.
-	// zero it out and place it on the free list.
+fn MmWorkingSetEntryFree { wsli wsleptr process -- }
+	// place a working set entry on the free list.
 
+	process@ PsProcess_WorkingSetFreeListHead + @ PAGESHIFT << wsleptr@!
 
+	wsli@ process@ PsProcess_WorkingSetFreeListHead + !
 end

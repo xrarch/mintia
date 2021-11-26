@@ -62,7 +62,7 @@ fn MmWorkingSetListInitialize { process -- ok }
 	MMWORKINGSETDEFAULTMINIMUM process@ PsProcess_WorkingSetMinimum + !
 	MMWORKINGSETDEFAULTMAXIMUM process@ PsProcess_WorkingSetMaximum + !
 
-	0 process@ PsProcess_WorkingSetFreeListHead + !
+	-1 process@ PsProcess_WorkingSetFreeListHead + !
 	0 process@ PsProcess_WorkingSetMaximumIndex + !
 	0 process@ PsProcess_WorkingSetReplacementIndex + !
 	0 process@ PsProcess_WorkingSetTrimFaultCount + !
@@ -100,7 +100,7 @@ fn MmWorkingSetTrim { pages process -- trimmed }
 	// attempt to trim the given number of pages, and return the real number
 	// of pages trimmed.
 
-
+	"MmWorkingSetTrim: TODO\n" KeCrash
 end
 
 fn MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
@@ -243,22 +243,25 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 				// no free entries, we need to allocate a new working set
 				// array.
 
-				// first we have to find the first zero pointer in the process
-				// PsProcess_WorkingSetListPointers array. if there is none,
-				// we've hit the capacity of the working set list data
-				// structure and must count that as a failed allocation.
+				process@ MmWorkingSetArrayExpand ok! wsleptr! wsli!
 
-				// then we need to allocate the array and set the pointer in
-				// the process's WorkingSetListPointers array. then we need to
-				// initialize it by placing MMWORKINGSETENTRIESPERTABLE-1 of
-				// its entries on the free list, reserving the last one for
-				// ourselves.
+				if (ok@)
+					if (ok@ STATUS_NO_MEMORY ==)
+						// uncharge working set quota and loop with room=0 if
+						// failed to allocate, in order to retry the
+						// reservation as a replacement.
 
-				// uncharge working set quota and loop with room=0 if failed
-				// to allocate, in order to retry the reservation as a
-				// replacement.
+						1 // charge
+						process@ PsProcess_QuotaBlock + @ // quotablock
+						MmQuotaBlockUnchargeWorkingSet
 
-				"TODO THIS PART\n" KeCrash
+						0 room!
+
+						continue
+					end
+
+					return
+				end
 			end
 		end
 
@@ -272,6 +275,82 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 	end
 
 	"MmWorkingSetEntryReserve: unreachable\n" KeCrash
+end
+
+fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
+	"MmWorkingSetArrayExpand: unreachable\n" KeCrash
+
+	// first we have to find the first zero pointer in the process
+	// PsProcess_WorkingSetListPointers array. if there is none, we've hit the
+	// capacity of the working set list data structure and must count that as
+	// a failed allocation.
+
+	// then we need to allocate the array and set the pointer in the process's
+	// WorkingSetListPointers array. then we need to initialize it by placing
+	// MMWORKINGSETENTRIESPERTABLE-1 of its entries on the free list,
+	// reserving the last one for our caller.
+
+	auto tabptr
+	process@ PsProcess_WorkingSetListPointers + tabptr!
+
+	auto count
+	WORKINGSETLISTCOUNT count!
+
+	0 wsli!
+
+	while (count@)
+		if (tabptr@@ ~~)
+			// found it
+
+			auto tab
+			MMWORKINGSETTABLESIZE // bytes
+			'MmWs' // tag
+			MmAllocWithTag ok! tab!
+
+			if (ok@)
+				return
+			end
+
+			tab@ tabptr@!
+
+			MMWORKINGSETENTRIESPERTABLE 1 - count!
+
+			auto last
+			-1 last!
+
+			auto iwsli
+			wsli@ 1 + iwsli!
+
+			4 tab +=
+
+			// initialize the free list
+
+			while (count@)
+				last@ PAGESHIFT << tab@!
+
+				iwsli@ last!
+				4 tab +=
+				1 iwsli +=
+				1 count -=
+			end
+
+			if (DEBUGCHECKS)
+				if (last@ -1 ==)
+					"MmWorkingSetArrayExpand\n" KeCrash
+				end
+			end
+
+			last@ process@ PsProcess_WorkingSetFreeListHead + !
+
+			return
+		end
+
+		MMWORKINGSETENTRIESPERTABLE wsli +=
+		4 tabptr +=
+		1 count -=
+	end
+
+	STATUS_NO_MEMORY ok!
 end
 
 fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }

@@ -410,10 +410,17 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- dropped evicted o
 	auto sectionobject
 	pfdbe@ MmPageFrameEntryAnonymous_SectionObject + @ sectionobject!
 
-	sectionobject@ MmSectionPPTTryLock ok!
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+		// COW page -- sectionobject is really a process object and we need to
+		// lock its VAD list to keep pagefaults out.
+
+		sectionobject@ MmVADListTryLock ok!
+	end else
+		sectionobject@ MmSectionPPTTryLock ok!
+	end
 
 	if (ok@ ~~)
-		// failed to lock PPT
+		// failed to lock
 
 		return
 	end
@@ -433,7 +440,11 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- dropped evicted o
 
 		IPLDPC KeIPLRaise drop
 
-		sectionobject@ MmSectionPPTUnlock
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+			sectionobject@ MmVADListUnlock
+		end else
+			sectionobject@ MmSectionPPTUnlock
+		end
 
 		return
 	end
@@ -447,21 +458,17 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- dropped evicted o
 
 	IPLDPC KeIPLRaise drop
 
-	sectionobject@ MmSectionPPTUnlock
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+		sectionobject@ MmVADListUnlock
+	end else
+		sectionobject@ MmSectionPPTUnlock
+	end
 end
 
 fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
-	auto flags
+	// caller must set COW flag in pfdbe if applicable.
 
-	// an anonymous page is known to be a COW page by lacking a sectionobject.
-
-	if (sectionobject@)
-		0 flags!
-	end else
-		MMEVICTFLAG_COW flags!
-	end
-
-	flags@ // flags
+	0 // flags
 	MmAnonymousEvictableFunctions // evictablefuncs
 	pri@ CANBLOCK | // priority
 	MmEvictablePageAlloc ok! pfn! pfdbe!

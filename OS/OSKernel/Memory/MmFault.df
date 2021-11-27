@@ -45,7 +45,7 @@ fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 		IPLAPC KeIPLRaise ipl!
 
 		writing@ // writing
-		badaddr@ // badaddr
+		badaddr@ // vaddr
 		trapframe@ // trapframe
 		MmSatisfyFault signal!
 
@@ -85,11 +85,7 @@ fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 	HALCPUInterruptDisable drop
 end
 
-const FAULTACTIONNORMAL 1
-const FAULTACTIONDIRTY  2
-const FAULTACTIONCOW    3
-
-fn MmSatisfyFault { writing badaddr trapframe -- signal }
+fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	0 signal!
 
 	auto process
@@ -97,7 +93,7 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 
 	if (MmEventLowMemory KeDispatchIsSignaled)
 		if (process@ PsProcess_ThrottleFaultCount + @ 32 >=)
-			// system is in a low memory state and this process has page-
+			// system is in a low memory state and this process has hard-
 			// -faulted 32 times, throttle this thread for the same number
 			// of milliseconds multiplied by two (but capped at 300)
 
@@ -110,24 +106,17 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 		0 process@ PsProcess_ThrottleFaultCount + !
 	end
 
+	process@ MmVADListLock drop // this will NEVER fail since we're at IPLAPC
+
 	auto ok
-	process@ MmVADListLock ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "MmSatisfyFault: failed to lock VAD list (%i)\n" KeCrash
-		end
-	end
-
 	auto pteaddr
 	auto phyaddr
 	auto flags
 	auto pfdbe
+	auto wsleptr
+	auto wsli
 
-	0 flags!
-	0 phyaddr!
-
-	badaddr@ // vaddr
+	vaddr@ // vaddr
 	process@ KeProcess_PageDirectory + @ // pagemap
 	MmVirtualtoPTEAddress ok! pteaddr!
 
@@ -136,198 +125,433 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 		MmPTEInterpret ok! flags! phyaddr!
 
 		if (ok@ ~~)
-			if (writing@ ~~)
-				// not writing and PTE is valid, nothing to do
+			// valid
+
+			if (flags@ PTE_W &)
+				// no work to do
 				process@ MmVADListUnlock
 				return
-			end elseif (flags@ PTE_W &)
-				// am writing but PTE is writable, nothing to do
+			end elseif (writing@)
+				vaddr@ // vaddr
+				process@ // process
+				MmWriteFault signal!
+
+				if (signal@ -1 ~=)
+					process@ MmVADListUnlock
+					return
+				end
+			end else
+				// no work to do
 				process@ MmVADListUnlock
 				return
 			end
-		end elseif (pteaddr@@ PTE_INSWAP &)
-			// swap in COW page
+		end else
+			// hold PTE contents in flags temporarily
+			pteaddr@@ flags!
 
-			0 // sectionobject
-			0 // pte
-			pteaddr@@ PAGESHIFT >> // pno
-			MmAnonymousSwapIn ok! phyaddr! pfdbe!
+			if (flags@ PTE_TRANSITION PTE_INSWAP | &)
+				// COW page. we need to do work here
 
-			if (ok@)
+				flags@ PAGENUMBERMASK & phyaddr!
+
+				process@ MmWorkingSetLock drop // will NEVER fail
+
+				process@ // process
+				MmWorkingSetEntryReserve ok! wsleptr! wsli!
+
+				if (ok@)
+					process@ MmWorkingSetUnlock
+					process@ MmVADListUnlock
+
+					STATUS_KILLED signal!
+
+					return
+				end
+
+				if (flags@ PTE_TRANSITION &)
+					// just soft-fault it in
+
+					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+					if (DEBUGCHECKS)
+						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW & ~~)
+							"MmSatisfyFault: transition PTE wasn't COW\n" KeCrash
+						end
+					end
+
+					pfdbe@ MmEvictablePageReference drop
+				end else
+					// must have PTE_INSWAP flag.
+					// swap it in. unlock and relock the working set to avoid
+					// deadlock.
+
+					process@ MmWorkingSetUnlock
+
+					process@ // sectionobject
+					pteaddr@ // pte
+					phyaddr@ PAGESHIFT >> // pno
+					MmAnonymousSwapIn ok! phyaddr! pfdbe!
+
+					process@ MmWorkingSetLock drop
+
+					if (ok@)
+						wsli@ // wsli
+						wsleptr@ // wsleptr
+						process@ // process
+						MmWorkingSetEntryFree
+
+						process@ MmWorkingSetUnlock
+						process@ MmVADListUnlock
+
+						STATUS_KILLED signal!
+
+						return
+					end
+
+					MMEVICTFLAG_COW pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+
+					PAGESHIFT phyaddr <<=
+				end
+
+				wsli@ pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
+
+				phyaddr@ // phyaddr
+				PTE_V PTE_W | // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				process@ KeProcess_ASID + @ // asid
+				MmPTEUpdate drop drop drop
+
+				vaddr@ PAGENUMBERMASK & // vaddr
+				0 // isfilepage
+				wsleptr@ // wsleptr
+				process@ // process
+				MmWorkingSetEntryInsert
+
+				process@ MmWorkingSetUnlock
 				process@ MmVADListUnlock
+
 				return
 			end
-
-			PAGESHIFT phyaddr <<=
-
-			phyaddr@ // phyaddr
-			PTE_V PTE_W | // flags
-			badaddr@ // vaddr
-			pteaddr@ // pteaddr
-			process@ KeProcess_ASID + @ // asid
-			MmPTEUpdate ok! drop drop
-
-			if (ok@)
-				phyaddr@ PAGESHIFT >> MmPageFree
-
-				// funny enough, we actually just completely lost the COW page
-				// with no good way to keep it around, so the process should just
-				// be murdered at this point.
-
-				process@ MmVADListUnlock
-				OSSIGNAL_KILL signal!
-				return
-			end
-
-			process@ MmVADListUnlock
-			return
 		end
 	end
 
-	auto vad
-	badaddr@ // vaddr
+	vaddr@ // vaddr
+	process@ // process
+	MmNormalFault signal!
+
+	process@ MmVADListUnlock
+end
+
+fn MmFaultParameters { vaddr process -- offset section vad ok }
+	vaddr@ // vaddr
 	0 // length
 	0 // mustbestart
 	process@ // processobject
 	MmVADFind ok! vad!
 
 	if (ok@)
-		process@ MmVADListUnlock
+		return
+	end
+
+	if (vaddr@ vad@ MmVAD_FurthestExtentMapped + @ >)
+		vaddr@ PAGENUMBERMASK & vad@ MmVAD_FurthestExtentMapped + !
+	end
+
+	vad@ MmVAD_SectionObject + @ section!
+	vaddr@ vad@ MmVAD_StartVA + @ - vad@ MmVAD_OffsetInSection + @ + offset!
+end
+
+fn MmNormalFault { vaddr process -- signal }
+	0 signal!
+
+	auto offset
+	auto section
+	auto vad
+	auto ok
+	auto isfilepage
+	auto flags
+	auto phyaddr
+	auto pfdbe
+	auto pteaddr
+	auto wsli
+	auto wsleptr
+
+	vaddr@ // vaddr
+	process@ // process
+	MmFaultParameters ok! vad! section! offset!
+
+	if (ok@)
 		OSSIGNAL_SEGV signal!
 		return
 	end
 
-	auto faulttype
-	FAULTACTIONNORMAL faulttype!
+	if (section@ MmSection_FileObject + @)
+		if (section@ MmSection_FileObject + @ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+			vaddr@ // vaddr
+			process@ // process
+			section@ // section
+			offset@ // offset
+			vad@ // vad
+			MmSatisfyCharFault ok!
 
-	if (writing@)
-		// we are writing...
-		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE & ~~)
-			// but the VAD isn't writable...
-			if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY & ~~)
-				// nor is it COW. this is an access violation
-				process@ MmVADListUnlock
-				OSSIGNAL_SEGV signal!
-				return
+			if (ok@)
+				OSSIGNAL_KILL signal!
 			end
-			// but is COW.
-			FAULTACTIONCOW faulttype!
-		end else
-			// and the VAD is writable...
-			if (flags@ PTE_W & ~~)
-				// but the PTE is readonly (or not yet mapped). we're dirtying something
-				FAULTACTIONDIRTY faulttype!
-			end // else -- can't happen, would have returned above
-		end
-	end
 
-	// TODO remove when working set is introduuced
-	// auto ipl
-	// IPLDPC KeIPLRaise ipl!
-	// vad@ MmVADRemove
-	// vad@ MmVADInsert
-	// ipl@ KeIPLLower
-
-	auto section
-	vad@ MmVAD_SectionObject + @ section!
-
-	if (badaddr@ vad@ MmVAD_FurthestExtentMapped + @ >)
-		badaddr@ PAGENUMBERMASK & vad@ MmVAD_FurthestExtentMapped + !
-	end
-
-	auto sectoff
-	badaddr@ vad@ MmVAD_StartVA + @ - vad@ MmVAD_OffsetInSection + @ + sectoff!
-
-	0 pfdbe!
-
-	if (flags@ PTE_V & ~~)
-		// pte was truly invalid and needs faulting in
-
-		if (section@ MmSection_FileObject + @)
-			vad@ // vad
-			section@ // sectionobject
-			sectoff@ // sectionoffset
-			badaddr@ // vaddr
-			process@ // processobject
-			MmSatisfyFileFault ok! phyaddr! pfdbe! pteaddr!
-		end else
-			vad@ // vad
-			section@ // sectionobject
-			sectoff@ // sectionoffset
-			badaddr@ // vaddr
-			process@ // processobject
-			MmSatisfyAnonFault ok! phyaddr! pfdbe! pteaddr!
-		end
-
-		if (ok@)
-			process@ MmVADListUnlock
-			OSSIGNAL_KILL signal!
 			return
 		end
-	end elseif (section@ MmSection_NoCommit + @ ~~)
-		// pte was valid but something else caused the fault like a dirty fault
-
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 	end
 
-	if (faulttype@ FAULTACTIONDIRTY ==)
-		// if there's no file object, this is really just an anon page getting
-		// faulted in for the first time with a write, and we shouldn't count
-		// that as a "dirty".
+	vaddr@ // vaddr
+	process@ KeProcess_PageDirectory + @ // pagemap
+	1 // canblock
+	MmPTECreate ok! pteaddr!
 
-		if (section@ MmSection_FileObject + @)
-			// pfdbe is zeroed out for things where this isn't applicable like
-			// a mapped character device.
+	if (ok@)
+		STATUS_KILLED signal!
+		return
+	end
 
-			if (pfdbe@)
-				auto ipl
-				IPLDPC KeIPLRaise ipl!
+	process@ MmWorkingSetLock drop // will NEVER fail
 
-				pfdbe@ IOCachePageModifyFunction ok!
+	process@ // process
+	MmWorkingSetEntryReserve ok! wsleptr! wsli!
 
-				if (DEBUGCHECKS)
-					if (ok@)
-						"MmSatisfyFault: failed to modify page\n" KeCrash
-					end
-				end
+	process@ MmWorkingSetUnlock
 
-				phyaddr@ // phyaddr
-				PTE_V PTE_W | // flags
-				badaddr@ // vaddr
-				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate ok! drop drop
+	if (ok@)
+		pteaddr@ // pteaddr
+		vaddr@ // vaddr
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmPTEDelete drop
 
-				if (ok@)
-					ipl@ KeIPLLower
-					process@ MmVADListUnlock
-					OSSIGNAL_KILL signal!
-					return
-				end
+		STATUS_KILLED signal!
+		return
+	end
 
-				if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
-					pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmPTEUnmodify
-				end
+	if (section@ MmSection_FileObject + @)
+		1 isfilepage!
+		section@ // section
+		offset@ // offset
+		vad@ // vad
+		MmSatisfyFileFault ok! phyaddr! pfdbe! flags!
+	end else
+		0 isfilepage!
+		section@ // section
+		offset@ // offset
+		vad@ // vad
+		MmSatisfyAnonFault ok! phyaddr! pfdbe! flags!
+	end
 
-				pteaddr@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+	process@ MmWorkingSetLock drop
 
-				ipl@ KeIPLLower
-			end
+	if (ok@)
+		wsli@ // wsli
+		wsleptr@ // wsleptr
+		process@ // process
+		MmWorkingSetEntryFree
+
+		process@ MmWorkingSetUnlock
+
+		pteaddr@ // pteaddr
+		vaddr@ // vaddr
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmPTEDelete drop
+
+		STATUS_KILLED signal!
+		return
+	end
+
+	1 process@ PsProcess_ThrottleFaultCount + +=
+
+	wsli@ pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
+
+	phyaddr@ // phyaddr
+	flags@ // flags
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	process@ KeProcess_ASID + @ // asid
+	MmPTEUpdate drop drop drop
+
+	vaddr@ PAGENUMBERMASK & // vaddr
+	isfilepage@ // isfilepage
+	wsleptr@ // wsleptr
+	process@ // process
+	MmWorkingSetEntryInsert
+
+	process@ MmWorkingSetUnlock
+end
+
+fn MmSatisfyCharFault { vaddr process section offset vad -- ok }
+	auto fcb
+	section@ MmSection_FileObject + @ IOFile_FileControlBlock + @ fcb!
+
+	auto getpagefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_GetPageAddress + @ getpagefunc!
+
+	if (DEBUGCHECKS)
+		if (getpagefunc@ ~~)
+			"MmSatisfyCharFault: no GetPageAddress\n" KeCrash
 		end
-	end elseif (faulttype@ FAULTACTIONCOW ==)
+	end
+
+	auto phyaddr
+	offset@ // offset
+	fcb@ // fcb
+	getpagefunc@ IODispatchGetPageAddressFunction ok! phyaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmSatisfyCharFault: failed to get page address (%i)\n" KeCrash
+		end
+	end
+
+	auto flags
+	PTE_V flags!
+
+	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+		PTE_W flags |=
+	end
+
+	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_NONCACHED &)
+		PTE_NC flags |=
+	end
+
+	auto pteaddr
+	vaddr@ // vaddr
+	process@ KeProcess_PageDirectory + @ // pagemap
+	1 // canblock
+	MmPTECreate ok! pteaddr!
+
+	if (ok@)
+		return
+	end
+
+	phyaddr@ // phyaddr
+	flags@ // flags
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	process@ KeProcess_ASID + @ // asid
+	MmPTEUpdate drop drop drop
+end
+
+fn MmSatisfyFileFault { section offset vad -- flags pfdbe phyaddr ok }
+	auto fcb
+	section@ MmSection_FileObject + @ IOFile_FileControlBlock + @ fcb!
+
+	0 // kflags
+	0 // flags
+	offset@ PAGENUMBERMASK & // offset
+	fcb@ // fcb
+	IOCachePageRead ok! pfdbe! drop
+
+	if (ok@)
+		return
+	end
+
+	pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << phyaddr!
+
+	PTE_V flags!
+end
+
+fn MmSatisfyAnonFault { section offset vad -- flags pfdbe phyaddr ok }
+	offset@ // sectionoffset
+	section@ // sectionobject
+	MmSectionPageGet ok! pfdbe! phyaddr!
+
+	if (ok@)
+		return
+	end
+
+	PTE_V flags!
+
+	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+		PTE_W flags |=
+	end
+end
+
+fn MmWriteFault { vaddr process -- signal }
+	// COW or dirty fault. lets find out which one
+
+	0 signal!
+
+	auto pteaddr
+	auto phyaddr
+
+	process@ MmWorkingSetLock drop
+
+	// re-check the PTE with the working set mutex held, since it may have
+	// been trimmed since we decided it was valid. we know that it's the same
+	// PTE if it's still valid, and hasn't been switched out with something
+	// else, because the VAD list mutex is held during all such events.
+	// the loss of this convenient assumption is one reason that it sounds
+	// hard to allow multiple threads to take a page fault per process without
+	// waiting for eachother.
+
+	vaddr@ // vaddr
+	process@ KeProcess_PageDirectory + @ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (ok@)
+		// invalid
+		process@ MmWorkingSetUnlock
+		-1 signal!
+		return
+	end
+
+	pteaddr@ // pteaddr
+	MmPTEInterpret ok! drop phyaddr!
+
+	if (ok@)
+		// invalid
+		process@ MmWorkingSetUnlock
+		-1 signal!
+		return
+	end
+
+	auto offset
+	auto section
+	auto vad
+	auto ok
+	auto pfdbe
+	auto wsli
+	auto wsleptr
+
+	vaddr@ // vaddr
+	process@ // process
+	MmFaultParameters ok! vad! section! offset!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
+		end
+	end
+
+	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
+		// COW, allocate a page frame and copy the old page frame into it.
+
+		// XXX this is a unique situation where a page allocation occurs
+		// with the working set mutex held. this could prevent the process's
+		// working set from being trimmed while it's blocked waiting for a
+		// page to become available, which could lead to an unnecessary
+		// early demise for the process.
+
 		auto cowpfdbe
 		auto cowaddr
 
-		0 // sectionobject
-		0 // pte
+		process@ // sectionobject
+		pteaddr@ // pte
 		FREEFIRST // pri
 		MmAnonymousPageAlloc ok! cowaddr! cowpfdbe!
 
 		if (ok@)
-			process@ MmVADListUnlock
-			OSSIGNAL_KILL signal!
 			return
 		end
+
+		MMEVICTFLAG_COW cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
 
 		PAGESHIFT cowaddr <<=
 
@@ -338,184 +562,52 @@ fn MmSatisfyFault { writing badaddr trapframe -- signal }
 
 		cowaddr@ // phyaddr
 		PTE_V PTE_W | // flags
-		badaddr@ // vaddr
+		vaddr@ // vaddr
 		pteaddr@ // pteaddr
 		process@ KeProcess_ASID + @ // asid
-		MmPTEUpdate ok! drop drop
-
-		if (ok@)
-			process@ MmVADListUnlock
-			cowaddr@ PAGESHIFT >> MmPageFree
-			OSSIGNAL_KILL signal!
-			return
-		end
-
-		if (DEBUGCHECKS)
-			if (pfdbe@ ~~)
-				"MmSatisfyFault: no pfdbe\n" KeCrash
-			end
-		end
+		MmPTEUpdate drop drop drop
 
 		// we COW'd over top of the old page frame and no longer have it
 		// mapped, so dereference it
 		pfdbe@ MmEvictablePageDereference drop
-	end
-
-	process@ MmVADListUnlock
-end
-
-fn MmSatisfyFileFault { vad sectionobject sectionoffset vaddr processobject -- pteaddr pfdbe phyaddr ok }
-	auto fileobject
-	sectionobject@ MmSection_FileObject + @ fileobject!
-
-	auto fcb
-	fileobject@ IOFile_FileControlBlock + @ fcb!
-
-	0 ok!
-
-	auto flags
-
-	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-		// character device, like a framebuffer or something. will have its
-		// own method of mapping.
-
-		auto getpagefunc
-		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_GetPageAddress + @ getpagefunc!
+	end elseif (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE & ~~)
+		// privilege violation
+		OSSIGNAL_SEGV signal!
+	end else
+		// dirty fault. mark the file page modified.
 
 		if (DEBUGCHECKS)
-			if (getpagefunc@ ~~)
-				"MmSatisfyFileFault: no GetPageAddress\n" KeCrash
+			if (section@ MmSection_FileObject + @ ~~)
+				"MmWriteFault: no fileobject\n" KeCrash
 			end
 		end
 
-		0 pfdbe!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-		sectionoffset@ // offset
-		fcb@ // fcb
-		getpagefunc@ IODispatchGetPageAddressFunction ok! phyaddr!
+		pfdbe@ IOCachePageModifyFunction ok!
 
 		if (DEBUGCHECKS)
 			if (ok@)
-				ok@ "MmSatisfyFileFault: failed to get page address (%i)\n" KeCrash
+				"MmWriteFault: failed to modify page\n" KeCrash
 			end
 		end
 
-		PTE_V flags!
-
-		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
-			PTE_W flags |=
-		end
-
-		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_NONCACHED &)
-			PTE_NC flags |=
-		end
-
-		vaddr@ // vaddr
-		processobject@ KeProcess_PageDirectory + @ // pagemap
-		1 // canblock
-		MmPTECreate ok! pteaddr!
-
-		if (ok@)
-			return
-		end
-
 		phyaddr@ // phyaddr
-		flags@ // flags
+		PTE_V PTE_W | // flags
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		processobject@ KeProcess_ASID + @ // asid
-		MmPTEUpdate ok! drop drop
+		process@ KeProcess_ASID + @ // asid
+		MmPTEUpdate drop drop drop
 
-		if (ok@)
-			return
+		if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
+			pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmPTEUnmodify
 		end
 
-		1 processobject@ PsProcess_MappedPageFrames + +=
-	end else
-		// real file like a block device (or normal file). call into
-		// page cache.
+		pteaddr@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
 
-		0 // kflags
-		0 // flags
-		sectionoffset@ PAGENUMBERMASK & // offset
-		fcb@ // fcb
-		IOCachePageRead ok! pfdbe! drop
-
-		if (ok@)
-			return
-		end
-
-		pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << phyaddr!
-
-		vaddr@ // vaddr
-		processobject@ KeProcess_PageDirectory + @ // pagemap
-		1 // canblock
-		MmPTECreate ok! pteaddr!
-
-		if (ok@)
-			pfdbe@ MmEvictablePageDereference drop
-			return
-		end
-
-		phyaddr@ // phyaddr
-		PTE_V // flags
-		vaddr@ // vaddr
-		pteaddr@ // pteaddr
-		processobject@ KeProcess_ASID + @ // asid
-		MmPTEUpdate ok! drop drop
-
-		if (ok@)
-			pfdbe@ MmEvictablePageDereference drop
-			return
-		end
-
-		1 processobject@ PsProcess_CommittedPageFrames + +=
-		1 processobject@ PsProcess_MappedPageFrames + +=
-		1 processobject@ PsProcess_PageFaultCount + +=
-		1 processobject@ PsProcess_ThrottleFaultCount + +=
-	end
-end
-
-fn MmSatisfyAnonFault { vad sectionobject sectionoffset vaddr processobject -- pteaddr pfdbe phyaddr ok }
-	sectionoffset@ // sectionoffset
-	sectionobject@ // sectionobject
-	MmSectionPageGet ok! pfdbe! phyaddr!
-
-	if (ok@)
-		return
+		ipl@ KeIPLLower
 	end
 
-	auto flags
-	PTE_V flags!
-
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
-		PTE_W flags |=
-	end
-
-	vaddr@ // vaddr
-	processobject@ KeProcess_PageDirectory + @ // pagemap
-	1 // canblock
-	MmPTECreate ok! pteaddr!
-
-	if (ok@)
-		pfdbe@ MmEvictablePageDereference drop
-		return
-	end
-
-	phyaddr@ // phyaddr
-	flags@ // flags
-	vaddr@ // vaddr
-	pteaddr@ // pteaddr
-	processobject@ KeProcess_ASID + @ // asid
-	MmPTEUpdate ok! drop drop
-
-	if (ok@)
-		pfdbe@ MmEvictablePageDereference drop
-		return
-	end
-
-	1 processobject@ PsProcess_MappedPageFrames + +=
-	1 processobject@ PsProcess_CommittedPageFrames + +=
-	1 processobject@ PsProcess_PageFaultCount + +=
-	1 processobject@ PsProcess_ThrottleFaultCount + +=
+	process@ MmWorkingSetUnlock
 end

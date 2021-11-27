@@ -146,22 +146,9 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		slowcount@ // slowneeded
 		fastcount@ // fastneeded
-		MmPopulateLists succeedcount!
+		MmPopulateLists
 
 		if (reason@ STATUS_WAIT_TIMEOUT ~=)
-			if (succeedcount@)
-				0 failcount!
-			end
-
-			if (DEBUGCHECKS)
-				if (succeedcount@ slowcount@ >)
-					"MmEvictionWorker: succeedcount > slowcount\n" KeCrash
-				end
-			end
-
-			// decrement by the amount of COW pages that were swapped out
-			succeedcount@ slowcount -=
-
 			auto done
 
 			fastcount@ // trycount
@@ -202,11 +189,9 @@ fn MmEvictionWorker { context1 context2 -- }
 	end
 end
 
-fn MmPopulateLists { slowneeded fastneeded -- cowswapped }
+fn MmPopulateLists { slowneeded fastneeded -- }
 	// aims towards getting at least slowneeded and fastneeded pages in each
-	// list. swaps out found COW pages immediately (if slowneeded remaining).
-
-	0 cowswapped!
+	// list.
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -234,179 +219,9 @@ fn MmPopulateLists { slowneeded fastneeded -- cowswapped }
 		end
 	end
 
-	// go through global VAD LRU list and invalidate PTEs in order to try and
-	// place more pages on the slow and fast evictable lists.
+	// IPL still raised...
 
-	auto vad
-	MmVADListHead@ vad!
-
-	while (vad@)
-		if (fastneeded@ ~~)
-			if (slowneeded@ ~~)
-				ipl@ KeIPLLower
-
-				return
-			end
-		end
-
-		// if we need slow and fast pages, try this VAD.
-
-		// if we only need fast pages, only try this VAD if it's a
-		// memory-mapped file.
-
-		// if we only need slow pages, try this VAD if it's either anonymous
-		// or is (or has ever been) a COW-mapped file (VM quota charged).
-
-		auto sectionobject
-		vad@ MmVAD_SectionObject + @ sectionobject!
-
-		if (sectionobject@ MmSection_NoCommit + @ ~~)
-			auto asid
-			vad@ MmVAD_ProcessObject + @ KeProcess_ASID + @ asid!
-
-			auto pdir
-			vad@ MmVAD_ProcessObject + @ KeProcess_PageDirectory + @ pdir!
-
-			auto skip
-			1 skip!
-
-			if (fastneeded@)
-				if (sectionobject@ MmSection_FileObject + @)
-					0 skip!
-				end
-			end
-
-			if (skip@)
-				if (slowneeded@)
-					if (sectionobject@ MmSection_AnonSize + @)
-						0 skip!
-					end elseif (vad@ MmVAD_ChargeVMQuota + @)
-						0 skip!
-					end
-				end
-			end
-
-			if (skip@ ~~)
-				vad@ MmVAD_ProcessObject + @ MmVADListTryLock skip!
-
-				if (skip@)
-					// locked it, yeet this one
-
-					ipl@ KeIPLLower
-
-					auto vaddr
-					vad@ MmVAD_StartVA + @ vaddr!
-
-					auto endva
-					vad@ MmVAD_FurthestExtentMapped + @ endva!
-
-					auto phyaddr
-					auto pfdbe
-					auto oldcount
-
-					while (vaddr@ endva@ <=)
-						// use skip to hold ok
-
-						// XXX this is actually BROKEN with modified PTEs!
-						// it leaves the pointer from the modified PFDBE to
-						// this PTE intact which is incorrect! I will fix this
-						// as part of the working set overhaul (which is
-						// getting moved WAY up on the schedule)
-
-						auto pteaddr
-
-						vaddr@ // vaddr
-						pdir@ // pagemap
-						MmVirtualtoPTEAddress skip! pteaddr!
-
-						if (skip@ ~~)
-							pteaddr@ // pteaddr
-							MmPTEInterpret skip! drop phyaddr!
-
-							if (skip@ ~~)
-								// valid. invalidate if not COW, OR if we have
-								// slow pages left to evict. delete PTE unless
-								// COW.
-
-								phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-								if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-									if (slowneeded@)
-										// found a COW page! invalidate and swap out immediately
-
-										0 // phyaddr
-										0 // flags
-										vaddr@ // vaddr
-										pteaddr@ // pteaddr
-										asid@ // asid
-										MmPTEUpdate drop drop drop
-
-										auto pno
-										phyaddr@ IDENTITYSPACE | // pageframe
-										IOSwapPageWrite skip! pno!
-
-										if (skip@)
-											// TODO don't crash here
-											skip@ "Failed to swap out COW page (%i). Try expanding the swapfile!\n" KeCrash
-										end
-
-										1 cowswapped +=
-										1 slowneeded -=
-
-										phyaddr@ PAGESHIFT >> MmPageFree
-
-										pno@ PAGESHIFT << PTE_INSWAP | pteaddr@!
-									end
-								end else
-									0 // phyaddr
-									0 // flags
-									vaddr@ // vaddr
-									pteaddr@ // pteaddr
-									asid@ // asid
-									MmPTEUpdate drop drop drop
-
-									IPLDPC KeIPLRaise ipl!
-
-									pfdbe@ MmEvictablePageDereference oldcount!
-
-									if (oldcount@ 1 ==)
-										// we managed to put this page on a list!
-
-										if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
-											if (fastneeded@)
-												1 fastneeded -=
-											end
-										end else
-											if (slowneeded@)
-												1 slowneeded -=
-											end
-										end
-									end
-
-									ipl@ KeIPLLower
-
-									pteaddr@ // pteaddr
-									vaddr@ // vaddr
-									pdir@ // pagemap
-									MmPTEDelete drop
-								end
-							end
-						end
-
-						PAGESIZE vaddr +=
-					end
-
-					IPLDPC KeIPLRaise ipl!
-
-					vad@ MmVAD_ProcessObject + @ MmVADListUnlock
-				end
-			end
-		end
-
-		vad@ MmVAD_NextGlobal + @ vad!
-	end
-
-	ipl@ KeIPLLower
+	"MmPopulateLists: TODO trim working sets\n" KeCrash
 end
 
 fn MmZeroPageWorker { -- }

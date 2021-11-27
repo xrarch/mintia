@@ -104,12 +104,10 @@ fn MmWorkingSetTrim { pages process -- trimmed }
 end
 
 fn MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
-	"MmWorkingSetEntryInsert: REVIEW ME\n" KeCrash
-
 	// caller must create the associated PTE before calling this function.
-	// XXX is it before or after? update this comment when we find out
 
 	// increments the working set size.
+	// does NOT charge working set quota.
 
 	if (DEBUGCHECKS)
 		if (vaddr@ PAGEOFFSETMASK &)
@@ -130,8 +128,6 @@ fn MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
 end
 
 fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
-	"MmWorkingSetEntryReserve: REVIEW ME\n" KeCrash
-
 	// first we check to see if the working set can take a page:
 	//
 	// - if the working set size is below the minimum, it can.
@@ -265,10 +261,6 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 			end
 		end
 
-		if (wsli@ process@ PsProcess_WorkingSetMaximumIndex + @ >)
-			wsli@ process@ PsProcess_WorkingSetMaximumIndex + !
-		end
-
 		0 wsleptr@!
 
 		return
@@ -278,8 +270,6 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 end
 
 fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
-	"MmWorkingSetArrayExpand: unreachable\n" KeCrash
-
 	// first we have to find the first zero pointer in the process
 	// PsProcess_WorkingSetListPointers array. if there is none, we've hit the
 	// capacity of the working set list data structure and must count that as
@@ -311,6 +301,7 @@ fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
 				return
 			end
 
+			tab@ wsleptr!
 			tab@ tabptr@!
 
 			MMWORKINGSETENTRIESPERTABLE 1 - count!
@@ -340,6 +331,7 @@ fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
 				end
 			end
 
+			last@ process@ PsProcess_WorkingSetMaximumIndex + !
 			last@ process@ PsProcess_WorkingSetFreeListHead + !
 
 			return
@@ -354,8 +346,6 @@ fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
 end
 
 fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
-	"MmWorkingSetEntryReplace: REVIEW ME\n" KeCrash
-
 	// find a working set entry to replace.
 
 	auto hint
@@ -427,8 +417,6 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 end
 
 fn MmWorkingSetEntryRemove { wsleptr process -- }
-	"MmWorkingSetEntryRemove: REVIEW ME\n" KeCrash
-
 	// remove the specified entry from the working set. deletes the PTE unless
 	// COW.
 
@@ -519,9 +507,9 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 	end
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-		// create transition PTE and link back
+		// COW page. create transition PTE so we can soft-fault it back in
+		// later.
 
-		pteaddr@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
 		phyaddr@ PTE_TRANSITION | pteaddr@!
 	end else
 		pteaddr@ // pteaddr
@@ -547,8 +535,6 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 end
 
 fn MmWorkingSetEntryFindByIndex { wsli process -- wsleptr ok }
-	"MmWorkingSetEntryFindByIndex: REVIEW ME\n" KeCrash
-
 	// look up a working set index in the working set and return the pointer.
 	// return -1 in ok if the index is beyond the end of valid indices.
 
@@ -585,17 +571,16 @@ fn MmWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok }
 
 	// caller must make sure the vaddr points to a physical page frame.
 
-	// look up vaddr in process's pagemap, if it's not valid we know it's not
-	// in the working set.
-
 	if (DEBUGCHECKS)
 		if (vaddr@ PAGEOFFSETMASK &)
 			"MmWorkingSetEntryFindByVirtualAddress: unaligned vaddr\n" KeCrash
 		end
 	end
 
-	auto pteaddr
+	// look up vaddr in process's pagemap, if it's not valid we know it's not
+	// in the working set.
 
+	auto pteaddr
 	vaddr@ // vaddr
 	process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
 	MmVirtualtoPTEAddress ok! pteaddr!
@@ -679,11 +664,8 @@ fn MmWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok }
 end
 
 fn MmWorkingSetEntryFree { wsli wsleptr process -- }
-	"MmWorkingSetEntryFree: REVIEW ME\n" KeCrash
-
 	// place a working set entry on the free list.
 
 	process@ PsProcess_WorkingSetFreeListHead + @ PAGESHIFT << wsleptr@!
-
 	wsli@ process@ PsProcess_WorkingSetFreeListHead + !
 end

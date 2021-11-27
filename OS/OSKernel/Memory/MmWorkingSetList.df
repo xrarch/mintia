@@ -73,8 +73,8 @@ fn MmWorkingSetListInitialize { process -- ok }
 	memset
 end
 
-// all working set manipulation functions assume the caller took care of the
-// necessary locking.
+// unless explicitly stated otherwise, all working set manipulation functions
+// assume the caller took care of the necessary locking.
 
 fn MmWorkingSetListFree { process -- }
 	auto count
@@ -101,6 +101,64 @@ fn MmWorkingSetTrim { pages process -- trimmed }
 	// of pages trimmed.
 
 	"MmWorkingSetTrim: TODO\n" KeCrash
+end
+
+fn MmWorkingSetTrimRange { startva endva process -- }
+	// trim any entries between startva and endva out of the working set.
+
+	auto wsli
+	0 wsli!
+
+	auto tabptr
+	process@ PsProcess_WorkingSetListPointers + tabptr!
+
+	auto wsleptr
+	tabptr@@ wsleptr!
+
+	auto wsle
+
+	auto leftintable
+	MMWORKINGSETENTRIESPERTABLE leftintable!
+
+	auto maxi
+	process@ PsProcess_WorkingSetMaximumIndex + @ maxi!
+
+	while (wsli@ maxi@ <=)
+		if (leftintable@ ~~)
+			4 tabptr +=
+			tabptr@@ wsleptr!
+			MMWORKINGSETENTRIESPERTABLE leftintable!
+		end
+
+		wsleptr@@ wsle!
+
+		if (wsle@ MMWORKINGSETENTRY_VALID &)
+			wsle@ PAGENUMBERMASK & wsle!
+
+			if (wsle@ startva@ >=)
+				if (wsle@ endva@ <)
+					// found one, remove it
+
+					wsleptr@ // wsleptr
+					process@ // process
+					MmWorkingSetEntryRemove
+
+					wsli@ // wsli
+					wsleptr@ // wsleptr
+					process@ // process
+					MmWorkingSetEntryFree
+
+					1 // charge
+					process@ PsProcess_QuotaBlock + @ // quotablock
+					MmQuotaBlockUnchargeWorkingSet
+				end
+			end
+		end
+
+		1 leftintable -=
+		4 wsleptr +=
+		1 wsli +=
+	end
 end
 
 fn MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
@@ -347,6 +405,8 @@ end
 
 fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 	// find a working set entry to replace.
+
+	0 ok!
 
 	auto hint
 	process@ PsProcess_WorkingSetReplacementIndex + @ hint!

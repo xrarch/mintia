@@ -6,6 +6,7 @@ extern MmWorkingSetListInitialize { process -- ok }
 extern MmWorkingSetListFree { process -- }
 
 extern MmWorkingSetTrim { pages process -- trimmed }
+extern MmWorkingSetTrimRange { startva endva process -- }
 
 extern MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
 extern MmWorkingSetEntryReserve { process -- wsli wsleptr ok }

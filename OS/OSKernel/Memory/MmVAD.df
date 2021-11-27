@@ -429,6 +429,13 @@ fn MmVADUnmap { vad processobject -- }
 	auto commitcharge
 	vad@ MmVAD_SectionObject + @ MmSection_NoCommit + @ ~~ commitcharge!
 
+	if (commitcharge@)
+		vad@ MmVAD_StartVA + @ // startva
+		vad@ MmVAD_EndVA + @ // endva
+		processobject@ // process
+		MmWorkingSetTrimRange
+	end
+
 	auto ok
 
 	auto phyaddr
@@ -438,64 +445,75 @@ fn MmVADUnmap { vad processobject -- }
 
 	auto pfdbe
 
-	while (vaddr@ max@ <=)
-		// XXX this is actually BROKEN with modified PTEs!
-		// it leaves the pointer from the modified PFDBE to
-		// this PTE intact which is incorrect! I will fix this
-		// as part of the working set overhaul (which is
-		// getting moved WAY up on the schedule)
+	if (vad@ MmVAD_ChargeVMQuota + @ commitcharge@ ~~ ||)
+		// this means that the VAD is or was mapped COW. we need to traverse
+		// the page tables to find transition and swap PTEs to free.
 
-		vaddr@ // vaddr
-		pdir@ // pagemap
-		MmVirtualtoPTEAddress ok! pteaddr!
+		// also we need to traverse the page tables when its a mapped
+		// character device.
 
-		if (ok@ ~~)
-			pteaddr@@ pte!
-
-			0 // phyaddr
-			0 // flags
+		while (vaddr@ max@ <=)
 			vaddr@ // vaddr
-			pteaddr@ // pteaddr
-			asid@ // asid
-			MmPTEUpdate ok! flags! phyaddr!
+			pdir@ // pagemap
+			MmVirtualtoPTEAddress ok! pteaddr!
 
-			if (flags@ PTE_V &)
-				// unmapped a page, do accounting
+			if (ok@ ~~)
+				pteaddr@@ pte!
 
-				if (commitcharge@)
-					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+				0 // phyaddr
+				0 // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				asid@ // asid
+				MmPTEUpdate ok! flags! phyaddr!
 
-					// dereference page or free immediately if COW
+				if (vad@ MmVAD_ChargeVMQuota + @)
+					if (DEBUGCHECKS)
+						if (flags@ PTE_V &)
+							"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
+						end
+					end
 
-					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-						// is COW, free now
+					if (pte@ PTE_INSWAP &)
+						// free COW page in swap
+
+						pte@ PAGESHIFT >> IOSwapPageFree
+					end elseif (pte@ PTE_TRANSITION &)
+						// free COW page
+
+						pte@ PAGENUMBERMASK & phyaddr!
+
+						phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+						auto rs
+						HALCPUInterruptDisable rs!
+						
+						if (DEBUGCHECKS)
+							if (pfdbe@ MmPageFrameEntryEvictable_References + @)
+								"MmVADUnmap: COW page had references\n" KeCrash
+							end
+						end
+
+						pfdbe@ MmEvictablePageRemove
+
+						rs@ HALCPUInterruptRestore
 
 						phyaddr@ PAGESHIFT >> MmPageFree
-					end else
-						// not COW, deref
-
-						pfdbe@ MmEvictablePageDereference drop
 					end
 				end
-			end else
-				if (pte@ PTE_INSWAP &)
-					// free COW page in swap
 
-					pte@ PAGESHIFT >> IOSwapPageFree
+				if (pte@)
+					// there was a PTE containing some information, so delete it.
+
+					pteaddr@ // pteaddr
+					vaddr@ // vaddr
+					pdir@ // pagemap
+					MmPTEDelete drop
 				end
 			end
 
-			if (pte@)
-				// there was a PTE containing some information, so delete it.
-
-				pteaddr@ // pteaddr
-				vaddr@ // vaddr
-				pdir@ // pagemap
-				MmPTEDelete drop
-			end
+			PAGESIZE vaddr +=
 		end
-
-		PAGESIZE vaddr +=
 	end
 
 	if (vad@ processobject@ PsProcess_VADLookupHint + @ ==)

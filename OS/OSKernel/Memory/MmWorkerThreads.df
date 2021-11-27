@@ -11,6 +11,8 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Process.h"
+
 #include "<inc>/IO.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
@@ -74,14 +76,12 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		ipl@ KeIPLLower
 
-		1 failcount +=
-
-		if (failcount@ 8 >=)
+		if (failcount@ 4 >=)
 			// we've been here a lot of times...
-			// giving up the processor for 25ms might untangle things and help
+			// giving up the processor for 50ms might untangle things and help
 			// us evict more pages...
 
-			25 // interval
+			50 // interval
 			KERNELMODE // waitmode
 			0 // alertable
 			KeThreadSleep ok!
@@ -108,13 +108,12 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		if (reason@ STATUS_WAIT_TIMEOUT ~=)
 			if (sleptonce@ ~~)
-				if (IOCacheModifiedPageListHead@)
-					// there's some modified page frames.
+				if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ 3 / >=)
+					// there's IOCachePagesModifiedMaximum/3 or more modified page frames.
 					// go to sleep for 50ms with the hope that the modified page writer will have freed some up by
 					// the time we wake up.
 
 					// we may do this only once per eviction period.
-
 					1 sleptonce!
 
 					50 // interval
@@ -142,11 +141,11 @@ fn MmEvictionWorker { context1 context2 -- }
 		// attempt to collect enough pages in both lists to satisfy these
 		// targets
 
-		auto succeedcount
-
-		slowcount@ // slowneeded
-		fastcount@ // fastneeded
+		MmPageFreeCount@ MMMUSTSUCCEEDPAGES 2 * < // dire
+		fastcount@ slowcount@ + // pagecount
 		MmPopulateLists
+
+		auto succeedcount
 
 		if (reason@ STATUS_WAIT_TIMEOUT ~=)
 			auto done
@@ -160,13 +159,13 @@ fn MmEvictionWorker { context1 context2 -- }
 				ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
 			end
 
+			if (succeedcount@)
+				0 failcount!
+			end
+
 			if (done@)
 				// free page count became sufficient while evicting
 				continue
-			end
-
-			if (succeedcount@)
-				0 failcount!
 			end
 
 			slowcount@ // trycount
@@ -178,57 +177,94 @@ fn MmEvictionWorker { context1 context2 -- }
 				ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
 			end
 
+			if (succeedcount@)
+				0 failcount!
+			end
+
 			if (done@)
 				continue
 			end
 
-			if (succeedcount@)
-				0 failcount!
-			end
+			1 failcount +=
 		end
 	end
 end
 
-fn MmPopulateLists { slowneeded fastneeded -- }
-	// aims towards getting at least slowneeded and fastneeded pages in each
-	// list.
+fn MmPopulateLists { dire pagecount -- }
+	auto ok
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
 	// check if we need to populate the lists at all judging by their current
-	// sizes and the given slowneeded and fastneeded.
+	// sizes and the given pagecount.
 
-	if (fastneeded@ MmEvictableFastPageCount@ >)
-		MmEvictableFastPageCount@ fastneeded -=
+	auto fcmp
+	if (IOCachePagesLowWatermark@ MmEvictableFastPageCount@ >=)
+		0 fcmp!
 	end else
-		0 fastneeded!
+		MmEvictableFastPageCount@ IOCachePagesLowWatermark@ - fcmp!
 	end
 
-	if (slowneeded@ MmEvictableSlowPageCount@ >)
-		MmEvictableSlowPageCount@ slowneeded -=
-	end else
-		0 slowneeded!
+	if (fcmp@ MmEvictableSlowPageCount@ + pagecount@ >=)
+		ipl@ KeIPLLower
+
+		return
 	end
 
-	if (fastneeded@ ~~)
-		if (slowneeded@ ~~)
-			ipl@ KeIPLLower
+	fcmp@ MmEvictableSlowPageCount@ + pagecount -=
 
-			return
+	ipl@ KeIPLLower
+
+	PsProcessListLock ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmPopulateLists: failed to lock process list\n" KeCrash
 		end
 	end
 
-	fastneeded@
-	slowneeded@
+	auto process
+	PsProcessListHead@ process!
 
-	MmEvictableFastPageCount@
-	MmEvictableSlowPageCount@
-	"%d slow %d fast; wants %d slow %d fast\n" KeCrash
+	auto head
+	process@ head!
 
-	// IPL still raised...
+	auto nprocess
 
-	"MmPopulateLists: TODO trim working sets\n" KeCrash
+	while (process@)
+		process@ PsProcess_GlobalListNext + @ nprocess!
+
+		if (process@ PsProcess_WorkingSetSize + @)
+			process@ MmWorkingSetLockTimeout ok!
+
+			if (ok@ ~~)
+				dire@ // dire
+				pagecount@ // pages
+				process@ // process
+				MmWorkingSetTrim pagecount -=
+
+				process@ MmWorkingSetUnlock
+
+				if (pagecount@ ~~)
+					break
+				end
+
+				if (process@ PsProcessListTail@ ~=)
+					process@ PsProcessRemove
+					process@ PsProcessInsert
+				end
+			end
+		end
+
+		if (nprocess@ head@ ==)
+			break
+		end
+
+		nprocess@ process!
+	end
+
+	PsProcessListUnlock
 end
 
 fn MmZeroPageWorker { -- }
@@ -249,9 +285,9 @@ fn MmZeroPageWorker { -- }
 
 			MmPageFreeListHead@ pfdbe!
 
-			if (pfdbe@ ~~)
-				// make sure the free list didnt become empty in that brief timespan
+			// make sure the free list didnt become empty in that brief timespan
 
+			if (pfdbe@ ~~)
 				rs@ HALCPUInterruptRestore
 
 				continue

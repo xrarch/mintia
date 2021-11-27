@@ -91,21 +91,23 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	auto process
 	KeProcessCurrent process!
 
-	if (0)
-		if (MmEventLowMemory KeDispatchIsSignaled)
-			if (process@ PsProcess_ThrottleFaultCount + @ 32 >=)
-				// system is in a low memory state and this process has hard-
-				// -faulted 32 times, throttle this thread for the same number
-				// of milliseconds multiplied by two (but capped at 300)
+	if (MmEventLowMemory KeDispatchIsSignaled)
+		if (process@ PsProcess_ThrottleFaultCount + @ 100 >=)
+			// system is in a low memory state and this process has hard-
+			// -faulted 100 times, throttle this thread for 50ms
 
-				process@ PsProcess_ThrottleFaultCount + @ 2 * 300 min // ms
-				KERNELMODE // waitmode
-				0 // alertable
-				KeThreadSleep drop
-			end
-		end else
-			0 process@ PsProcess_ThrottleFaultCount + !
+			50 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+		end elseif (process@ PsProcess_ThrottleFaultCount + @ 50 >=)
+			25 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
 		end
+	end else
+		0 process@ PsProcess_ThrottleFaultCount + !
 	end
 
 	process@ MmVADListLock drop // this will NEVER fail since we're at IPLAPC
@@ -155,6 +157,11 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 			if (flags@ PTE_TRANSITION PTE_INSWAP | &)
 				// COW page. we need to do work here
+
+				auto vad
+				vaddr@ // vaddr
+				process@ // process
+				MmFaultParameters drop vad! drop drop
 
 				flags@ PAGENUMBERMASK & phyaddr!
 
@@ -219,8 +226,14 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 				wsli@ pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
 
+				PTE_V flags!
+
+				if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
+					PTE_W flags |=
+				end
+
 				phyaddr@ // phyaddr
-				PTE_V PTE_W | // flags
+				flags@ // flags
 				vaddr@ // vaddr
 				pteaddr@ // pteaddr
 				process@ KeProcess_ASID + @ // asid
@@ -551,6 +564,7 @@ fn MmWriteFault { vaddr process -- signal }
 		MmAnonymousPageAlloc ok! cowaddr! cowpfdbe!
 
 		if (ok@)
+			OSSIGNAL_KILL signal!
 			return
 		end
 

@@ -59,6 +59,9 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 	auto ent
 	vaddr@ 22 >> 2 << pagemap@ + ent!
 
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	auto pt
 	ent@@ 5 >> PAGESHIFT << pt!
 
@@ -68,6 +71,8 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 		// need to allocate this page table.
 		// dip into MUSTSUCCEEDL2 pool to increase odds of successfully
 		// satisfying a page fault in high memory pressure conditions.
+
+		rs@ HALCPUInterruptRestore
 
 		auto flags
 
@@ -93,13 +98,15 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
+
+		rs@ HALCPUInterruptRestore
 	end
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
 
 	if (DEBUGCHECKS)
 		if (pteaddr@@)
-			pteaddr@@ vaddr@ "MmPTECreate: 0x%08x already has a PTE (pte=0x%08x)!\n" KeCrash
+			pteaddr@@ vaddr@ "MmPTECreate: 0x%08x already has a PTE (pte=0x%08x)! %d\n" KeCrash
 		end
 	end
 end
@@ -124,6 +131,9 @@ fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
 	auto pfdbe
 	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	auto oldcount
 	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ oldcount!
 
@@ -144,7 +154,11 @@ fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
 		// zero out the pde for the page table.
 		0 ent@!
 
+		rs@ HALCPUInterruptRestore
+
 		pfn@ MmPageFree
+	end else
+		rs@ HALCPUInterruptRestore
 	end
 end
 

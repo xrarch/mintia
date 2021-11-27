@@ -92,50 +92,6 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 	handletable@ processobject@ PsProcess_HandleTable + !
 
-	auto pid
-
-	// XXX this may be VERY racey,
-	// should probably take a mutex to lock out
-	// any operations that take a process's PID
-	// until this process is fully initialized.
-
-	processobject@ // entryvalue
-	PsProcessTable@ // handletable
-	0 // locked
-	ExHandleCreate ok! drop pid!
-
-	if (ok@)
-		quotablock@ MmQuotaBlockDereference
-
-		if (initial@ ~~)
-			0 handletable@ ExHandleTableDelete
-		end
-
-		processobject@ ObObjectDeallocate
-
-		return
-	end
-
-	pid@ processobject@ PsProcess_PID + !
-
-	// put it on the global process list
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto h
-
-	PsProcessListHead@ h!
-
-	if (h@)
-		processobject@ h@ PsProcess_GlobalListPrev + !
-		h@ processobject@ PsProcess_GlobalListNext + !
-	end
-
-	processobject@ PsProcessListHead!
-
-	rs@ HALCPUInterruptRestore
-
 	name@ // name
 	pid@ // asid
 	processobject@ // process
@@ -153,13 +109,82 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 		MmProcessInitialize ok!
 
 		if (ok@)
-			// just dereference and let PsProcessObjectDelete take care of the cleanup
+			processobject@ KeProcessUninitialize
 
-			processobject@ ObObjectDereferenceByPointer drop
+			quotablock@ MmQuotaBlockDereference
+
+			0 handletable@ ExHandleTableDelete
+
+			processobject@ ObObjectDeallocate
 
 			return
 		end
+	end else
+		// so that we don't try to trim it
+		0 processobject@ PsProcess_WorkingSetSize + !
 	end
+
+	// XXX this may be VERY racey,
+	// should probably take a mutex to lock out
+	// any operations that take a process's PID
+	// until this process is fully initialized.
+
+	auto pid
+	processobject@ // entryvalue
+	PsProcessTable@ // handletable
+	0 // locked
+	ExHandleCreate ok! drop pid!
+
+	if (ok@)
+		if (initial@ ~~)
+			processobject@ MmProcessUninitialize drop
+		end
+
+		processobject@ KeProcessUninitialize
+
+		quotablock@ MmQuotaBlockDereference
+
+		if (initial@ ~~)
+			0 handletable@ ExHandleTableDelete
+		end
+
+		processobject@ ObObjectDeallocate
+
+		return
+	end
+
+	pid@ processobject@ PsProcess_PID + !
+
+	// put it on the global process list
+
+	PsProcessListLock ok!
+
+	if (ok@)
+		pid@ // handle
+		PsProcessTable@ // handletable
+		0 // locked
+		ExHandleDelete drop drop drop
+
+		if (initial@ ~~)
+			processobject@ MmProcessUninitialize drop
+		end
+
+		processobject@ KeProcessUninitialize
+
+		quotablock@ MmQuotaBlockDereference
+
+		if (initial@ ~~)
+			0 handletable@ ExHandleTableDelete
+		end
+
+		processobject@ ObObjectDeallocate
+
+		return
+	end
+
+	processobject@ PsProcessInsert
+
+	PsProcessListUnlock
 end
 
 fn PsProcessCreate { sectionhandle inherithandles permissions name -- processhandle ok }
@@ -315,4 +340,48 @@ end
 
 fn PsProcessGetOwner { process -- owninguser }
 	process@ PsProcess_OwningUser + @ owninguser!
+end
+
+fn PsProcessRemove { process -- }
+	// assumes process list locked
+
+	auto ls
+	process@ PsProcess_GlobalListPrev + @ ls!
+
+	auto ns
+	process@ PsProcess_GlobalListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ PsProcess_GlobalListNext + !
+	end else
+		ns@ PsProcessListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ PsProcess_GlobalListPrev + !
+	end else
+		ls@ PsProcessListTail!
+	end
+end
+
+fn PsProcessInsert { process -- }
+	// assumes process list locked
+
+	auto t
+
+	PsProcessListTail@ t!
+
+	if (t@ ~~)
+		0 process@ PsProcess_GlobalListNext + !
+		0 process@ PsProcess_GlobalListPrev + !
+
+		process@ PsProcessListHead!
+		process@ PsProcessListTail!
+	end else
+		0 process@ PsProcess_GlobalListNext + !
+
+		t@ process@ PsProcess_GlobalListPrev + !
+		process@ t@ PsProcess_GlobalListNext + !
+		process@ PsProcessListTail!
+	end
 end

@@ -74,11 +74,19 @@ endstruct
 externptr PsProcessObjectType
 externptr PsThreadObjectType
 externptr PsProcessTable
+
 externptr PsProcessListHead
+externptr PsProcessListTail
+
 externptr PsSystemProcess
 
 externptr PsOSDLLInformation
 externptr PsOSDLLSectionObject
+
+extern PsProcessListLock { -- ok }
+extern PsProcessListTryLock { -- ok }
+extern PsProcessListIsLocked { -- locked }
+extern PsProcessListUnlock { -- }
 
 extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
@@ -94,3 +102,6 @@ extern PsProcessObjectDelete { object -- }
 extern PsThreadObjectDelete { object -- }
 
 extern PsProcessGetOwner { process -- owninguser }
+
+extern PsProcessRemove { process -- }
+extern PsProcessInsert { process -- }

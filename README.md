@@ -20,12 +20,12 @@ WIP: MINTIA is not currently in an even minimally usable state.
 10. AisixFS read-only support.
 11. Demand paging, memory-mapped files, etc.
 12. Userspace dynamic linking.
+13. Swap files and working set management.
 
 ## Planned features (in rough descending order of priority)
 
-1. Swap files. (in progress)
-2. Command-line interface.
-3. AisixFS write support, FAT32 driver
-4. Mac OS 9-like window system.
+1. Command-line interface.
+2. AisixFS write support, FAT32 driver
+3. Mac OS 9-like window system.
 
 ![Running](https://i.imgur.com/ITFIXBl.png)

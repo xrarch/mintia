@@ -20,7 +20,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-const MMSECTIONMULTILEVELTHRESHOLD 0x800000
+const MMSECTIONMULTILEVELTHRESHOLD 0x200000
 
 fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	// if anonymous, free all associated page frames (in main memory and in swap).
@@ -132,12 +132,14 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 							1 j -=
 						end
 
-						multilevel@ MmFree
+						multilevel@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFree
 					end
 
 					4 ppt +=
 					1 count -=
 				end
+
+				object@ MmSection_AnonPrototypePageTable + @ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFree
 			end else
 				anonsize@ PAGESHIFT >> count!
 
@@ -169,9 +171,9 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 					4 ppt +=
 					1 count -=
 				end
-			end
 
-			object@ MmSection_AnonPrototypePageTable + @ MmFree
+				object@ MmSection_AnonPrototypePageTable + @ MmFree
+			end
 		end
 
 		object@ MmSectionPPTUnlock
@@ -531,19 +533,16 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		// needs to be created
 
 		if (multilevel@)
-			PAGESIZE // bytes
-			'mPPT' // tag
-			MmAllocWithTag ok! ppt!
+			ZEROMUST CANBLOCK | // priority
+			MmPageAlloc ok! ppt! drop
 
 			if (ok@)
 				sectionobject@ MmSectionPPTUnlock
 				return
 			end
 
-			ppt@ // ptr
-			PAGESIZE // size
-			0 // word
-			memset
+			PAGESHIFT ppt <<=
+			IDENTITYSPACE ppt |=
 		end else
 			// create linearly
 			anonsize@ PAGESHIFT >> 2 << // bytes
@@ -569,21 +568,16 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		sectionoffset@ PDSHIFT >> 2 << ppt@ + pde!
 
 		if (pde@@ ~~)
-			// need to allocate this level
-
-			PAGESIZE // bytes
-			'nPPT' // tag
-			MmAllocWithTag ok! ppt!
+			ZEROMUST CANBLOCK | // priority
+			MmPageAlloc ok! ppt! drop
 
 			if (ok@)
 				sectionobject@ MmSectionPPTUnlock
 				return
 			end
 
-			ppt@ // ptr
-			PAGESIZE // size
-			0 // word
-			memset
+			PAGESHIFT ppt <<=
+			IDENTITYSPACE ppt |=
 
 			ppt@ pde@!
 		end

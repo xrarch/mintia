@@ -77,6 +77,29 @@ fn SeUserCreate { gid uid username -- user ok }
 	SeUserListUnlock
 end
 
+fn SeUserCurrentGet { -- user }
+	KeProcessCurrent PsProcess_OwningUser + @ user!
+end
+
+fn SeUserListLock { -- ok }
+	1 // alertable
+	0 // nowait
+	SeUserListRwLock // rwlock
+	ExRwLockAcquireExclusive ok!
+end
+
+fn SeUserListLockShared { -- ok }
+	1 // alertable
+	0 // nowait
+	0 // canstarve
+	SeUserListRwLock // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn SeUserListUnlock { -- }
+	SeUserListRwLock ExRwLockRelease
+end
+
 fn SeUserGetByUsername { username userlistlocked -- user ok }
 	if (userlistlocked@ ~~)
 		SeUserListLockShared ok!
@@ -139,137 +162,4 @@ fn SeUserGetByUID { uid userlistlocked -- user ok }
 	if (userlistlocked@ ~~)
 		SeUserListUnlock
 	end
-end
-
-fn SePermissionsInitialize { permissions -- ok }
-	0 ok!
-
-	auto p
-	permissions@ SePermissions_PermissionsBitmap + p!
-
-	auto m
-	p@ SEPERMISSIONSBITMAPSIZE + m!
-
-	while (p@ m@ <)
-		0 p@ sb
-
-		1 p +=
-	end
-end
-
-fn SeUserGrantPermission { permission user -- ok }
-	if (permission@ SEMAXPERMISSION >=)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
-
-	0 ok!
-
-	auto p
-	user@ SeUser_Permissions + SePermissions_PermissionsBitmap + p!
-
-	permission@ 8 / p +=
-
-	p@ gb 1 permission@ 7 & << | p@ sb
-end
-
-fn SeUserCheckPermission { permission user -- ok }
-	0 ok!
-
-	if (SYSTEMPERMISSION_SYSTEM user@ SeUserCheckPermission1)
-		return
-	end
-
-	if (permission@ user@ SeUserCheckPermission1)
-		return
-	end
-
-	STATUS_PERMISSION_DENIED ok!
-end
-
-fn SeUserCheckPermission1 { permission user -- ok }
-	auto p
-	user@ SeUser_Permissions + SePermissions_PermissionsBitmap + p!
-
-	permission@ 8 / p +=
-
-	p@ gb permission@ 7 & >> 1 & ok!
-end
-
-fn SeUserCurrentGet { -- user }
-	KeProcessCurrent PsProcess_OwningUser + @ user!
-end
-
-fn SeUserListLock { -- ok }
-	1 // alertable
-	0 // nowait
-	SeUserListRwLock // rwlock
-	ExRwLockAcquireExclusive ok!
-end
-
-fn SeUserListLockShared { -- ok }
-	1 // alertable
-	0 // nowait
-	0 // canstarve
-	SeUserListRwLock // rwlock
-	ExRwLockAcquireShared ok!
-end
-
-fn SeUserListUnlock { -- }
-	SeUserListRwLock ExRwLockRelease
-end
-
-fn SeAmIAdmin { -- admin }
-	SYSTEMPERMISSION_ADMIN // permission
-	KeProcessCurrent PsProcess_OwningUser + @ // user
-	SeUserCheckPermission admin!
-end
-
-fn SeCheckAccess { access permission -- ok }
-	STATUS_PERMISSION_DENIED ok!
-
-	if (access@ permission@ & permission@ ==)
-		0 ok!
-	end
-end
-
-fn SeCheckAccessFilesystem { access permbits owninguid owninggid user -- ok }
-	SYSTEMPERMISSION_ADMIN // permission
-	user@ // user
-	SeUserCheckPermission ok!
-
-	if (ok@ ~~)
-		return
-	end
-
-	ACCESS_ALL access &=
-
-	auto shift
-
-	if (owninguid@ user@ SeUser_UID + @ ==)
-		6 shift! // owner
-	end elseif (owninggid@ user@ SeUser_GID + @ ==)
-		3 shift! // group
-	end else
-		0 shift! // world
-	end
-
-	permbits@ shift@ >> ACCESS_ALL & permbits!
-
-	if (permbits@ access@ | permbits@ ==)
-		0 ok!
-	end
-end
-
-fn SeCheckAccessObjectUser { access object user -- ok }
-	auto obh
-	object@ ObHeader_SIZEOF - obh!
-
-	access@ // access
-	obh@ ObHeader_Permissions + @ // permbits
-	obh@ ObHeader_OwningUser + @ SeUser_UID + @ // owninguid
-	obh@ ObHeader_OwningUser + @ SeUser_GID + @ // owninggid
-	user@ // user
-	SeCheckAccessFilesystem ok!
 end

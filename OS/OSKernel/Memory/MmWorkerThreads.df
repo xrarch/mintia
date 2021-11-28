@@ -15,7 +15,7 @@
 
 #include "<inc>/IO.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
+#include "<ll>/OSDLL/OS.h"
 
 // fraction over 128 of the number of evicted pages that should be written to
 // swap.
@@ -46,15 +46,13 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		KERNELMODE // waitmode
 		0 // alertable
-		60000 // timeout (evict up to the high watermark every 60 seconds)
+		OSWAIT_TIMEOUTINFINITE // timeout
 		MmEventLowMemory // object
 		KeThreadWaitForObject reason!
 
 		if (DEBUGCHECKS)
 			if (reason@)
-				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
-				end
+				reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
 			end
 		end
 
@@ -106,37 +104,35 @@ fn MmEvictionWorker { context1 context2 -- }
 		auto fastcount
 		evictcount@ slowcount@ - fastcount!
 
-		if (reason@ STATUS_WAIT_TIMEOUT ~=)
-			if (sleptonce@ ~~)
-				if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ 3 / >=)
-					// there's IOCachePagesModifiedMaximum/3 or more modified page frames.
-					// go to sleep for 50ms with the hope that the modified page writer will have freed some up by
-					// the time we wake up.
+		if (sleptonce@ ~~)
+			if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ 3 / >=)
+				// there's IOCachePagesModifiedMaximum/3 or more modified page frames.
+				// go to sleep for 50ms with the hope that the modified page writer will have freed some up by
+				// the time we wake up.
 
-					// we may do this only once per eviction period.
-					1 sleptonce!
+				// we may do this only once per eviction period.
+				1 sleptonce!
 
-					50 // interval
-					KERNELMODE // waitmode
-					0 // alertable
-					KeThreadSleep ok!
+				50 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep ok!
 
-					if (DEBUGCHECKS)
-						if (ok@ STATUS_WAIT_TIMEOUT ~=)
-							ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
-						end
+				if (DEBUGCHECKS)
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
 					end
-
-					continue
 				end
-			end
 
-			// ensure we can progress by putting a minimum on these
-			if (MmSwappiness@)
-				slowcount@ 20 max slowcount!
+				continue
 			end
-			fastcount@ 32 max fastcount!
 		end
+
+		// ensure we can progress by putting a minimum on these
+		if (MmSwappiness@)
+			slowcount@ 20 max slowcount!
+		end
+		fastcount@ 32 max fastcount!
 
 		// attempt to collect enough pages in both lists to satisfy these
 		// targets
@@ -147,46 +143,44 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		auto succeedcount
 
-		if (reason@ STATUS_WAIT_TIMEOUT ~=)
-			auto done
+		auto done
 
-			fastcount@ // trycount
-			1 // fast
-			MmEvictableFastPageListHead // listhead
-			MmEvictFromList ok! done! succeedcount!
+		fastcount@ // trycount
+		1 // fast
+		MmEvictableFastPageListHead // listhead
+		MmEvictFromList ok! done! succeedcount!
 
-			if (ok@)
-				ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
-			end
-
-			if (succeedcount@)
-				0 failcount!
-			end
-
-			if (done@)
-				// free page count became sufficient while evicting
-				continue
-			end
-
-			slowcount@ // trycount
-			0 // fast
-			MmEvictablePageListHead // listhead
-			MmEvictFromList ok! done! succeedcount!
-
-			if (ok@)
-				ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
-			end
-
-			if (succeedcount@)
-				0 failcount!
-			end
-
-			if (done@)
-				continue
-			end
-
-			1 failcount +=
+		if (ok@)
+			ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
 		end
+
+		if (succeedcount@)
+			0 failcount!
+		end
+
+		if (done@)
+			// free page count became sufficient while evicting
+			continue
+		end
+
+		slowcount@ // trycount
+		0 // fast
+		MmEvictablePageListHead // listhead
+		MmEvictFromList ok! done! succeedcount!
+
+		if (ok@)
+			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
+		end
+
+		if (succeedcount@)
+			0 failcount!
+		end
+
+		if (done@)
+			continue
+		end
+
+		1 failcount +=
 	end
 end
 

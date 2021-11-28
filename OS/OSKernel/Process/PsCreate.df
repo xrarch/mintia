@@ -92,38 +92,6 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 	handletable@ processobject@ PsProcess_HandleTable + !
 
-	name@ // name
-	pid@ // asid
-	processobject@ // process
-	KeProcessInitialize ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			"PsProcessCreate: failed to initialize process\n" KeCrash
-		end
-	end
-
-	if (initial@ ~~)
-		sectionobject@ // sectionobject
-		processobject@ // process
-		MmProcessInitialize ok!
-
-		if (ok@)
-			processobject@ KeProcessUninitialize
-
-			quotablock@ MmQuotaBlockDereference
-
-			0 handletable@ ExHandleTableDelete
-
-			processobject@ ObObjectDeallocate
-
-			return
-		end
-	end else
-		// so that we don't try to trim it
-		0 processobject@ PsProcess_WorkingSetSize + !
-	end
-
 	// XXX this may be VERY racey,
 	// should probably take a mutex to lock out
 	// any operations that take a process's PID
@@ -137,16 +105,10 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 	if (ok@)
 		if (initial@ ~~)
-			processobject@ MmProcessUninitialize drop
-		end
-
-		processobject@ KeProcessUninitialize
-
-		quotablock@ MmQuotaBlockDereference
-
-		if (initial@ ~~)
 			0 handletable@ ExHandleTableDelete
 		end
+
+		quotablock@ MmQuotaBlockDereference
 
 		processobject@ ObObjectDeallocate
 
@@ -155,27 +117,70 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 	pid@ processobject@ PsProcess_PID + !
 
+	name@ // name
+	pid@ // asid
+	processobject@ // process
+	KeProcessInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"PsProcessCreate: failed to initialize process\n" KeCrash
+		end
+	end
+
+	if (initial@ ~~)
+		if (DEBUGCHECKS)
+			if (pid@ ~~)
+				"PsProcessCreate: pid=0\n" KeCrash
+			end
+		end
+
+		sectionobject@ // sectionobject
+		processobject@ // process
+		MmProcessInitialize ok!
+
+		if (ok@)
+			processobject@ KeProcessUninitialize
+
+			pid@ // handle
+			PsProcessTable@ // handletable
+			0 // locked
+			ExHandleDelete drop drop drop
+
+			0 handletable@ ExHandleTableDelete
+
+			quotablock@ MmQuotaBlockDereference
+
+			processobject@ ObObjectDeallocate
+
+			return
+		end
+	end else
+		// so that we don't try to trim it
+		0 processobject@ PsProcess_WorkingSetSize + !
+	end
+
 	// put it on the global process list
 
 	PsProcessListLock ok!
 
 	if (ok@)
-		pid@ // handle
-		PsProcessTable@ // handletable
-		0 // locked
-		ExHandleDelete drop drop drop
-
 		if (initial@ ~~)
 			processobject@ MmProcessUninitialize drop
 		end
 
 		processobject@ KeProcessUninitialize
 
-		quotablock@ MmQuotaBlockDereference
+		pid@ // handle
+		PsProcessTable@ // handletable
+		0 // locked
+		ExHandleDelete drop drop drop
 
 		if (initial@ ~~)
 			0 handletable@ ExHandleTableDelete
 		end
+
+		quotablock@ MmQuotaBlockDereference
 
 		processobject@ ObObjectDeallocate
 

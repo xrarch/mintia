@@ -68,6 +68,11 @@ fn IOModifiedPageWorker { context1 context2 -- }
 	auto objecttable
 	8 alloc objecttable!
 
+	auto flushtime
+	KeTime_SIZEOF alloc flushtime!
+
+	auto flushtimesec
+
 	MmEventLowMemory objecttable@!
 	IOModifiedPageEvent objecttable@ 4 + !
 
@@ -90,7 +95,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		KERNELMODE // waitmode
 		0 // alertable
 		THREADWAITANY // waittype
-		30000 // timeout
+		4000 // timeout
 		2 // objectcount
 		objecttable@ // objecttable
 		KeThreadWaitForMultipleObjects waitok!
@@ -106,20 +111,42 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		auto writescore
 		0 writescore!
 
+		auto delayscore
+		0 delayscore!
+
+		auto failed
+
+		auto modcount
+		IOCachePagesModifiedCount@ 2 max modcount! // used for heuristics
+
 		while (1)
-			if (writescore@ 128 >=)
-				// if we tried to unsuccessfully write 128 times in a row,
-				// odds are we're stuck in an infinite loop and we
-				// need to let user threads run for a bit in order
-				// to successfully write out any more pages.
-				// go to sleep for 50ms.
+			if (writescore@ modcount@ 1 >> >=)
+				// if we tried to unsuccessfully write modcount/2 times in a
+				// row, odds are we're stuck in an infinite loop and we need
+				// to let user threads run for a bit in order to successfully
+				// write out any more pages. go to sleep for 50ms.
 
 				0 writescore!
 
-				50 // interval
-				KERNELMODE // waitmode
-				0 // alertable
-				KeThreadSleep ok!
+				if (delayscore@ modcount@ 2 >> >=
+					IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ < &&)
+					// young pages were the cause of >=50% of the failed
+					// writes. sleep for a bit longer and allow the threshold
+					// event to wake us up.
+
+					KERNELMODE // waitmode
+					0 // alertable
+					75 // timeout
+					IOModifiedPageEvent // object
+					KeThreadWaitForObject ok!
+				end else
+					50 // interval
+					KERNELMODE // waitmode
+					0 // alertable
+					KeThreadSleep ok!
+				end
+
+				0 writescore!
 
 				if (DEBUGCHECKS)
 					if (ok@ STATUS_WAIT_TIMEOUT ~=)
@@ -129,6 +156,11 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 				0 ok!
 			end
+
+			IOCachePagesModifiedCount@ 2 max modcount! // used for heuristics
+
+			flushtime@ HALRTCQuery
+			flushtime@ KeTime_SecPart + @ flushtimesec!
 
 			auto none
 			0 none!
@@ -143,29 +175,62 @@ fn IOModifiedPageWorker { context1 context2 -- }
 				IOCacheModifiedPageListHead@ pfdbe!
 
 				if (pfdbe@)
-					auto cacheblock
-					pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+					0 failed!
 
-					cacheblock@ // cacheblock
-					IOCacheInfoBlockTryLockShared ok!
+					if (flushtimesec@ pfdbe@ IOPageFrameEntryCache_LastFlushTime + @ - 5 <)
+						if (MmEventLowMemory KeDispatchIsSignaled ~~)
+							// don't flush the same page more than once every
+							// 5 seconds if we're not low on memory.
 
-					if (ok@)
-						// locked successfully
+							// XXX we wouldn't need this odd heuristic if we
+							// had a way to asynchronously write out modified
+							// pages. this is needed here because this thread
+							// will block when it writes a page and will allow
+							// user threads to run, who could potentially
+							// modify the same pages in rapid succession,
+							// preventing us from emptying the list fully, and
+							// sending us into an infinite loop of thrashing.
+							// this is likely incorrect behavior considering
+							// how much nicer this would all be if we had
+							// async page IO.
 
-						ipl@ KeIPLLower
+							1 failed!
+							1 delayscore +=
+						end
+					end
 
-						// write out page
-
-						0 // dontunbias
-						pfdbe@ // pfdbe
-						IOCachePageWriteModified drop
+					if (failed@ ~~)
+						auto cacheblock
+						pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 						cacheblock@ // cacheblock
-						IOCacheInfoBlockUnlock
+						IOCacheInfoBlockTryLockShared ok!
 
-						0 writescore!
-					end else
-						// lock failed, move this page to the tail so that we
+						if (ok@)
+							// locked successfully
+
+							ipl@ KeIPLLower
+
+							flushtimesec@ pfdbe@ IOPageFrameEntryCache_LastFlushTime + !
+
+							// write out page
+
+							0 // dontunbias
+							pfdbe@ // pfdbe
+							IOCachePageWriteModified drop
+
+							cacheblock@ // cacheblock
+							IOCacheInfoBlockUnlock
+
+							0 writescore!
+							0 delayscore!
+						end else
+							1 failed!
+						end
+					end
+
+					if (failed@)
+						// write failed, move this page to the tail so that we
 						// don't try it infinitely
 
 						if (pfdbe@ IOCacheModifiedPageListTail@ ~=)

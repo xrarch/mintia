@@ -38,10 +38,6 @@ endstruct
 const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?
 const IOCACHEPAGEFLAG_DIRTY 2 // is the page dirty (does it need to be written out)?
 
-const IOCACHEGETFLAG_SWAPOUT 1 // this IOCachePageGet is involved in a swap
-                               // operation which means different page
-                               // allocation behavior is needed
-
 extern IOModifiedPageWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
 

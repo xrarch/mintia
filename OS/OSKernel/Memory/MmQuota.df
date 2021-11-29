@@ -11,17 +11,17 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-fn MmQuotaBlockCreate { wsmax vmmax heapmax -- quotablock ok }
+fn MmQuotaBlockCreate { modmax wsmax vmmax heapmax -- quotablock ok }
 	MmQuotaBlock_SIZEOF 'Quot' MmAllocWithTag ok! quotablock!
 
 	if (ok@)
 		return
 	end
 
-	wsmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
+	modmax@ wsmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
+fn MmQuotaBlockInitialize { modmax wsmax vmmax heapmax quotablock -- ok }
 	0 ok!
 
 	1 quotablock@ MmQuotaBlock_References + !
@@ -34,6 +34,9 @@ fn MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
 
 	0 quotablock@ MmQuotaBlock_WorkingSetUsed + !
 	wsmax@ quotablock@ MmQuotaBlock_WorkingSetMax + !
+
+	0 quotablock@ MmQuotaBlock_ModifiedPagesUsed + !
+	modmax@ quotablock@ MmQuotaBlock_ModifiedPagesMax + !
 end
 
 fn MmQuotaBlockReference { quotablock -- }
@@ -212,6 +215,55 @@ fn MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
 	end
 
 	oldcharge@ charge@ - quotablock@ MmQuotaBlock_WorkingSetUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaBlockChargeModifiedPages { charge quotablock -- ok }
+	if (charge@ 0 s<)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	0 ok!
+
+	auto modmax
+	quotablock@ MmQuotaBlock_ModifiedPagesMax + @ modmax!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quotablock@ MmQuotaBlock_ModifiedPagesUsed + @ oldcharge!
+
+	if (oldcharge@ charge@ + modmax@ >)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_VM_QUOTA_EXCEEDED ok!
+
+		return
+	end
+
+	oldcharge@ charge@ + quotablock@ MmQuotaBlock_ModifiedPagesUsed + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn MmQuotaBlockUnchargeModifiedPages { charge quotablock -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto oldcharge
+	quotablock@ MmQuotaBlock_ModifiedPagesUsed + @ oldcharge!
+
+	if (DEBUGCHECKS)
+		if (charge@ oldcharge@ >)
+			"MmQuotaBlockUnchargeModifiedPages: attempt to uncharge more than was charged\n" KeCrash
+		end
+	end
+
+	oldcharge@ charge@ - quotablock@ MmQuotaBlock_ModifiedPagesUsed + !
 
 	rs@ HALCPUInterruptRestore
 end

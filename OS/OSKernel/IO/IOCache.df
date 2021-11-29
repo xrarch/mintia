@@ -27,7 +27,7 @@ table IOCacheEvictableFunctions
 	pointerof IOCachePageEvictionFunction // EvictionFunc
 	pointerof IOCachePageReferenceFunction // ReferenceFunc
 	pointerof IOCachePageDereferenceFunction // DereferenceFunc
-	pointerof IOCachePageModifyFunction // ModifyFunc
+	0 // ModifyFunc
 	0 // Reserved2
 	0 // Reserved3
 	0 // Reserved4
@@ -573,6 +573,21 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
 	end
 
+	auto quotablock
+	pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @ quotablock!
+
+	if (quotablock@)
+		// someone was charged quota for this modified page
+
+		1 // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargeModifiedPages
+
+		quotablock@ MmQuotaBlockDereference
+
+		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
+	end
+
 	ipl@ KeIPLLower
 
 	auto writefunc
@@ -761,7 +776,7 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 			rs@ HALCPUInterruptRestore
 		end
 
-		0 pfdbe@ IOPageFrameEntryCache_LastFlushTime + !
+		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
 		0 pfdbe@ IOPageFrameEntryCache_Flags + !
 		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
@@ -954,6 +969,12 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- dropped evicted o
 		return
 	end
 
+	if (DEBUGCHECKS)
+		if (pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @)
+			"IOCachePageEvictionFunction: cache page had modified quota block\n" KeCrash
+		end
+	end
+
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
 
@@ -974,8 +995,83 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- dropped evicted o
 	cacheblock@ IOCacheInfoBlockUnlock
 end
 
+fn IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
+	// attempts to charge modified page quota for the pfdbe.
+	// not 100% foolproof but "good enough".
+
+	// keep in mind that once called, if you become aware that the page may
+	// not be marked modified after all, ensure that you call
+	// IOCachePageModifyQuotaUncharge on it BEFORE dereferencing it.
+
+	// disable interrupts instead of raising IPL since raising IPL would
+	// probably actually be slower.
+
+	// XXX should this time out?
+
+	auto ok
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	while (1)
+		0 charged!
+
+		if (pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @)
+			// page already accounted for.
+			rs@ HALCPUInterruptRestore
+			return
+		end
+
+		// page is not accounted for, try to charge quota.
+
+		1 charged!
+
+		1 // charge
+		quotablock@ // quotablock
+		MmQuotaBlockChargeModifiedPages ok!
+
+		if (ok@)
+			// failed to charge quota. throttle for 25ms and try again.
+			rs@ HALCPUInterruptRestore
+
+			25 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+
+			HALCPUInterruptDisable rs!
+		end else
+			// charged successfully.
+			quotablock@ MmQuotaBlockReference
+			quotablock@ pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
+			rs@ HALCPUInterruptRestore
+			return
+		end
+	end
+end
+
+fn IOCachePageModifyQuotaUncharge { pfdbe -- }
+	auto quotablock
+	pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @ quotablock!
+
+	if (DEBUGCHECKS)
+		if (quotablock@ ~~)
+			"IOCachePageModifyQuotaUncharge: no quotablock\n" KeCrash
+		end
+	end
+
+	0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
+
+	1 // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUnchargeModifiedPages
+
+	quotablock@ MmQuotaBlockDereference
+end
+
 fn IOCachePageModifyFunction { pfdbe -- ok }
-	// mark a page modified and insert it on the modified page list if necessary
+	// mark a page modified and insert it on the modified page list if
+	// necessary.
 
 	0 ok!
 
@@ -1241,6 +1337,10 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 
 				return
 			end
+
+			KeProcessCurrent PsProcess_QuotaBlock + @ // quotablock
+			pfdbe@ // pfdbe
+			IOCachePageModifyQuotaCharge drop
 		end else
 			pageframe@ pageoff@ + // dest
 			buffer@ // src

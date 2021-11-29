@@ -26,7 +26,7 @@ struct IOPageFrameEntryCache
 	4 WorkingSetIndexHint
 	4 Context3
 	4 Context4
-	4 LastFlushTime
+	4 ModifiedQuotaBlock
 	4 ModifiedPTE
 	4 FCB
 	4 Flags
@@ -73,6 +73,8 @@ extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 extern IOCachePageModifyFunction { pfdbe -- ok }
 
+extern IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
+extern IOCachePageModifyQuotaUncharge { pfdbe -- }
 
 extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }

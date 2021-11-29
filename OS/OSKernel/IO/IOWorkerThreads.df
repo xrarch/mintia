@@ -72,11 +72,6 @@ fn IOModifiedPageWorker { context1 context2 -- }
 	auto objecttable
 	8 alloc objecttable!
 
-	auto flushtime
-	KeTime_SIZEOF alloc flushtime!
-
-	auto flushtimesec
-
 	MmEventLowMemory objecttable@!
 	IOModifiedPageEvent objecttable@ 4 + !
 
@@ -121,7 +116,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		auto failed
 
 		auto modcount
-		IOCachePagesModifiedCount@ 2 max modcount! // used for heuristics
+		IOCachePagesModifiedCount@ modcount!
 
 		while (1)
 			if (writescore@ modcount@ 1 >> >=)
@@ -143,13 +138,10 @@ fn IOModifiedPageWorker { context1 context2 -- }
 					end
 				end
 
+				IOCachePagesModifiedCount@ modcount!
+
 				0 ok!
 			end
-
-			IOCachePagesModifiedCount@ 2 max modcount! // used for heuristics
-
-			flushtime@ HALRTCQuery
-			flushtime@ KeTime_SecPart + @ flushtimesec!
 
 			auto none
 			0 none!
@@ -166,33 +158,9 @@ fn IOModifiedPageWorker { context1 context2 -- }
 				if (pfdbe@)
 					0 failed!
 
-					if (flushtimesec@ pfdbe@ IOPageFrameEntryCache_LastFlushTime + @ - IOMODIFIEDWRITEPAGEDELAY <)
+					if (modcount@ ~~)
 						if (MmEventLowMemory KeDispatchIsSignaled ~~)
-							// don't flush the same page more than once every
-							// IOMODIFIEDWRITEPAGEDELAY seconds if memory is
-							// plentiful.
-
-							// XXX we wouldn't need this odd heuristic if we
-							// had a way to asynchronously write out modified
-							// pages. this is needed here because this thread
-							// will block when it writes a page and will allow
-							// user threads to run, who could potentially
-							// modify the same pages in rapid succession,
-							// preventing us from emptying the list fully, and
-							// sending us into an infinite loop of thrashing.
-							
-							// the behavior this heuristic introduces, while
-							// "better", is likely incorrect considering how
-							// much nicer this would all be if we had async
-							// page IO for the modified page writer.
-
-							1 failed!
-							1 delayscore +=
-
-							if (delayscore@ modcount@ 2 >> >=)
-								// a quarter of the modified page count was
-								// delayed, break out.
-
+							if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ <)
 								ipl@ KeIPLLower
 
 								break
@@ -212,8 +180,6 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 							ipl@ KeIPLLower
 
-							flushtimesec@ pfdbe@ IOPageFrameEntryCache_LastFlushTime + !
-
 							// write out page
 
 							0 // dontunbias
@@ -222,6 +188,10 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 							cacheblock@ // cacheblock
 							IOCacheInfoBlockUnlock
+
+							if (modcount@)
+								1 modcount -=
+							end
 
 							0 writescore!
 							0 delayscore!
@@ -272,6 +242,8 @@ fn IOModifiedPageWorker { context1 context2 -- }
 								"IOModifiedPageWorker: failed to wait\n" KeCrash
 							end
 						end
+
+						IOCachePagesModifiedCount@ modcount!
 
 						continue
 					end

@@ -55,6 +55,10 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	end
 end
 
+const IOMODIFIEDWRITEINTERVALSEC 10 // how frequently should we flush?
+const IOMODIFIEDWRITEPAGEDELAY   6  // how many seconds must elapse before we
+                                    // can write the same page again?
+
 buffer IOModifiedPageEvent KeEvent_SIZEOF
 public IOModifiedPageEvent
 
@@ -81,7 +85,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 	// the modified page writer
 
 	while (1)
-		// write out all modified pages every 30 seconds, whenever the system
+		// write out all modified pages every 10 seconds, whenever the system
 		// is low on memory, and whenever the number of modified pages crosses
 		// the maximum.
 
@@ -95,7 +99,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		KERNELMODE // waitmode
 		0 // alertable
 		THREADWAITANY // waittype
-		30000 // timeout
+		IOMODIFIEDWRITEINTERVALSEC 1000 * // timeout
 		2 // objectcount
 		objecttable@ // objecttable
 		KeThreadWaitForMultipleObjects waitok!
@@ -177,10 +181,11 @@ fn IOModifiedPageWorker { context1 context2 -- }
 				if (pfdbe@)
 					0 failed!
 
-					if (flushtimesec@ pfdbe@ IOPageFrameEntryCache_LastFlushTime + @ - 5 <)
+					if (flushtimesec@ pfdbe@ IOPageFrameEntryCache_LastFlushTime + @ - IOMODIFIEDWRITEPAGEDELAY <)
 						if (MmEventLowMemory KeDispatchIsSignaled ~~)
 							// don't flush the same page more than once every
-							// 5 seconds if we're not low on memory.
+							// IOMODIFIEDWRITEPAGEDELAY seconds if memory is
+							// plentiful.
 
 							// XXX we wouldn't need this odd heuristic if we
 							// had a way to asynchronously write out modified

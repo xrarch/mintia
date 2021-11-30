@@ -63,6 +63,8 @@ extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
+extern IOCachePageRemove { pfdbe buckethead -- }
+extern IOCachePageInsert { pfdbe buckethead -- }
 
 extern IOCachePageRemoveModified { pfdbe -- }
 extern IOCachePageInsertModified { pfdbe -- }

@@ -1,0 +1,442 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn IOCacheInfoBlockCreate { -- cacheblock ok }
+	IOCacheInfoBlock_SIZEOF // bytes
+	'Cach' // tag
+	MmAllocWithTag ok! cacheblock!
+
+	if (ok@)
+		// allocation failed
+
+		return
+	end
+
+	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
+	0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
+	0 cacheblock@ IOCacheInfoBlock_Flags + !
+
+	"IOCacheInfoBlockRwLock" // name
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"IOCacheInfoBlockCreate: couldn't initialize rwlock\n" KeCrash
+		end
+	end
+
+	auto buckets
+	IOCACHEPAGEBUCKETS buckets!
+
+	auto mutex
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + mutex!
+
+	while (buckets@)
+		"IOCacheInfoBucketMutex" // name
+		KERNELMODE // mode
+		mutex@ // mutex
+		KeMutexInitialize ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"IOCacheInfoBlockCreate: couldn't initialize mutex\n" KeCrash
+			end
+		end
+
+		KeMutex_SIZEOF mutex +=
+		1 buckets -=
+	end
+
+	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + // ptr
+	IOCACHEPAGEBUCKETS 8 * // size
+	0 // word
+	memset
+end
+
+fn IOCacheInfoBlockLock { cacheblock -- ok }
+	1 // alertable
+	0 // nowait
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
+end
+
+fn IOCacheInfoBlockTryLock { cacheblock -- ok }
+	0 // alertable
+	1 // nowait
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
+
+	if (ok@ 0 s<)
+		0 ok!
+	end
+end
+
+fn IOCacheInfoBlockLockShared { cacheblock -- ok }
+	1 // alertable
+	0 // nowait
+	0 // canstarve
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn IOCacheInfoBlockTryLockShared { cacheblock -- ok }
+	0 // alertable
+	1 // nowait
+	0 // canstarve
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
+
+	if (ok@ 0 s<)
+		0 ok!
+	end
+end
+
+fn IOCacheInfoBlockUnlock { cacheblock -- }
+	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
+	ExRwLockRelease
+end
+
+fn IOCacheInfoBlockLockBucket { bucket cacheblock -- ok }
+	if (DEBUGCHECKS)
+		if (bucket@ IOCACHEPAGEBUCKETS >=)
+			"IOCacheInfoBlockLockBucket: bucket >= IOCACHEPAGEBUCKETS\n" KeCrash
+		end
+	end
+
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // object
+	KeThreadWaitForObject ok!
+end
+
+fn IOCacheInfoBlockTryLockBucket { bucket cacheblock -- locked }
+	if (DEBUGCHECKS)
+		if (bucket@ IOCACHEPAGEBUCKETS >=)
+			"IOCacheInfoBlockLockBucket: bucket >= IOCACHEPAGEBUCKETS\n" KeCrash
+		end
+	end
+
+	KERNELMODE // waitmode
+	0 // alertable
+	0 // timeout
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // object
+	KeThreadWaitForObject locked!
+end
+
+fn IOCacheInfoBlockUnlockBucket { bucket cacheblock -- }
+	if (DEBUGCHECKS)
+		if (bucket@ IOCACHEPAGEBUCKETS >=)
+			"IOCacheInfoBlockUnlockBucket: bucket >= IOCACHEPAGEBUCKETS\n" KeCrash
+		end
+	end
+
+	cacheblock@ IOCacheInfoBlock_PageBucketMutexes + bucket@ KeMutex_SIZEOF * + // rwlock
+	KeMutexRelease drop
+end
+
+fn IOCacheInfoBlockReference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_PageReferences + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
+	0 ok!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (cacheblock@ IOCacheInfoBlock_Flags + @ IOCACHEBLOCKFLAG_TRUNCATING &)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
+	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_PageReferences + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"IOCacheInfoBlockDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_PageReferences + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockFlush { cacheblock -- ok }
+	// flush all of the cacheblock's modified pages.
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
+	// for each bucket, iterate all pages. if a page if modified, write it
+	// out to disk.
+
+	// ensure thread can't receive signals while writing out dirty pages
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	auto i
+	0 i!
+
+	while (i@ IOCACHEPAGEBUCKETS <)
+		auto buckethead
+		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+
+		auto pfdbe
+
+		// get the tail so that we can go backwards thru the bucket.
+		// reason for this is that LRU -> MRU is the most likely
+		// order to go "in order" on the disk surface
+		buckethead@ 4 + @ pfdbe!
+
+		while (pfdbe@)
+			if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+				0 // dontunbias
+				pfdbe@ // pfdbe
+				IOCachePageWriteModified drop
+			end
+
+			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
+		end
+
+		1 i +=
+	end
+
+	// allow thread to receive signals again
+	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockUnlock
+end
+
+fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
+	// attempt to evict all of the cacheblock's page frames beyond newsize.
+
+	auto maxpage
+	newsize@ PAGEOFFSETMASK + PAGENUMBERMASK & maxpage!
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + @ ~=)
+		// one or more page frames in this cache is currently in use.
+		// don't allow truncation for now.
+
+		if (DEBUGCHECKS)
+			if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ <)
+				"IOCacheInfoBlockTruncate: page references < modified page count\n" KeCrash
+			end
+		end
+
+		rs@ HALCPUInterruptRestore
+
+		cacheblock@ IOCacheInfoBlockUnlock
+
+		STATUS_IO_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
+	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
+
+	rs@ HALCPUInterruptRestore
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ ~=)
+			// they should both either be zero (all modified pages written out and zero other references),
+			// or both be equal (only modified pages, and writeout==0)
+
+			cacheblock@ IOCacheInfoBlock_ModifiedPages + @
+			cacheblock@ IOCacheInfoBlock_PageReferences + @
+			"IOCacheInfoBlockTruncate: page references (%d) != modified page count (%d)\n" KeCrash
+		end
+	end
+
+	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
+	// for each bucket, free all cached pages. if a page is modified,
+	// and caller wanted us to write out dirty pages (writeout==1),
+	// write the page out first.
+
+	// ensure thread can't receive signals while writing out dirty pages
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	auto i
+	0 i!
+
+	while (i@ IOCACHEPAGEBUCKETS <)
+		auto buckethead
+		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+
+		auto pfdbe
+
+		// get the tail so that we can go backwards thru the bucket.
+		// reason for this is that LRU -> MRU is the most likely
+		// order to go "in order" on the disk surface
+		buckethead@ 4 + @ pfdbe!
+
+		while (pfdbe@)
+			if (DEBUGCHECKS)
+				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+					if (pfdbe@ IOPageFrameEntryCache_References + @ 1 ~=)
+						pfdbe@
+						pfdbe@ IOPageFrameEntryCache_References + @
+						"IOCacheInfoBlockTruncate: found page with strange refcount %d (0x%08x)\n" KeCrash
+					end
+				end elseif (pfdbe@ IOPageFrameEntryCache_References + @ 0 ~=)
+					pfdbe@
+					pfdbe@ IOPageFrameEntryCache_References + @
+					"IOCacheInfoBlockTruncate: 2 found page with strange refcount %d (0x%08x)\n" KeCrash
+				end
+			end
+
+			auto npfdbe
+
+			// get this now, because who knows what will happen to it
+			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
+
+			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
+				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+					if (writeout@)
+						// this is a modified page, and caller wants us to
+						// write them out to disk. the alternative is
+						// writeout==0, which means the caller says its fine
+						// to ignore and throw them out.
+
+						1 // dontunbias
+						pfdbe@ // pfdbe
+						IOCachePageWriteModified drop
+
+						HALCPUInterruptDisable rs!
+						1 cacheblock@ IOCacheInfoBlock_PageReferences + -=
+						rs@ HALCPUInterruptRestore
+					end else
+						// this is a modified page and the caller doesn't want
+						// us to write it to disk, so we need to clean it up
+						// ourselves by decrementing this cacheblock's
+						// modified page count and removing it from the
+						// modified list.
+
+						HALCPUInterruptDisable rs!
+						1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
+						1 cacheblock@ IOCacheInfoBlock_PageReferences + -=
+						rs@ HALCPUInterruptRestore
+
+						pfdbe@ IOCachePageRemoveModified
+					end
+				end else
+					// unmodified, remove from evictable list
+
+					HALCPUInterruptDisable rs!
+					pfdbe@ MmEvictablePageRemove
+					rs@ HALCPUInterruptRestore
+				end
+
+				if (maxpage@)
+					// we are slightly more sophisticated in our hash list
+					// management when maxpage ~= 0 since it may not be empty
+					// after this operation, whereas when its zero we are
+					// definitely removing every page. this is sort of a
+					// micro-optimization.
+
+					pfdbe@ // pfdbe
+					buckethead@ // buckethead
+					IOCachePageRemove
+				end
+
+				pfdbe@ IOPageFrameEntryCache_PFN + @ // pfn
+				MmPageFree
+
+				HALCPUInterruptDisable rs!
+				1 IOCachePagesUsed -=
+				rs@ HALCPUInterruptRestore
+			end
+
+			npfdbe@ pfdbe!
+		end
+
+		if (maxpage@ 0 ==)
+			// set buckethead and buckettail to null to reflect that it is now empty
+			0 buckethead@!
+			0 buckethead@ 4 + !
+		end
+
+		1 i +=
+	end
+
+	HALCPUInterruptDisable rs!
+	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=
+	rs@ HALCPUInterruptRestore
+
+	// allow thread to receive signals again
+	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockUnlock
+end
+
+fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
+	0 // newsize
+	writeout@ // writeout
+	cacheblock@ // cacheblock
+	IOCacheInfoBlockTruncate ok!
+
+	if (ok@ 0 ==)
+		cacheblock@ MmFree
+	end
+end

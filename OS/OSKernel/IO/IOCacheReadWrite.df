@@ -1,0 +1,242 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
+	auto pfdbe
+	auto pageframe
+
+	0 ok!
+
+	0 byteswritten!
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	auto truncfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
+
+	if (truncfunc@ ~~)
+		// driver provides no way to grow this file
+
+		if (offset@ bytesize@ >=)
+			STATUS_IO_END_OF_DISK ok!
+
+			return
+		end
+
+		bytesize@ offset@ -
+		length@
+		min length!
+	end else
+		if (offset@ PAGENUMBERMASK >=)
+			// prevent underflow
+			STATUS_IO_END_OF_FILE ok!
+
+			return
+		end
+
+		PAGENUMBERMASK offset@ -
+		length@
+		min length!
+	end
+
+	while (byteswritten@ length@ <)
+		auto pageno
+		offset@ PAGENUMBERMASK & pageno!
+
+		auto pageoff
+		offset@ PAGEOFFSETMASK & pageoff!
+
+		auto m
+
+		length@ byteswritten@ -
+		PAGESIZE pageoff@ -
+		min m!
+
+		if (DEBUGCHECKS)
+			// just in case im dumb
+
+			if (m@ ~~)
+				"IOCacheFileWrite: m == 0\n" KeCrash
+			end
+		end
+
+		if (truncfunc@)
+			fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+			if (offset@ m@ + bytesize@ >)
+				offset@ m@ + bytesize!
+
+				bytesize@ // newsize
+				1 // growing
+				fcb@ // fcb
+				truncfunc@ IODispatchTruncateFunction ok!
+
+				if (ok@)
+					return
+				end
+			end
+		end
+
+		if (m@ PAGESIZE ==)
+			// writing a full page -- no need to read something we're about to overwrite
+
+			0 // kflags
+			0 // locked
+			pageno@ // offset
+			fcb@ // fcb
+			IOCachePageGet ok! pfdbe! pageframe!
+
+			if (ok@)
+				return
+			end
+		end else
+			// writing a partial page, may need to read the rest of the page
+
+			flags@ // flags
+			0 // kflags
+			pageno@ // offset
+			fcb@ // fcb
+			IOCachePageRead ok! pfdbe! pageframe!
+
+			if (ok@)
+				return
+			end
+		end
+
+		if (lastmode@ USERMODE ==)
+			pageframe@ pageoff@ + // dest
+			buffer@ // src
+			m@ // size
+			KeSafeCopyIn ok!
+
+			if (ok@)
+				// page may have been partially written but this is an error
+				// state anyway so that data loss is probably not a big deal
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				return
+			end
+
+			KeProcessCurrent PsProcess_QuotaBlock + @ // quotablock
+			pfdbe@ // pfdbe
+			IOCachePageModifyQuotaCharge drop
+		end else
+			pageframe@ pageoff@ + // dest
+			buffer@ // src
+			m@ // size
+			memcpy
+		end
+
+		pfdbe@ IOCachePageModifyFunction ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "IOCacheFileWrite: failed to mark page frame modified (%i)\n" KeCrash
+			end
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		m@ buffer +=
+		m@ byteswritten +=
+		m@ offset +=
+	end
+end
+
+fn IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
+	auto pfdbe
+	auto pageframe
+
+	0 ok!
+
+	0 bytesread!
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	bytesize@ offset@ -
+	length@
+	min length!
+
+	while (bytesread@ length@ <)
+		auto pageno
+		offset@ PAGENUMBERMASK & pageno!
+
+		auto pageoff
+		offset@ PAGEOFFSETMASK & pageoff!
+
+		auto m
+
+		length@ bytesread@ -
+		PAGESIZE pageoff@ -
+		min m!
+
+		if (DEBUGCHECKS)
+			if (m@ ~~)
+				"IOCacheFileRead: m == 0\n" KeCrash
+			end
+		end
+
+		flags@ // flags
+		0 // kflags
+		pageno@ // offset
+		fcb@ // fcb
+		IOCachePageRead ok! pfdbe! pageframe!
+
+		if (ok@)
+			return
+		end
+
+		if (lastmode@ USERMODE ==)
+			buffer@ // dest
+			pageframe@ pageoff@ + // src
+			m@ // size
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				pfdbe@ MmEvictablePageDereference drop
+
+				return
+			end
+		end else
+			buffer@ // dest
+			pageframe@ pageoff@ + // src
+			m@ // size
+			memcpy
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		m@ buffer +=
+		m@ bytesread +=
+		m@ offset +=
+	end
+end

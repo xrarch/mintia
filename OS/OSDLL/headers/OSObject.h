@@ -25,3 +25,6 @@ extern OSDirectoryName { path dirname bufsize -- ok }
 extern OSRealPath { path canon bufsize -- ok }
 
 extern OSOpen { flags access path -- handle ok }
+
+const OSEVENT_SYNCH 1
+const OSEVENT_NOTIF 2

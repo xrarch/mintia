@@ -31,6 +31,8 @@ struct ObType
 	4 CloseFunction
 	4 DeleteFunction
 	4 ParseFunction
+
+	4 WaitOffset
 endstruct
 
 struct ObTypeInitializer
@@ -42,6 +44,7 @@ struct ObTypeInitializer
 	4 CloseFunction
 	4 DeleteFunction
 	4 ParseFunction
+	4 WaitOffset
 endstruct
 
 struct ObDirectory

@@ -24,8 +24,8 @@ WIP: MINTIA is not currently in an even minimally usable state.
 
 ## Planned features (in rough descending order of priority)
 
-1. Command-line interface.
+1. Command-line interface over TTY.
 2. AisixFS write support, FAT32 driver
-3. Mac OS 9-like window system.
+3. Mac OS 9-lookalike window system.
 
 ![Running](https://i.imgur.com/ITFIXBl.png)

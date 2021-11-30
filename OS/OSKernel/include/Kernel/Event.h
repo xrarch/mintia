@@ -6,9 +6,6 @@ struct KeEvent
 	4 Reserved2
 endstruct
 
-const KEEVENT_SYNCH 1
-const KEEVENT_NOTIF 2
-
 extern KeEventInitialize { signaled type name event -- ok }
 extern KeEventReset { event -- signaled }
 extern KeEventSignal { priboost event -- ok }

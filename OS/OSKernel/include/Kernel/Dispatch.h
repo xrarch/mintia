@@ -35,9 +35,6 @@ struct KeDispatchWaitBlock
 	4 Object
 endstruct
 
-const THREADWAITALL 1
-const THREADWAITANY 2
-
 const THREADWAITBLOCKS 4
 
 extern KeDispatchInitialize { name type dobject -- ok }

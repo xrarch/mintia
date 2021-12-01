@@ -1,0 +1,254 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandletable -- ok }
+	// takes a table of handles and turns it into a table of referenced object
+	// pointers, and creates a table of dispatch object pointers, which it
+	// passes to KeThreadWaitForMultipleObjects.
+
+	if (DEBUGCHECKS)
+		if (objecthandletable@ MMLOWESTSYSTEMADDRESS <)
+			"ObWaitForMultipleObjects: objecthandletable not in kernel space\n" KeCrash
+		end
+	end
+
+	if (objectcount@ ~~)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	auto objecttable
+
+	objectcount@ 4 * // bytes
+	'ObWt' // tag
+	MmAllocWithTag ok! objecttable!
+
+	if (ok@)
+		return
+	end
+
+	auto ptr
+	objecthandletable@ ptr!
+
+	auto optr
+	objecttable@ optr!
+
+	auto i
+	0 i!
+
+	auto access
+	auto object
+	auto dobject
+
+	while (i@ objectcount@ <)
+		0 // type (any)
+		ptr@@ // handle
+		ObObjectReferenceByHandle ok! object! access!
+
+		if (ok@)
+			objecttable@ MmFree
+
+			// go back and deref all the ones we ref'd
+
+			while (i@)
+				4 ptr -=
+				1 i -=
+
+				ptr@@ ObObjectDereferenceByPointer drop
+			end
+
+			return
+		end
+
+		auto typeobj
+		object@ ObHeader_SIZEOF - ObHeader_TypeObject + @ typeobj!
+
+		if (DEBUGCHECKS)
+			if (typeobj@ ~~)
+				"ObWaitForMultipleObjects: no object type\n" KeCrash
+			end
+		end
+
+		typeobj@ ObType_WaitOffset + @ dobject!
+
+		if (dobject@ 0xFFFFFFFF ==)
+			// object type doesn't support waiting
+
+			objecttable@ MmFree
+
+			object@ ObObjectDereferenceByPointer drop
+
+			// go back and deref all the ones we ref'd
+
+			while (i@)
+				4 ptr -=
+				1 i -=
+
+				ptr@@ ObObjectDereferenceByPointer drop
+			end
+
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+
+		object@ dobject +=
+
+		access@ // access
+		ACCESS_EXEC // permission
+		SeCheckAccess ok!
+
+		if (ok@)
+			objecttable@ MmFree
+
+			object@ ObObjectDereferenceByPointer drop
+
+			// go back and deref all the ones we ref'd
+
+			while (i@)
+				4 ptr -=
+				1 i -=
+
+				ptr@@ ObObjectDereferenceByPointer drop
+			end
+
+			return
+		end
+
+		dobject@ optr@!
+		object@ ptr@!
+
+		4 ptr +=
+		4 optr +=
+		1 i +=
+	end
+
+	// objecthandletable now contains pointers to the objects themselves, and
+	// objecttable contains pointers to the dispatch objects contained within.
+
+	// make sure no object was specified twice
+
+	0 i!
+	auto j
+
+	objecthandletable@ ptr!
+
+	while (i@ objectcount@ <)
+		i@ 1 + j!
+		objecthandletable@ j@ 2 << + optr!
+		ptr@@ object!
+
+		while (j@ objectcount@ <)
+			if (object@ optr@@ ==)
+				// object was specified twice
+
+				objecttable@ MmFree
+
+				while (objectcount@)
+					objecthandletable@@ ObObjectDereferenceByPointer drop
+
+					4 objecthandletable +=
+					1 objectcount -=
+				end
+
+				STATUS_INVALID_ARGUMENT ok!
+
+				return
+			end
+
+			4 optr +=
+			1 j +=
+		end
+
+		4 ptr +=
+		1 i +=
+	end
+
+	USERMODE // waitmode
+	alertable@ // alertable
+	waittype@ // waittype
+	timeout@ // timeout
+	objectcount@ // objectcount
+	objecttable@ // objecttable
+	KeThreadWaitForMultipleObjects ok!
+
+	while (objectcount@)
+		objecthandletable@@ ObObjectDereferenceByPointer drop
+
+		4 objecthandletable +=
+		1 objectcount -=
+	end
+
+	objecttable@ MmFree
+end
+
+fn ObWaitForObject { alertable timeout objecthandle -- ok }
+	auto object
+	auto access
+
+	0 // type (any)
+	objecthandle@ // handle
+	ObObjectReferenceByHandle ok! object! access!
+
+	if (ok@)
+		return
+	end
+
+	auto typeobj
+	object@ ObHeader_SIZEOF - ObHeader_TypeObject + @ typeobj!
+
+	if (DEBUGCHECKS)
+		if (typeobj@ ~~)
+			"ObWaitForObject: no object type\n" KeCrash
+		end
+	end
+
+	auto dobject
+	typeobj@ ObType_WaitOffset + @ dobject!
+
+	if (dobject@ 0xFFFFFFFF ==)
+		object@ ObObjectDereferenceByPointer drop
+
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	object@ dobject +=
+
+	access@ // access
+	ACCESS_EXEC // permission
+	SeCheckAccess ok!
+
+	if (ok@)
+		object@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	USERMODE // waitmode
+	alertable@ // alertable
+	timeout@ // timeout
+	dobject@ // object
+	KeThreadWaitForObject ok!
+
+	object@ ObObjectDereferenceByPointer drop
+end

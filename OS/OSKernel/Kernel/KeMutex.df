@@ -21,6 +21,7 @@ fn KeMutexInitialize { name mode mutex -- ok }
 	0 mutex@ KeMutex_Locked + !
 	mode@ mutex@ KeMutex_Mode + !
 
+	0 mutex@ KeMutex_Prev + !
 	0 mutex@ KeMutex_Next + !
 
 	1 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
@@ -37,14 +38,20 @@ fn KeMutexOwnerSet { thread mutex -- ok }
 	end
 
 	auto h
-	thread@ KeThread_MutexListHead + @ mutex@ KeMutex_Next + !
+	thread@ KeThread_MutexListHead + @ h!
+
+	h@ mutex@ KeMutex_Next + !
+
+	if (h@)
+		mutex@ h@ KeMutex_Prev + !
+	end
 
 	mutex@ thread@ KeThread_MutexListHead + !
 
 	0 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 end
 
-fn KeMutexRelease { mutex -- ok }
+fn KeMutexRelease { abandon mutex -- ok }
 	0 ok!
 
 	// if kernelmode mutex, there is NO possible return value except for 0.
@@ -56,28 +63,50 @@ fn KeMutexRelease { mutex -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	auto lock
-	mutex@ KeMutex_Locked + @ lock!
-
 	if (DEBUGCHECKS)
 		if (KeDPCActive@)
 			"KeMutexRelease: DPC active\n" KeCrash
 		end
+
+		if (abandon@)
+			if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+				"KeMutexRelease: attempt to abandon kernel mutex\n" KeCrash
+			end
+		end
 	end
 
-	if (mutex@ KeMutex_OwningThread + @ current@ ~=)
-		// we didn't own it...
+	auto lock
 
-		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
-			mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
-			current@ KeThread_Name +
-			"KeMutexRelease: thread '%s' didn't own mutex '%s'\n" KeCrash
-		end else
+	if (abandon@)
+		mutex@ KeMutex_OwningThread + @ current!
+
+		if (current@ ~~)
 			ipl@ KeIPLLower
 
 			STATUS_MUTEX_NOT_OWNED ok!
 
 			return
+		end
+
+		1 lock!
+		1 mutex@ KeMutex_Locked + !
+	end else
+		mutex@ KeMutex_Locked + @ lock!
+
+		if (mutex@ KeMutex_OwningThread + @ current@ ~=)
+			// we didn't own it...
+
+			if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
+				current@ KeThread_Name +
+				"KeMutexRelease: thread '%s' didn't own mutex '%s'\n" KeCrash
+			end else
+				ipl@ KeIPLLower
+
+				STATUS_MUTEX_NOT_OWNED ok!
+
+				return
+			end
 		end
 	end
 
@@ -94,34 +123,28 @@ fn KeMutexRelease { mutex -- ok }
 	1 lock -=
 
 	if (lock@ ~~)
-		// just unlocked it, give it away if necessary
+		// just unlocked it, remove it from the thread's owned mutex list
 
-		auto h
-		current@ KeThread_MutexListHead + @ h!
+		auto ls
+		mutex@ KeMutex_Prev + @ ls!
 
-		if (h@ mutex@ ~=)
-			// attempting to release mutex in wrong order
+		auto ns
+		mutex@ KeMutex_Next + @ ns!
 
-			if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
-				// its a kernel mode mutex! thats a system software bug!
-
-				mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
-				current@ KeThread_Name +
-				"KeMutexRelease: thread '%s' mutex '%s': deadlock possible\n" KeCrash
-			end
-
-			// its a usermode mutex, we can just return with an error
-
-			ipl@ KeIPLLower
-
-			STATUS_DEADLOCK_POSSIBLE ok!
-
-			return	
+		if (ls@)
+			ns@ ls@ KeMutex_Next + !
+		end else
+			ns@ current@ KeThread_MutexListHead + !
 		end
 
-		mutex@ KeMutex_Next + @ current@ KeThread_MutexListHead + !
+		if (ns@)
+			ls@ ns@ KeMutex_Prev + !
+		end
 
+		0 mutex@ KeMutex_Prev + !
 		0 mutex@ KeMutex_Next + !
+
+		// try to wake up a waiter.
 
 		auto wokenthread
 
@@ -158,8 +181,12 @@ fn KeMutexRelease { mutex -- ok }
 		if (wokenthread@)
 			// we woke up a thread who was waiting. make him the owner of the mutex
 
-			if (wokenthread@ mutex@ KeMutexOwnerSet)
-				"KeMutexRelease: couldn't KeMutexOwnerSet\n" KeCrash
+			wokenthread@ mutex@ KeMutexOwnerSet ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"KeMutexRelease: couldn't KeMutexOwnerSet\n" KeCrash
+				end
 			end
 		end else
 			// just unown the mutex

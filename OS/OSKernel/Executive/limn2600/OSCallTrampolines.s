@@ -18,6 +18,8 @@
 .extern OSObjectOpen
 .extern OSQuery
 .extern OSClose
+.extern OSWaitForMultipleObjects
+.extern OSWaitForObject
 .extern OSFileQuery
 .extern OSFileSeek
 .extern OSFileRead
@@ -32,7 +34,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 27
+	.dl 29
 
 OSCallTable:
 .global OSCallTable
@@ -53,17 +55,19 @@ OSCallTable:
 	.dl OSTOSObjectOpen                                  ;14
 	.dl OSTOSQuery                                       ;15
 	.dl OSTOSClose                                       ;16
-	.dl OSTOSFileQuery                                   ;17
-	.dl OSTOSFileSeek                                    ;18
-	.dl OSTOSFileRead                                    ;19
-	.dl OSTOSFileWrite                                   ;20
-	.dl OSTOSSwapFileCreate                              ;21
-	.dl OSTOSSectionCreate                               ;22
-	.dl OSTOSSectionMapView                              ;23
-	.dl OSTOSUnmapView                                   ;24
-	.dl OSTOSRemapView                                   ;25
-	.dl OSTOSSetSwappiness                               ;26
-	.dl OSTOSThreadSleep                                 ;27
+	.dl OSTOSWaitForMultipleObjects                      ;17
+	.dl OSTOSWaitForObject                               ;18
+	.dl OSTOSFileQuery                                   ;19
+	.dl OSTOSFileSeek                                    ;20
+	.dl OSTOSFileRead                                    ;21
+	.dl OSTOSFileWrite                                   ;22
+	.dl OSTOSSwapFileCreate                              ;23
+	.dl OSTOSSectionCreate                               ;24
+	.dl OSTOSSectionMapView                              ;25
+	.dl OSTOSUnmapView                                   ;26
+	.dl OSTOSRemapView                                   ;27
+	.dl OSTOSSetSwappiness                               ;28
+	.dl OSTOSThreadSleep                                 ;29
 
 
 OSTOSConsolePutCharacter:
@@ -304,6 +308,38 @@ OSTOSClose:
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSClose
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSWaitForMultipleObjects:
+.global OSTOSWaitForMultipleObjects
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
+
+	jal  OSWaitForMultipleObjects
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSWaitForObject:
+.global OSTOSWaitForObject
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSWaitForObject
 
 	mov  long [s18 + 4], a0 ;t1
 

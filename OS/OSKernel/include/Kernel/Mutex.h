@@ -5,6 +5,7 @@ struct KeMutex
 	4 Locked
 	4 Mode
 	
+	4 Prev
 	4 Next
 
 	4 Reserved1
@@ -12,6 +13,6 @@ struct KeMutex
 endstruct
 
 extern KeMutexInitialize { name mode mutex -- ok }
-extern KeMutexRelease { mutex -- ok }
+extern KeMutexRelease { abandon mutex -- ok }
 extern KeMutexOwnerSet { thread mutex -- ok }
 extern KeMutexIsLocked { mutex -- locked }

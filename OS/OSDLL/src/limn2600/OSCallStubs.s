@@ -199,12 +199,38 @@ OSClose:
 
 	ret
 
+OSWaitForMultipleObjects:
+.global OSWaitForMultipleObjects
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 17
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSWaitForObject:
+.global OSWaitForObject
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 18
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSFileQuery:
 .global OSFileQuery
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 17
+	li   t0, 19
 	sys  0
 
 	mov  a0, t1
@@ -217,7 +243,7 @@ OSFileSeek:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 18
+	li   t0, 20
 	sys  0
 
 	mov  a1, t2
@@ -233,7 +259,7 @@ OSFileRead:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 19
+	li   t0, 21
 	sys  0
 
 	mov  a1, t2
@@ -248,7 +274,7 @@ OSFileWrite:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 20
+	li   t0, 22
 	sys  0
 
 	mov  a1, t2
@@ -260,7 +286,7 @@ OSSwapFileCreate:
 .global OSSwapFileCreate
 	mov  t1, a0
 
-	li   t0, 21
+	li   t0, 23
 	sys  0
 
 	mov  a0, t1
@@ -275,7 +301,7 @@ OSSectionCreate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 22
+	li   t0, 24
 	sys  0
 
 	mov  a1, t2
@@ -293,7 +319,7 @@ OSSectionMapView:
 	mov  a0, long [sp + 8]
 	mov  a1, long [sp + 12]
 
-	li   t0, 23
+	li   t0, 25
 	sys  0
 
 	mov  a1, t2
@@ -307,7 +333,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 24
+	li   t0, 26
 	sys  0
 
 	mov  a0, t1
@@ -321,7 +347,7 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 25
+	li   t0, 27
 	sys  0
 
 	mov  a0, t1
@@ -332,7 +358,7 @@ OSSetSwappiness:
 .global OSSetSwappiness
 	mov  t1, a0
 
-	li   t0, 26
+	li   t0, 28
 	sys  0
 
 	mov  a0, t1
@@ -343,7 +369,7 @@ OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 27
+	li   t0, 29
 	sys  0
 
 	mov  a0, t1

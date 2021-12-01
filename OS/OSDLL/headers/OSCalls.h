@@ -24,6 +24,9 @@ extern OSQuery { handle query -- ok }
 
 extern OSClose { handle -- ok }
 
+extern OSWaitForMultipleObjects { waittype timeout objectcount objecthandletable -- ok }
+extern OSWaitForObject { timeout objecthandle -- ok }
+
 // IO
 extern OSFileQuery { filehandle query -- ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }

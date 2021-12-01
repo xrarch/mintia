@@ -28,3 +28,6 @@ extern OSOpen { flags access path -- handle ok }
 
 const OSEVENT_SYNCH 1
 const OSEVENT_NOTIF 2
+
+const OSWAITALL 1
+const OSWAITANY 2

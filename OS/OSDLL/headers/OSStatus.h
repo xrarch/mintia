@@ -44,5 +44,6 @@ const STATUS_NO_SWAP               -42
 const STATUS_RING_FULL             -43
 const STATUS_RING_EMPTY            -44
 const STATUS_WS_QUOTA_EXCEEDED     -45
+const STATUS_MUTEX_NOT_OWNED       -46
 
 extern OSStatusGetName { status -- name }

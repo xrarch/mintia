@@ -4,6 +4,17 @@
 
 .extern OSConsolePutCharacter
 .extern OSSystemAbort
+.extern OSEventCreate
+.extern OSEventReset
+.extern OSEventSignal
+.extern OSEventPulse
+.extern OSEventReadState
+.extern OSSemaphoreCreate
+.extern OSSemaphoreRelease
+.extern OSSemaphoreReadState
+.extern OSMutexCreate
+.extern OSMutexRelease
+.extern OSMutexReadState
 .extern OSObjectOpen
 .extern OSQuery
 .extern OSClose
@@ -21,27 +32,38 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 16
+	.dl 27
 
 OSCallTable:
 .global OSCallTable
 	.dl 0                                                ;0
 	.dl OSTOSConsolePutCharacter                         ;1
 	.dl OSTOSSystemAbort                                 ;2
-	.dl OSTOSObjectOpen                                  ;3
-	.dl OSTOSQuery                                       ;4
-	.dl OSTOSClose                                       ;5
-	.dl OSTOSFileQuery                                   ;6
-	.dl OSTOSFileSeek                                    ;7
-	.dl OSTOSFileRead                                    ;8
-	.dl OSTOSFileWrite                                   ;9
-	.dl OSTOSSwapFileCreate                              ;10
-	.dl OSTOSSectionCreate                               ;11
-	.dl OSTOSSectionMapView                              ;12
-	.dl OSTOSUnmapView                                   ;13
-	.dl OSTOSRemapView                                   ;14
-	.dl OSTOSSetSwappiness                               ;15
-	.dl OSTOSThreadSleep                                 ;16
+	.dl OSTOSEventCreate                                 ;3
+	.dl OSTOSEventReset                                  ;4
+	.dl OSTOSEventSignal                                 ;5
+	.dl OSTOSEventPulse                                  ;6
+	.dl OSTOSEventReadState                              ;7
+	.dl OSTOSSemaphoreCreate                             ;8
+	.dl OSTOSSemaphoreRelease                            ;9
+	.dl OSTOSSemaphoreReadState                          ;10
+	.dl OSTOSMutexCreate                                 ;11
+	.dl OSTOSMutexRelease                                ;12
+	.dl OSTOSMutexReadState                              ;13
+	.dl OSTOSObjectOpen                                  ;14
+	.dl OSTOSQuery                                       ;15
+	.dl OSTOSClose                                       ;16
+	.dl OSTOSFileQuery                                   ;17
+	.dl OSTOSFileSeek                                    ;18
+	.dl OSTOSFileRead                                    ;19
+	.dl OSTOSFileWrite                                   ;20
+	.dl OSTOSSwapFileCreate                              ;21
+	.dl OSTOSSectionCreate                               ;22
+	.dl OSTOSSectionMapView                              ;23
+	.dl OSTOSUnmapView                                   ;24
+	.dl OSTOSRemapView                                   ;25
+	.dl OSTOSSetSwappiness                               ;26
+	.dl OSTOSThreadSleep                                 ;27
 
 
 OSTOSConsolePutCharacter:
@@ -69,6 +91,174 @@ OSTOSSystemAbort:
 	jal  OSSystemAbort
 
 	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSEventCreate:
+.global OSTOSEventCreate
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
+
+	jal  OSEventCreate
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSEventReset:
+.global OSTOSEventReset
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSEventReset
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSEventSignal:
+.global OSTOSEventSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSEventSignal
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSEventPulse:
+.global OSTOSEventPulse
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSEventPulse
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSEventReadState:
+.global OSTOSEventReadState
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSEventReadState
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSSemaphoreCreate:
+.global OSTOSSemaphoreCreate
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+
+	jal  OSSemaphoreCreate
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSSemaphoreRelease:
+.global OSTOSSemaphoreRelease
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSSemaphoreRelease
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSSemaphoreReadState:
+.global OSTOSSemaphoreReadState
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSSemaphoreReadState
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSMutexCreate:
+.global OSTOSMutexCreate
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSMutexCreate
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSMutexRelease:
+.global OSTOSMutexRelease
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSMutexRelease
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSMutexReadState:
+.global OSTOSMutexReadState
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSMutexReadState
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

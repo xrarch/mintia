@@ -26,8 +26,8 @@ OSSystemAbort:
 
 	ret
 
-OSObjectOpen:
-.global OSObjectOpen
+OSEventCreate:
+.global OSEventCreate
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
@@ -41,12 +41,147 @@ OSObjectOpen:
 
 	ret
 
+OSEventReset:
+.global OSEventReset
+	mov  t1, a0
+
+	li   t0, 4
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSEventSignal:
+.global OSEventSignal
+	mov  t1, a0
+
+	li   t0, 5
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSEventPulse:
+.global OSEventPulse
+	mov  t1, a0
+
+	li   t0, 6
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSEventReadState:
+.global OSEventReadState
+	mov  t1, a0
+
+	li   t0, 7
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSSemaphoreCreate:
+.global OSSemaphoreCreate
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+
+	li   t0, 8
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSSemaphoreRelease:
+.global OSSemaphoreRelease
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 9
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSSemaphoreReadState:
+.global OSSemaphoreReadState
+	mov  t1, a0
+
+	li   t0, 10
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSMutexCreate:
+.global OSMutexCreate
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 11
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSMutexRelease:
+.global OSMutexRelease
+	mov  t1, a0
+
+	li   t0, 12
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSMutexReadState:
+.global OSMutexReadState
+	mov  t1, a0
+
+	li   t0, 13
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSObjectOpen:
+.global OSObjectOpen
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 14
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
 OSQuery:
 .global OSQuery
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 4
+	li   t0, 15
 	sys  0
 
 	mov  a0, t1
@@ -57,7 +192,7 @@ OSClose:
 .global OSClose
 	mov  t1, a0
 
-	li   t0, 5
+	li   t0, 16
 	sys  0
 
 	mov  a0, t1
@@ -69,7 +204,7 @@ OSFileQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 6
+	li   t0, 17
 	sys  0
 
 	mov  a0, t1
@@ -82,7 +217,7 @@ OSFileSeek:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 7
+	li   t0, 18
 	sys  0
 
 	mov  a1, t2
@@ -98,7 +233,7 @@ OSFileRead:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 8
+	li   t0, 19
 	sys  0
 
 	mov  a1, t2
@@ -113,7 +248,7 @@ OSFileWrite:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 9
+	li   t0, 20
 	sys  0
 
 	mov  a1, t2
@@ -125,7 +260,7 @@ OSSwapFileCreate:
 .global OSSwapFileCreate
 	mov  t1, a0
 
-	li   t0, 10
+	li   t0, 21
 	sys  0
 
 	mov  a0, t1
@@ -140,7 +275,7 @@ OSSectionCreate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 11
+	li   t0, 22
 	sys  0
 
 	mov  a1, t2
@@ -158,7 +293,7 @@ OSSectionMapView:
 	mov  a0, long [sp + 8]
 	mov  a1, long [sp + 12]
 
-	li   t0, 12
+	li   t0, 23
 	sys  0
 
 	mov  a1, t2
@@ -172,7 +307,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 13
+	li   t0, 24
 	sys  0
 
 	mov  a0, t1
@@ -186,7 +321,7 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 14
+	li   t0, 25
 	sys  0
 
 	mov  a0, t1
@@ -197,7 +332,7 @@ OSSetSwappiness:
 .global OSSetSwappiness
 	mov  t1, a0
 
-	li   t0, 15
+	li   t0, 26
 	sys  0
 
 	mov  a0, t1
@@ -208,7 +343,7 @@ OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 16
+	li   t0, 27
 	sys  0
 
 	mov  a0, t1

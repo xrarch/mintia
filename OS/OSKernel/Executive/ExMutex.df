@@ -1,0 +1,145 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+var ExMutexObjectType 0
+
+fn ExMutexInit { -- }
+	auto type
+
+	auto typeinit
+	ObTypeInitializer_SIZEOF alloc typeinit!
+
+	// initialize ObTypeInitializer fields
+
+	typeinit@ ObTypeInitializerInitialize
+
+	"Mutex" typeinit@ ObTypeInitializer_Name + !
+	'ExMu' typeinit@ ObTypeInitializer_Tag + !
+	0 typeinit@ ObTypeInitializer_WaitOffset + !
+
+	auto ok
+	typeinit@ ObTypeCreate ok! type!
+
+	if (ok@)
+		ok@ "ExMutexInit: couldn't create Mutex type (%i)\n" KeCrash
+	end
+
+	type@ ExMutexObjectType!
+end
+
+fn ExMutexCreateObject { owninguser permissions name -- mutexobject ok }
+	name@ // name
+	0 // flags
+	permissions@ // permissions
+	owninguser@ // owninguser
+	0 // quotabias
+	KeMutex_SIZEOF // bodysize
+	ExMutexObjectType@ // type
+	ObObjectCreate ok! mutexobject!
+
+	if (ok@)
+		return
+	end
+
+	"ExMutexObject" // name
+	USERMODE // mode
+	mutexobject@ // mutex
+	KeMutexInitialize ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"ExMutexCreateObject: failed to initialize mutex (%i)\n" KeCrash
+		end
+	end
+end
+
+fn ExMutexCreate { permissions name -- mutexhandle ok }
+	auto mutexobject
+
+	KeProcessCurrent PsProcess_OwningUser + @ // owninguser
+	permissions@ // permissions
+	name@ // name
+	ExMutexCreateObject ok! mutexobject!
+
+	if (ok@)
+		return
+	end
+
+	1 // nocheck
+	ACCESS_ALL // permissions
+	mutexobject@ // object
+	ObObjectOpen ok! mutexhandle!
+
+	if (ok@)
+		mutexobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+end
+
+fn ExMutexRelease { mutexhandle -- ok }
+	auto obj
+	auto access
+
+	ExMutexObjectType@ // type
+	mutexhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_EXEC SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	obj@ KeMutexRelease ok!
+
+	obj@ ObObjectDereferenceByPointer drop
+end
+
+fn ExMutexReadState { mutexhandle -- locked ok }
+	auto obj
+	auto access
+
+	ExMutexObjectType@ // type
+	mutexhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_READ SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	obj@ KeDispatchIsSignaled locked!
+
+	obj@ ObObjectDereferenceByPointer drop
+end

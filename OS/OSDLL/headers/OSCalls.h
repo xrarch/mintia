@@ -4,6 +4,20 @@
 extern OSConsolePutCharacter { c -- ok }
 extern OSSystemAbort { num1 num2 msg -- ok }
 
+extern OSEventCreate { signaled type permissions name -- eventhandle ok }
+extern OSEventReset { eventhandle -- signaled ok }
+extern OSEventSignal { eventhandle -- ok }
+extern OSEventPulse { eventhandle -- ok }
+extern OSEventReadState { eventhandle -- signaled ok }
+
+extern OSSemaphoreCreate { count permissions name -- semaphorehandle ok }
+extern OSSemaphoreRelease { adjustment semaphorehandle -- ok }
+extern OSSemaphoreReadState { semaphorehandle -- count ok }
+
+extern OSMutexCreate { permissions name -- mutexhandle ok }
+extern OSMutexRelease { mutexhandle -- ok }
+extern OSMutexReadState { mutexhandle -- locked ok }
+
 // Ob
 extern OSObjectOpen { flags access initialobjecthandle path -- handle ok }
 extern OSQuery { handle query -- ok }

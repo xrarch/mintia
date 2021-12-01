@@ -35,6 +35,8 @@ extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
 
 extern OSSwapFileCreate { filehandle -- ok }
 
+extern OSIOControl { arg2 arg1 filehandle -- ret ok }
+
 // Mm
 extern OSSectionCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
 extern OSSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }

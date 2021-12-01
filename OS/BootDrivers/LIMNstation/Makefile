@@ -2,7 +2,11 @@ all:
 	make -C RTC
 	make -C Serial
 	make -C DKS
+	make -C EBus
+	make -C KinnowFB
+
 	make -C AnalogClockTest
+
 	make sysfiles
 
 

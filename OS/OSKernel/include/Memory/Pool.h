@@ -14,6 +14,9 @@ endstruct
 
 externptr MmPoolBytesUsed
 
+extern MmPoolSpaceReserve { pagesneeded -- offset ok }
+extern MmPoolSpaceRelease { pages offset -- }
+
 externptr MmSlabBytesUsedExternally
 externptr MmSlabBytesUsedInternally
 

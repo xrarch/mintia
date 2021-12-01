@@ -1,0 +1,122 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+// Dynamic mapping of IO space.
+
+// Maps IO regions into the same POOLSPACE used for page-aligned allocations,
+// as a result, space is limited; using these facilities to map areas larger
+// than about 256KB permanently, or larger than about 1MB at all after boot
+// time, is NOT recommended.
+
+fn MmIORegionMap { cached length phyaddr -- vaddr ok }
+	auto pagesneeded
+	length@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
+
+	auto offset
+
+	pagesneeded@ // pagesneeded
+	MmPoolSpaceReserve ok! offset!
+
+	if (ok@)
+		return
+	end
+
+	auto flags
+	PTE_V PTE_W | PTE_K | PTE_G | flags!
+
+	if (cached@ ~~)
+		PTE_NC flags |=
+	end
+
+	// map region
+
+	POOLSPACE offset@ PAGESHIFT << + vaddr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	auto ptr
+	vaddr@ ptr!
+
+	while (i@ pagesneeded@ <)
+		phyaddr@ // phyaddr
+		flags@ // flags
+		ptr@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmIORegionMap: failed to map (%i)\n" KeCrash
+			end
+		end
+
+		PAGESIZE phyaddr +=
+		PAGESIZE ptr +=
+		1 i +=
+	end
+end
+
+fn MmIORegionUnmap { length vaddr -- }
+	if (DEBUGCHECKS)
+		if (vaddr@ POOLSPACE <)
+			vaddr@ "MmIOUnmapRegion: vaddr<POOLSPACE (0x%08x)\n" KeCrash
+		end
+	end
+
+	auto pages
+	length@ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	// unmap region
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	while (i@ pages@ <)
+		auto ok
+
+		0 // phyaddr
+		0 // flags
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmIORegionUnmap: failed to unmap (%i)\n" KeCrash
+			end
+		end
+
+		PAGESIZE vaddr +=
+		1 i +=
+	end
+
+	// release pool space
+
+	auto offset
+	vaddr@ POOLSPACE - PAGESHIFT >> offset!
+
+	pages@ // pages
+	offset@ // offset
+	MmPoolSpaceRelease
+end

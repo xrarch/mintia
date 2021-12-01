@@ -2,6 +2,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "<ll>/OSDLL/OSVideoControl.h"
+
 var Seed 0x12AB34CD
 
 fn SimpleRandom { -- num }
@@ -15,7 +17,7 @@ end
 buffer TestBuffer 8192
 
 fn Main { ... -- ret }
-	"SystemInit.exe: Hello from dynamically-linked userspace!\n" Printf
+	"SystemInit.exe: Hello from dynamically-linked, demand-paged userspace!\n" Printf
 
 	"SystemInit.exe: creating swapfile as //:/Devices/dks2.
 Eventually it will be configurable and will be /mintia/SwapFile.sys by default,
@@ -67,6 +69,72 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 	"SystemInit.exe: swapfile is %d bytes (%d pages).\n" Printf
 
 	if (0)
+		// framebuffer mmap test
+
+		0 // flags
+		ACCESS_READ ACCESS_WRITE | // access
+		"//:/Devices/kinnowfb0" // path
+		0 // ftype
+		OSFileOpen ret! handle!
+
+		if (ret@)
+			ret@ OSStatusGetName "SystemInit.exe: failed to open e: %s\n" OSAbort
+		end
+
+		OSVideoQuery_SIZEOF alloc query!
+
+		query@ // arg2
+		OSVIDEOIOCONTROL_QUERY // arg1
+		handle@ // filehandle
+		OSIOControl ret! drop
+
+		if (ret@)
+			ret@ OSStatusGetName "SystemInit.exe: failed to get video parameters: %s\n" OSAbort
+		end
+
+		query@ OSVideoQuery_Height + @
+		query@ OSVideoQuery_Width + @ "%dx%d\n" Printf
+
+		ACCESS_READ ACCESS_WRITE | // pageprotection
+		0 // anonsize
+		handle@ // filehandle
+		ACCESS_OWNER_ALL // permissions
+		0 // name
+		OSSectionCreate ret! handle2!
+
+		if (ret@)
+			ret@ OSStatusGetName "SystemInit.exe: failed to make section: %s\n" OSAbort
+		end
+
+		query@ OSVideoQuery_Width + @ query@ OSVideoQuery_Height + @ * 2 * // length
+		HEAPSTART // startva
+		0 // sectionoffset
+		handle2@ // sectionhandle
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITE | PAGEACCESS_NONCACHED | // pageprotection
+		0 // flags
+		OSSectionMapView ret! realva!
+
+		if (ret@)
+			ret@ OSStatusGetName "SystemInit.exe: failed to map section: %s\n" OSAbort
+		end
+
+		while (1)
+			query@ OSVideoQuery_Width + @ query@ OSVideoQuery_Height + @ * 2 * hugeareasize!
+			realva@ ptr!
+
+			while (hugeareasize@)
+				SimpleRandom ptr@!
+
+				4 hugeareasize -=
+				4 ptr +=
+			end
+		end
+	end
+
+	if (0)
+		// usermode mutex test
+
 		ACCESS_OWNER_ALL // permissions
 		0 // name
 		OSMutexCreate ret! handle!
@@ -118,6 +186,8 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 	auto written
 
 	if (0)
+		// disk write test
+
 		8192 hugeareasize!
 		TestBuffer realva!
 
@@ -129,7 +199,7 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 		end
 
 		0 // flags
-		ACCESS_READ ACCESS_WRITE | // access
+		PAGEACCESS_READ PAGEACCESS_WRITE | // access
 		"//:/Devices/dks3" // path
 		0 // ftype
 		OSFileOpen ret! handle!
@@ -152,8 +222,10 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 	end
 
 	if (0)
+		// mmap disk write test
+
 		0 // flags
-		ACCESS_READ ACCESS_WRITE | // access
+		PAGEACCESS_READ PAGEACCESS_WRITE | // access
 		"//:/Devices/dks3" // path
 		0 // ftype
 		OSFileOpen ret! handle!
@@ -163,7 +235,7 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 		end
 
 		auto handle2
-		ACCESS_READ ACCESS_WRITE | // pageprotection
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
 		0 // anonsize
 		handle@ // filehandle
 		ACCESS_OWNER_ALL // permissions
@@ -179,7 +251,7 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 		0 // sectionoffset
 		handle2@ // sectionhandle
 		OSCURRENTPROCESS // processhandle
-		ACCESS_READ ACCESS_WRITE | // pageprotection
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
 		0 // flags
 		OSSectionMapView ret! realva!
 
@@ -202,6 +274,8 @@ and will be able to prompt the user for a swapfile path upon failure.\n" Printf
 	end
 
 	if (0)
+		// swap test
+
 		12 1024 * 1024 * hugeareasize!
 
 		auto hugearea

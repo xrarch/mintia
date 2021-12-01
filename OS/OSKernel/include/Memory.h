@@ -8,3 +8,4 @@
 #include "<inc>/Memory/Process.h"
 #include "<inc>/Memory/PTE.h"
 #include "<inc>/Memory/WorkingSet.h"
+#include "<inc>/Memory/IORegion.h"

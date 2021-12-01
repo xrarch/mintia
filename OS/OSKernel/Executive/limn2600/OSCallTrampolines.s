@@ -25,6 +25,7 @@
 .extern OSFileRead
 .extern OSFileWrite
 .extern OSSwapFileCreate
+.extern OSIOControl
 .extern OSSectionCreate
 .extern OSSectionMapView
 .extern OSUnmapView
@@ -34,7 +35,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 29
+	.dl 30
 
 OSCallTable:
 .global OSCallTable
@@ -62,12 +63,13 @@ OSCallTable:
 	.dl OSTOSFileRead                                    ;21
 	.dl OSTOSFileWrite                                   ;22
 	.dl OSTOSSwapFileCreate                              ;23
-	.dl OSTOSSectionCreate                               ;24
-	.dl OSTOSSectionMapView                              ;25
-	.dl OSTOSUnmapView                                   ;26
-	.dl OSTOSRemapView                                   ;27
-	.dl OSTOSSetSwappiness                               ;28
-	.dl OSTOSThreadSleep                                 ;29
+	.dl OSTOSIOControl                                   ;24
+	.dl OSTOSSectionCreate                               ;25
+	.dl OSTOSSectionMapView                              ;26
+	.dl OSTOSUnmapView                                   ;27
+	.dl OSTOSRemapView                                   ;28
+	.dl OSTOSSetSwappiness                               ;29
+	.dl OSTOSThreadSleep                                 ;30
 
 
 OSTOSConsolePutCharacter:
@@ -427,6 +429,23 @@ OSTOSSwapFileCreate:
 	jal  OSSwapFileCreate
 
 	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSIOControl:
+.global OSTOSIOControl
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+
+	jal  OSIOControl
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

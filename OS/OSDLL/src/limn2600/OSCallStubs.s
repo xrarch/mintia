@@ -293,6 +293,20 @@ OSSwapFileCreate:
 
 	ret
 
+OSIOControl:
+.global OSIOControl
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+
+	li   t0, 24
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
 OSSectionCreate:
 .global OSSectionCreate
 	mov  t1, a0
@@ -301,7 +315,7 @@ OSSectionCreate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 24
+	li   t0, 25
 	sys  0
 
 	mov  a1, t2
@@ -319,7 +333,7 @@ OSSectionMapView:
 	mov  a0, long [sp + 8]
 	mov  a1, long [sp + 12]
 
-	li   t0, 25
+	li   t0, 26
 	sys  0
 
 	mov  a1, t2
@@ -333,7 +347,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 26
+	li   t0, 27
 	sys  0
 
 	mov  a0, t1
@@ -347,7 +361,7 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 27
+	li   t0, 28
 	sys  0
 
 	mov  a0, t1
@@ -358,7 +372,7 @@ OSSetSwappiness:
 .global OSSetSwappiness
 	mov  t1, a0
 
-	li   t0, 28
+	li   t0, 29
 	sys  0
 
 	mov  a0, t1
@@ -369,7 +383,7 @@ OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 29
+	li   t0, 30
 	sys  0
 
 	mov  a0, t1

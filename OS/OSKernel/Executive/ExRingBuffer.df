@@ -209,7 +209,7 @@ fn ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ringbuff
 		// depending on how big the ringbuffer is, this could be pretty slow.
 		// but this will only happen once every 4 billion insertions, and only
 		// if the read pointer never ever catches up during that time, so it
-		// is considered a small price to pay.
+		// is considered a small price to pay to not just BSOD.
 
 		wp@ rp@ - wp!
 
@@ -323,4 +323,110 @@ fn ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valu
 	oldipl@ KeIPLLower
 
 	0 ok!
+end
+
+fn ExRingBufferRubout { ringbuffer -- value valueptr ok }
+	// un-write the last value and return the value.
+
+	0 ok!
+
+	auto valuesizelog
+	ringbuffer@ ExRingBuffer_ValueSizeLog + @ valuesizelog!
+
+	auto size
+	ringbuffer@ ExRingBuffer_Size + @ size!
+
+	auto offmask
+	size@ 1 - offmask!
+
+	auto bufdata
+	ringbuffer@ ExRingBuffer_BufferData + @ bufdata!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto rp
+	ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
+
+	auto wp
+	ringbuffer@ ExRingBuffer_WritePointer + @ wp!
+
+	if (wp@ rp@ ==)
+		// ringbuffer is empty.
+
+		rs@ HALCPUInterruptRestore
+
+		-1 ok!
+
+		return
+	end
+
+	1 wp -=
+
+	wp@ offmask@ & valuesizelog@ << bufdata@ + valueptr!
+
+	if (valuesizelog@ 0 ==)
+		valueptr@ gb value!
+	end elseif (valuesizelog@ 1 ==)
+		valueptr@ gi value!
+	end else
+		valueptr@ @ value!
+	end
+
+	wp@ ringbuffer@ ExRingBuffer_WritePointer + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn ExRingBufferPutBack { value ringbuffer -- valueptr ok }
+	// un-read the last value and replace it with a new one.
+
+	0 ok!
+
+	auto valuesizelog
+	ringbuffer@ ExRingBuffer_ValueSizeLog + @ valuesizelog!
+
+	auto size
+	ringbuffer@ ExRingBuffer_Size + @ size!
+
+	auto offmask
+	size@ 1 - offmask!
+
+	auto bufdata
+	ringbuffer@ ExRingBuffer_BufferData + @ bufdata!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto rp
+	ringbuffer@ ExRingBuffer_ReadPointer + @ rp!
+
+	auto wp
+	ringbuffer@ ExRingBuffer_WritePointer + @ wp!
+
+	if (wp@ rp@ - size@ >=)
+		// ringbuffer is full.
+
+		rs@ HALCPUInterruptRestore
+
+		-1 ok!
+
+		return
+	end
+
+	1 rp -=
+
+	rp@ offmask@ & valuesizelog@ << bufdata@ + valueptr!
+
+	if (valuesizelog@ 0 ==)
+		value@ valueptr@ sb
+	end elseif (valuesizelog@ 1 ==)
+		value@ valueptr@ si
+	end else
+		value@ valueptr@!
+	end
+
+	rp@ ringbuffer@ ExRingBuffer_ReadPointer + !
+
+	rs@ HALCPUInterruptRestore
 end

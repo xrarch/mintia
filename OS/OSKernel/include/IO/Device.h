@@ -32,6 +32,8 @@ struct IODevice
 	4 Reserved7
 endstruct
 
+extern IODeviceDeleteObject { object -- ok }
+
 extern IODeviceGetExtension { deviceobject -- extension }
 extern IODeviceSetBlockSize { blocksize deviceobject -- }
 extern IODeviceGetBlockSize { deviceobject -- blocksize }

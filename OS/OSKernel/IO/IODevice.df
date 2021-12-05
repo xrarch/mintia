@@ -22,7 +22,57 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+fn IODeviceCreateEx { name sizeinbytes driver owninguser permissions permanent -- deviceobject ok }
+	auto flags
+
+	if (permanent@)
+		OBFLAGS_PERMANENT flags!
+	end else
+		0 flags!
+	end
+
+	name@ // name
+	flags@ // flags
+	permissions@ // permissions
+	owninguser@ // owninguser
+	0 // quotabias
+	IODevice_SIZEOF driver@ IODriver_ExtensionSize + @ + // bodysize
+	IODeviceTypeObject@ // type
+	ObObjectCreate ok! deviceobject!
+
+	if (ok@)
+		return
+	end
+
+	auto fcb
+	driver@ IODriver_DispatchTable + @ // dispatchtable
+	deviceobject@ // devobj
+	driver@ IODriver_DeviceType + @ // filetype
+	0 // flags
+	IOFileControlBlockCreate ok! fcb!
+
+	if (ok@)
+		deviceobject@ ObObjectDeallocate
+
+		return
+	end
+
+	driver@ deviceobject@ IODevice_Driver + !
+	deviceobject@ IODevice_SIZEOF + deviceobject@ IODevice_Extension + !
+	fcb@ deviceobject@ IODevice_FileControlBlock + !
+	0 deviceobject@ IODevice_BlockSize + !
+
+	sizeinbytes@ fcb@ IOFileControlBlock_SizeInBytes + !
+end
+
 fn IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
+	// makes the device object permanent and inserts it in the Devices object
+	// directory. useful for physical device drivers.
+
+	if (name@ ~~)
+		"IODeviceCreate: no name\n" KeCrash
+	end
+
 	if (driver@ IODriver_VersionMajor + @ IOVERSION_MAJOR ~=)
 		name@ "Failed to create device '%s'.\n" "IODeviceCreate" HALLog
 
@@ -35,46 +85,24 @@ fn IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
 		name@ "Device '%s' has mismatched driver interface.\n" "IODeviceCreate" HALLog
 	end
 
-	auto dir
-
 	name@ // name
-	OBFLAGS_PERMANENT // flags
-	permissions@ // permissions
+	sizeinbytes@ // sizeinbytes
+	driver@ // driver
 	SeSystemUser@ // owninguser
-	0 // quotabias
-	IODevice_SIZEOF driver@ IODriver_ExtensionSize + @ + // bodysize
-	IODeviceTypeObject@ // type
-	ObObjectCreate ok! deviceobject!
+	permissions@ // permissions
+	1 // permanent
+	IODeviceCreateEx ok! deviceobject!
 
 	if (ok@)
-		ok@ name@ "IODeviceCreate: failed to create object for device '%s' (%i)\n" KeCrash
+		return
 	end
-
-	auto fcb
-
-	driver@ IODriver_DispatchTable + @ // dispatchtable
-	deviceobject@ // devobj
-	driver@ IODriver_DeviceType + @ // filetype
-	0 // flags
-	IOFileControlBlockCreate ok! fcb!
-
-	if (ok@)
-		ok@ name@ "IODeviceCreate: failed to create FCB for device '%s' (%i)\n" KeCrash
-	end
-
-	driver@ deviceobject@ IODevice_Driver + !
-	deviceobject@ IODevice_SIZEOF + deviceobject@ IODevice_Extension + !
-	fcb@ deviceobject@ IODevice_FileControlBlock + !
-	0 deviceobject@ IODevice_BlockSize + !
-
-	sizeinbytes@ fcb@ IOFileControlBlock_SizeInBytes + !
 
 	deviceobject@ ObHeader_SIZEOF - // object
 	IODevicesDirectoryObject@ // directory
 	ObDirectoryInsertByPointers ok!
 
 	if (ok@)
-		ok@ name@ "IODeviceCreate: failed to insert device '%s' into /Devices (%i)\n" KeCrash
+		"IODeviceCreate: failed to insert in Devices directory\n" KeCrash
 	end
 end
 
@@ -90,10 +118,39 @@ fn IODeviceGetBlockSize { deviceobject -- blocksize }
 	deviceobject@ IODevice_BlockSize + @ blocksize!
 end
 
+fn (IODispatchDeleteObjectFunction) IODeviceDeleteObject { object -- ok }
+	0 ok!
+
+	auto fcb
+	object@ IODevice_FileControlBlock + @ fcb!
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlock_References + @)
+			"IODeviceDeleteObject: fcb had refs\n" KeCrash
+		end
+	end
+
+	auto deletefunc
+	object@ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_DeleteDeviceObject + @ deletefunc!
+
+	if (deletefunc@)
+		object@ // object
+		deletefunc@ IODispatchDeleteDeviceObjectFunction
+	end
+
+	-1 // writeout
+	fcb@ // fcb
+	IOFileControlBlockDelete
+end
+
 fn (IODispatchDeleteObjectFunction) IODeviceDeleteFileObject { object -- ok }
 	// generic function for deleting a file object for device drivers
 
 	0 ok!
 
-	object@ IOFile_FileControlBlock + @ IOFileControlBlockDereference drop
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	fcb@ IOFileControlBlockDereference drop
+	fcb@ IOFileControlBlock_DeviceObject + @ ObObjectDereferenceByPointer drop
 end

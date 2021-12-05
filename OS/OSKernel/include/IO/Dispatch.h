@@ -10,6 +10,7 @@ fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
+fnptr IODispatchDeleteDeviceObjectFunction { object -- }
 
 struct IODispatchTable
 	4 Open
@@ -30,7 +31,7 @@ struct IODispatchTable
 	4 Truncate
 	4 ReadDirectory
 	4 GetPageAddress
-	4 Reserved6
+	4 DeleteDeviceObject
 	4 Reserved7
 	4 Reserved8
 	4 Reserved9

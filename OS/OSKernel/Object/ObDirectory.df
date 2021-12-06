@@ -109,6 +109,15 @@ fn ObDirectoryCreateFlags { permissions name flags -- dirhandle ok }
 end
 
 fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
+	auto handletable
+	KeProcessCurrent PsProcess_HandleTable + @ handletable!
+
+	handletable@ ExHandleTableLockShared ok!
+
+	if (ok@)
+		return
+	end
+
 	auto dir
 	auto obj
 	auto access
@@ -118,12 +127,16 @@ fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
 	ObObjectReferenceByHandle ok! dir! access!
 
 	if (ok@)
+		handletable@ ExHandleTableUnlock
+
 		return
 	end
 
 	access@ ACCESS_WRITE SeCheckAccess ok!
 
 	if (ok@)
+		handletable@ ExHandleTableUnlock
+
 		dir@ ObObjectDereferenceByPointer drop
 
 		return
@@ -134,6 +147,8 @@ fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
 	ObObjectReferenceByHandle ok! obj! access!
 
 	if (ok@)
+		handletable@ ExHandleTableUnlock
+
 		dir@ ObObjectDereferenceByPointer drop
 
 		return
@@ -142,6 +157,8 @@ fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
 	access@ ACCESS_WRITE SeCheckAccess ok!
 
 	if (ok@)
+		handletable@ ExHandleTableUnlock
+
 		dir@ ObObjectDereferenceByPointer drop
 		obj@ ObObjectDereferenceByPointer drop
 
@@ -152,11 +169,22 @@ fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
 	dir@ // directory
 	ObDirectoryInsertByPointers ok!
 
+	handletable@ ExHandleTableUnlock
+
 	dir@ ObObjectDereferenceByPointer drop
 	obj@ ObObjectDereferenceByPointer drop
 end
 
 fn ObDirectoryRemove { objecthandle -- ok }
+	auto handletable
+	KeProcessCurrent PsProcess_HandleTable + @ handletable!
+
+	handletable@ ExHandleTableLockShared ok!
+
+	if (ok@)
+		return
+	end
+
 	auto obj
 	auto access
 
@@ -165,12 +193,16 @@ fn ObDirectoryRemove { objecthandle -- ok }
 	ObObjectReferenceByHandle ok! obj! access!
 
 	if (ok@)
+		handletable@ ExHandleTableUnlock
+
 		return
 	end
 
 	access@ ACCESS_WRITE SeCheckAccess ok!
 
 	if (ok@)
+		handletable@ ExHandleTableUnlock
+
 		obj@ ObObjectDereferenceByPointer drop
 
 		return
@@ -180,11 +212,17 @@ fn ObDirectoryRemove { objecthandle -- ok }
 	obj@ ObHeader_SIZEOF - // object
 	ObDirectoryRemoveByPointer ok!
 
+	handletable@ ExHandleTableUnlock
+
 	obj@ ObObjectDereferenceByPointer drop
 end
 
 fn ObDirectoryInsertByPointers { object directory -- ok }
-	// must be passed the object's header
+	// must be passed the object's header.
+	// assumes the caller locked the handletable shared, to prevent a nasty
+	// race condition where the object may get closed for the last time and
+	// then promptly inserted into an object directory, denying it the
+	// change to be removed.
 
 	0 ok!
 
@@ -247,7 +285,10 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 end
 
 fn ObDirectoryRemoveByPointer { locked object -- ok }
-	// must be passed the object's header
+	// must be passed the object's header.
+	// assumes the caller locked the handletable shared. i don't know if
+	// that is strictly necessary for removal, but i know it is for insertion,
+	// which makes me paranoid.
 
 	if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT &)
 		// don't remove from directory if permanent

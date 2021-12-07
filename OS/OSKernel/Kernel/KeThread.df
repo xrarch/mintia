@@ -99,8 +99,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_IgnoreKill + !
 
-	if (process@ KeProcess_MainThread + @ ~~)
-		thread@ process@ KeProcess_MainThread + !
+	if (process@ KeProcess_SignalThread + @ ~~)
+		thread@ process@ KeProcess_SignalThread + !
 	end
 
 	auto i
@@ -128,9 +128,6 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_SafeAccessAbort + !
 	0 thread@ KeThread_SafeAccessSP + !
-
-	0          thread@ KeThread_Signaled + !
-	0xCF66FFFF thread@ KeThread_AcceptMask + !
 
 	"NA" 0 thread@ KeThread_Timer + KeTimerInitialize ok!
 end
@@ -199,8 +196,11 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 	// passed to OSDLL; actual signal dispatch and certain actions like core
 	// dumping are performed in usermode OSDLL code.
 
+	auto process
+	thread@ KeThread_Process + @ process!
+
 	auto sig
-	thread@ KeThread_Signaled + @ sig!
+	process@ KeProcess_Signaled + @ sig!
 
 	if (sig@ ~~)
 		// no signals, return now
@@ -239,6 +239,13 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		return
 	end
 
+	if (process@ KeProcess_SignalThread + @ thread@ ~=)
+		// not the designated signal handling thread, ignore
+		0 ok!
+
+		return
+	end
+
 	if (alertable@ ~~)
 		// usermode unalertable can block all signals except OSSIGNAL_KILL and
 		// OSSIGNAL_STOP
@@ -247,7 +254,7 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		return
 	end
 
-	if (thread@ KeThread_AcceptMask + @ sig@ &)
+	if (process@ KeProcess_AcceptMask + @ sig@ &)
 		STATUS_SIGNALLED ok!
 	end else
 		0 ok!

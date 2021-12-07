@@ -23,13 +23,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn CoInit { -- }
-	// initialize console subsystem
-
-
-end
-
-fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissions permanent -- fileobject deviceobject ok }
+fn CoConsoleCreateObject { outputfunc context rawbuffer name owninguser permissions permanent -- fileobject deviceobject ok }
 	name@ // name
 	0 // sizeinbytes
 	CoDriver // driver
@@ -48,7 +42,7 @@ fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissio
 	0 console@ CoConsole_Initialized + !
 
 	auto outputbuffer
-	8 // sizelog (2^9 = 256 bytes)
+	7 // sizelog (2^7 = 128 bytes)
 	0 // valuesizelog (2^0 = 1 byte)
 	IPLDPC // synchipl
 	0 // quotablock
@@ -60,12 +54,12 @@ fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissio
 		return
 	end
 
-	auto inputbuffer
-	8 // sizelog (2^9 = 256 bytes)
+	auto cookedbuffer
+	9 // sizelog (2^9 = 512 bytes)
 	0 // valuesizelog (2^0 = 1 byte)
-	synchipl@ // synchipl
+	IPLDPC // synchipl
 	0 // quotablock
-	ExRingBufferCreate ok! inputbuffer!
+	ExRingBufferCreate ok! cookedbuffer!
 
 	if (ok@)
 		outputbuffer@ // ringbuffer
@@ -74,6 +68,30 @@ fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissio
 		deviceobject@ ObObjectDereferenceByPointer drop
 
 		return
+	end
+
+	if (rawbuffer@)
+		0 console@ CoConsole_RawBufferAllocated + !
+	end else
+		1 console@ CoConsole_RawBufferAllocated + !
+
+		9 // sizelog (2^9 = 512 bytes)
+		0 // valuesizelog (2^0 = 1 byte)
+		IPLDPC // synchipl
+		0 // quotablock
+		ExRingBufferCreate ok! rawbuffer!
+
+		if (ok@)
+			cookedbuffer@ // ringbuffer
+			ExRingBufferDelete
+
+			outputbuffer@ // ringbuffer
+			ExRingBufferDelete
+
+			deviceobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
 	end
 
 	auto hostfcb
@@ -84,16 +102,23 @@ fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissio
 	IOFileControlBlockCreate ok! hostfcb!
 
 	if (ok@)
-		inputbuffer@ // ringbuffer
+		cookedbuffer@ // ringbuffer
 		ExRingBufferDelete
 
 		outputbuffer@ // ringbuffer
 		ExRingBufferDelete
 
+		if (console@ CoConsole_RawBufferAllocated + @)
+			rawbuffer@ // ringbuffer
+			ExRingBufferDelete
+		end
+
 		deviceobject@ ObObjectDereferenceByPointer drop
 
 		return
 	end
+
+	1 hostfcb@ IOFileControlBlock_FSContext + !
 
 	// bias refcounts for host fileobject
 	deviceobject@ ObObjectReferenceByPointer drop
@@ -114,11 +139,16 @@ fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissio
 		hostfcb@ // fcb
 		IOFileControlBlockDelete
 
-		inputbuffer@ // ringbuffer
+		cookedbuffer@ // ringbuffer
 		ExRingBufferDelete
 
 		outputbuffer@ // ringbuffer
 		ExRingBufferDelete
+
+		if (console@ CoConsole_RawBufferAllocated + @)
+			rawbuffer@ // ringbuffer
+			ExRingBufferDelete
+		end
 
 		deviceobject@ ObObjectDereferenceByPointer drop
 
@@ -126,10 +156,12 @@ fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissio
 	end
 
 	hostfcb@ console@ CoConsole_HostFCB + !
-	inputbuffer@ console@ CoConsole_InputBuffer + !
+	rawbuffer@ console@ CoConsole_RawBuffer + !
+	cookedbuffer@ console@ CoConsole_CookedBuffer + !
 	outputbuffer@ console@ CoConsole_OutputBuffer + !
 	outputfunc@ console@ CoConsole_OutputFunction + !
 	context@ console@ CoConsole_Context + !
+	0 console@ CoConsole_Mode + !
 
 	1 console@ CoConsole_Initialized + !
 end

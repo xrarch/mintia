@@ -1,1 +1,0 @@
-const OSTTY_MODE_NOECHO 1

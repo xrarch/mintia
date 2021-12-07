@@ -28,7 +28,9 @@ struct KeProcess
 
 	4 BasePriority
 
-	4 MainThread
+	4 SignalThread
+	4 Signaled
+	4 AcceptMask
 
 	// memory manager information
 
@@ -116,9 +118,6 @@ struct KeThread
 
 	4 SafeAccessAbort
 	4 SafeAccessSP
-
-	4 Signaled
-	4 AcceptMask
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }

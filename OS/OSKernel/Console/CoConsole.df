@@ -1,0 +1,107 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
+	auto outputbuffer
+	console@ CoConsole_OutputBuffer + @ outputbuffer!
+
+	auto outputfunc
+	console@ CoConsole_OutputFunction + @ outputfunc!
+
+	auto diff
+	0 diff!
+
+	while (length@)
+		auto c
+		if (lastmode@ USERMODE ==)
+			buffer@ KeSafeGetByte ok! c!
+
+			if (ok@)
+				break
+			end
+		end else
+			buffer@ gb c!
+		end
+
+		c@ // value
+		0 // overwrite
+		0 // timeout
+		lastmode@ // lastmode
+		EXRINGDONTWAIT // waitonfull
+		outputbuffer@ // ringbuffer
+		ExRingBufferWriteValue ok! drop
+
+		if (ok@ ~~)
+			1 diff +=
+		end else
+			0 diff!
+		end
+
+		while (ok@)
+			if (ok@ STATUS_WAIT_TIMEOUT ~=)
+				if (ok@ STATUS_RING_FULL ~=)
+					break
+				end
+			end
+
+			// ringbuffer full. call console output function and wake up host
+			// to try to empty it out.
+
+			if (outputfunc@)
+				console@ // console
+				outputfunc@ CoOutputFunction drop
+			end
+
+			IOBOOSTCONHOST // priboost
+			outputbuffer@ // ringbuffer
+			ExRingBufferWakeReader
+
+			// try again. this time sleep with a timeout.
+
+			c@ // value
+			0 // overwrite
+			50 // timeout
+			lastmode@ // lastmode
+			EXRINGWAIT // waitonfull
+			outputbuffer@ // ringbuffer
+			ExRingBufferWriteValue ok! drop
+		end
+
+		1 byteswritten +=
+		1 buffer +=
+		1 length -=
+	end
+
+	if (diff@)
+		if (outputfunc@)
+			console@ // console
+			outputfunc@ CoOutputFunction drop
+		end
+
+		IOBOOSTCONHOST // priboost
+		outputbuffer@ // ringbuffer
+		ExRingBufferWakeReader
+	end
+end

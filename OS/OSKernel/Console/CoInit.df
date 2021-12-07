@@ -1,0 +1,135 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn CoInit { -- }
+	// initialize console subsystem
+
+
+end
+
+fn CoConsoleCreateObject { outputfunc context synchipl name owninguser permissions permanent -- fileobject deviceobject ok }
+	name@ // name
+	0 // sizeinbytes
+	CoDriver // driver
+	owninguser@ // owninguser
+	permissions@ // permissions
+	permanent@ // permanent
+	IODeviceCreateEx ok! deviceobject!
+
+	if (ok@)
+		return
+	end
+
+	auto console
+	deviceobject@ IODeviceGetExtension console!
+
+	0 console@ CoConsole_Initialized + !
+
+	auto outputbuffer
+	8 // sizelog (2^9 = 256 bytes)
+	0 // valuesizelog (2^0 = 1 byte)
+	IPLDPC // synchipl
+	0 // quotablock
+	ExRingBufferCreate ok! outputbuffer!
+
+	if (ok@)
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto inputbuffer
+	8 // sizelog (2^9 = 256 bytes)
+	0 // valuesizelog (2^0 = 1 byte)
+	synchipl@ // synchipl
+	0 // quotablock
+	ExRingBufferCreate ok! inputbuffer!
+
+	if (ok@)
+		outputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto hostfcb
+	CoDispatch // dispatchtable
+	deviceobject@ // devobj
+	OSFILETYPE_CHARDEVICE // filetype
+	0 // flags
+	IOFileControlBlockCreate ok! hostfcb!
+
+	if (ok@)
+		inputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		outputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	// bias refcounts for host fileobject
+	deviceobject@ ObObjectReferenceByPointer drop
+	hostfcb@ IOFileControlBlockReference drop
+
+	"ConsoleHost" // openedpath
+	0 // flags
+	owninguser@ // owninguser
+	ACCESS_OWNER_ALL // permissions
+	hostfcb@ // fcb
+	IOFileCreateObject ok! fileobject!
+
+	if (ok@)
+		deviceobject@ ObObjectDereferenceByPointer drop
+		hostfcb@ IOFileControlBlockDereference drop
+
+		-1 // writeout
+		hostfcb@ // fcb
+		IOFileControlBlockDelete
+
+		inputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		outputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	hostfcb@ console@ CoConsole_HostFCB + !
+	inputbuffer@ console@ CoConsole_InputBuffer + !
+	outputbuffer@ console@ CoConsole_OutputBuffer + !
+	outputfunc@ console@ CoConsole_OutputFunction + !
+	context@ console@ CoConsole_Context + !
+
+	1 console@ CoConsole_Initialized + !
+end

@@ -1,5 +1,3 @@
-// needs Kernel.h
-
 struct ExRingBuffer
 	4 Size
 	4 BufferData

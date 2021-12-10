@@ -26,11 +26,16 @@ fn ExRingBufferCreate { sizelog valuesizelog synchipl quotablock -- ringbuffer o
 	auto size
 	1 sizelog@ << size!
 
-	auto ringbufsize
-	ExRingBuffer_SIZEOF size@ valuesizelog@ << + ringbufsize!
+	auto ringbufcharge
+	ExRingBuffer_SIZEOF MmChargeBytesGet ringbufcharge!
+
+	auto ringbufdatasize
+	size@ valuesizelog@ << ringbufdatasize!
+
+	ringbufdatasize@ MmChargeBytesGet ringbufcharge +=
 
 	if (quotablock@)
-		ringbufsize@ MmChargeBytesGet // charge
+		ringbufcharge@ // charge
 		quotablock@ // quotablock
 		MmQuotaBlockCharge ok!
 
@@ -41,13 +46,32 @@ fn ExRingBufferCreate { sizelog valuesizelog synchipl quotablock -- ringbuffer o
 		quotablock@ MmQuotaBlockReference
 	end
 
-	ringbufsize@ // bytes
+	ExRingBuffer_SIZEOF // bytes
 	'Ring' // tag
 	MmAllocWithTag ok! ringbuffer!
 
 	if (ok@)
 		if (quotablock@)
-			ringbufsize@ MmChargeBytesGet // charge
+			ringbufcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUncharge
+
+			quotablock@ MmQuotaBlockDereference
+		end
+
+		return
+	end
+
+	auto ringbufdata
+	ringbufdatasize@ // bytes
+	'RiDa' // tag
+	MmAllocWithTag ok! ringbufdata!
+
+	if (ok@)
+		ringbuffer@ MmFree
+
+		if (quotablock@)
+			ringbufcharge@ // charge
 			quotablock@ // quotablock
 			MmQuotaBlockUncharge
 
@@ -58,7 +82,7 @@ fn ExRingBufferCreate { sizelog valuesizelog synchipl quotablock -- ringbuffer o
 	end
 
 	size@ ringbuffer@ ExRingBuffer_Size + !
-	ringbuffer@ ExRingBuffer_SIZEOF + ringbuffer@ ExRingBuffer_BufferData + !
+	ringbufdata@ ExRingBuffer_SIZEOF + ringbuffer@ ExRingBuffer_BufferData + !
 
 	0 ringbuffer@ ExRingBuffer_ReadPointer + !
 	0 ringbuffer@ ExRingBuffer_WritePointer + !
@@ -94,10 +118,15 @@ fn ExRingBufferDelete { ringbuffer -- }
 	auto quotablock
 	ringbuffer@ ExRingBuffer_QuotaBlock + @ quotablock!
 
+	auto charge
+	ExRingBuffer_SIZEOF MmChargeBytesGet charge!
+	ringbuffer@ ExRingBuffer_BufferData + @ MmBlockChargeGet charge +=
+
+	ringbuffer@ ExRingBuffer_BufferData + @ MmFree
 	ringbuffer@ MmFree
 
 	if (quotablock@)
-		ringbuffer@ MmBlockChargeGet // charge
+		charge@ // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
 

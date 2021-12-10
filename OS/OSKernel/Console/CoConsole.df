@@ -25,6 +25,150 @@
 
 #include "<ll>/OSDLL/OSConsoleControl.h"
 
+fn CoConsoleCreateObject { outputfunc context rawbuffer quotablock name owninguser permissions permanent -- fileobject deviceobject ok }
+	name@ // name
+	0 // sizeinbytes
+	CoDriver // driver
+	owninguser@ // owninguser
+	permissions@ // permissions
+	permanent@ // permanent
+	IODeviceCreateEx ok! deviceobject!
+
+	if (ok@)
+		return
+	end
+
+	auto console
+	deviceobject@ IODeviceGetExtension console!
+
+	0 console@ CoConsole_Initialized + !
+
+	auto outputbuffer
+	10 // sizelog (2^10 = 1024 bytes)
+	0 // valuesizelog (2^0 = 1 byte)
+	IPLDPC // synchipl
+	quotablock@ // quotablock
+	ExRingBufferCreate ok! outputbuffer!
+
+	if (ok@)
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto cookedbuffer
+	10 // sizelog (2^10 = 1024 bytes)
+	0 // valuesizelog (2^0 = 1 byte)
+	IPLDPC // synchipl
+	quotablock@ // quotablock
+	ExRingBufferCreate ok! cookedbuffer!
+
+	if (ok@)
+		outputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	if (rawbuffer@)
+		0 console@ CoConsole_RawBufferAllocated + !
+	end else
+		1 console@ CoConsole_RawBufferAllocated + !
+
+		8 // sizelog (2^8 = 256 bytes)
+		0 // valuesizelog (2^0 = 1 byte)
+		IPLDPC // synchipl
+		quotablock@ // quotablock
+		ExRingBufferCreate ok! rawbuffer!
+
+		if (ok@)
+			cookedbuffer@ // ringbuffer
+			ExRingBufferDelete
+
+			outputbuffer@ // ringbuffer
+			ExRingBufferDelete
+
+			deviceobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+	end
+
+	auto hostfcb
+	CoDispatch // dispatchtable
+	deviceobject@ // devobj
+	OSFILETYPE_CHARDEVICE // filetype
+	0 // flags
+	IOFileControlBlockCreate ok! hostfcb!
+
+	if (ok@)
+		cookedbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		outputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		if (console@ CoConsole_RawBufferAllocated + @)
+			rawbuffer@ // ringbuffer
+			ExRingBufferDelete
+		end
+
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	1 hostfcb@ IOFileControlBlock_FSContext + !
+
+	// bias refcounts for host fileobject
+	deviceobject@ ObObjectReferenceByPointer drop
+	hostfcb@ IOFileControlBlockReference drop
+
+	"ConsoleHost" // openedpath
+	0 // flags
+	owninguser@ // owninguser
+	ACCESS_OWNER_ALL // permissions
+	hostfcb@ // fcb
+	IOFileCreateObject ok! fileobject!
+
+	if (ok@)
+		// failed, unbias these
+		deviceobject@ ObObjectDereferenceByPointer drop
+		hostfcb@ IOFileControlBlockDereference drop
+
+		-1 // writeout
+		hostfcb@ // fcb
+		IOFileControlBlockDelete
+
+		cookedbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		outputbuffer@ // ringbuffer
+		ExRingBufferDelete
+
+		if (console@ CoConsole_RawBufferAllocated + @)
+			rawbuffer@ // ringbuffer
+			ExRingBufferDelete
+		end
+
+		deviceobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	hostfcb@ console@ CoConsole_HostFCB + !
+	rawbuffer@ console@ CoConsole_RawBuffer + !
+	cookedbuffer@ console@ CoConsole_CookedBuffer + !
+	outputbuffer@ console@ CoConsole_OutputBuffer + !
+	outputfunc@ console@ CoConsole_OutputFunction + !
+	context@ console@ CoConsole_Context + !
+	0 console@ CoConsole_Mode + !
+
+	1 console@ CoConsole_Initialized + !
+end
+
 fn CoConsoleRawBufferGet { console -- rawbuffer }
 	console@ CoConsole_RawBuffer + @ rawbuffer!
 end

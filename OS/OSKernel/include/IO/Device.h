@@ -32,6 +32,8 @@ struct IODevice
 	4 Reserved7
 endstruct
 
+extern IODeviceDirectoryInsert { deviceobject -- ok }
+
 extern IODeviceDeleteObject { object -- ok }
 
 extern IODeviceGetExtension { deviceobject -- extension }

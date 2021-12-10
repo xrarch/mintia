@@ -1,0 +1,276 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALLIMNstationCitron.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+struct SerialPort
+	4 PortCMD
+	4 PortData
+	KeDPC_SIZEOF DPC
+endstruct
+
+const SERIALA_PORTCMD   0x10
+const SERIALA_PORTDATA  0x11
+const SERIALA_INTERRUPT 4
+
+const SERIALB_PORTCMD   0x12
+const SERIALB_PORTDATA  0x13
+const SERIALB_INTERRUPT 5
+
+var SerialPortA 0
+var SerialPortB 0
+
+const SERIALCMDWRITE   1
+const SERIALCMDREAD    2
+const SERIALCMDINTR    3
+const SERIALCMDINTROFF 4
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	if (stage@ STAGE_THREAD ==)
+		auto deviceobject
+		auto serialport
+		auto rawbuffer
+
+		8 // sizelog (2^9 = 256 bytes)
+		0 // valuesizelog (2^0 = 1 byte)
+		IPLSERIAL // synchipl
+		0 // quotablock
+		ExRingBufferCreate ok! rawbuffer!
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
+		end
+
+		SerialPort_SIZEOF // bytes
+		'Sril' // tag
+		MmAllocWithTag ok! serialport!
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
+		end
+
+		SERIALA_PORTCMD  serialport@ SerialPort_PortCMD + !
+		SERIALA_PORTDATA serialport@ SerialPort_PortData + !
+
+		pointerof DriverSerialDPCFunction // function
+		serialport@ SerialPort_DPC + // dpc
+		KeDPCInitialize ok!
+
+		if (ok@)
+			ok@ "SerialInit: failed to initialize DPC 0 (%i)\n" KeCrash
+		end
+
+		pointerof DriverSerialConsoleOutput // outputfunc
+		serialport@ // context
+		rawbuffer@ // rawbuffer
+		"ttyS0" // name
+		SeSystemUser@ // owninguser
+		ACCESS_OWNER_ALL // permissions
+		1 // permanent
+		CoConsoleCreateObject ok! deviceobject! drop
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
+		end
+
+		deviceobject@ IODeviceDirectoryInsert ok!
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
+		end
+
+		deviceobject@ SerialPortA!
+
+		8 // sizelog (2^9 = 256 bytes)
+		0 // valuesizelog (2^0 = 1 byte)
+		IPLSERIAL // synchipl
+		0 // quotablock
+		ExRingBufferCreate ok! rawbuffer!
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
+		end
+
+		SerialPort_SIZEOF // bytes
+		'Sril' // tag
+		MmAllocWithTag ok! serialport!
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
+		end
+
+		SERIALB_PORTCMD  serialport@ SerialPort_PortCMD + !
+		SERIALB_PORTDATA serialport@ SerialPort_PortData + !
+
+		pointerof DriverSerialDPCFunction // function
+		serialport@ SerialPort_DPC + // dpc
+		KeDPCInitialize ok!
+
+		if (ok@)
+			ok@ "SerialInit: failed to initialize DPC 1 (%i)\n" KeCrash
+		end
+
+		pointerof DriverSerialConsoleOutput // outputfunc
+		serialport@ // context
+		rawbuffer@ // rawbuffer
+		"ttyS1" // name
+		SeSystemUser@ // owninguser
+		ACCESS_OWNER_ALL // permissions
+		1 // permanent
+		CoConsoleCreateObject ok! deviceobject! drop
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
+		end
+
+		deviceobject@ IODeviceDirectoryInsert ok!
+
+		if (ok@)
+			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
+		end
+
+		deviceobject@ SerialPortB!
+
+		// register interrupts and start interrupting
+
+		pointerof DriverSerialInterrupt // function
+		SERIALA_INTERRUPT // interrupt number
+		IPLSERIAL // interrupt priority level
+		HALInterruptRegister
+
+		pointerof DriverSerialInterrupt // function
+		SERIALB_INTERRUPT // interrupt number
+		IPLSERIAL // interrupt priority level
+		HALInterruptRegister
+
+		SERIALCMDINTR SERIALA_PORTCMD HALLIMNstationCitronCommand
+		SERIALCMDINTR SERIALB_PORTCMD HALLIMNstationCitronCommand
+	end
+
+	0 ok!
+end
+
+fn SerialPutc { c s -- }
+	// huge TODO: make serial port writing interrupt-driven. in real life this
+	// place could have interrupts disabled for a REALLY long time!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+	SERIALCMDWRITE s@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn SerialGetc { s -- c }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	SERIALCMDREAD s@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
+	s@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
+
+	rs@ HALCPUInterruptRestore
+
+	if (c@ 0xFFFF ==)
+		ERR c! return
+	end
+end
+
+fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
+	auto serialport
+
+	if (int@ SERIALA_INTERRUPT ==)
+		SerialPortA@ serialport!
+	end elseif (int@ SERIALB_INTERRUPT ==)
+		SerialPortB@ serialport!
+	end else
+		int@ "DriverSerialInterrupt: weird interrupt number %d\n" KeCrash
+	end
+
+	auto console
+	serialport@ IODeviceGetExtension console!
+
+	console@ CoConsoleGetContext serialport!
+
+	auto ringbuf
+	console@ CoConsoleRawBufferGet ringbuf!
+
+	auto c
+	serialport@ SerialGetc c!
+
+	while (c@ ERR ~=)
+		c@ // value
+		1  // overwrite
+		0 // timeout
+		KERNELMODE // lastmode
+		EXRINGDONTWAIT // waitonfull
+		ringbuf@ // ringbuffer
+		ExRingBufferWriteValue drop drop
+
+		serialport@ SerialGetc c!
+	end
+
+	auto dpc
+	serialport@ SerialPort_DPC + dpc!
+
+	if (dpc@ KeDPC_Enqueued + @ ~~)
+		// defer waking up any blocked readers til later,
+		// otherwise we will BSOD since we're at IPLSERIAL
+
+		console@ // context1
+		0 // context2
+		DPCLOWIMPORTANCE // importance
+		dpc@ // dpc
+		KeDPCEnqueue
+	end
+end
+
+fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
+	context1@ CoConsoleCook
+end
+
+fn (CoOutputFunction) DriverSerialConsoleOutput { console -- ok }
+	// TODO make this interrupt-driven
+
+	auto outputbuffer
+	console@ CoConsoleOutputBufferGet outputbuffer!
+
+	auto serialport
+	console@ CoConsoleGetContext serialport!
+
+	0 ok!
+
+	while (1)
+		auto c
+		0 // timeout
+		KERNELMODE // lastmode
+		EXRINGDONTWAIT // waitonempty
+		outputbuffer@ // ringbuffer
+		ExRingBufferReadValue ok! drop c!
+
+		if (ok@)
+			return
+		end
+
+		c@ serialport@ SerialPutc
+	end
+end

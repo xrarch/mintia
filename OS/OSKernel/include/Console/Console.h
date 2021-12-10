@@ -23,4 +23,12 @@ externptr CoDriver
 
 fnptr CoOutputFunction { console -- ok }
 
+extern CoConsoleOutputBufferGet { console -- outputbuffer }
+extern CoConsoleRawBufferGet { console -- rawbuffer }
+extern CoConsoleGetContext { console -- context }
+extern CoConsoleCreateObject { outputfunc context rawbuffer name owninguser permissions permanent -- fileobject deviceobject ok }
+
+extern CoConsoleCook { console -- }
+
+extern CoConsoleRead { timeout flags length buffer lastmode console -- bytesread ok }
 extern CoConsoleWrite { length buffer lastmode console -- byteswritten ok }

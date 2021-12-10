@@ -20,6 +20,13 @@ extern OSGetStdIn { -- fd }
 extern OSGetStdOut { -- fd }
 extern OSGetStdErr { -- fd }
 
+extern OSSetStdIn { fd -- }
+extern OSSetStdOut { fd -- }
+extern OSSetStdErr { fd -- }
+
+extern OSFlushLine { -- }
+extern OSPutc { c filehandle -- ok }
+
 extern OSLastComponent { path -- lcomp }
 extern OSDirectoryName { path dirname bufsize -- ok }
 extern OSRealPath { path canon bufsize -- ok }

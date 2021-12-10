@@ -19,6 +19,18 @@ fn OSGetStdErr { -- fd }
 	OSPEB OSPEBs_StdErr + @ fd!
 end
 
+fn OSSetStdIn { fd -- }
+	fd@ OSPEB OSPEBs_StdIn + !
+end
+
+fn OSSetStdOut { fd -- }
+	fd@ OSPEB OSPEBs_StdOut + !
+end
+
+fn OSSetStdErr { fd -- }
+	fd@ OSPEB OSPEBs_StdErr + !
+end
+
 fn OSAbort { ... fmt -- }
 	argv
 	argc@
@@ -48,11 +60,57 @@ fn VPrintf { argvt argcn fmt -- }
 	VFPrintf
 end
 
+const LINEBUFFERMAX 80
+buffer FPutcLineBuffer (LINEBUFFERMAX 16 +)
+var FPutcLineBufferLength 0
+
+fn OSFlushLine { -- }
+	auto len
+	FPutcLineBufferLength@ len!
+
+	if (len@ ~~)
+		return
+	end
+
+	0 FPutcLineBufferLength!
+
+	0 // flags
+	len@ // length
+	FPutcLineBuffer // buffer
+	OSPEB OSPEBs_StdOut + @ // filehandle
+	OSFileWrite drop drop
+end
+
+fn OSPutc { c filehandle -- ok }
+	auto small
+	4 alloc small!
+
+	c@ small@ sb
+
+	0 // flags
+	1 // length
+	small@ // buffer
+	filehandle@ // filehandle
+	OSFileWrite ok! drop
+end
+
 fn FPutc { fd c -- }
 	if (fd@ OSNONE ==)
 		c@ OSConsolePutCharacter drop
+	end elseif (fd@ OSPEB OSPEBs_StdOut + @ ==)
+		// XXX NOT reentrant!! should be!!
+
+		c@ FPutcLineBuffer FPutcLineBufferLength@ + sb
+		
+		1 FPutcLineBufferLength +=
+
+		if (FPutcLineBufferLength@ LINEBUFFERMAX ==)
+			OSFlushLine
+		end elseif (c@ '\n' ==)
+			OSFlushLine
+		end
 	end else
-		0 0 "FPutc NYI\n" OSSystemAbort drop
+		c@ fd@ OSPutc drop
 	end
 end
 

@@ -1,0 +1,527 @@
+#include "<ll>/rta3x/a3x.h"
+#include "<df>/dragonfruit.h"
+#include "../../Loader/LoaderGlobal.h"
+
+#include "<inc>/HALConsole.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALResource.h"
+
+externptr HALLoaderInfo
+
+var FBAddr 0
+var FBSize 0
+var FBModulo 0
+
+fn KVInit { -- }
+	if (HALLoaderInfo@ LoaderInfo_HALConsoleFBFormat + @ BOOTFBFORMAT_AB5G5R5 ~=)
+		0 FBAddr!
+		return
+	end
+
+	HALLoaderInfo@ LoaderInfo_HALConsoleFBAddr + @ FBAddr!
+	HALConsoleWidthPix@ HALConsoleHeightPix@ * 1 << FBSize!
+	HALConsoleWidthPix@ HALConsoleFontWidth@ - 1 << FBModulo!
+end
+
+fn KVQuery { -- w h ok }
+	if (FBAddr@ ~~)
+		-1 ok!
+		return
+	end
+
+	0 ok!
+
+	HALConsoleWidthPix@ w!
+	HALConsoleHeightPix@ h!
+end
+
+fn KVFontGet { name -- font ok }
+	auto rsrc
+	name@ HALResourceByName rsrc!
+
+	if (rsrc@ ~~)
+		-1 ok!
+		return
+	end
+
+	rsrc@ BootResource_Data + @ font!
+
+	if (font@ HCFHeader_Magic + @ HCFMAGIC ~=)
+		-1 ok!
+		return
+	end
+
+	rsrc@ HALResourceWire
+end
+
+fn KVRGB24ToNative { rgb24a -- nativecolor }
+	// convert to 15 bit BGR
+
+	rgb24a@ 16 >> 0xFF & 3 >> nativecolor!
+	rgb24a@ 8 >> 0xFF & 3 >> 5 << nativecolor |=
+	rgb24a@ 0xFF & 3 >> 10 << nativecolor |=
+end
+
+fn KVClearScreen { nativecolor -- }
+	auto c32
+	nativecolor@ 16 << nativecolor@ | c32!
+
+	FBAddr@ FBSize@ c32@ memset
+end
+
+fn KVDrawFilledRectangle { nativecolor x y w h -- }
+	auto row
+	0 row!
+
+	auto v
+	nativecolor@ 16 << nativecolor@ | v!
+
+	auto gw
+	HALConsoleWidthPix@ gw!
+
+	auto fb
+	FBAddr@ fb!
+
+	auto ptr
+	y@ gw@ * 1 << x@ 1 << + fb@ + ptr!
+
+	auto mod
+	gw@ 1 << mod!
+
+	auto rowsz
+	w@ 1 << rowsz!
+
+	while (row@ h@ <)
+		ptr@ rowsz@ v@ memset
+
+		1 row +=
+		mod@ ptr +=
+	end
+end
+
+fn KVDrawEmptyRectangle { nativecolor x y w h -- }
+	auto gw
+	HALConsoleWidthPix@ gw!
+
+	auto mod
+	gw@ 1 << mod!
+
+	auto v
+	nativecolor@ 16 << nativecolor@ | v!
+
+	auto kptr
+	y@ gw@ * 1 << x@ 1 << + FBAddr@ + kptr!
+
+	auto rowsz
+	w@ 1 << rowsz!
+
+	// top edge
+	kptr@ rowsz@ v@ memset
+
+	auto bptr
+	h@ gw@ * 1 << kptr@ + bptr!
+
+	// bottom edge
+	bptr@ rowsz@ v@ memset
+
+	auto ptr
+	kptr@ ptr!
+
+	auto hk
+	h@ hk!
+
+	// left edge
+	while (hk@)
+		nativecolor@ ptr@ si
+
+		mod@ ptr +=
+		1 hk -=
+	end
+
+	kptr@ w@ 1 << + ptr!
+
+	h@ hk!
+
+	// right edge
+	while (hk@)
+		nativecolor@ ptr@ si
+
+		mod@ ptr +=
+		1 hk -=
+	end
+end
+
+fn KVDrawCharacter { char nativefg nativebg x y font -- }
+	auto row
+	0 row!
+
+	auto gw
+	HALConsoleWidthPix@ gw!
+
+	auto fb
+	FBAddr@ fb!
+
+	auto w
+	font@ HCFHeader_Width + @ w!
+
+	auto h
+	font@ HCFHeader_Height + @ h!
+
+	auto dest
+	y@ gw@ * 1 << x@ 1 << + fb@ + dest!
+
+	auto mod
+	gw@ w@ - 1 << mod!
+
+	auto bmp
+	w@ 7 + 3 >> h@ * char@ * font@ HCFHeader_SIZEOF + + bmp!
+
+	auto bitd
+	font@ HCFHeader_Flags + @ HCFFLAG_REVERSE & bitd!
+
+	if (nativefg@ -1 ==)
+		if (nativebg@ -1 ==)
+			return
+		end
+
+		if (bitd@)
+			nativebg@ bmp@ dest@ mod@ w@ h@ KVBlitBitsFastBackwardsBG
+		end else
+			nativebg@ bmp@ dest@ mod@ w@ h@ KVBlitBitsFastBG
+		end
+	end elseif (nativebg@ -1 ==)
+		if (bitd@)
+			nativefg@ bmp@ dest@ mod@ w@ h@ KVBlitBitsFastBackwardsFG
+		end else
+			nativefg@ bmp@ dest@ mod@ w@ h@ KVBlitBitsFastFG
+		end
+	end else
+		if (bitd@)
+			nativefg@ nativebg@ bmp@ dest@ mod@ w@ h@ KVBlitBitsFastBackwardsFGBG
+		end else
+			nativefg@ nativebg@ bmp@ dest@ mod@ w@ h@ KVBlitBitsFastFGBG
+		end
+	end
+end
+
+// mountains of redundant functions for various bit blit ops
+
+fn KVBlitBitsFastFG { fg ptr dest mod w h -- }
+	auto j
+	auto byte
+
+	auto extrabits
+	auto wholebytes
+
+	while (h@)
+		w@ 3 >> wholebytes!
+		while (wholebytes@)
+			ptr@ gb byte!
+
+			1 j!
+
+			while (j@ 256 <)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end
+
+				2 dest +=
+				1 j <<=
+			end
+
+			1 wholebytes -=
+			1 ptr +=
+		end
+
+		w@ 7 & extrabits!
+		if (extrabits@)
+			ptr@ gb byte!
+			1 ptr +=
+			1 j!
+
+			while (extrabits@)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end
+
+				2 dest +=
+				1 j <<=
+				1 extrabits -=
+			end
+		end
+
+		mod@ dest +=
+		1 h -=
+	end
+end
+
+fn KVBlitBitsFastBG { bg ptr dest mod w h -- }
+	auto j
+	auto byte
+
+	auto extrabits
+	auto wholebytes
+
+	while (h@)
+		w@ 3 >> wholebytes!
+		while (wholebytes@)
+			ptr@ gb byte!
+
+			1 j!
+
+			while (j@ 256 <)
+				if (byte@ j@ & ~~)
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j <<=
+			end
+
+			1 wholebytes -=
+			1 ptr +=
+		end
+
+		w@ 7 & extrabits!
+		if (extrabits@)
+			ptr@ gb byte!
+			1 ptr +=
+			1 j!
+
+			while (extrabits@)
+				if (byte@ j@ & ~~)
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j <<=
+				1 extrabits -=
+			end
+		end
+
+		mod@ dest +=
+		1 h -=
+	end
+end
+
+fn KVBlitBitsFastFGBG { fg bg ptr dest mod w h -- }
+	auto j
+	auto byte
+
+	auto extrabits
+	auto wholebytes
+
+	while (h@)
+		w@ 3 >> wholebytes!
+		while (wholebytes@)
+			ptr@ gb byte!
+
+			1 j!
+
+			while (j@ 256 <)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end else
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j <<=
+			end
+
+			1 wholebytes -=
+			1 ptr +=
+		end
+
+		w@ 7 & extrabits!
+		if (extrabits@)
+			ptr@ gb byte!
+			1 ptr +=
+			1 j!
+
+			while (extrabits@)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end else
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j <<=
+				1 extrabits -=
+			end
+		end
+
+		mod@ dest +=
+		1 h -=
+	end
+end
+
+// reversed ones
+
+fn KVBlitBitsFastBackwardsFG { fg ptr dest mod w h -- }
+	auto j
+	auto byte
+
+	auto extrabits
+	auto wholebytes
+
+	while (h@)
+		w@ 3 >> wholebytes!
+		while (wholebytes@)
+			ptr@ gb byte!
+
+			128 j!
+
+			while (j@)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end
+
+				2 dest +=
+				1 j >>=
+			end
+
+			1 wholebytes -=
+			1 ptr +=
+		end
+
+		w@ 7 & extrabits!
+		if (extrabits@)
+			ptr@ gb byte!
+			1 ptr +=
+
+			if (w@ 3 >>)
+				128 j!
+			end else
+				1 extrabits@ << j!
+			end
+
+			while (extrabits@)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end
+
+				2 dest +=
+				1 j >>=
+				1 extrabits -=
+			end
+		end
+
+		mod@ dest +=
+		1 h -=
+	end
+end
+
+fn KVBlitBitsFastBackwardsBG { bg ptr dest mod w h -- }
+	auto j
+	auto byte
+
+	auto extrabits
+	auto wholebytes
+
+	while (h@)
+		w@ 3 >> wholebytes!
+		while (wholebytes@)
+			ptr@ gb byte!
+
+			128 j!
+
+			while (j@)
+				if (byte@ j@ & ~~)
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j >>=
+			end
+
+			1 wholebytes -=
+			1 ptr +=
+		end
+
+		w@ 7 & extrabits!
+		if (extrabits@)
+			ptr@ gb byte!
+			1 ptr +=
+
+			if (w@ 3 >>)
+				128 j!
+			end else
+				1 extrabits@ << j!
+			end
+
+			while (extrabits@)
+				if (byte@ j@ & ~~)
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j >>=
+				1 extrabits -=
+			end
+		end
+
+		mod@ dest +=
+		1 h -=
+	end
+end
+
+fn KVBlitBitsFastBackwardsFGBG { fg bg ptr dest mod w h -- }
+	auto j
+	auto byte
+
+	auto extrabits
+	auto wholebytes
+
+	while (h@)
+		w@ 3 >> wholebytes!
+		while (wholebytes@)
+			ptr@ gb byte!
+
+			128 j!
+
+			while (j@)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end else
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j >>=
+			end
+
+			1 wholebytes -=
+			1 ptr +=
+		end
+
+		w@ 7 & extrabits!
+		if (extrabits@)
+			ptr@ gb byte!
+			1 ptr +=
+
+			if (w@ 3 >>)
+				128 j!
+			end else
+				1 extrabits@ << j!
+			end
+
+			while (extrabits@)
+				if (byte@ j@ &)
+					fg@ dest@ si
+				end else
+					bg@ dest@ si
+				end
+
+				2 dest +=
+				1 j >>=
+				1 extrabits -=
+			end
+		end
+
+		mod@ dest +=
+		1 h -=
+	end
+end

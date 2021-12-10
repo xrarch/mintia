@@ -11,6 +11,8 @@ struct CoConsole
 
 	4 OutputFunction
 
+	4 Detached
+
 	4 Mode
 
 	4 Initialized

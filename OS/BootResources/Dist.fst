@@ -7,3 +7,4 @@ Mach.8x12.hcf Mach.8x12.hcf
 Haiku.6x12.hcf Haiku.6x12.hcf
 Fixed.6x13.hcf Fixed.6x13.hcf
 Sony.8x16.hcf Sony.8x16.hcf
+Fixed.10x20.hcf Fixed.10x20.hcf

@@ -4,6 +4,7 @@ all:
 	make -C DKS
 	make -C EBus
 	make -C KinnowFB
+	make -C Keyboard
 
 	make -C AnalogClockTest
 

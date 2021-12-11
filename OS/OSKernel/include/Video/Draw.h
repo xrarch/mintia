@@ -7,6 +7,7 @@ extern KVRGB24ToNative { rgb24a -- nativecolor }
 extern KVClearScreen { nativecolor -- }
 
 extern KVFontGet { name -- font ok }
+extern KVFontQuery { font -- width height }
 
 extern KVDrawFilledRectangle { nativecolor x y w h -- }
 extern KVDrawEmptyRectangle { nativecolor x y w h -- }

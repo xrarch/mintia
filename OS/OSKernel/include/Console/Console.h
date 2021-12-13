@@ -34,3 +34,5 @@ extern CoConsoleCook { console -- }
 
 extern CoConsoleRead { timeout flags length buffer lastmode console -- bytesread ok }
 extern CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
+
+extern CoConsoleDoOutput { console -- }

@@ -4,6 +4,7 @@
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALDebug.h"
 #include "<inc>/HALConsole.h"
+#include "<inc>/HALCrash.h"
 
 #include "<inc>/Kernel.h"
 
@@ -17,15 +18,26 @@
 
 // run-time message logging for executive.
 
-fn ExLog { ... fmt source -- }
-	argv argc@ fmt@ source@ ExVLog
-end
+var ExSystemConsoleName 0
+public ExSystemConsoleName
 
-fn ExVLog { argvt argcn fmt source -- }
-	// just send straight to HAL console for now.
-	// eventually this will be MUCH fancier.
+var ExSystemConsole 0
+public ExSystemConsole
 
-	argvt@ argcn@ fmt@ source@ HALVLog
+fn ExSystemConsoleSet { name console -- }
+	if (KeIPLCurrentGet IPLDPC >=)
+		"ExSystemConsoleSet: IPL >= IPLDPC\n" KeCrash
+	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	name@ ExSystemConsoleName!
+	console@ ExSystemConsole!
+
+	HALLogReset
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn FPuts { fd s -- }
@@ -36,17 +48,30 @@ fn FPuts { fd s -- }
 end
 
 fn FPutc { fd c -- }
-	if (CoVideoConsole@)
-		return
+	if (ExSystemConsole@)
+		if (KeIPLCurrentGet IPLDPC <=)
+			if (HALCrashed@ ~~)
+				auto outputbuffer
+				ExSystemConsole@ CoConsoleOutputBufferGet outputbuffer!
+
+				c@ // value
+				1 // overwrite
+				0 // timeout
+				KERNELMODE // lastmode
+				EXRINGDONTWAIT // waitonfull
+				outputbuffer@ // ringbuffer
+				ExRingBufferWriteValue drop drop
+
+				ExSystemConsole@ CoConsoleDoOutput
+
+				return
+			end
+		end
 	end
 
 	c@ HALPutc
 end
 
 fn Putc { c -- }
-	if (CoVideoConsole@)
-		return
-	end
-
-	c@ HALPutc
+	0 c@ FPutc
 end

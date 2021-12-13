@@ -123,6 +123,7 @@ endstruct
 extern KeSafeCopyIn { dest src size -- ok }
 extern KeSafeCopyOut { dest src size -- ok }
 extern KeSafeStringCopyIn { dest src max -- ok }
+extern KeSafeStringCopyOut { dest src max -- ok }
 extern KeSafeStoreByte { byte dest -- ok }
 extern KeSafeGetByte { src -- byte ok }
 

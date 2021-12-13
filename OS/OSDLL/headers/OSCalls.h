@@ -4,6 +4,8 @@
 extern OSConsolePutCharacter { c -- ok }
 extern OSSystemAbort { num1 num2 msg -- ok }
 
+extern OSGetSystemConsoleName { namebuf -- ok }
+
 extern OSEventCreate { signaled type permissions name -- eventhandle ok }
 extern OSEventReset { eventhandle -- signaled ok }
 extern OSEventSignal { eventhandle -- ok }

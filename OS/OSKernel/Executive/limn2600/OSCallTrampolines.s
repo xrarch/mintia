@@ -4,6 +4,7 @@
 
 .extern OSConsolePutCharacter
 .extern OSSystemAbort
+.extern OSGetSystemConsoleName
 .extern OSEventCreate
 .extern OSEventReset
 .extern OSEventSignal
@@ -35,41 +36,42 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 30
+	.dl 31
 
 OSCallTable:
 .global OSCallTable
 	.dl 0                                                ;0
 	.dl OSTOSConsolePutCharacter                         ;1
 	.dl OSTOSSystemAbort                                 ;2
-	.dl OSTOSEventCreate                                 ;3
-	.dl OSTOSEventReset                                  ;4
-	.dl OSTOSEventSignal                                 ;5
-	.dl OSTOSEventPulse                                  ;6
-	.dl OSTOSEventReadState                              ;7
-	.dl OSTOSSemaphoreCreate                             ;8
-	.dl OSTOSSemaphoreRelease                            ;9
-	.dl OSTOSSemaphoreReadState                          ;10
-	.dl OSTOSMutexCreate                                 ;11
-	.dl OSTOSMutexRelease                                ;12
-	.dl OSTOSMutexReadState                              ;13
-	.dl OSTOSObjectOpen                                  ;14
-	.dl OSTOSQuery                                       ;15
-	.dl OSTOSClose                                       ;16
-	.dl OSTOSWaitForMultipleObjects                      ;17
-	.dl OSTOSWaitForObject                               ;18
-	.dl OSTOSFileQuery                                   ;19
-	.dl OSTOSFileSeek                                    ;20
-	.dl OSTOSFileRead                                    ;21
-	.dl OSTOSFileWrite                                   ;22
-	.dl OSTOSSwapFileCreate                              ;23
-	.dl OSTOSIOControl                                   ;24
-	.dl OSTOSSectionCreate                               ;25
-	.dl OSTOSSectionMapView                              ;26
-	.dl OSTOSUnmapView                                   ;27
-	.dl OSTOSRemapView                                   ;28
-	.dl OSTOSSetSwappiness                               ;29
-	.dl OSTOSThreadSleep                                 ;30
+	.dl OSTOSGetSystemConsoleName                        ;3
+	.dl OSTOSEventCreate                                 ;4
+	.dl OSTOSEventReset                                  ;5
+	.dl OSTOSEventSignal                                 ;6
+	.dl OSTOSEventPulse                                  ;7
+	.dl OSTOSEventReadState                              ;8
+	.dl OSTOSSemaphoreCreate                             ;9
+	.dl OSTOSSemaphoreRelease                            ;10
+	.dl OSTOSSemaphoreReadState                          ;11
+	.dl OSTOSMutexCreate                                 ;12
+	.dl OSTOSMutexRelease                                ;13
+	.dl OSTOSMutexReadState                              ;14
+	.dl OSTOSObjectOpen                                  ;15
+	.dl OSTOSQuery                                       ;16
+	.dl OSTOSClose                                       ;17
+	.dl OSTOSWaitForMultipleObjects                      ;18
+	.dl OSTOSWaitForObject                               ;19
+	.dl OSTOSFileQuery                                   ;20
+	.dl OSTOSFileSeek                                    ;21
+	.dl OSTOSFileRead                                    ;22
+	.dl OSTOSFileWrite                                   ;23
+	.dl OSTOSSwapFileCreate                              ;24
+	.dl OSTOSIOControl                                   ;25
+	.dl OSTOSSectionCreate                               ;26
+	.dl OSTOSSectionMapView                              ;27
+	.dl OSTOSUnmapView                                   ;28
+	.dl OSTOSRemapView                                   ;29
+	.dl OSTOSSetSwappiness                               ;30
+	.dl OSTOSThreadSleep                                 ;31
 
 
 OSTOSConsolePutCharacter:
@@ -95,6 +97,20 @@ OSTOSSystemAbort:
 	mov  a2, long [s18 + 12] ;t3
 
 	jal  OSSystemAbort
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSGetSystemConsoleName:
+.global OSTOSGetSystemConsoleName
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSGetSystemConsoleName
 
 	mov  long [s18 + 4], a0 ;t1
 

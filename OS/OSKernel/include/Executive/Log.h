@@ -1,2 +1,3 @@
-extern ExLog { ... fmt source -- }
-extern ExVLog { argvt argcn fmt source -- }
+externptr ExSystemConsoleName
+
+extern ExSystemConsoleSet { name console -- }

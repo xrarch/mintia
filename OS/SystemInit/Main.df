@@ -58,6 +58,57 @@ fn TrySystemConsole { -- ok }
 	SetSystemConsole ok!
 end
 
+fn SetSwapFile { path -- ok }
+	path@ "SystemInit: setting '%s' as swapfile\n" Printf
+
+	auto handle
+
+	0 // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	path@ // path
+	0 // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@)
+		return
+	end
+
+	handle@ // filehandle
+	OSSwapFileCreate ok!
+
+	if (ok@)
+		handle@ OSClose drop
+
+		return
+	end
+
+	auto query
+	OSFileInformation_SIZEOF alloc query!
+
+	handle@ // filehandle
+	query@ // query
+	OSFileQuery ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "SystemInit: failed to query swapfile: %s\n" OSAbort
+	end
+
+	handle@ OSClose drop
+
+	// aim to swap out 32/128 = 25% of evicted pages.
+	// before this call, the swappiness starts at 0, which means swap is never
+	// used.
+	32 OSSetSwappiness ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "SystemInit: failed to set swappiness: %s\n" OSAbort
+	end
+
+	query@ OSFileInformation_Size + @ OSPAGESHIFT >>
+	query@ OSFileInformation_Size + @
+	"SystemInit: swapfile is %d bytes (%d pages).\n" Printf
+end
+
 fn Main { ... -- ret }
 	TrySystemConsole ret!
 
@@ -67,54 +118,32 @@ fn Main { ... -- ret }
 
 	"\nSystemInit: Hello from dynamically-linked, demand-paged userspace!\n" Printf
 
-	"SystemInit: creating swapfile as //:/Devices/dks2.
-Eventually it will be configurable and will be /mintia/SwapFile.sys by default,
-and will be able to prompt the user for a swapfile path upon failure.\n" Printf
-
-	auto handle
-
-	0 // flags
-	ACCESS_READ ACCESS_WRITE | // access
-	"//:/Devices/dks2" // path
-	0 // ftype
-	OSFileOpen ret! handle!
+	"/mintia/SwapFile.sys" SetSwapFile ret!
 
 	if (ret@)
-		ret@ OSStatusGetName "SystemInit: failed to open swapfile: %s\n" OSAbort
+		ret@ OSStatusGetName "SystemInit: failed to establish swapfile: %s\n" Printf
 	end
 
-	handle@ // filehandle
-	OSSwapFileCreate ret!
+	auto swapfilename
+	OSFILEPATHMAX alloc swapfilename!
 
-	if (ret@)
-		ret@ OSStatusGetName "SystemInit: failed to create swapfile: %s\n" OSAbort
+	while (ret@)
+		"\nEnter swapfile name [none]: " Printf
+		
+		swapfilename@ // s
+		OSFILEPATHMAX 1 - // max
+		Gets
+
+		if (swapfilename@ gb ~~)
+			break
+		end
+
+		swapfilename@ SetSwapFile ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "SystemInit: failed to establish swapfile: %s\n" Printf
+		end
 	end
-
-	auto query
-	OSFileInformation_SIZEOF alloc query!
-
-	handle@ // filehandle
-	query@ // query
-	OSFileQuery ret!
-
-	if (ret@)
-		ret@ OSStatusGetName "SystemInit: failed to query swapfile: %s\n" OSAbort
-	end
-
-	handle@ OSClose drop
-
-	// aim to swap out 32/128 = 25% of evicted pages.
-	// before this call, the swappiness starts at 0, which means swap is never
-	// used.
-	32 OSSetSwappiness ret!
-
-	if (ret@)
-		ret@ OSStatusGetName "SystemInit: failed to set swappiness: %s\n" OSAbort
-	end
-
-	query@ OSFileInformation_Size + @ OSPAGESHIFT >>
-	query@ OSFileInformation_Size + @
-	"SystemInit.exe: swapfile is %d bytes (%d pages).\n" Printf
 
 	if (0)
 		// serial tty test

@@ -27,6 +27,8 @@ extern OSSetStdErr { fd -- }
 extern OSFlushLine { -- }
 extern OSPutc { c filehandle -- ok }
 
+extern OSReadline { s max -- eof }
+
 extern OSLastComponent { path -- lcomp }
 extern OSDirectoryName { path dirname bufsize -- ok }
 extern OSRealPath { path canon bufsize -- ok }

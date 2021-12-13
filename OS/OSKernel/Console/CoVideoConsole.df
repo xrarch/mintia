@@ -69,6 +69,8 @@ var CoVideoConsoleDirtyY2 0
 
 var CoVideoConsoleNeedsDraw 1
 
+buffer CoVideoConsoleOutputEvent KeEvent_SIZEOF
+
 fn CoVideoConsoleInit { -- }
 	if (CoVideoConsoleRawBuffer@ ~~)
 		// no input device
@@ -147,6 +149,12 @@ fn CoVideoConsoleInit { -- }
 	CoVideoConsoleScreenWidth@ 2 / CoVideoConsoleWindowWidth@ 2 / - CoVideoConsoleWindowX!
 	CoVideoConsoleScreenHeight@ 2 / CoVideoConsoleWindowHeight@ 2 / - CoVideoConsoleWindowY!
 
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"CoVideoConsoleOutputEvent" // name
+	CoVideoConsoleOutputEvent // event
+	KeEventInitialize drop
+
 	deviceobject@ IODeviceGetExtension CoVideoConsole!
 
 	0 // context1
@@ -166,9 +174,9 @@ const VIDEOCONSOLEWINDOWBGCOLOR 0xFFFFFF // white
 const VIDEOCONSOLEBGCOLOR       0x8ADFC9 // a shade of mint
 const VIDEOCONSOLEFGCOLOR       0x000000 // black
 
-const VIDEOCONSOLEDECOMARGINS 8 // pixel margin required for window decoration drawing
+const VIDEOCONSOLEDECOMARGINS 10 // pixel margin required for window decoration drawing
 
-const VIDEOCONSOLETEXTMARGINS 4 // pixel margin between window border and text
+const VIDEOCONSOLETEXTMARGINS 16 // pixel margin between window border and text
 
 fn CoVideoConsoleDraw { -- }
 	// (re)draw the video console programmatically.
@@ -342,7 +350,7 @@ fn CoVideoConsolePutCharacter { c -- }
 	ipl@ KeIPLLower
 end
 
-fn (CoOutputFunction) CoVideoConsoleOutput { console -- ok }
+fn (CoOutputFunction) CoVideoConsoleOutput { echo console -- ok }
 	auto outputbuffer
 	console@ CoConsoleOutputBufferGet outputbuffer!
 
@@ -357,10 +365,16 @@ fn (CoOutputFunction) CoVideoConsoleOutput { console -- ok }
 		ExRingBufferReadValue ok! drop c!
 
 		if (ok@)
-			return
+			break
 		end
 
 		c@ CoVideoConsolePutCharacter
+	end
+
+	if (echo@)
+		0 // priboost
+		CoVideoConsoleOutputEvent // event
+		KeEventSignal drop
 	end
 end
 
@@ -529,16 +543,11 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 	auto ok
 
 	while (1)
-		20 // interval
 		KERNELMODE // waitmode
 		0 // alertable
-		KeThreadSleep ok!
-
-		if (DEBUGCHECKS)
-			if (ok@ STATUS_WAIT_TIMEOUT ~=)
-				ok@ "CoVideoConsoleDrawWorker: wait failed (%i)\n" KeCrash
-			end
-		end
+		40 // timeout
+		CoVideoConsoleOutputEvent // object
+		KeThreadWaitForObject drop
 
 		if (CoVideoConsoleIsDirty@)
 			auto ipl

@@ -23,7 +23,7 @@ endstruct
 externptr CoDispatch
 externptr CoDriver
 
-fnptr CoOutputFunction { console -- ok }
+fnptr CoOutputFunction { echo console -- ok }
 
 extern CoConsoleOutputBufferGet { console -- outputbuffer }
 extern CoConsoleRawBufferGet { console -- rawbuffer }
@@ -35,4 +35,4 @@ extern CoConsoleCook { console -- }
 extern CoConsoleRead { timeout flags length buffer lastmode console -- bytesread ok }
 extern CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
 
-extern CoConsoleDoOutput { console -- }
+extern CoConsoleDoOutput { echo console -- }

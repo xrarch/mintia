@@ -12,6 +12,10 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
 #include "<inc>/Console.h"
 
 #include "<ll>/OSDLL/OS.h"
@@ -21,23 +25,42 @@
 var ExSystemConsoleName 0
 public ExSystemConsoleName
 
+var ExSystemConsoleObject 0
+public ExSystemConsoleObject
+
 var ExSystemConsole 0
 public ExSystemConsole
 
-fn ExSystemConsoleSet { name console -- }
+fn ExSystemConsoleSet { consoleobject -- }
 	if (KeIPLCurrentGet IPLDPC >=)
 		"ExSystemConsoleSet: IPL >= IPLDPC\n" KeCrash
 	end
 
+	consoleobject@ ObObjectReferenceByPointer drop
+
+	auto console
+	consoleobject@ IODeviceGetExtension console!
+
+	auto name
+	consoleobject@ ObHeader_SIZEOF - ObHeader_Name + @ name!
+
 	auto rs
 	HALCPUInterruptDisable rs!
 
+	auto oldconsoleobject
+	ExSystemConsoleObject@ oldconsoleobject!
+
 	name@ ExSystemConsoleName!
+	consoleobject@ ExSystemConsoleObject!
 	console@ ExSystemConsole!
 
 	HALLogReset
 
 	rs@ HALCPUInterruptRestore
+
+	if (oldconsoleobject@)
+		oldconsoleobject@ ObObjectDereferenceByPointer drop
+	end
 end
 
 fn FPuts { fd s -- }
@@ -51,6 +74,9 @@ fn FPutc { fd c -- }
 	if (ExSystemConsole@)
 		if (KeIPLCurrentGet IPLDPC <=)
 			if (HALCrashed@ ~~)
+				auto ipl
+				IPLDPC KeIPLRaise ipl!
+
 				auto outputbuffer
 				ExSystemConsole@ CoConsoleOutputBufferGet outputbuffer!
 
@@ -63,6 +89,8 @@ fn FPutc { fd c -- }
 				ExRingBufferWriteValue drop drop
 
 				ExSystemConsole@ CoConsoleDoOutput
+
+				ipl@ KeIPLLower
 
 				return
 			end

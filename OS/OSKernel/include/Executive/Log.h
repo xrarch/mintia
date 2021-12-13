@@ -1,3 +1,3 @@
 externptr ExSystemConsoleName
 
-extern ExSystemConsoleSet { name console -- }
+extern ExSystemConsoleSet { consoleobject -- }

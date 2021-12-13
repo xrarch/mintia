@@ -49,3 +49,6 @@ extern OSSetSwappiness { swappiness -- ok }
 
 // Ps
 extern OSThreadSleep { ms -- ok }
+
+// Co
+extern OSSetSystemConsole { filehandle -- ok }

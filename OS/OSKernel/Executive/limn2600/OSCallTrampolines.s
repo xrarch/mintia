@@ -33,10 +33,11 @@
 .extern OSRemapView
 .extern OSSetSwappiness
 .extern OSThreadSleep
+.extern OSSetSystemConsole
 
 OSCallCount:
 .global OSCallCount
-	.dl 31
+	.dl 32
 
 OSCallTable:
 .global OSCallTable
@@ -72,6 +73,7 @@ OSCallTable:
 	.dl OSTOSRemapView                                   ;29
 	.dl OSTOSSetSwappiness                               ;30
 	.dl OSTOSThreadSleep                                 ;31
+	.dl OSTOSSetSystemConsole                            ;32
 
 
 OSTOSConsolePutCharacter:
@@ -569,6 +571,20 @@ OSTOSThreadSleep:
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSThreadSleep
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSSetSystemConsole:
+.global OSTOSSetSystemConsole
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSSetSystemConsole
 
 	mov  long [s18 + 4], a0 ;t1
 

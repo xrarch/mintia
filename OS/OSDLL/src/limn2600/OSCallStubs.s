@@ -401,3 +401,14 @@ OSThreadSleep:
 
 	ret
 
+OSSetSystemConsole:
+.global OSSetSystemConsole
+	mov  t1, a0
+
+	li   t0, 32
+	sys  0
+
+	mov  a0, t1
+
+	ret
+

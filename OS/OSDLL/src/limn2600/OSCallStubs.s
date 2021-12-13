@@ -300,6 +300,7 @@ OSSwapFileCreate:
 	li   t0, 24
 	sys  0
 
+	mov  a1, t2
 	mov  a0, t1
 
 	ret

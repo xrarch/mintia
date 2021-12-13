@@ -447,6 +447,7 @@ OSTOSSwapFileCreate:
 	jal  OSSwapFileCreate
 
 	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

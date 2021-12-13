@@ -35,7 +35,7 @@ extern OSFileSeek { offset handle mode -- newoffset ok }
 extern OSFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
 
-extern OSSwapFileCreate { filehandle -- ok }
+extern OSSwapFileCreate { filehandle -- sizeinpages ok }
 
 extern OSIOControl { arg2 arg1 filehandle -- ret ok }
 

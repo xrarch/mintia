@@ -25,4 +25,7 @@ cleanup:
 	make -C RTC cleanup
 	make -C Serial cleanup
 	make -C DKS cleanup
+	make -C EBus cleanup
+	make -C KinnowFB cleanup
+	make -C Keyboard cleanup
 	make -C AnalogClockTest cleanup

@@ -4,6 +4,7 @@
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALArgs.h"
 #include "<inc>/HALMap.h"
+#include "<inc>/HALConsole.h"
 
 #include "<inc>/Kernel.h"
 
@@ -48,6 +49,23 @@ var CoVideoConsoleWindowHeight 0
 
 var CoVideoConsoleWindowX 0
 var CoVideoConsoleWindowY 0
+
+var CoVideoConsoleUpdateBuffer 0
+var CoVideoConsoleOnScreenBuffer 0
+
+var CoVideoConsoleUpdateCursorX 0
+var CoVideoConsoleUpdateCursorY 0
+
+var CoVideoConsoleOnScreenCursorX 0
+var CoVideoConsoleOnScreenCursorY 0
+
+var CoVideoConsoleIsDirty 0
+
+var CoVideoConsoleDirtyX1 -1
+var CoVideoConsoleDirtyY1 0
+
+var CoVideoConsoleDirtyX2 0
+var CoVideoConsoleDirtyY2 0
 
 fn CoVideoConsoleInit { -- }
 	if (CoVideoConsoleRawBuffer@ ~~)
@@ -101,22 +119,25 @@ fn CoVideoConsoleInit { -- }
 		end
 	end
 
-	deviceobject@ IODeviceGetExtension CoVideoConsole!
-
-	CoVideoConsoleDraw
-end
-
-const VIDEOCONSOLEWINDOWBGCOLOR 0xFFFFFF // white
-const VIDEOCONSOLEBGCOLOR       0x8ADFC9 // a shade of mint
-
-const VIDEOCONSOLEDECOMARGINS 4 // pixel margin required for window decoration drawing
-
-fn CoVideoConsoleDraw { -- }
-	// set video console parameters and (re)draw the video console
-	// programmatically.
-
 	CoVideoConsoleScreenWidth@ CoVideoConsoleFontWidth@ / 80 min CoVideoConsoleColumns!
 	CoVideoConsoleScreenHeight@ CoVideoConsoleFontHeight@ / 30 min CoVideoConsoleRows!
+
+	auto buf
+	CoVideoConsoleRows@ CoVideoConsoleColumns@ * 4 * // bytes
+	'CoBf' // tag
+	MmAllocWithTag ok! buf!
+
+	if (ok@)
+		ok@ "CoVideoConsoleInit: failed to create text buffers for ttyV0 (%i)\n" KeCrash
+	end
+
+	buf@ CoVideoConsoleUpdateBuffer!
+	buf@ CoVideoConsoleRows@ CoVideoConsoleColumns@ * 2 * + CoVideoConsoleOnScreenBuffer!
+
+	buf@ // ptr
+	CoVideoConsoleRows@ CoVideoConsoleColumns@ * 4 * // size
+	0 // word
+	memset
 
 	CoVideoConsoleColumns@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowWidth!
 	CoVideoConsoleRows@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowHeight!
@@ -124,6 +145,33 @@ fn CoVideoConsoleDraw { -- }
 	CoVideoConsoleScreenWidth@ 2 / CoVideoConsoleWindowWidth@ 2 / - CoVideoConsoleWindowX!
 	CoVideoConsoleScreenHeight@ 2 / CoVideoConsoleWindowHeight@ 2 / - CoVideoConsoleWindowY!
 
+	deviceobject@ IODeviceGetExtension CoVideoConsole!
+
+	CoVideoConsoleDraw
+
+	0 // context1
+	0 // context2
+	pointerof CoVideoConsoleDrawWorker // startfunc
+	ACCESS_OWNER_ALL // permissions
+	"VideoConsoleDraw" // name
+	PsSystemProcess@ // processobject
+	PsThreadCreateObject ok! drop
+
+	if (ok@)
+		ok@ "CoVideoConsoleInit: couldn't create 'VideoConsoleDraw' thread (%i)\n" KeCrash
+	end
+end
+
+const VIDEOCONSOLEWINDOWBGCOLOR 0xFFFFFF // white
+const VIDEOCONSOLEBGCOLOR       0x8ADFC9 // a shade of mint
+const VIDEOCONSOLEFGCOLOR       0x000000 // black
+
+const VIDEOCONSOLEDECOMARGINS 8 // pixel margin required for window decoration drawing
+
+const VIDEOCONSOLETEXTMARGINS 4 // pixel margin between window border and text
+
+fn CoVideoConsoleDraw { -- }
+	// (re)draw the video console programmatically.
 	auto deco
 	1 deco!
 
@@ -138,31 +186,362 @@ fn CoVideoConsoleDraw { -- }
 		KVClearScreen
 
 		0x000000 KVRGB24ToNative // nativecolor
-		CoVideoConsoleWindowX@ 1 - // x
-		CoVideoConsoleWindowY@ 1 - // y
-		CoVideoConsoleWindowWidth@ 2 + // w
-		CoVideoConsoleWindowHeight@ 2 + // h
+		CoVideoConsoleWindowX@ VIDEOCONSOLETEXTMARGINS - 1 - // x
+		CoVideoConsoleWindowY@ VIDEOCONSOLETEXTMARGINS - 1 - // y
+		CoVideoConsoleWindowWidth@ VIDEOCONSOLETEXTMARGINS 2 * + 1 + // w
+		CoVideoConsoleWindowHeight@ VIDEOCONSOLETEXTMARGINS 2 * + 1 + // h
 		KVDrawEmptyRectangle
 
 		0x000000 KVRGB24ToNative // nativecolor
-		CoVideoConsoleWindowX@ // x
-		CoVideoConsoleWindowY@ // y
-		CoVideoConsoleWindowWidth@ 2 + // w
-		CoVideoConsoleWindowHeight@ 2 + // h
+		CoVideoConsoleWindowX@ VIDEOCONSOLETEXTMARGINS - 1 - // x
+		CoVideoConsoleWindowY@ VIDEOCONSOLETEXTMARGINS - 1 - // y
+		CoVideoConsoleWindowWidth@ VIDEOCONSOLETEXTMARGINS 2 * + 2 + // w
+		CoVideoConsoleWindowHeight@ VIDEOCONSOLETEXTMARGINS 2 * + 2 + // h
 		KVDrawEmptyRectangle
 
 		VIDEOCONSOLEWINDOWBGCOLOR KVRGB24ToNative // nativecolor
-		CoVideoConsoleWindowX@ // x
-		CoVideoConsoleWindowY@ // y
-		CoVideoConsoleWindowWidth@ // w
-		CoVideoConsoleWindowHeight@ // h
+		CoVideoConsoleWindowX@ VIDEOCONSOLETEXTMARGINS - // x
+		CoVideoConsoleWindowY@ VIDEOCONSOLETEXTMARGINS - // y
+		CoVideoConsoleWindowWidth@ VIDEOCONSOLETEXTMARGINS 2 * + // w
+		CoVideoConsoleWindowHeight@ VIDEOCONSOLETEXTMARGINS 2 * + // h
 		KVDrawFilledRectangle
 	end else
 		VIDEOCONSOLEWINDOWBGCOLOR KVRGB24ToNative // nativecolor
 		KVClearScreen
 	end
+
+	HALConsoleStolen
+end
+
+fn CoVideoConsoleScroll { -- }
+	CoVideoConsoleUpdateBuffer@ // dest
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ 1 << + // src
+	CoVideoConsoleColumns@ CoVideoConsoleRows@ 1 - * 1 << // size
+	memcpy
+
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ CoVideoConsoleRows@ 1 - * 1 << + // ptr
+	CoVideoConsoleColumns@ 1 << // size
+	0 // word
+	memset
+
+	0 CoVideoConsoleDirtyX1!
+	0 CoVideoConsoleDirtyY1!
+
+	CoVideoConsoleColumns@ 1 - CoVideoConsoleDirtyX2!
+	CoVideoConsoleRows@ 1 - CoVideoConsoleDirtyY2!
+
+	1 CoVideoConsoleIsDirty!
+end
+
+fn CoVideoConsoleNewline { -- }
+	0 CoVideoConsoleUpdateCursorX!
+	1 CoVideoConsoleUpdateCursorY +=
+
+	if (CoVideoConsoleUpdateCursorY@ CoVideoConsoleRows@ >=)
+		CoVideoConsoleRows@ 1 - CoVideoConsoleUpdateCursorY!
+		CoVideoConsoleScroll
+	end
+
+	1 CoVideoConsoleIsDirty!
+end
+
+fn CoVideoConsoleBackUp { -- }
+	if (CoVideoConsoleUpdateCursorX@ 0 ==)
+		if (CoVideoConsoleUpdateCursorY@)
+			1 CoVideoConsoleUpdateCursorY -=
+		end
+
+		CoVideoConsoleColumns@ 1 - CoVideoConsoleUpdateCursorX!
+	end else
+		1 CoVideoConsoleUpdateCursorX -=
+	end
+
+	1 CoVideoConsoleIsDirty!
+end
+
+fn CoVideoConsoleRubout { -- }
+	CoVideoConsoleBackUp
+	' ' CoVideoConsolePutCharacter
+	CoVideoConsoleBackUp
+end
+
+fn CoVideoConsolePutCharacter { c -- }
+	if (c@ 0x7F >)
+		return
+	end
+
+	if (c@ 0 ==)
+		return
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (c@ '\n' ==)
+		CoVideoConsoleNewline
+		ipl@ KeIPLLower
+		return
+	end elseif (c@ '\b' ==)
+		CoVideoConsoleBackUp
+		ipl@ KeIPLLower
+		return
+	end elseif (c@ 0x7F ==)
+		CoVideoConsoleRubout
+		ipl@ KeIPLLower
+		return
+	end elseif (c@ '\t' ==)
+		' ' c!
+	end elseif (c@ '\r' ==)
+		0 CoVideoConsoleUpdateCursorX!
+		1 CoVideoConsoleIsDirty!
+		ipl@ KeIPLLower
+		return
+	end
+
+	auto curx
+	CoVideoConsoleUpdateCursorX@ curx!
+
+	auto cury
+	CoVideoConsoleUpdateCursorY@ cury!
+
+	auto bufp
+	CoVideoConsoleUpdateBuffer@
+	cury@ CoVideoConsoleColumns@ * 1 << +
+	curx@ 1 << + bufp!
+
+	c@ bufp@ sb
+
+	if (CoVideoConsoleDirtyX1@ -1 ==)
+		curx@ CoVideoConsoleDirtyX1!
+		cury@ CoVideoConsoleDirtyY1!
+
+		curx@ CoVideoConsoleDirtyX2!
+		cury@ CoVideoConsoleDirtyY2!
+	end else
+		if (curx@ CoVideoConsoleDirtyX1@ <)
+			curx@ CoVideoConsoleDirtyX1!
+		end elseif (curx@ CoVideoConsoleDirtyX2@ >)
+			curx@ CoVideoConsoleDirtyX2!
+		end
+
+		if (cury@ CoVideoConsoleDirtyY1@ <)
+			cury@ CoVideoConsoleDirtyY1!
+		end elseif (cury@ CoVideoConsoleDirtyY2@ >)
+			cury@ CoVideoConsoleDirtyY2!
+		end
+	end
+
+	curx@ 1 + CoVideoConsoleUpdateCursorX!
+
+	if (CoVideoConsoleUpdateCursorX@ CoVideoConsoleColumns@ >=)
+		CoVideoConsoleNewline
+	end
+
+	1 CoVideoConsoleIsDirty!
+
+	ipl@ KeIPLLower
 end
 
 fn (CoOutputFunction) CoVideoConsoleOutput { console -- ok }
+	auto outputbuffer
+	console@ CoConsoleOutputBufferGet outputbuffer!
+
 	0 ok!
+
+	while (1)
+		auto c
+		0 // timeout
+		KERNELMODE // lastmode
+		EXRINGDONTWAIT // waitonempty
+		outputbuffer@ // ringbuffer
+		ExRingBufferReadValue ok! drop c!
+
+		if (ok@)
+			return
+		end
+
+		c@ CoVideoConsolePutCharacter
+	end
+end
+
+fn CoVideoConsoleClearCursor { nativefg nativebg -- }
+	auto ux
+	CoVideoConsoleUpdateCursorX@ ux!
+
+	auto uy
+	CoVideoConsoleUpdateCursorY@ uy!
+
+	auto osx
+	CoVideoConsoleOnScreenCursorX@ osx!
+
+	auto osy
+	CoVideoConsoleOnScreenCursorY@ osy!
+
+	auto bufp
+	CoVideoConsoleUpdateBuffer@
+	osy@ CoVideoConsoleColumns@ * 1 << +
+	osx@ 1 << + bufp!
+
+	auto ch
+	bufp@ gi 0xFF & ch!
+
+	if (ch@ ~~)
+		' ' ch!
+	end
+
+	ch@ // char
+	nativefg@ // nativefg
+	nativebg@ // nativebg
+	osx@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowX@ + // x
+	osy@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowY@ + // y
+	CoVideoConsoleFont@ // font
+	KVDrawCharacter
+end
+
+fn CoVideoConsoleDrawCursor { nativefg nativebg -- }
+	auto ux
+	CoVideoConsoleUpdateCursorX@ ux!
+
+	auto uy
+	CoVideoConsoleUpdateCursorY@ uy!
+
+	auto bufp
+	CoVideoConsoleUpdateBuffer@
+	uy@ CoVideoConsoleColumns@ * 1 << +
+	ux@ 1 << + bufp!
+
+	auto ch
+	bufp@ gi 0xFF & ch!
+
+	if (ch@ ~~)
+		' ' ch!
+	end
+
+	ch@ // char
+	nativebg@ // nativefg
+	nativefg@ // nativebg
+	ux@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowX@ + // x
+	uy@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowY@ + // y
+	CoVideoConsoleFont@ // font
+	KVDrawCharacter
+
+	ux@ CoVideoConsoleOnScreenCursorX!
+	uy@ CoVideoConsoleOnScreenCursorY!
+end
+
+fn CoVideoConsoleUpdate { -- }
+	auto nativefg
+	VIDEOCONSOLEFGCOLOR KVRGB24ToNative nativefg!
+
+	auto nativebg
+	VIDEOCONSOLEWINDOWBGCOLOR KVRGB24ToNative nativebg!
+
+	nativefg@ nativebg@ CoVideoConsoleClearCursor
+
+	if (CoVideoConsoleDirtyX1@ -1 ~=)
+		auto x
+		CoVideoConsoleDirtyX1@ x!
+
+		auto y
+		CoVideoConsoleDirtyY1@ y!
+
+		auto dy
+		CoVideoConsoleDirtyY2@ dy!
+
+		auto dx
+		CoVideoConsoleDirtyX2@ dx!
+
+		auto bufmod
+		CoVideoConsoleColumns@
+		dx@ x@ - 1 +
+		- 1 << bufmod!
+
+		auto off
+		y@ CoVideoConsoleColumns@ * 1 <<
+		x@ 1 << + off!
+
+		auto font
+		CoVideoConsoleFont@ font!
+
+		auto ubufp
+		CoVideoConsoleUpdateBuffer@ off@ + ubufp!
+
+		auto sbufp
+		CoVideoConsoleOnScreenBuffer@ off@ + sbufp!
+
+		while (y@ dy@ <=)
+			auto qx
+			x@ qx!
+
+			while (qx@ dx@ <=)
+				auto ct
+				ubufp@ gi ct!
+
+				if (sbufp@ gi ct@ ~=)
+					// changed!
+
+					auto ch
+					ct@ 0xFF & ch!
+
+					if (ch@ ~~)
+						' ' ch!
+					end
+
+					ch@ // char
+					nativefg@ // nativefg
+					nativebg@ // nativebg
+					qx@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowX@ + // x
+					y@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowY@ + // y
+					font@ // font
+					KVDrawCharacter
+
+					ct@ sbufp@ si
+				end
+
+				2 ubufp +=
+				2 sbufp +=
+				1 qx +=
+			end
+
+			bufmod@ ubufp +=
+			bufmod@ sbufp +=
+			1 y +=
+		end
+	end
+
+	0 CoVideoConsoleIsDirty!
+
+	nativefg@ nativebg@ CoVideoConsoleDrawCursor
+end
+
+fn CoVideoConsoleDrawWorker { context1 context2 -- }
+	PRIORITY_LOWREALTIME 2 + // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	auto ok
+
+	while (1)
+		20 // interval
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep ok!
+
+		if (DEBUGCHECKS)
+			if (ok@ STATUS_WAIT_TIMEOUT ~=)
+				ok@ "CoVideoConsoleDrawWorker: wait failed (%i)\n" KeCrash
+			end
+		end
+
+		if (CoVideoConsoleIsDirty@)
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			CoVideoConsoleUpdate
+
+			ipl@ KeIPLLower
+		end
+	end
 end

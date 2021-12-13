@@ -3,6 +3,7 @@ extern HALGetc { -- c }
 extern HALConsoleQuery { -- w h x y }
 extern HALConsoleSetCursor { x y -- }
 extern HALConsoleClear { -- }
+extern HALConsoleStolen { -- }
 extern HALConsoleSetMode { newmode -- oldmode }
 
 const CONSOLEFG 0 // white

@@ -23,4 +23,5 @@ extern HALLIMNstationAmtsuReset { -- }
 
 extern HALLIMNstationAmtsuEnumerate { func mid -- count }
 
+extern HALLIMNstationAmtsuIDToIrq { id -- irq }
 extern HALLIMNstationAmtsuIrqToID { irq -- id }

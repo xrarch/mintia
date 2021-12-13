@@ -1,0 +1,2 @@
+externptr CoVideoConsole
+externptr CoVideoConsoleRawBuffer

@@ -19,6 +19,8 @@
 
 #include "<inc>/IO.h"
 
+#include "<inc>/Video.h"
+
 #include "<inc>/Console.h"
 
 #include "<ll>/OSDLL/OS.h"
@@ -26,10 +28,141 @@
 var CoVideoConsole 0
 public CoVideoConsole
 
+var CoVideoConsoleFont 0
+
 // set by keyboard driver (or whatever is feeding the video console)
 var CoVideoConsoleRawBuffer 0
 public CoVideoConsoleRawBuffer
 
+var CoVideoConsoleScreenWidth 0
+var CoVideoConsoleScreenHeight 0
+
+var CoVideoConsoleFontWidth 0
+var CoVideoConsoleFontHeight 0
+
+var CoVideoConsoleColumns 0
+var CoVideoConsoleRows 0
+
+var CoVideoConsoleWindowWidth 0
+var CoVideoConsoleWindowHeight 0
+
+var CoVideoConsoleWindowX 0
+var CoVideoConsoleWindowY 0
+
 fn CoVideoConsoleInit { -- }
-	CoVideoConsoleRawBuffer@ "rawbuffer at 0x%08x\n" Printf
+	if (CoVideoConsoleRawBuffer@ ~~)
+		// no input device
+		return
+	end
+
+	auto ok
+
+	KVQuery ok! CoVideoConsoleScreenHeight! CoVideoConsoleScreenWidth!
+
+	if (ok@)
+		// no boot video
+		return
+	end
+
+	auto font
+	"VideoConsoleFont" // name
+	KVFontGet ok! font!
+
+	if (ok@)
+		// no font
+		return
+	end
+
+	font@ KVFontQuery CoVideoConsoleFontHeight! CoVideoConsoleFontWidth!
+
+	font@ CoVideoConsoleFont!
+
+	auto deviceobject
+
+	pointerof CoVideoConsoleOutput // outputfunc
+	0 // context
+	CoVideoConsoleRawBuffer@ // rawbuffer
+	0 // quotablock
+	"ttyV0" // name
+	SeSystemUser@ // owninguser
+	ACCESS_OWNER_ALL // permissions
+	1 // permanent
+	CoConsoleCreateObject ok! deviceobject! drop
+
+	if (ok@)
+		return
+	end
+
+	deviceobject@ IODeviceDirectoryInsert ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "CoVideoConsoleInit: failed to insert ttyV0 (%i)\n" KeCrash
+		end
+	end
+
+	deviceobject@ IODeviceGetExtension CoVideoConsole!
+
+	CoVideoConsoleDraw
+end
+
+const VIDEOCONSOLEWINDOWBGCOLOR 0xFFFFFF // white
+const VIDEOCONSOLEBGCOLOR       0x8ADFC9 // a shade of mint
+
+const VIDEOCONSOLEDECOMARGINS 4 // pixel margin required for window decoration drawing
+
+fn CoVideoConsoleDraw { -- }
+	// set video console parameters and (re)draw the video console
+	// programmatically.
+
+	CoVideoConsoleScreenWidth@ CoVideoConsoleFontWidth@ / 80 min CoVideoConsoleColumns!
+	CoVideoConsoleScreenHeight@ CoVideoConsoleFontHeight@ / 30 min CoVideoConsoleRows!
+
+	CoVideoConsoleColumns@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowWidth!
+	CoVideoConsoleRows@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowHeight!
+
+	CoVideoConsoleScreenWidth@ 2 / CoVideoConsoleWindowWidth@ 2 / - CoVideoConsoleWindowX!
+	CoVideoConsoleScreenHeight@ 2 / CoVideoConsoleWindowHeight@ 2 / - CoVideoConsoleWindowY!
+
+	auto deco
+	1 deco!
+
+	if (CoVideoConsoleScreenWidth@ CoVideoConsoleWindowWidth@ - VIDEOCONSOLEDECOMARGINS <)
+		0 deco!
+	end elseif (CoVideoConsoleScreenHeight@ CoVideoConsoleWindowHeight@ - VIDEOCONSOLEDECOMARGINS <)
+		0 deco!
+	end
+
+	if (deco@)
+		VIDEOCONSOLEBGCOLOR KVRGB24ToNative // nativecolor
+		KVClearScreen
+
+		0x000000 KVRGB24ToNative // nativecolor
+		CoVideoConsoleWindowX@ 1 - // x
+		CoVideoConsoleWindowY@ 1 - // y
+		CoVideoConsoleWindowWidth@ 2 + // w
+		CoVideoConsoleWindowHeight@ 2 + // h
+		KVDrawEmptyRectangle
+
+		0x000000 KVRGB24ToNative // nativecolor
+		CoVideoConsoleWindowX@ // x
+		CoVideoConsoleWindowY@ // y
+		CoVideoConsoleWindowWidth@ 2 + // w
+		CoVideoConsoleWindowHeight@ 2 + // h
+		KVDrawEmptyRectangle
+
+		VIDEOCONSOLEWINDOWBGCOLOR KVRGB24ToNative // nativecolor
+		CoVideoConsoleWindowX@ // x
+		CoVideoConsoleWindowY@ // y
+		CoVideoConsoleWindowWidth@ // w
+		CoVideoConsoleWindowHeight@ // h
+		KVDrawFilledRectangle
+	end else
+		VIDEOCONSOLEWINDOWBGCOLOR KVRGB24ToNative // nativecolor
+		KVClearScreen
+	end
+end
+
+fn (CoOutputFunction) CoVideoConsoleOutput { console -- ok }
+	0 ok!
 end

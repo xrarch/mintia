@@ -20,6 +20,33 @@
 
 #include "<inc>/HALDebug.h"
 
+fn PsProcessLookupPID { pid -- processobject ok }
+	PsProcessTable@ ExHandleTableLockShared ok!
+
+	if (ok@)
+		return
+	end
+
+	auto entryptr
+
+	pid@ // handle
+	PsProcessTable@ // handletable
+	1 // locked
+	ExHandleLookup ok! entryptr!
+
+	if (ok@)
+		PsProcessTable@ ExHandleTableUnlock
+
+		return
+	end
+
+	entryptr@@ processobject!
+
+	processobject@ ObObjectReferenceByPointer drop
+
+	PsProcessTable@ ExHandleTableUnlock
+end
+
 fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess permissions name -- processobject ok }
 	auto initial
 
@@ -92,18 +119,17 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 	handletable@ processobject@ PsProcess_HandleTable + !
 
-	// XXX this may be VERY racey,
-	// should probably take a mutex to lock out
-	// any operations that take a process's PID
-	// until this process is fully initialized.
+	PsProcessTable@ ExHandleTableLockUnalertable
 
 	auto pid
 	processobject@ // entryvalue
 	PsProcessTable@ // handletable
-	0 // locked
+	1 // locked
 	ExHandleCreate ok! drop pid!
 
 	if (ok@)
+		PsProcessTable@ ExHandleTableUnlock
+
 		if (initial@ ~~)
 			0 handletable@ ExHandleTableDelete
 		end
@@ -144,8 +170,10 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 			pid@ // handle
 			PsProcessTable@ // handletable
-			0 // locked
+			1 // locked
 			ExHandleDelete drop drop drop
+
+			PsProcessTable@ ExHandleTableUnlock
 
 			0 handletable@ ExHandleTableDelete
 
@@ -173,8 +201,10 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 
 		pid@ // handle
 		PsProcessTable@ // handletable
-		0 // locked
+		1 // locked
 		ExHandleDelete drop drop drop
+
+		PsProcessTable@ ExHandleTableUnlock
 
 		if (initial@ ~~)
 			0 handletable@ ExHandleTableDelete
@@ -190,6 +220,8 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 	processobject@ PsProcessInsert
 
 	PsProcessListUnlock
+
+	PsProcessTable@ ExHandleTableUnlock
 end
 
 fn PsProcessCreate { sectionhandle inherithandles permissions name -- processhandle ok }

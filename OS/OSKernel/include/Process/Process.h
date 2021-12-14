@@ -95,8 +95,8 @@ extern PsThreadUserEntry { context1 context2 -- }
 
 extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
-extern PsThreadCreateObject { context1 context2 startfunc permissions name processobject -- threadobject ok }
-extern PsThreadCreate { context1 context2 startfunc permissions name processhandle -- threadhandle ok }
+extern PsThreadCreateObject { context1 context2 startfunc creationflags permissions name processobject -- threadobject ok }
+extern PsThreadCreate { context1 context2 startfunc creationflags permissions name processhandle -- threadhandle ok }
 
 extern PsProcessObjectDelete { object -- }
 extern PsThreadObjectDelete { object -- }

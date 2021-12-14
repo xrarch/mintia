@@ -171,6 +171,8 @@ fn KeThreadIgnoreKill { thread -- oldcount }
 	1 thread@ KeThread_IgnoreKill + +=
 
 	rs@ HALCPUInterruptRestore
+
+	thread@ KeThreadKernelAPCDisable drop
 end
 
 fn KeThreadAcceptKill { thread -- oldcount }
@@ -188,13 +190,15 @@ fn KeThreadAcceptKill { thread -- oldcount }
 	1 thread@ KeThread_IgnoreKill + -=
 
 	rs@ HALCPUInterruptRestore
+
+	thread@ KeThreadKernelAPCEnable drop
 end
 
 fn KeThreadIsKilled { mode alertable thread -- ok }
 	// gives the status code that should be returned for the thread's signal
 	// state. this only determines what should interrupt a syscall and be
 	// passed to OSDLL; actual signal dispatch and certain actions like core
-	// dumping are performed in usermode OSDLL code.
+	// dumping are to be performed in usermode OSDLL code.
 
 	auto process
 	thread@ KeThread_Process + @ process!
@@ -258,6 +262,44 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		STATUS_SIGNALLED ok!
 	end else
 		0 ok!
+	end
+end
+
+fn KeThreadKernelAPCDisable { thread -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_KernelAPCDisableCount + @ oldcount!
+
+	1 thread@ KeThread_KernelAPCDisableCount + +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeThreadKernelAPCEnable { thread -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_KernelAPCDisableCount + @ oldcount!
+
+	if (oldcount@ 0 ==)
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	1 thread@ KeThread_KernelAPCDisableCount + -=
+
+	rs@ HALCPUInterruptRestore
+
+	if (oldcount@ 1 ==)
+		if (thread@ KeThread_APCEnqueued + @)
+			if (KeIPLCurrentGet IPLAPC <)
+				if (thread@ KeThreadCurrent@ ==)
+					0 KERNELMODE KeAPCDispatchQueue
+				end
+			end
+		end
 	end
 end
 

@@ -47,7 +47,7 @@ fn PsProcessLookupPID { pid -- processobject ok }
 	PsProcessTable@ ExHandleTableUnlock
 end
 
-fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess permissions name -- processobject ok }
+fn PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
 	auto initial
 
 	if (parentprocess@)
@@ -60,6 +60,16 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 		KeProcessIdleProcess parentprocess!
 
 		1 initial!
+	end
+
+	if (creationflags@ OSPROCESS_FORKQUOTA &)
+		SYSTEMPERMISSION_FORKQUOTA // permission
+		SeUserCurrentGet // user
+		SeUserCheckPermission ok!
+
+		if (ok@)
+			return
+		end
 	end
 
 	name@ // name
@@ -80,13 +90,25 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 	auto quotablock
 	parentprocess@ PsProcess_QuotaBlock + @ quotablock!
 
-	quotablock@ MmQuotaBlockReference
-	quotablock@ processobject@ PsProcess_QuotaBlock + !
+	if (creationflags@ OSPROCESS_FORKQUOTA &)
+		// fork quotablock
+		quotablock@ MmQuotaBlockFork ok! quotablock!
+
+		if (ok@)
+			processobject@ ObObjectDeallocate
+
+			return
+		end
+	end else
+		// inherit quotablock
+		quotablock@ MmQuotaBlockReference
+		quotablock@ processobject@ PsProcess_QuotaBlock + !
+	end
 
 	auto handletable
 
 	if (initial@ ~~)
-		if (inherithandles@)
+		if (creationflags@ OSPROCESS_NOINHERIT & ~~)
 			pointerof ObHandleInheritFunction // func
 			parentprocess@ PsProcess_HandleTable + @ // handletablesrc
 			processobject@ // chargedprocess
@@ -224,7 +246,7 @@ fn PsProcessCreateObject { sectionobject inherithandles owninguser parentprocess
 	PsProcessTable@ ExHandleTableUnlock
 end
 
-fn PsProcessCreate { sectionhandle inherithandles permissions name -- processhandle ok }
+fn PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 	auto sectionobject
 	auto access
 
@@ -250,7 +272,7 @@ fn PsProcessCreate { sectionhandle inherithandles permissions name -- processhan
 	KeProcessCurrent curproc!
 
 	sectionobject@ // sectionobject
-	inherithandles@ // inherithandles
+	creationflags@ // creationflags
 	curproc@ PsProcess_OwningUser + @ // owninguser
 	curproc@ // parentprocess
 	permissions@ // permissions

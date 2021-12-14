@@ -17,6 +17,7 @@ endstruct
 const MMQUOTAINFINITE -1
 
 extern MmQuotaBlockCreate { modmax wsmax vmmax heapmax -- quotablock ok }
+extern MmQuotaBlockFork { quotablock -- newquotablock ok }
 extern MmQuotaBlockInitialize { modmax wsmax vmmax heapmax quotablock -- ok }
 extern MmQuotaBlockReference { quotablock -- }
 extern MmQuotaBlockDereference { quotablock -- }

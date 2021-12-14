@@ -9,3 +9,4 @@
 #include "<ll>/OSDLL/OSObject.h"
 #include "<ll>/OSDLL/OSAlloc.h"
 #include "<ll>/OSDLL/OSModule.h"
+#include "<ll>/OSDLL/OSProcess.h"

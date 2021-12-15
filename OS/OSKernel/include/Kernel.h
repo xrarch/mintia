@@ -12,6 +12,4 @@
 
 #include "<inc>/Kernel/Process.h"
 
-#include "<inc>/Kernel/APC.h"
-
 const DEBUGCHECKS 1

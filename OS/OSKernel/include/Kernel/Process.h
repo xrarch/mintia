@@ -91,22 +91,7 @@ struct KeThread
 	4 WaitStatus
 	4 WaitIPL
 
-	4 APCQueueable
-	4 APCEnqueued
-
-	4 APCUserListHead
-	4 APCUserListTail
-
-	4 APCKernelListHead
-	4 APCKernelListTail
-
 	4 MutexListHead
-
-	4 UserAPCDisableCount
-
-	4 KernelAPCDisableCount
-
-	4 KernelAPCInProgress
 
 	4 WaitCount
 
@@ -139,8 +124,6 @@ extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
 extern KeThreadIsKilled { mode alertable thread -- ok }
-extern KeThreadUserAPCDisable { thread -- oldcount }
-extern KeThreadUserAPCEnable { thread -- oldcount }
 extern KeThreadEnqueue { front thread -- }
 extern KeThreadDequeue { thread -- }
 extern KeThreadNextPick { -- thread }

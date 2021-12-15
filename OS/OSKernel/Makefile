@@ -10,7 +10,7 @@ SYSTOOL = ../../../sdk/gensyscalls.sh
 
 SYSBINDIR  = ../SystemBin
 
-DCFLAGS = incdir=./include/:../HAL/include
+DCFLAGS = incdir=./include/:../HAL/include:../HAL/limn2600/include
 
 all: $(SYSBINDIR)/OSKernel.exe
 

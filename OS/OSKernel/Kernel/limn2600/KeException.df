@@ -1,0 +1,350 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALLimn2kContext.h"
+#include "<inc>/HALCrash.h"
+
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALInterrupt.h"
+
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Memory.h"
+
+// if this seems janked up, its because it is, because this all used to be in
+// the HAL, and the process of moving it into the kernel was rough.
+
+const ECAUSEINTERRUPT 1
+const ECAUSESYS       2
+const ECAUSENMI       6
+const ECAUSEPAGEFAULT 12
+const ECAUSEPAGEWRITE 13
+
+externptr HALLIMNstationInterruptHandlers
+
+externptr HALLIMNstationLSICClaimComplete
+
+externptr HALLimn2500SavedEV
+
+externptr KeThreadCurrentStackTop
+
+externptr OSCallCount
+externptr OSCallTable
+
+asm "
+
+KeLimn2600ExceptionVector:
+.global KeLimn2600ExceptionVector
+	mtcr k0, t0 ; save t0 to free it as scratch
+	mtcr k1, t1 ; ditto with t1
+	mtcr k2, sp ; save stack pointer
+	mtcr k3, sp ; save trace link
+
+	mfcr t0, ers
+
+	andi t1, t0, RS_USER
+	beq  t1, .waskernel
+
+	la   t1, KeThreadCurrentStackTop
+	mov  sp, long [t1] ; load new sp for current thread
+
+	mtcr k3, zero ; this was a usermode sp, zero out the trace link
+
+.waskernel:
+	subi sp, sp, Limn2500Context_SIZEOF
+
+	mfcr t1, k2
+	mov  long [sp + Limn2500Context_sp],  t1
+	mov  long [sp + Limn2500Context_ers], t0 ; ers was still in t0
+
+	mfcr t0, epc
+	mov  long [sp + Limn2500Context_epc], t0
+
+	mfcr t1, k0
+	mov  long [sp + Limn2500Context_t0],  t1
+
+	mfcr t1, k1
+	mov  long [sp + Limn2500Context_t1],  t1
+
+	mov  long [sp + Limn2500Context_t2],  t2
+	mov  long [sp + Limn2500Context_t3],  t3
+	mov  long [sp + Limn2500Context_t4],  t4
+	mov  long [sp + Limn2500Context_t5],  t5
+	mov  long [sp + Limn2500Context_a0],  a0
+	mov  long [sp + Limn2500Context_a1],  a1
+	mov  long [sp + Limn2500Context_a2],  a2
+	mov  long [sp + Limn2500Context_a3],  a3
+	mov  long [sp + Limn2500Context_s0],  s0
+	mov  long [sp + Limn2500Context_s1],  s1
+	mov  long [sp + Limn2500Context_s2],  s2
+	mov  long [sp + Limn2500Context_s3],  s3
+	mov  long [sp + Limn2500Context_s4],  s4
+	mov  long [sp + Limn2500Context_s5],  s5
+	mov  long [sp + Limn2500Context_s6],  s6
+	mov  long [sp + Limn2500Context_s7],  s7
+	mov  long [sp + Limn2500Context_s8],  s8
+	mov  long [sp + Limn2500Context_s9],  s9
+	mov  long [sp + Limn2500Context_s10], s10
+	mov  long [sp + Limn2500Context_s11], s11
+	mov  long [sp + Limn2500Context_s12], s12
+	mov  long [sp + Limn2500Context_s13], s13
+	mov  long [sp + Limn2500Context_s14], s14
+	mov  long [sp + Limn2500Context_s15], s15
+	mov  long [sp + Limn2500Context_s16], s16
+	mov  long [sp + Limn2500Context_s17], s17
+	mov  long [sp + Limn2500Context_s18], s18
+	mov  long [sp + Limn2500Context_lr],  lr
+
+	mfcr a1, ecause
+	mfcr a2, ebadaddr
+	mov  a0, sp ; give KeLimn2600Exception our context
+
+	subi sp, sp, 8
+	mfcr t0, epc
+	mov  long [sp + 4], t0
+	mfcr t0, k3
+	mov  long [sp], t0
+
+	jal  KeLimn2600Exception ; call KeLimn2600Exception, to handle the exception
+
+	addi sp, sp, 8
+
+LoadInitialContext:
+.global LoadInitialContext
+
+	mov  t0, long [sp + Limn2500Context_ers]
+	mtcr ers, t0
+
+	mov  t0, long [sp + Limn2500Context_epc]
+	mtcr epc, t0
+
+	mov  t0,  long [sp + Limn2500Context_t0]
+	mov  t1,  long [sp + Limn2500Context_t1]
+	mov  t2,  long [sp + Limn2500Context_t2]
+	mov  t3,  long [sp + Limn2500Context_t3]
+	mov  t4,  long [sp + Limn2500Context_t4]
+	mov  t5,  long [sp + Limn2500Context_t5]
+	mov  a0,  long [sp + Limn2500Context_a0]
+	mov  a1,  long [sp + Limn2500Context_a1]
+	mov  a2,  long [sp + Limn2500Context_a2]
+	mov  a3,  long [sp + Limn2500Context_a3]
+	mov  s0,  long [sp + Limn2500Context_s0]
+	mov  s1,  long [sp + Limn2500Context_s1]
+	mov  s2,  long [sp + Limn2500Context_s2]
+	mov  s3,  long [sp + Limn2500Context_s3]
+	mov  s4,  long [sp + Limn2500Context_s4]
+	mov  s5,  long [sp + Limn2500Context_s5]
+	mov  s6,  long [sp + Limn2500Context_s6]
+	mov  s7,  long [sp + Limn2500Context_s7]
+	mov  s8,  long [sp + Limn2500Context_s8]
+	mov  s9,  long [sp + Limn2500Context_s9]
+	mov  s10, long [sp + Limn2500Context_s10]
+	mov  s11, long [sp + Limn2500Context_s11]
+	mov  s12, long [sp + Limn2500Context_s12]
+	mov  s13, long [sp + Limn2500Context_s13]
+	mov  s14, long [sp + Limn2500Context_s14]
+	mov  s15, long [sp + Limn2500Context_s15]
+	mov  s16, long [sp + Limn2500Context_s16]
+	mov  s17, long [sp + Limn2500Context_s17]
+	mov  s18, long [sp + Limn2500Context_s18]
+
+	mov  lr, long [sp + Limn2500Context_lr]
+	mov  sp, long [sp + Limn2500Context_sp]
+
+	rfe
+
+; a0 - tf
+KeLimn2600Syscall:
+.global KeLimn2600Syscall
+	subi sp, sp, 20
+	mov  long [sp], zero
+	mov  long [sp + 4], s0
+	mov  long [sp + 8], s1
+	mov  long [sp + 12], s18
+	mov  long [sp + 16], lr
+
+	mov  s18, a0 ;trampolines expect trapframe in s18
+
+	mov  t1, long [a0 + Limn2500Context_t0]
+	beq  t1, .sysout
+
+	la   t0, OSCallCount
+	mov  t0, long [t0]
+	slt  t0, t0, t1
+	bne  t0, .sysout
+
+	la   t0, OSCallTable
+	mov  t0, long [t0 + t1 LSH 2]
+
+	mfcr s0, rs
+	ori  s1, s0, RS_INT
+	mtcr rs, s1
+
+	jalr lr, t0, 0
+
+	mtcr rs, s0
+
+.sysout:
+	mov  s0, long [sp + 4]
+	mov  s1, long [sp + 8]
+	mov  s18, long [sp + 12]
+	mov  lr, long [sp + 16]
+	addi sp, sp, 20
+
+	ret
+
+KeCPUInit:
+.global KeCPUInit
+	la   t0, HALLimn2500SavedEV
+	mfcr t1, evec
+	mov  long [t0], t1
+
+	la   t0, KeLimn2600ExceptionVector
+	mtcr evec, t0
+
+	mtcr ebadaddr, zero
+
+	subi t0, zero, 1
+	ftlb t0, t0
+	
+	ret
+
+"
+
+extern KeLimn2600Syscall { tf -- }
+
+const EXCNAMESMAX 15
+
+table ExceptionNames
+	"EXC0"
+	"INTERRUPT"
+	"SYSCALL"
+	"FWCALL"
+	"BUSERROR"
+	"EXC5"
+	"BREAKPOINT"
+	"INVALIDINSTRUCTION"
+	"PRIVILEGEVIOLATION"
+	"UNALIGNEDADDR"
+	"EXC10"
+	"EXC11"
+	"PAGEFAULT(READ)"
+	"PAGEFAULT(WRITE)"
+	"EXC14"
+	"EXC15"
+endtable
+
+fn KeLimn2600Interrupt { -- }
+	auto lsiccc
+	HALLIMNstationLSICClaimComplete@ lsiccc!
+
+	auto inth
+	HALLIMNstationInterruptHandlers inth!
+
+	auto inthe
+
+	auto int
+	lsiccc@@ int!
+
+	while (int@)
+		int@ lsiccc@!
+
+		int@ 3 << inth@ + inthe!
+
+		inthe@ 4 + @ // ipl
+		int@ // int
+		inthe@@ // handler
+		KeInterrupt
+
+		lsiccc@@ int!
+	end
+end
+
+fn KeLimn2600Exception { badaddr ecause tf -- }
+	if (ecause@ ECAUSEINTERRUPT ==)
+		KeLimn2600Interrupt
+
+		return
+	end
+
+	auto excname
+
+	if (ecause@ EXCNAMESMAX >)
+		"UNKNOWN" excname!
+	end else
+		[ecause@]ExceptionNames@ excname!
+	end
+
+	if (ecause@ ECAUSENMI ==)
+		if (HALDebug)
+			return
+		end
+
+		return
+	end
+
+	auto handled
+	0 handled!
+
+	// TODO generate signals on various actual faults
+	
+	if (ecause@ ECAUSESYS ==)
+		tf@ KeLimn2600Syscall
+		1 handled!
+	end elseif (ecause@ ECAUSEPAGEFAULT ==)
+		4 tf@ Limn2500Context_epc + -=
+
+		0 // writing
+		badaddr@ // badaddr
+		tf@ // trapframe
+		MmPageFault handled!
+	end elseif (ecause@ ECAUSEPAGEWRITE ==)
+		4 tf@ Limn2500Context_epc + -=
+
+		1 // writing
+		badaddr@ // badaddr
+		tf@ // trapframe
+		MmPageFault handled!
+	end
+
+	if (handled@ ~~)
+		ecause@ excname@ badaddr@ tf@ Limn2500Context_epc + @ tf@ Limn2500Context_ers + @
+		"Fault: ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" KeCrash
+	end
+
+	// while (1) end
+end
+
+fn HALCPUIsUserTrapFrame { tf -- user }
+	tf@ Limn2500Context_ers + @ RS_USER & user!
+end
+
+fn HALCPUTrapFrameAbort { abort tf -- }
+	abort@ tf@ Limn2500Context_epc + !
+end
+
+fn HALCPUContextInit { context1 context2 startfunc kstack -- ctx }
+	8 kstack -=
+
+	0 kstack@!
+	startfunc@ kstack@ 4 + !
+
+	kstack@ Limn2500Context_SIZEOF - ctx!
+
+	ctx@ Limn2500Context_SIZEOF 0 memset
+
+	context1@ ctx@ Limn2500Context_a1 + !
+	context2@ ctx@ Limn2500Context_a0 + !
+
+	// enable interrupts and paging in the thread's context
+	RS_KTHREAD ctx@ Limn2500Context_ers + !
+
+	startfunc@ ctx@ Limn2500Context_epc + !
+
+	kstack@ ctx@ Limn2500Context_sp + !
+
+	Limn2500Context_SIZEOF ctx -=
+
+	pointerof LoadInitialContext ctx@ Limn2500Context_lr + !
+end

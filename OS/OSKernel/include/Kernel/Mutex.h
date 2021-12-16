@@ -2,7 +2,6 @@
 struct KeMutex
 	KeDispatchHeader_SIZEOF DispatchHeader
 	4 OwningThread
-	4 Locked
 	4 Mode
 	
 	4 Prev

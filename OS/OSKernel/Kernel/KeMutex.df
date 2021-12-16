@@ -14,7 +14,6 @@ fn KeMutexInitialize { name mode mutex -- }
 	name@ DISPATCHOBJECT_MUTEX mutex@ KeDispatchInitialize
 
 	0 mutex@ KeMutex_OwningThread + !
-	0 mutex@ KeMutex_Locked + !
 	mode@ mutex@ KeMutex_Mode + !
 
 	0 mutex@ KeMutex_Prev + !
@@ -25,7 +24,6 @@ end
 
 fn KeMutexOwnerSet { thread mutex -- }
 	thread@ mutex@ KeMutex_OwningThread + !
-	1 mutex@ KeMutex_Locked + !
 
 	auto h
 	thread@ KeThread_MutexListHead + @ h!
@@ -65,7 +63,7 @@ fn KeMutexRelease { abandon mutex -- ok }
 		end
 	end
 
-	auto lock
+	auto count
 
 	if (abandon@)
 		mutex@ KeMutex_OwningThread + @ current!
@@ -78,10 +76,9 @@ fn KeMutexRelease { abandon mutex -- ok }
 			return
 		end
 
-		1 lock!
-		1 mutex@ KeMutex_Locked + !
+		0 count!
 	end else
-		mutex@ KeMutex_Locked + @ lock!
+		mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + @ count!
 
 		if (mutex@ KeMutex_OwningThread + @ current@ ~=)
 			// we didn't own it...
@@ -92,16 +89,14 @@ fn KeMutexRelease { abandon mutex -- ok }
 				"KeMutexRelease: thread '%s' didn't own mutex '%s'\n" KeCrash
 			end else
 				ipl@ KeIPLLower
-
 				STATUS_MUTEX_NOT_OWNED ok!
-
 				return
 			end
 		end
 	end
 
 	if (DEBUGCHECKS)
-		if (lock@ ~~)
+		if (count@ 0 s>)
 			// it wasn't locked...
 
 			mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Name + @
@@ -110,9 +105,9 @@ fn KeMutexRelease { abandon mutex -- ok }
 		end
 	end
 
-	1 lock -=
+	1 count +=
 
-	if (lock@ ~~)
+	if (count@ 0 s>)
 		// just unlocked it, remove it from the thread's owned mutex list
 
 		auto ls
@@ -155,24 +150,23 @@ fn KeMutexRelease { abandon mutex -- ok }
 		end
 
 		if (wokenthread@)
-			// we woke up a thread who was waiting. make him the owner of the mutex
+			// we woke up a thread who was waiting. make them the owner of the
+			// mutex
 
 			wokenthread@ // thread
 			mutex@ // mutex
 			KeMutexOwnerSet
 		end else
 			// just unown the mutex
-
 			0 mutex@ KeMutex_OwningThread + !
-			0 mutex@ KeMutex_Locked + !
 		end
 	end else
-		lock@ mutex@ KeMutex_Locked + !
+		count@ mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 	end
 
 	ipl@ KeIPLLower
 end
 
 fn KeMutexIsLocked { mutex -- locked }
-	mutex@ KeMutex_Locked + @ locked!
+	mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + @ 0 s> locked!
 end

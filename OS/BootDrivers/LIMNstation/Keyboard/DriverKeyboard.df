@@ -22,10 +22,15 @@ const KEYBDMID 0x8FC48FC4
 
 const KEYBDCMDREAD 1
 
+const KEYBD_SHIFT 1
+const KEYBD_CTRL  2
+const KEYBD_CAPS  4
+
 struct Keyboard
 	4 ID
 	4 ScanCodeBuffer
 	4 RawBuffer
+	4 States
 	KeDPC_SIZEOF DPC
 endstruct
 
@@ -117,6 +122,8 @@ fn (HALLIMNstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
 	KeDPCInitialize
 
 	id@ keyboard@ Keyboard_ID + !
+
+	0 keyboard@ Keyboard_States + !
 
 	if (CoVideoConsoleRawBuffer@ ~~)
 		// no device specified as video console input buffer, allocate it and
@@ -246,7 +253,7 @@ fn (HALInterruptHandler) DriverKeyboardInterrupt { int -- }
 	auto scan
 
 	while (1)
-		id@ KeyboardRead c! scan!
+		keyboard@ KeyboardRead c! scan!
 
 		if (scan@ -1 ==)
 			break
@@ -292,11 +299,10 @@ fn (HALInterruptHandler) DriverKeyboardInterrupt { int -- }
 	end
 end
 
-var Shift 0
-var Ctrl 0
-var Capslock 0
+fn KeyboardRead { keyboard -- scan c }
+	auto id
+	keyboard@ Keyboard_ID + @ id!
 
-fn KeyboardRead { id -- scan c }
 	auto rs
 	HALCPUInterruptDisable rs!
 
@@ -314,15 +320,19 @@ fn KeyboardRead { id -- scan c }
 	end
 
 	if (scan@ 80 ==)
-		1 Ctrl!
+		KEYBD_CTRL keyboard@ Keyboard_States + |=
 	end elseif (scan@ 82 ==)
-		1 Shift!
+		KEYBD_SHIFT keyboard@ Keyboard_States + |=
 	end elseif (scan@ 32848 ==)
-		0 Ctrl!
+		KEYBD_CTRL ~ keyboard@ Keyboard_States + &=
 	end elseif (scan@ 32850 ==)
-		0 Shift!
+		KEYBD_SHIFT ~ keyboard@ Keyboard_States + &=
 	end elseif (scan@ 32820 ==)
-		Capslock@ ~~ Capslock!
+		if (keyboard@ Keyboard_States + @ KEYBD_CAPS &)
+			KEYBD_CAPS ~ keyboard@ Keyboard_States + &=
+		end else
+			KEYBD_CAPS keyboard@ Keyboard_States + |=
+		end
 	end
 
 	if (scan@ 80 >=)
@@ -341,11 +351,11 @@ fn KeyboardRead { id -- scan c }
 		return
 	end
 
-	if (Shift@)
+	if (keyboard@ Keyboard_States + @ KEYBD_SHIFT &)
 		[scan@]KeyboardLayoutShift@ c!
-	end elseif (Ctrl@)
+	end elseif (keyboard@ Keyboard_States + @ KEYBD_CTRL &)
 		[scan@]KeyboardLayoutCtrl@ c!
-	end elseif (Capslock@ scan@ 26 < &&)
+	end elseif (keyboard@ Keyboard_States + @ KEYBD_CAPS & scan@ 26 < &&)
 		[scan@]KeyboardLayoutShift@ c!
 	end else
 		[scan@]KeyboardLayout@ c!

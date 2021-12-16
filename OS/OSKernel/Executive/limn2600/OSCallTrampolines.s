@@ -33,11 +33,13 @@
 .extern OSRemapView
 .extern OSSetSwappiness
 .extern OSThreadSleep
+.extern OSThreadCreate
+.extern OSThreadTerminate
 .extern OSSetSystemConsole
 
 OSCallCount:
 .global OSCallCount
-	.dl 32
+	.dl 34
 
 OSCallTable:
 .global OSCallTable
@@ -73,7 +75,9 @@ OSCallTable:
 	.dl OSTOSRemapView                                   ;29
 	.dl OSTOSSetSwappiness                               ;30
 	.dl OSTOSThreadSleep                                 ;31
-	.dl OSTOSSetSystemConsole                            ;32
+	.dl OSTOSThreadCreate                                ;32
+	.dl OSTOSThreadTerminate                             ;33
+	.dl OSTOSSetSystemConsole                            ;34
 
 
 OSTOSConsolePutCharacter:
@@ -572,6 +576,45 @@ OSTOSThreadSleep:
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSThreadSleep
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadCreate:
+.global OSTOSThreadCreate
+	subi sp, sp, 12
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
+
+	mov  t0, long [s18 + 20] ;t5
+	mov  long [sp + 4], t0
+
+	mov  t0, long [s18 + 24] ;a0
+	mov  long [sp + 8], t0
+
+	jal  OSThreadCreate
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 12
+	ret
+
+OSTOSThreadTerminate:
+.global OSTOSThreadTerminate
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSThreadTerminate
 
 	mov  long [s18 + 4], a0 ;t1
 

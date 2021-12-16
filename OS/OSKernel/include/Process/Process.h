@@ -8,6 +8,10 @@ struct PsProcess
 
 	4 PID
 
+	4 Terminated
+
+	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
+
 	// memory management
 
 	4 QuotaBlock
@@ -56,6 +60,7 @@ endstruct
 
 struct PsOSDLLInfo
 	4 StartFunction
+	4 ExitFunction
 
 	4 HeadSize
 
@@ -93,6 +98,10 @@ extern PsInitPhase1 { -- }
 
 extern PsThreadUserEntry { context1 context2 -- }
 
+extern PsProcessCreateDeleteLock { processobject -- ok }
+extern PsProcessCreateDeleteLockShared { processobject -- ok }
+extern PsProcessCreateDeleteUnlock { processobject -- }
+
 extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 extern PsThreadCreateObject { context1 context2 startfunc creationflags permissions name processobject -- threadobject ok }
@@ -100,6 +109,11 @@ extern PsThreadCreate { context1 context2 startfunc creationflags permissions na
 
 extern PsProcessObjectDelete { object -- }
 extern PsThreadObjectDelete { object -- }
+
+extern PsThreadExit { -- }
+
+extern PsThreadTerminateObject { status threadobject -- ok }
+extern PsThreadTerminate { status threadhandle -- ok }
 
 extern PsProcessGetOwner { process -- owninguser }
 

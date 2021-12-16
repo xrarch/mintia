@@ -402,11 +402,40 @@ OSThreadSleep:
 
 	ret
 
+OSThreadCreate:
+.global OSThreadCreate
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+	mov  t5, long [sp + 4]
+	mov  a0, long [sp + 8]
+
+	li   t0, 32
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSThreadTerminate:
+.global OSThreadTerminate
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 33
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 32
+	li   t0, 34
 	sys  0
 
 	mov  a0, t1

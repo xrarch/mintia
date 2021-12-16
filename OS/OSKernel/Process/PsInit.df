@@ -39,6 +39,8 @@ public PsProcessListTail
 var PsSystemProcess 0
 public PsSystemProcess
 
+extern PsReaperInit { -- }
+
 buffer PsProcessListMutex KeMutex_SIZEOF
 
 fn PsProcessListLock { -- ok }
@@ -140,6 +142,8 @@ fn PsInitPhase0 { -- }
 
 	HALPlatformKernelPageDirectory@ PsSystemProcess@ KeProcess_PageDirectory + !
 
+	PsReaperInit
+
 	0 // context1
 	0 // context2
 	pointerof ExInitPhase1 // startfunc
@@ -207,16 +211,22 @@ fn PsInitPhase1 { -- }
 	end
 end
 
+buffer PsOSDLLInformation PsOSDLLInfo_SIZEOF
+public PsOSDLLInformation
+
 fn PsThreadUserEntry { context1 context2 -- }
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
+	PsOSDLLInformation PsOSDLLInfo_ExitFunction + @ // exitfunc
+	context2@ // context
 	KeThreadCurrent@ PsThread_UserStackTop + @ // ustack
 	context1@ // entryfunc
 	HALCPUEnterUserMode
-end
 
-buffer PsOSDLLInformation PsOSDLLInfo_SIZEOF
-public PsOSDLLInformation
+	// HALCPUEnterUserMode should not return
+
+	"PsThreadUserEntry\n" KeCrash
+end
 
 var PsOSDLLSectionObject 0
 public PsOSDLLSectionObject
@@ -312,6 +322,17 @@ fn PsOSDLLInit { -- }
 	end
 
 	addr@ info@ PsOSDLLInfo_StartFunction + !
+
+	"DLLThreadExit" // name
+	info@ PsOSDLLInfo_TextVAddr + @ // textbase
+	head@ // head
+	PsOSDLLFindFunction ok! addr!
+
+	if (ok@)
+		"PsOSDLLInit: couldn't find symbol 'DLLThreadExit'\n" KeCrash
+	end
+
+	addr@ info@ PsOSDLLInfo_ExitFunction + !
 
 	head@ MmFree
 

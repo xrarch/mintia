@@ -1,6 +1,8 @@
 #include "<df>/dragonfruit.h"
 
 #include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
 
 #include "<inc>/Kernel.h"
 
@@ -14,18 +16,13 @@
 
 #include "<inc>/Process.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
-
-#include "<inc>/HALCPU.h"
-
-#include "<inc>/HALDebug.h"
+#include "<ll>/OSDLL/OS.h"
 
 fn (ObTypeDeleteFunction) PsProcessObjectDelete { object -- }
 	// the last reference to this process object was removed.
 	// finally free all resources associated with it.
 
 	// destroy PID
-	// XXX should this be done in the context of the process's last thread?
 
 	auto ok
 
@@ -83,8 +80,6 @@ fn (ObTypeDeleteFunction) PsThreadObjectDelete { object -- }
 	// the last reference to this thread object was removed.
 	// finally free all resources associated with it.
 
-	"deleting thread\n" Printf
-
 	if (DEBUGCHECKS)
 		if (object@ KeThread_Enqueued + @)
 			"PsThreadObjectDelete: attempt to delete enqueued thread\n" KeCrash
@@ -98,6 +93,160 @@ fn (ObTypeDeleteFunction) PsThreadObjectDelete { object -- }
 	object@ KeThread_KernelStackBottom + @ MmKernelStackFree
 
 	object@ KeThread_Process + @ ObObjectDereferenceByPointer drop
+end
 
-	object@ KeThreadUninitialize
+var PsReaperThreadListHead 0
+
+buffer PsReaperEvent KeEvent_SIZEOF
+
+fn PsReaperInit { -- }
+	auto ok
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"PsReaperEvent" // event
+	PsReaperEvent // event
+	KeEventInitialize
+
+	0 // context1
+	0 // context2
+	pointerof PsReaperWorker // startfunc
+	0 // creationflags
+	ACCESS_OWNER_ALL // permissions
+	"Reaper" // name
+	PsSystemProcess@ // processobject
+	PsThreadCreateObject ok! drop
+
+	if (ok@)
+		"PsReaperInit: failed to create reaper thread\n" KeCrash
+	end
+end
+
+fn PsReaperWorker { context1 context2 -- }
+	PRIORITY_HIGHREALTIME // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	while (1)
+		auto ok
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		PsReaperEvent // object
+		KeThreadWaitForObject ok!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "PsReaperWorker: failed to wait on reap event (%i)\n" KeCrash
+			end
+		end
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		while (PsReaperThreadListHead@)
+			auto thread
+			PsReaperThreadListHead@ thread!
+			thread@ KeThread_QueueNext + @ PsReaperThreadListHead!
+
+			ipl@ KeIPLLower
+
+			thread@ ObObjectDereferenceByPointer drop
+
+			IPLDPC KeIPLRaise ipl!
+		end
+
+		ipl@ KeIPLLower
+	end
+end
+
+fn PsProcessExit { process -- }
+	// this process has reached the end of its life.
+
+	1 process@ PsProcess_Terminated + !
+
+	if (process@ PsSystemProcess@ ==)
+		"PsProcessExit: system process terminated\n" Printf
+	end
+end
+
+fn PsThreadExit { -- }
+	// this thread has reached the end of its life. usermode will never regain
+	// control.
+
+	auto current
+	KeThreadCurrent@ current!
+
+	auto process
+	current@ KeThread_Process + @ process!
+
+	// ignore kill so nothing bad happens while we're cleaning up
+	current@ KeThreadIgnoreKill drop
+
+	current@ KeThreadRundown
+
+	current@ MmThreadUninitialize drop
+
+	process@ PsProcessCreateDeleteLock drop
+
+	current@ KeThreadUninitialize
+
+	if (process@ KeProcess_ThreadCount + @ ~~)
+		// we were the last thread, process is dead now.
+
+		process@ PsProcessExit
+	end
+
+	process@ PsProcessCreateDeleteUnlock
+
+	auto ipl
+	IPLDPC KeIPLRaise drop
+
+	// add ourselves to the reaper thread list and signal its event.
+
+	PsReaperThreadListHead@ current@ KeThread_QueueNext + !
+	current@ PsReaperThreadListHead!
+
+	0 // priboost
+	PsReaperEvent // event
+	KeEventSignal
+
+	THREADSTATUS_TERMINATED KeThreadYield
+end
+
+fn PsThreadTerminateObject { status threadobject -- ok }
+	0 ok!
+
+	status@ // status
+	threadobject@ // thread
+	KeThreadTerminate
+end
+
+fn PsThreadTerminate { status threadhandle -- ok }
+	auto obj
+	auto access
+
+	PsThreadObjectType@ // type
+	threadhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	status@ // status
+	obj@ // threadobject
+	PsThreadTerminateObject ok!
+
+	obj@ ObObjectDereferenceByPointer drop
 end

@@ -1,4 +1,5 @@
 .extern OSExit
+.extern OSThreadExit
 
 .section text
 
@@ -35,6 +36,10 @@ DLLMainTrampoline:
 	jalr lr, a2, 0
 
 	j    OSExit
+
+DLLThreadExit:
+.global DLLThreadExit
+	j    OSThreadExit
 
 .section data
 

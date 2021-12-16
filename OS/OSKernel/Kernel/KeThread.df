@@ -85,6 +85,9 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_WaitCount + !
 
 	0 thread@ KeThread_IgnoreKill + !
+	0 thread@ KeThread_KilledStatus + !
+
+	0 thread@ KeThread_Killed + !
 
 	if (process@ KeProcess_SignalThread + @ ~~)
 		thread@ process@ KeProcess_SignalThread + !
@@ -138,6 +141,14 @@ fn KeThreadUninitialize { thread -- }
 		n@ process@ KeProcess_ThreadListHead + !
 	end
 
+	if (DEBUGCHECKS)
+		if (process@ KeProcess_ThreadCount + @ ~~)
+			"KeThreadUninitialize: thread count underflow\n" KeCrash
+		end
+	end
+
+	1 process@ KeProcess_ThreadCount + -=
+
 	rs@ HALCPUInterruptRestore
 end
 
@@ -169,11 +180,87 @@ fn KeThreadAcceptKill { thread -- oldcount }
 	rs@ HALCPUInterruptRestore
 end
 
+fn KeThreadTerminate { status thread -- }
+	1 thread@ KeThread_Killed + !
+	status@ thread@ KeThread_KilledStatus + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	// determine whether we need to wake the thread up
+
+	if (thread@ KeThread_IgnoreKill + @)
+		// no
+		ipl@ KeIPLLower
+		return
+	end
+
+	if (thread@ KeThread_Status + @ THREADSTATUS_WAITINGALERTABLE ==)
+		// yes, wake it up
+
+		STATUS_KILLED // waitstatus
+		0 // priboost
+		thread@ // thread
+		KeThreadWakeup drop
+	end elseif (thread@ KeThread_Status + @ THREADSTATUS_WAITINGUNALERTABLE ==)
+		if (thread@ KeThread_WaitMode + @ USERMODE ==)
+			// yes, wake it up
+
+			STATUS_KILLED // waitstatus
+			0 // priboost
+			thread@ // thread
+			KeThreadWakeup drop
+		end
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeThreadRundown { thread -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto mutex
+	thread@ KeThread_MutexListHead + @ mutex!
+
+	auto next
+
+	while (mutex@)
+		mutex@ KeMutex_Next + @ next!
+
+		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+			"KeThreadRundown: thread held a kernelmode mutex at rundown time\n" KeCrash
+		end
+
+		1 // abandon
+		mutex@ // mutex
+		KeMutexRelease drop
+
+		next@ mutex!
+	end
+
+	ipl@ KeIPLLower
+end
+
 fn KeThreadIsKilled { mode alertable thread -- ok }
 	// gives the status code that should be returned for the thread's signal
 	// state. this only determines what should interrupt a syscall and be
 	// passed to OSDLL; actual signal dispatch and certain actions like core
 	// dumping are to be performed in usermode OSDLL code.
+
+	if (thread@ KeThread_IgnoreKill + @)
+		// all signals are being hard-ignored by the system
+		0 ok!
+
+		return
+	end
+
+	if (thread@ KeThread_Killed + @)
+		// thread was explicitly terminated
+		STATUS_KILLED ok!
+
+		return
+	end
 
 	auto process
 	thread@ KeThread_Process + @ process!
@@ -183,13 +270,6 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 
 	if (sig@ ~~)
 		// no signals, return now
-		0 ok!
-
-		return
-	end
-
-	if (thread@ KeThread_IgnoreKill + @)
-		// all signals are being hard-ignored by the system
 		0 ok!
 
 		return
@@ -570,10 +650,10 @@ fn KeThreadPrioritySet { priority thread -- }
 	end
 
 	if (priority@ pri@ >)
-		// the priority has been raised. if the thread is running or waiting, do nothing.
-		// however, if the thread is in a ready queue, it must be requeued.
-		// if this action raises its priority above that of the current thread, ask the
-		// scheduler to run.
+		// the priority has been raised. if the thread is running or waiting,
+		// do nothing. however, if the thread is in a ready queue, it must be
+		// requeued. if this action raises its priority above that of the
+		// current thread, ask the scheduler to run.
 
 		if (thread@ KeThread_Status + @ THREADSTATUS_READY ==)
 			thread@ KeThreadDequeue
@@ -595,9 +675,10 @@ fn KeThreadPrioritySet { priority thread -- }
 			priority@ thread@ KeThread_Priority + !
 		end
 	end else
-		// the priority has been lowered. if the thread is in a ready queue, it must be requeued.
-		// if the thread is currently running, see if there is now a higher priority thread that can run.
-		// if so, ask the scheduler to run.
+		// the priority has been lowered. if the thread is in a ready queue,
+		// it must be requeued. if the thread is currently running, see if
+		// there is now a higher priority thread that can run. if so, ask the
+		// scheduler to run.
 
 		auto status
 		thread@ KeThread_Status + @ status!

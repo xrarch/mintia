@@ -50,5 +50,8 @@ extern OSSetSwappiness { swappiness -- ok }
 // Ps
 extern OSThreadSleep { ms -- ok }
 
+extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
+extern OSThreadTerminate { status threadhandle -- ok }
+
 // Co
 extern OSSetSystemConsole { filehandle -- ok }

@@ -20,6 +20,25 @@
 
 #include "<inc>/HALDebug.h"
 
+fn PsProcessCreateDeleteLock { processobject -- ok }
+	1 // alertable
+	0 // nowait
+	processobject@ PsProcess_ThreadCreateDeleteRwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
+end
+
+fn PsProcessCreateDeleteLockShared { processobject -- ok }
+	1 // alertable
+	0 // nowait
+	0 // canstarve
+	processobject@ PsProcess_ThreadCreateDeleteRwLock + // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn PsProcessCreateDeleteUnlock { processobject -- }
+	processobject@ PsProcess_ThreadCreateDeleteRwLock + ExRwLockRelease
+end
+
 fn PsProcessLookupPID { pid -- processobject ok }
 	PsProcessTable@ ExHandleTableLockShared ok!
 
@@ -165,6 +184,12 @@ fn PsProcessCreateObject { sectionobject creationflags owninguser parentprocess 
 
 	pid@ processobject@ PsProcess_PID + !
 
+	0 processobject@ PsProcess_Terminated + !
+
+	"PsProcessCreateDeleteRwLock"
+	processobject@ PsProcess_ThreadCreateDeleteRwLock + // rwlock
+	ExRwLockInitialize
+
 	name@ // name
 	pid@ // asid
 	processobject@ // process
@@ -293,6 +318,20 @@ fn PsProcessCreate { sectionhandle creationflags permissions name -- processhand
 end
 
 fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions name processobject -- threadobject ok }
+	processobject@ PsProcessCreateDeleteLockShared ok!
+
+	if (ok@)
+		return
+	end
+
+	if (processobject@ PsProcess_Terminated + @)
+		processobject@ PsProcessCreateDeleteUnlock
+
+		STATUS_PROCESS_IS_TERMINATED ok!
+
+		return
+	end
+
 	name@ // name
 	0 // flags
 	permissions@ // permissions
@@ -303,6 +342,8 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 	ObObjectCreate ok! threadobject!
 
 	if (ok@)
+		processobject@ PsProcessCreateDeleteUnlock
+
 		return
 	end
 
@@ -310,6 +351,8 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 	MmKernelStackAlloc ok! kstack!
 
 	if (ok@)
+		processobject@ PsProcessCreateDeleteUnlock
+
 		threadobject@ ObObjectDeallocate
 
 		return
@@ -332,6 +375,8 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 
 			threadobject@ KeThreadUninitialize
 
+			processobject@ PsProcessCreateDeleteUnlock
+
 			threadobject@ ObObjectDeallocate
 
 			return
@@ -348,6 +393,8 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 	// TODO be able to create suspended
 
 	QUEUEBACK threadobject@ KeThreadReady
+
+	processobject@ PsProcessCreateDeleteUnlock
 end
 
 fn PsThreadCreate { context1 context2 startfunc creationflags permissions name processhandle -- threadhandle ok }
@@ -398,6 +445,8 @@ fn PsThreadCreate { context1 context2 startfunc creationflags permissions name p
 
 		return
 	end
+
+	processobject@ ObObjectDereferenceByPointer drop
 end
 
 fn PsProcessGetOwner { process -- owninguser }

@@ -46,5 +46,6 @@ const STATUS_RING_EMPTY            -44
 const STATUS_WS_QUOTA_EXCEEDED     -45
 const STATUS_MUTEX_NOT_OWNED       -46
 const STATUS_CONSOLE_HUNG_UP       -47
+const STATUS_PROCESS_IS_TERMINATED -48
 
 extern OSStatusGetName { status -- name }

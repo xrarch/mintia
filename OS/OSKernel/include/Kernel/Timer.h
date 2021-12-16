@@ -15,6 +15,6 @@ struct KeTimer
 	4 Reserved2
 endstruct
 
-extern KeTimerInitialize { name function timer -- ok }
-extern KeTimerDequeue { timer -- ok }
-extern KeTimerEnqueue { context1 context2 interval timer -- ok }
+extern KeTimerInitialize { name function timer -- }
+extern KeTimerDequeue { timer -- }
+extern KeTimerEnqueue { context1 context2 interval timer -- }

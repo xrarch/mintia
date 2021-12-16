@@ -67,7 +67,7 @@ extern IOFileControlBlockSetChangeTime { time fcb -- }
 
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
-extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- ok }
+extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- }
 extern IOFileControlBlockReference { fcb -- oldcount }

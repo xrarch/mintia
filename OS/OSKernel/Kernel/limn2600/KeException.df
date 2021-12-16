@@ -5,6 +5,7 @@
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALMap.h"
 #include "<inc>/HALInterrupt.h"
+#include "<inc>/HALConsole.h"
 
 #include "<inc>/HALDebug.h"
 
@@ -31,6 +32,8 @@ externptr KeThreadCurrentStackTop
 
 externptr OSCallCount
 externptr OSCallTable
+
+externptr KeIPLCurrent
 
 asm "
 
@@ -210,6 +213,12 @@ KeCPUInit:
 	
 	ret
 
+KeIPLCurrentGet:
+.global KeIPLCurrentGet
+	la   a0, KeIPLCurrent
+	mov  a0, long [a0]
+	ret
+
 "
 
 extern KeLimn2600Syscall { tf -- }
@@ -236,35 +245,16 @@ table ExceptionNames
 endtable
 
 fn KeLimn2600Exception { badaddr ecause tf -- }
-	if (ecause@ ECAUSEINTERRUPT ==)
-		pointerof KeInterrupt // keint
-		HALPlatformInterrupt
-
-		return
-	end
-
-	auto excname
-
-	if (ecause@ EXCNAMESMAX >)
-		"UNKNOWN" excname!
-	end else
-		[ecause@]ExceptionNames@ excname!
-	end
-
-	if (ecause@ ECAUSENMI ==)
-		if (HALDebug)
-			return
-		end
-
-		return
-	end
-
 	auto handled
 	0 handled!
 
 	// TODO generate signals on various actual faults
 	
-	if (ecause@ ECAUSESYS ==)
+	if (ecause@ ECAUSEINTERRUPT ==)
+		pointerof KeInterrupt // keint
+		HALPlatformInterrupt
+		1 handled!
+	end elseif (ecause@ ECAUSESYS ==)
 		tf@ KeLimn2600Syscall
 		1 handled!
 	end elseif (ecause@ ECAUSEPAGEFAULT ==)
@@ -284,8 +274,30 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 	end
 
 	if (handled@ ~~)
+		auto excname
+
+		if (ecause@ EXCNAMESMAX >)
+			"UNKNOWN" excname!
+		end else
+			[ecause@]ExceptionNames@ excname!
+		end
+
+		if (ecause@ ECAUSENMI ==)
+			if (HALDebug)
+				return
+			end
+
+			return
+		end
+
 		ecause@ excname@ badaddr@ tf@ Limn2500Context_epc + @ tf@ Limn2500Context_ers + @
 		"Fault: ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" KeCrash
+	end
+
+	if (tf@ Limn2500Context_ers + @ RS_USER &)
+		// we interrupted usermode code
+
+		// TODO dispatch signals, thread termination
 	end
 
 	// while (1) end

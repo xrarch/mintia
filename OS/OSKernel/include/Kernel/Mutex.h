@@ -12,7 +12,7 @@ struct KeMutex
 	4 Reserved2
 endstruct
 
-extern KeMutexInitialize { name mode mutex -- ok }
+extern KeMutexInitialize { name mode mutex -- }
 extern KeMutexRelease { abandon mutex -- ok }
-extern KeMutexOwnerSet { thread mutex -- ok }
+extern KeMutexOwnerSet { thread mutex -- }
 extern KeMutexIsLocked { mutex -- locked }

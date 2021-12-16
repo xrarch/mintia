@@ -6,8 +6,8 @@ struct KeEvent
 	4 Reserved2
 endstruct
 
-extern KeEventInitialize { signaled type name event -- ok }
+extern KeEventInitialize { signaled type name event -- }
 extern KeEventReset { event -- signaled }
-extern KeEventSignal { priboost event -- ok }
-extern KeEventPulse { priboost event -- ok }
-extern KeEventSignalGetWaiter { priboost event -- waiter ok }
+extern KeEventSignal { priboost event -- }
+extern KeEventPulse { priboost event -- }
+extern KeEventSignalGetWaiter { priboost event -- waiter }

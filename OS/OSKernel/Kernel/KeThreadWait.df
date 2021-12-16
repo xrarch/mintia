@@ -10,9 +10,7 @@
 
 // initializes a dispatch object's header
 
-fn KeDispatchInitialize { name type dobject -- ok }
-	0 ok!
-
+fn KeDispatchInitialize { name type dobject -- }
 	0 dobject@ KeDispatchHeader_Signaled + !
 
 	type@ dobject@ KeDispatchHeader_Type + !
@@ -29,9 +27,7 @@ end
 
 // initializes a WaitBlock
 
-fn KeDispatchWaitBlockInitialize { thread waitblock -- ok }
-	0 ok!
-
+fn KeDispatchWaitBlockInitialize { thread waitblock -- }
 	0 waitblock@ KeDispatchWaitBlock_Prev + !
 	0 waitblock@ KeDispatchWaitBlock_Next + !
 
@@ -43,9 +39,7 @@ fn KeDispatchWaitBlockInitialize { thread waitblock -- ok }
 	0 waitblock@ KeDispatchWaitBlock_Object + !
 end
 
-fn KeDispatchWaitBlockDequeue { waitstatus waitblock -- ok }
-	0 ok!
-
+fn KeDispatchWaitBlockDequeue { waitstatus waitblock -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KeDispatchWaitBlockDequeue: ipl != IPLDPC\n" KeCrash
@@ -87,9 +81,7 @@ end
 
 // adds a WaitBlock to the tail of a dispatch object's WaitBlockList
 
-fn KeDispatchWaitBlockEnqueue { waittype waitblock object -- ok }
-	0 ok!
-
+fn KeDispatchWaitBlockEnqueue { waittype waitblock object -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KeDispatchWaitBlockInsert: ipl != IPLDPC\n" KeCrash
@@ -119,18 +111,14 @@ end
 
 // satisfies a WaitBlock
 
-fn KeDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- ok }
+fn KeDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KeDispatchWaitBlockSatisfy: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
-	waitstatus@ waitblock@ KeDispatchWaitBlockDequeue ok!
-
-	if (ok@)
-		return
-	end
+	waitstatus@ waitblock@ KeDispatchWaitBlockDequeue
 
 	auto thread
 	waitblock@ KeDispatchWaitBlock_Thread + @ thread!
@@ -152,9 +140,7 @@ end
 // satisfies all waiters on a dispatch object
 // this SIGNALS the object
 
-fn KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
-	0 ok!
-
+fn KeDispatchSatisfyAll { waitstatus priboost object -- count }
 	0 count!
 
 	auto ipl
@@ -171,13 +157,7 @@ fn KeDispatchSatisfyAll { waitstatus priboost object -- count ok }
 		h@ wb!
 		h@ KeDispatchWaitBlock_Next + @ h!
 
-		waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy ok!
-		
-		if (DEBUGCHECKS)
-			if (ok@)
-				"KeDispatchSatisfyAll: couldn't satisfy WaitBlock\n" KeCrash
-			end
-		end
+		waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy
 
 		1 count +=
 	end
@@ -192,9 +172,7 @@ end
 // that would require keeping the waitblock list insertion sorted to do
 // efficiently which I don't feel like working on right now.
 
-fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok }
-	0 ok!
-
+fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -203,13 +181,7 @@ fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread ok 
 
 	if (h@)
 		h@ KeDispatchWaitBlock_Thread + @ wokenthread!
-		waitstatus@ priboost@ h@ KeDispatchWaitBlockSatisfy ok!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"KeDispatchSatisfyFirst: couldn't satisfy WaitBlock\n" KeCrash
-			end
-		end
+		waitstatus@ priboost@ h@ KeDispatchWaitBlockSatisfy
 	end elseif (signal@)
 		0 wokenthread!
 		1 object@ KeDispatchHeader_Signaled + !
@@ -251,194 +223,153 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 	KeThreadIsKilled ok!
 
 	if (ok@)
-		// thread was killed or received a signal that cannot be ignored
 		waitipl@ KeIPLLower
 
 		return
 	end
 
-	// XXX timeout will reset if interrupted by an APC
+	auto i
+	0 i!
 
-	// XXX mutexes don't lock properly if you use THREADWAITALL
+	auto waitblock
+	current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
 
-	while (1)
-		auto i
-		0 i!
+	auto satisfied
 
-		auto waitblock
-		current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
+	if (waittype@ OSWAITANY ==)
+		0 satisfied!
+	end else
+		1 satisfied!
+	end
 
-		auto satisfied
+	objectcount@ current@ KeThread_WaitCount + !
+
+	while (i@ objectcount@ <)
+		auto object
+		objecttable@ i@ 2 << + @ object!
 
 		if (waittype@ OSWAITANY ==)
-			0 satisfied!
-		end else
-			1 satisfied!
-		end
+			if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+				if (object@ KeMutex_OwningThread + @ current@ ==)
+					if (object@ KeMutex_Locked + @ 0xFFFFFFFF ==)
+						if (object@ KeMutex_Mode + @ KERNELMODE ==)
+							"KeThreadWaitForMultipleObjects: mutex overflow\n" KeCrash
+						end else
+							waitipl@ KeIPLLower
 
-		objectcount@ current@ KeThread_WaitCount + !
+							STATUS_OVERFLOW ok!
 
-		while (i@ objectcount@ <)
-			auto object
-			objecttable@ i@ 2 << + @ object!
-
-			if (waittype@ OSWAITANY ==)
-				if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
-					if (object@ KeMutex_OwningThread + @ current@ ==)
-						if (object@ KeMutex_Locked + @ 0xFFFFFFFF ==)
-							if (object@ KeMutex_Mode + @ KERNELMODE ==)
-								"KeThreadWaitForMultipleObjects: mutex overflow\n" KeCrash
-							end else
-								waitipl@ KeIPLLower
-
-								STATUS_OVERFLOW ok!
-
-								return
-							end
+							return
 						end
-
-						1 object@ KeMutex_Locked + +=
-
-						i@ ok!
-						1 satisfied!
-						break
-					end elseif (object@ KeDispatchHeader_Signaled + @)
-						current@ object@ KeMutexOwnerSet ok!
-
-						if (DEBUGCHECKS)
-							if (ok@)
-								"KeThreadWaitForMultipleObjects: couldn't KeMutexOwnerSet\n" KeCrash
-							end
-						end
-
-						i@ ok!
-						1 satisfied!
-						break
 					end
-				end else
-					if (object@ KeDispatchHeader_Signaled + @)
-						if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
-							0 object@ KeDispatchHeader_Signaled + !
-						end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
-							if (DEBUGCHECKS)
-								if (object@ KeSemaphore_Count + @ 0 ==)
-									"KeThreadWaitForMultipleObjects: semaphore count==0\n" KeCrash
-								end
-							end
 
-							1 object@ KeSemaphore_Count + -=
+					1 object@ KeMutex_Locked + +=
 
-							if (object@ KeSemaphore_Count + @ 0 ==)
-								0 object@ KeDispatchHeader_Signaled + !
-							end
-						end
+					i@ ok!
+					1 satisfied!
+					break
+				end elseif (object@ KeDispatchHeader_Signaled + @)
+					current@ // thread
+					object@ // mutex
+					KeMutexOwnerSet
 
-						i@ ok!
-						1 satisfied!
-						break
-					end
+					i@ ok!
+					1 satisfied!
+					break
 				end
 			end else
-				if (object@ KeDispatchHeader_Signaled + @ ~~)
-					if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
-						if (object@ KeMutex_OwningThread + @ current@ ~=)
-							0 satisfied!
+				if (object@ KeDispatchHeader_Signaled + @)
+					if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
+						0 object@ KeDispatchHeader_Signaled + !
+					end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
+						if (DEBUGCHECKS)
+							if (object@ KeSemaphore_Count + @ 0 ==)
+								"KeThreadWaitForMultipleObjects: semaphore count==0\n" KeCrash
+							end
 						end
-					end else
+
+						1 object@ KeSemaphore_Count + -=
+
+						if (object@ KeSemaphore_Count + @ 0 ==)
+							0 object@ KeDispatchHeader_Signaled + !
+						end
+					end
+
+					i@ ok!
+					1 satisfied!
+					break
+				end
+			end
+		end else
+			if (object@ KeDispatchHeader_Signaled + @ ~~)
+				if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+					if (object@ KeMutex_OwningThread + @ current@ ~=)
 						0 satisfied!
 					end
-				end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
-					0 object@ KeDispatchHeader_Signaled + !
+				end else
+					0 satisfied!
 				end
-			end
-
-			if (timeout@)
-				waittype@ waitblock@ object@ KeDispatchWaitBlockEnqueue ok!
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						"KeThreadWaitForMultipleObjects: couldn't enqueue WaitBlock\n" KeCrash
-					end
-				end
-			end
-
-			KeDispatchWaitBlock_SIZEOF waitblock +=
-			1 i +=
-		end
-
-		if (timeout@ ~~)
-			// no timeout. just return whether the wait is satisfied or not
-
-			satisfied@ ok!
-
-			break
-		end elseif (satisfied@)
-			// the wait is already satisfied. dequeue any wait blocks we just enqueued
-			// and then return.
-
-			current@ KeThreadWaitBlocksDequeue ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"KeThreadWaitForMultipleObjects: couldn't dequeue all WaitBlocks\n" KeCrash
-				end
-			end
-
-			break
-		end
-
-		if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
-			// there's a timeout and its not infinite, set up a timer waitblock
-
-			"WaitTimeout" 0 current@ KeThread_Timer + KeTimerInitialize ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"KeThreadWaitForMultipleObjects: couldn't initialize timeout timer\n" KeCrash
-				end
-			end
-
-			current@ KeThread_TimeoutWaitBlock + waitblock!
-
-			OSWAITANY waitblock@ current@ KeThread_Timer + KeDispatchWaitBlockEnqueue ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"KeThreadWaitForMultipleObjects: couldn't initialize timeout WaitBlock\n" KeCrash
-				end
-			end
-
-			0 0 timeout@ current@ KeThread_Timer + KeTimerEnqueue ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"KeThreadWaitForMultipleObjects: couldn't enqueue timeout timer\n" KeCrash
-				end
+			end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
+				0 object@ KeDispatchHeader_Signaled + !
 			end
 		end
 
-		waitipl@ waitmode@ alertable@ KeThreadWait ok!
-
-		// if we got woken up to deliver an APC, it will be executed here when we
-		// lower the IPL.
-		// the object may become signaled while this occurs, hence the check above.
-
-		if (ok@ STATUS_KERNEL_APC ==)
-			if (DEBUGCHECKS)
-				if (waitipl@ IPLAPC ==)
-					"KeThreadWaitForMultipleObjects: awoken for APC while waiting at IPLAPC\n" KeCrash
-				end
-			end
-
-			IPLLOW KeIPLLower
-
-			// we were awoken to deliver a kernel APC. raise back to IPLDPC and retry.
-
-			IPLDPC KeIPLRaise drop
-		end else
-			break
+		if (timeout@)
+			waittype@ // waittype
+			waitblock@ // waitblock
+			object@ // object
+			KeDispatchWaitBlockEnqueue
 		end
+
+		KeDispatchWaitBlock_SIZEOF waitblock +=
+		1 i +=
 	end
+
+	if (timeout@ ~~)
+		// no timeout. just return even if the wait wasn't satisfied
+
+		satisfied@ ok!
+
+		waitipl@ KeIPLLower
+
+		return
+	end elseif (satisfied@)
+		// the wait is already satisfied. dequeue any wait blocks we just enqueued
+		// and then return.
+
+		current@ KeThreadWaitBlocksDequeue
+
+		waitipl@ KeIPLLower
+
+		return
+	end
+
+	if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
+		// there's a timeout and its not infinite, set up a timer waitblock
+
+		"WaitTimeout" // name
+		0 // function
+		current@ KeThread_Timer + // timer
+		KeTimerInitialize
+
+		current@ KeThread_TimeoutWaitBlock + waitblock!
+
+		OSWAITANY // waittype
+		waitblock@ // waitblock
+		current@ KeThread_Timer + // object
+		KeDispatchWaitBlockEnqueue
+
+		0 // context1
+		0 // context2
+		timeout@ // interval
+		current@ KeThread_Timer + // timer
+		KeTimerEnqueue
+	end
+
+	waitipl@ // waitipl
+	waitmode@ // waitmode
+	alertable@ // alertable
+	KeThreadWait ok!
 
 	waitipl@ KeIPLLower
 end
@@ -465,10 +396,10 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 	thread@ KeThread_Status + @ status!
 
 	if (status@ THREADSTATUS_TERMINATED ==)
-		// XXX are there legitimate, normal situations where you might try to wake up a dead thread
-		// that has not yet been cleaned up?
+		// XXX are there legitimate, normal situations where you might try to
+		// wake up a dead thread that has not yet been cleaned up?
 
-		"KeThreadWakeup: thread is already dead\n" KeCrash
+		"KeThreadWakeup: thread wa mou shindeiru\n" KeCrash
 	end
 
 	if (status@ THREADSTATUS_WAITINGALERTABLE ~= status@ THREADSTATUS_WAITINGUNALERTABLE ~= &&)
@@ -477,22 +408,10 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 		return
 	end
 
-	thread@ KeThreadWaitBlocksDequeue woken!
-
-	if (DEBUGCHECKS)
-		if (woken@)
-			"KeThreadWakeup: couldn't dequeue all WaitBlocks\n" KeCrash
-		end
-	end
+	thread@ KeThreadWaitBlocksDequeue
 
 	if (thread@ KeThread_Timer + KeTimer_Enqueued + @)
-		thread@ KeThread_Timer + KeTimerDequeue woken!
-
-		if (DEBUGCHECKS)
-			if (woken@)
-				"KeThreadWakeup: couldn't dequeue thread timer\n" KeCrash
-			end
-		end
+		thread@ KeThread_Timer + KeTimerDequeue
 	end
 
 	priboost@ thread@ KeThreadPriorityBoost
@@ -502,14 +421,12 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 	1 woken!
 end
 
-fn KeThreadWaitBlocksDequeue { thread -- ok }
+fn KeThreadWaitBlocksDequeue { thread -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KeThreadWaitBlocksDequeue: ipl != IPLDPC\n" KeCrash
 		end
 	end
-
-	0 ok!
 
 	auto wb
 	thread@ KeThread_WaitBlocks + wb!
@@ -519,13 +436,7 @@ fn KeThreadWaitBlocksDequeue { thread -- ok }
 
 	while (i@ THREADWAITBLOCKS <)
 		if (wb@ KeDispatchWaitBlock_Object + @)
-			0 wb@ KeDispatchWaitBlockDequeue ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"KeThreadWaitBlocksDequeue: couldn't dequeue WaitBlock\n" KeCrash
-				end
-			end
+			0 wb@ KeDispatchWaitBlockDequeue
 		end
 
 		1 i +=
@@ -535,13 +446,7 @@ fn KeThreadWaitBlocksDequeue { thread -- ok }
 	thread@ KeThread_TimeoutWaitBlock + wb!
 
 	if (wb@ KeDispatchWaitBlock_Object + @)
-		0 wb@ KeDispatchWaitBlockDequeue ok!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"KeThreadWaitBlocksDequeue: couldn't dequeue timeout WaitBlock\n" KeCrash
-			end
-		end
+		0 wb@ KeDispatchWaitBlockDequeue
 	end
 end
 
@@ -584,21 +489,16 @@ fn KeThreadSleep { ms waitmode alertable -- ok }
 	auto current
 	KeThreadCurrent@ current!
 
-	"KeThreadSleep" 0 current@ KeThread_Timer + KeTimerInitialize ok!
+	"KeThreadSleep" // name
+	0 // function
+	current@ KeThread_Timer + // timer
+	KeTimerInitialize
 
-	if (DEBUGCHECKS)
-		if (ok@)
-			"KeThreadSleep: couldn't initialize timer\n" KeCrash
-		end
-	end
-
-	0 0 ms@ current@ KeThread_Timer + KeTimerEnqueue ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			"KeThreadSleep: couldn't enqueue timer\n" KeCrash
-		end
-	end
+	0 // context1
+	0 // context2
+	ms@ // interval
+	current@ KeThread_Timer + // timer
+	KeTimerEnqueue
 
 	waitmode@ // waitmode
 	alertable@ // alertable

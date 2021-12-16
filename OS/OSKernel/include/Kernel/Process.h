@@ -113,13 +113,13 @@ extern KeSafeStoreByte { byte dest -- ok }
 extern KeSafeGetByte { src -- byte ok }
 
 extern KeProcessCurrent { -- current }
-extern KeProcessInitialize { name asid process -- ok }
+extern KeProcessInitialize { name asid process -- }
 extern KeProcessUninitialize { process -- }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess
 
-extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- ok }
+extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- }
 extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }

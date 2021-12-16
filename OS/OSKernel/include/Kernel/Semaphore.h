@@ -7,5 +7,5 @@ struct KeSemaphore
 	4 Reserved2
 endstruct
 
-extern KeSemaphoreInitialize { count name semaphore -- ok }
+extern KeSemaphoreInitialize { count name semaphore -- }
 extern KeSemaphoreRelease { adjustment semaphore -- ok }

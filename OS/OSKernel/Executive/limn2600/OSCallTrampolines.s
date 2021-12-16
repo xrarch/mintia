@@ -35,11 +35,14 @@
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
+.extern OSThreadResume
+.extern OSThreadReadStatus
+.extern OSProcessReadStatus
 .extern OSSetSystemConsole
 
 OSCallCount:
 .global OSCallCount
-	.dl 34
+	.dl 37
 
 OSCallTable:
 .global OSCallTable
@@ -77,7 +80,10 @@ OSCallTable:
 	.dl OSTOSThreadSleep                                 ;31
 	.dl OSTOSThreadCreate                                ;32
 	.dl OSTOSThreadTerminate                             ;33
-	.dl OSTOSSetSystemConsole                            ;34
+	.dl OSTOSThreadResume                                ;34
+	.dl OSTOSThreadReadStatus                            ;35
+	.dl OSTOSProcessReadStatus                           ;36
+	.dl OSTOSSetSystemConsole                            ;37
 
 
 OSTOSConsolePutCharacter:
@@ -617,6 +623,50 @@ OSTOSThreadTerminate:
 	jal  OSThreadTerminate
 
 	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadResume:
+.global OSTOSThreadResume
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSThreadResume
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadReadStatus:
+.global OSTOSThreadReadStatus
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSThreadReadStatus
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessReadStatus:
+.global OSTOSProcessReadStatus
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSProcessReadStatus
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

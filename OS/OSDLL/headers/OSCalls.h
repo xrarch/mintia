@@ -52,6 +52,10 @@ extern OSThreadSleep { ms -- ok }
 
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }
+extern OSThreadResume { threadhandle -- ok }
+extern OSThreadReadStatus { threadhandle -- status ok }
+
+extern OSProcessReadStatus { processhandle -- status ok }
 
 // Co
 extern OSSetSystemConsole { filehandle -- ok }

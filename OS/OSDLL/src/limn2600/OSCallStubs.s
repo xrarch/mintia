@@ -431,11 +431,46 @@ OSThreadTerminate:
 
 	ret
 
+OSThreadResume:
+.global OSThreadResume
+	mov  t1, a0
+
+	li   t0, 34
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSThreadReadStatus:
+.global OSThreadReadStatus
+	mov  t1, a0
+
+	li   t0, 35
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSProcessReadStatus:
+.global OSProcessReadStatus
+	mov  t1, a0
+
+	li   t0, 36
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
 OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 34
+	li   t0, 37
 	sys  0
 
 	mov  a0, t1

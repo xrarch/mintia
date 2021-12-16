@@ -20,52 +20,6 @@
 
 #include "<inc>/HALDebug.h"
 
-fn PsProcessCreateDeleteLock { processobject -- ok }
-	1 // alertable
-	0 // nowait
-	processobject@ PsProcess_ThreadCreateDeleteRwLock + // rwlock
-	ExRwLockAcquireExclusive ok!
-end
-
-fn PsProcessCreateDeleteLockShared { processobject -- ok }
-	1 // alertable
-	0 // nowait
-	0 // canstarve
-	processobject@ PsProcess_ThreadCreateDeleteRwLock + // rwlock
-	ExRwLockAcquireShared ok!
-end
-
-fn PsProcessCreateDeleteUnlock { processobject -- }
-	processobject@ PsProcess_ThreadCreateDeleteRwLock + ExRwLockRelease
-end
-
-fn PsProcessLookupPID { pid -- processobject ok }
-	PsProcessTable@ ExHandleTableLockShared ok!
-
-	if (ok@)
-		return
-	end
-
-	auto entryptr
-
-	pid@ // handle
-	PsProcessTable@ // handletable
-	1 // locked
-	ExHandleLookup ok! entryptr!
-
-	if (ok@)
-		PsProcessTable@ ExHandleTableUnlock
-
-		return
-	end
-
-	entryptr@@ processobject!
-
-	processobject@ ObObjectReferenceByPointer drop
-
-	PsProcessTable@ ExHandleTableUnlock
-end
-
 fn PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
 	auto initial
 
@@ -185,10 +139,17 @@ fn PsProcessCreateObject { sectionobject creationflags owninguser parentprocess 
 	pid@ processobject@ PsProcess_PID + !
 
 	0 processobject@ PsProcess_Terminated + !
+	0 processobject@ PsProcess_KilledStatus + !
 
 	"PsProcessCreateDeleteRwLock"
 	processobject@ PsProcess_ThreadCreateDeleteRwLock + // rwlock
 	ExRwLockInitialize
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"PsProcessTerminationEvent" // name
+	processobject@ PsProcess_TerminationEvent +
+	KeEventInitialize
 
 	name@ // name
 	pid@ // asid
@@ -383,6 +344,12 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 		end
 	end
 
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"PsThreadTerminationEvent" // name
+	threadobject@ PsThread_TerminationEvent +
+	KeEventInitialize
+
 	// bias reference count: this gets decremented when the thread is reaped.
 	// note that the associated process object is also left referenced.
 	// the process is dereferenced when the thread object is deleted.
@@ -390,9 +357,12 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 	processobject@ ObObjectReferenceByPointer drop
 	threadobject@ ObObjectReferenceByPointer drop
 
-	// TODO be able to create suspended
-
-	QUEUEBACK threadobject@ KeThreadReady
+	if (creationflags@ OSTHREAD_SUSPENDED &)
+		1 threadobject@ PsThread_Suspended + !
+	end else
+		0 threadobject@ PsThread_Suspended + !
+		QUEUEBACK threadobject@ KeThreadReady
+	end
 
 	processobject@ PsProcessCreateDeleteUnlock
 end

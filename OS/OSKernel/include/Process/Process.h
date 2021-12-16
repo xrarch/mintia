@@ -9,6 +9,7 @@ struct PsProcess
 	4 PID
 
 	4 Terminated
+	4 KilledStatus
 
 	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
 
@@ -23,6 +24,8 @@ struct PsProcess
 	// object manager
 
 	4 HandleTable
+
+	KeEvent_SIZEOF TerminationEvent
 
 	// virtual memory information
 
@@ -56,6 +59,10 @@ struct PsThread
 
 	4 UserStackBottom
 	4 UserStackTop
+
+	4 Suspended
+
+	KeEvent_SIZEOF TerminationEvent
 endstruct
 
 struct PsOSDLLInfo
@@ -97,6 +104,15 @@ extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
 
 extern PsThreadUserEntry { context1 context2 -- }
+
+extern PsThreadReadStatusObject { threadobject -- status ok }
+extern PsThreadReadStatus { threadhandle -- status ok }
+
+extern PsThreadResumeObject { threadobject -- }
+extern PsThreadResume { threadhandle -- ok }
+
+extern PsProcessReadStatusObject { processobject -- status ok }
+extern PsProcessReadStatus { processhandle -- status ok }
 
 extern PsProcessCreateDeleteLock { processobject -- ok }
 extern PsProcessCreateDeleteLockShared { processobject -- ok }

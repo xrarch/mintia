@@ -8,6 +8,8 @@ struct PsProcess
 
 	4 PID
 
+	4 CleanedUp
+
 	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
 
 	4 HasThread
@@ -116,6 +118,7 @@ extern PsProcessReadStatus { processhandle -- status ok }
 
 extern PsProcessCreateDeleteLock { processobject -- ok }
 extern PsProcessCreateDeleteLockShared { processobject -- ok }
+extern PsProcessCreateDeleteAcquireCheck { processobject -- ok }
 extern PsProcessCreateDeleteUnlock { processobject -- }
 
 extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }

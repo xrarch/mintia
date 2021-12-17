@@ -237,25 +237,50 @@ end
 fn PsPrepareUsermode { -- }
 	auto whatnow
 
-	USERMODE // mode
-	1 // alertable
-	KeThreadCurrent@ // thread
-	KeThreadIsKilled whatnow!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	if (whatnow@ STATUS_KILLED ==)
-		// don't return to userland.
-		// our journey ends here
+	HALCPUInterruptEnable
 
-		HALCPUInterruptEnable
+	while (1)
+		USERMODE // mode
+		1 // alertable
+		KeThreadCurrent@ // thread
+		KeThreadIsKilled whatnow!
 
-		PsThreadExit
+		if (whatnow@ STATUS_KILLED ==)
+			// don't return to userland.
+			// our journey ends here
 
-		// PsThreadExit should not return
+			ipl@ KeIPLLower
 
-		"PsPrepareUsermode\n" KeCrash
-	end elseif (whatnow@ STATUS_SIGNALLED ==)
-		"TODO signal dispatch\n" KeCrash
+			PsThreadExit
+
+			// PsThreadExit should not return
+
+			"PsPrepareUsermode\n" KeCrash
+		end elseif (whatnow@ STATUS_SIGNALLED ==)
+			auto sig
+			KeThreadCurrent@ KeThread_Process + @ KeProcess_Signaled + @ sig!
+
+			if (sig@ 1 OSSIGNAL_STOP << &)
+				// suspend!
+
+				1 KeThreadCurrent@ KeThread_Suspended + !
+				THREADSTATUS_SUSPENDED KeThreadYield
+
+				continue
+			end
+
+			"TODO signal dispatch\n" KeCrash
+		end
+
+		break
 	end
+
+	ipl@ KeIPLLower
+
+	HALCPUInterruptDisable drop
 end
 
 var PsOSDLLSectionObject 0

@@ -51,6 +51,7 @@ extern OSSetSwappiness { swappiness -- ok }
 extern OSThreadSleep { ms -- ok }
 
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
+extern OSProcessSignal { signal processhandle -- ok }
 
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }

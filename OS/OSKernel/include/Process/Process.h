@@ -8,9 +8,6 @@ struct PsProcess
 
 	4 PID
 
-	4 Terminated
-	4 KilledStatus
-
 	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
 
 	4 HasThread
@@ -62,8 +59,6 @@ struct PsThread
 	4 UserStackBottom
 	4 UserStackTop
 
-	4 Suspended
-
 	KeEvent_SIZEOF TerminationEvent
 endstruct
 
@@ -112,6 +107,9 @@ extern PsThreadReadStatus { threadhandle -- status ok }
 
 extern PsThreadResumeObject { threadobject -- }
 extern PsThreadResume { threadhandle -- ok }
+
+extern PsProcessSignalObject { signal processobject -- ok }
+extern PsProcessSignal { signal processhandle -- ok }
 
 extern PsProcessReadStatusObject { processobject -- status ok }
 extern PsProcessReadStatus { processhandle -- status ok }

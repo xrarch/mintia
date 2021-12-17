@@ -90,6 +90,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_KilledStatus + !
 	0 thread@ KeThread_Killed + !
 
+	0 thread@ KeThread_Suspended + !
+
 	if (process@ KeProcess_SignalThread + @ ~~)
 		thread@ process@ KeProcess_SignalThread + !
 	end
@@ -188,33 +190,65 @@ fn KeThreadTerminate { status thread -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
+	OSSIGNAL_KILL // signal
+	thread@ // thread
+	KeThreadWakeForSignal
+
+	ipl@ KeIPLLower
+end
+
+fn KeThreadResume { thread -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (thread@ KeThread_Suspended + @)
+		0 thread@ KeThread_Suspended + !
+		QUEUEBACK thread@ KeThreadReady
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn KeThreadWakeForSignal { sig thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KeThreadWakeForSignal: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	// determine whether we need to wake the thread up
+
+	auto status
+	if (sig@ 1 OSSIGNAL_KILL << &)
+		STATUS_KILLED status!
+	end else
+		STATUS_SIGNALLED status!
+	end
 
 	if (thread@ KeThread_IgnoreKill + @)
 		// no
-		ipl@ KeIPLLower
 		return
 	end
 
 	if (thread@ KeThread_Status + @ THREADSTATUS_WAITINGALERTABLE ==)
 		// yes, wake it up
 
-		STATUS_KILLED // waitstatus
+		status@ // waitstatus
 		0 // priboost
 		thread@ // thread
 		KeThreadWakeup drop
 	end elseif (thread@ KeThread_Status + @ THREADSTATUS_WAITINGUNALERTABLE ==)
 		if (thread@ KeThread_WaitMode + @ USERMODE ==)
-			// yes, wake it up
+			if (sig@ 1 OSSIGNAL_KILL << & sig@ 1 OSSIGNAL_STOP << & ||)
+				// yes, wake it up
 
-			STATUS_KILLED // waitstatus
-			0 // priboost
-			thread@ // thread
-			KeThreadWakeup drop
+				status@ // waitstatus
+				0 // priboost
+				thread@ // thread
+				KeThreadWakeup drop
+			end
 		end
 	end
-
-	ipl@ KeIPLLower
 end
 
 fn KeThreadRundown { thread -- }

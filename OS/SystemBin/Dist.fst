@@ -7,6 +7,6 @@ OSKernel.exe OSKernel.exe 493
 SystemInit.exe SystemInit.exe 493
 224Debug.exe 224Debug.exe 493
 
-Cmd.exe Cmd.exe 493
+cmd.exe cmd.exe 493
 
 Test.dll Test.dll 493

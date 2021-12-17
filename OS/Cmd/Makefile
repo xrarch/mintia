@@ -11,11 +11,11 @@ SYSBINDIR  = ../SystemBin
 
 DCFLAGS = incdir=./include/
 
-all: $(SYSBINDIR)/Cmd.exe
+all: $(SYSBINDIR)/cmd.exe
 
-$(SYSBINDIR)/Cmd.exe: $(OBJ)
-	$(LD) $(SYSBINDIR)/Cmd.exe $(OBJ) -d $(SYSBINDIR)/OSDLL.dll
-	$(OBJTOOL) move $(SYSBINDIR)/Cmd.exe mintia
+$(SYSBINDIR)/cmd.exe: $(OBJ)
+	$(LD) $(SYSBINDIR)/cmd.exe $(OBJ) -d $(SYSBINDIR)/OSDLL.dll
+	$(OBJTOOL) move $(SYSBINDIR)/cmd.exe mintia
 
 %.o: %.df
 	$(DC) $(DCFLAGS) $< $@
@@ -24,4 +24,4 @@ $(SYSBINDIR)/Cmd.exe: $(OBJ)
 	$(AS) $< $@
 
 cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF $(SYSBINDIR)/Cmd.exe
+	rm -f ${OBJ} *.a3x *.LOFF $(SYSBINDIR)/cmd.exe

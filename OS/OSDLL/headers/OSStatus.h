@@ -49,5 +49,6 @@ const STATUS_CONSOLE_HUNG_UP       -47
 const STATUS_PROCESS_IS_TERMINATED -48
 const STATUS_ALIVE                 -49
 const STATUS_ARGUMENTS_TOO_LONG    -50
+const STATUS_PROCESS_NO_THREAD     -51
 
 extern OSStatusGetName { status -- name }

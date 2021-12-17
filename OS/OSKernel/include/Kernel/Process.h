@@ -32,6 +32,9 @@ struct KeProcess
 	4 Signaled
 	4 AcceptMask
 
+	4 Terminated
+	4 KilledStatus
+
 	// memory manager information
 
 	4 PageDirectory
@@ -90,6 +93,8 @@ struct KeThread
 	4 Killed
 	4 KilledStatus
 
+	4 Suspended
+
 	4 WaitMode
 	4 WaitStatus
 	4 WaitIPL
@@ -118,6 +123,7 @@ extern KeSafeGetByte { src -- byte ok }
 extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name asid process -- }
 extern KeProcessUninitialize { process -- }
+extern KeProcessSignal { signal process -- ok }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess
@@ -127,6 +133,8 @@ extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
 extern KeThreadTerminate { status thread -- }
+extern KeThreadResume { thread -- }
+extern KeThreadWakeForSignal { sig thread -- }
 extern KeThreadRundown { thread -- }
 extern KeThreadIsKilled { mode alertable thread -- ok }
 extern KeThreadEnqueue { front thread -- }

@@ -13,6 +13,8 @@ struct PsProcess
 
 	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
 
+	4 HasThread
+
 	// memory management
 
 	4 QuotaBlock

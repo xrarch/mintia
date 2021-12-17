@@ -7,6 +7,7 @@
 #include "<inc>/OSObject.h"
 #include "<inc>/OSStatus.h"
 #include "<inc>/OSProcess.h"
+#include "<inc>/OSFile.h"
 
 #include "OSDLL.h"
 
@@ -18,6 +19,251 @@ fn OSThreadExit { status -- }
 	while (1)
 		1000 OSThreadSleep drop
 	end
+end
+
+fn OSCreationBlockInitialize { creationparams -- }
+	creationparams@ // ptr
+	OSCreationParams_SIZEOF // size
+	0 // word
+	memset
+
+	OSNONE creationparams@ OSCreationParams_StdIn + !
+	OSNONE creationparams@ OSCreationParams_StdOut + !
+	OSNONE creationparams@ OSCreationParams_StdErr + !
+end
+
+fn DLLConstructParameters { argcn argvt path pebaddr -- ok }
+	0 ok!
+
+	auto fullpath
+	OSFILEPATHMAX alloc fullpath!
+
+	path@ // path
+	fullpath@ // canon
+	OSFILEPATHMAX // bufsize
+	OSRealPath ok!
+
+	if (ok@)
+		return
+	end
+
+	auto paramtable
+	pebaddr@ OSPEBs_Parameters + paramtable!
+
+	auto paramend
+	paramtable@ OSPARAMETERSIZE + paramend!
+
+	1 argcn +=
+
+	auto paramstring
+	paramtable@ argcn@ 2 << + paramstring!
+
+	auto rstring
+	OSPEB OSPEBs_Parameters + argcn@ 2 << + rstring!
+
+	auto str
+
+	auto i
+	0 i!
+
+	while (i@ argcn@ <)
+		if (i@ 0 ==)
+			fullpath@ str!
+		end else
+			argvt@ i@ 1 - 2 << + @ str!
+		end
+
+		auto len
+		str@ strlen 1 + len!
+
+		if (paramstring@ len@ + paramend@ >)
+			STATUS_ARGUMENTS_TOO_LONG ok!
+
+			return
+		end
+
+		paramstring@ // dest
+		str@ // src
+		strcpy
+
+		rstring@ paramtable@!
+
+		4 paramtable +=
+		len@ rstring +=
+		len@ paramstring +=
+		1 i +=
+	end
+
+	argcn@ pebaddr@ OSPEBs_ParameterCount + !
+end
+
+fn DLLPEBInitialize { argcn argvt path creationflags creationparams pebaddr -- ok }
+	if (creationflags@ OSPROCESS_NOINHERITENV & ~~)
+		// inherit the environment
+
+		pebaddr@ OSPEBs_Environment + // dest
+		OSPEB OSPEBs_Environment + // src
+		OSENVIRONMENTSIZE // size
+		memcpy
+	end
+
+	argcn@ // argcn
+	argvt@ // argvt
+	path@ // path
+	pebaddr@ // pebaddr
+	DLLConstructParameters ok!
+
+	if (ok@)
+		return
+	end
+
+	if (creationflags@ OSPROCESS_NOINHERIT & ~~)
+		OSPEB OSPEBs_StdIn + @ pebaddr@ OSPEBs_StdIn + !
+		OSPEB OSPEBs_StdOut + @ pebaddr@ OSPEBs_StdOut + !
+		OSPEB OSPEBs_StdErr + @ pebaddr@ OSPEBs_StdErr + !
+		OSPEB OSPEBs_CurrentDirectory + @ pebaddr@ OSPEBs_CurrentDirectory + !
+	end else
+		// TODO explicit stdio/current directory specification.
+
+		OSNONE pebaddr@ OSPEBs_StdIn + !
+		OSNONE pebaddr@ OSPEBs_StdOut + !
+		OSNONE pebaddr@ OSPEBs_StdErr + !
+		OSNONE pebaddr@ OSPEBs_CurrentDirectory + !
+
+		"/" // env
+		"PWD" // name
+		pebaddr@ OSPEBs_Environment + // envblock
+		DLLSetEnvironmentVariable drop
+	end
+end
+
+fn DLLPEBCreate { -- pebaddr pebhandle ok }
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	OSPEBSIZE // anonsize
+	OSNONE // filehandle
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ok! pebhandle!
+
+	if (ok@)
+		return
+	end
+
+	OSPEBSIZE // length
+	HEAPSTART // startva
+	0 // sectionoffset
+	pebhandle@ // sectionhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSSectionMapView ok! pebaddr!
+
+	if (ok@)
+		pebhandle@ OSClose drop
+	end
+end
+
+fn DLLPEBCleanup { pebaddr pebhandle -- }
+	pebhandle@ OSClose drop
+
+	OSPEBSIZE // length
+	pebaddr@ // vaddr
+	OSCURRENTPROCESS // processhandle
+	OSUnmapView drop
+end
+
+table DLLCreationBlockDefault
+	OSNONE // StdIn
+	OSNONE // StdOut
+	OSNONE // StdErr
+	0 // CurrentDirectoryPath
+	// ... omitted until it exists ...
+endtable
+
+extern DLLMain { -- }
+
+fn OSSpawnV { argcn argvt path creationflags creationparams permissions name -- threadhandle processhandle ok }
+	if (creationparams@ ~~)
+		DLLCreationBlockDefault creationparams!
+	end
+
+	auto pebhandle
+	auto pebaddr
+
+	DLLPEBCreate ok! pebhandle! pebaddr!
+
+	if (ok@)
+		return
+	end
+
+	pebhandle@ // sectionhandle
+	creationflags@ // creationflags
+	permissions@ // permissions
+	name@ // name
+	OSProcessCreate ok! processhandle!
+
+	if (ok@)
+		pebaddr@ // pebaddr
+		pebhandle@ // pebhandle
+		DLLPEBCleanup
+
+		return
+	end
+
+	0 // context
+	pointerof DLLMain // startfunc
+	OSTHREAD_SUSPENDED // creationflags
+	ACCESS_OWNER_ALL // permissions
+	"Main" // name
+	processhandle@ // processhandle
+	OSThreadCreate ok! threadhandle!
+
+	if (ok@)
+		pebaddr@ // pebaddr
+		pebhandle@ // pebhandle
+		DLLPEBCleanup
+
+		processhandle@ OSClose drop
+
+		return
+	end
+
+	argcn@ // argcn
+	argvt@ // argvt
+	path@ // path
+	creationflags@ // creationflags
+	creationparams@ // creationparams
+	pebaddr@ // pebaddr
+	DLLPEBInitialize ok!
+
+	if (ok@)
+		0 threadhandle@ OSThreadTerminate drop
+
+		threadhandle@ OSClose drop
+
+		pebaddr@ // pebaddr
+		pebhandle@ // pebhandle
+		DLLPEBCleanup
+
+		processhandle@ OSClose drop
+
+		return
+	end
+
+	if (creationflags@ OSPROCESS_SUSPENDED & ~~)
+		threadhandle@ OSThreadResume drop
+	end
+end
+
+fn OSSpawn { ... path creationflags creationparams permissions name -- threadhandle processhandle ok }
+	argc@ // argcn
+	argv // argvt
+	path@ // path
+	creationflags@ // creationflags
+	creationparams@ // creationparams
+	permissions@ // permissions
+	name@ // name
+	OSSpawnV ok! processhandle! threadhandle!
 end
 
 fn OSExit { status -- }

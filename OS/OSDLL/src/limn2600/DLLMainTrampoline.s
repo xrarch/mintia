@@ -29,9 +29,8 @@ DLLMainTrampoline:
 	b    .loop
 
 .done:
-	subi sp, sp, 8
-	mov  long [sp + 4], lr
-	mov  long [sp], t0
+	subi sp, sp, 4
+	mov  long [sp], lr
 
 	jalr lr, a2, 0
 

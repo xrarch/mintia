@@ -17,6 +17,7 @@ BR_DIR     := $(OS_DIR)/BootResources
 DRIVER_DIR := $(OS_DIR)/BootDrivers
 RTL_DIR    := $(OS_DIR)/OSDLL
 SYSINIT_DIR:= $(OS_DIR)/SystemInit
+CMD_DIR    := $(OS_DIR)/Cmd
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
@@ -41,6 +42,7 @@ sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll
 	make -C $(DRIVER_DIR)
 
 	make -C $(SYSINIT_DIR)
+	make -C $(CMD_DIR)
 
 	make -C $(OS_DIR)/TestDLL
 

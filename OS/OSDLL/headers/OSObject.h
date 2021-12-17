@@ -33,6 +33,9 @@ extern OSLastComponent { path -- lcomp }
 extern OSDirectoryName { path dirname bufsize -- ok }
 extern OSRealPath { path canon bufsize -- ok }
 
+extern OSGetCWD { cwd bufsize -- ok }
+extern OSChangeCWD { path -- ok }
+
 extern OSOpen { flags access path -- handle ok }
 
 const OSEVENT_SYNCH 1

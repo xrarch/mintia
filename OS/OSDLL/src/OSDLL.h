@@ -15,6 +15,10 @@ struct OSPEBs
 	4 DLLListTail
 endstruct
 
+extern DLLFindEnvironmentVariable { name envblock -- entry env ok }
+extern DLLGetEnvironmentVariable { env name bufsize envblock -- ok }
+extern DLLSetEnvironmentVariable { env name envblock -- ok }
+
 // module stuff
 
 extern DLLDoFixup { ptr value type -- ok }

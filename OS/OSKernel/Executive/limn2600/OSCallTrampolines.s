@@ -33,6 +33,7 @@
 .extern OSRemapView
 .extern OSSetSwappiness
 .extern OSThreadSleep
+.extern OSProcessCreate
 .extern OSThreadCreate
 .extern OSThreadTerminate
 .extern OSThreadResume
@@ -42,7 +43,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 37
+	.dl 38
 
 OSCallTable:
 .global OSCallTable
@@ -78,12 +79,13 @@ OSCallTable:
 	.dl OSTOSRemapView                                   ;29
 	.dl OSTOSSetSwappiness                               ;30
 	.dl OSTOSThreadSleep                                 ;31
-	.dl OSTOSThreadCreate                                ;32
-	.dl OSTOSThreadTerminate                             ;33
-	.dl OSTOSThreadResume                                ;34
-	.dl OSTOSThreadReadStatus                            ;35
-	.dl OSTOSProcessReadStatus                           ;36
-	.dl OSTOSSetSystemConsole                            ;37
+	.dl OSTOSProcessCreate                               ;32
+	.dl OSTOSThreadCreate                                ;33
+	.dl OSTOSThreadTerminate                             ;34
+	.dl OSTOSThreadResume                                ;35
+	.dl OSTOSThreadReadStatus                            ;36
+	.dl OSTOSProcessReadStatus                           ;37
+	.dl OSTOSSetSystemConsole                            ;38
 
 
 OSTOSConsolePutCharacter:
@@ -584,6 +586,24 @@ OSTOSThreadSleep:
 	jal  OSThreadSleep
 
 	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessCreate:
+.global OSTOSProcessCreate
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
+
+	jal  OSProcessCreate
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

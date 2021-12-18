@@ -12,8 +12,6 @@ struct PsProcess
 
 	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
 
-	4 HasThread
-
 	// memory management
 
 	4 QuotaBlock
@@ -118,7 +116,7 @@ extern PsProcessReadStatus { processhandle -- status ok }
 
 extern PsProcessCreateDeleteLock { processobject -- ok }
 extern PsProcessCreateDeleteLockShared { processobject -- ok }
-extern PsProcessCreateDeleteAcquireCheck { processobject -- ok }
+extern PsProcessCreateDeleteAcquireCheck { needsthread processobject -- ok }
 extern PsProcessCreateDeleteUnlock { processobject -- }
 
 extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }

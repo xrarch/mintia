@@ -21,9 +21,19 @@
 #include "<inc>/HALDebug.h"
 
 fn PsProcessSignalObject { signal processobject -- ok }
+	1 // needsthread
+	processobject@ // processobject
+	PsProcessCreateDeleteAcquireCheck ok!
+
+	if (ok@)
+		return
+	end
+
 	signal@ // signal
 	processobject@ // process
 	KeProcessSignal ok!
+
+	processobject@ PsProcessCreateDeleteUnlock
 end
 
 fn PsProcessSignal { signal processhandle -- ok }
@@ -85,8 +95,12 @@ fn PsProcessCreateDeleteLockShared { processobject -- ok }
 	ExRwLockAcquireShared ok!
 end
 
-fn PsProcessCreateDeleteAcquireCheck { processobject -- ok }
+fn PsProcessCreateDeleteAcquireCheck { needsthread processobject -- ok }
 	processobject@ PsProcessCreateDeleteLockShared ok!
+
+	if (ok@)
+		return
+	end
 
 	if (processobject@ KeProcess_Terminated + @)
 		processobject@ PsProcessCreateDeleteUnlock
@@ -94,6 +108,26 @@ fn PsProcessCreateDeleteAcquireCheck { processobject -- ok }
 		STATUS_PROCESS_IS_TERMINATED ok!
 
 		return
+	end
+
+	if (DEBUGCHECKS)
+		if (processobject@ PsProcess_CleanedUp + @)
+			"PsProcessCreateDeleteAcquireCheck: process cleaned up?\n" KeCrash
+		end
+	end
+
+	if (needsthread@)
+		if (processobject@ KeProcess_SignalThread + @ ~~)
+			// there will always be a signal thread so long as there's at
+			// least one thread, so this means the process either has no
+			// threads anymore or it has never been given one.
+
+			processobject@ PsProcessCreateDeleteUnlock
+
+			STATUS_PROCESS_NO_THREAD ok!
+
+			return
+		end
 	end
 end
 

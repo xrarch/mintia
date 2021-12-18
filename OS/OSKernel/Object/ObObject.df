@@ -72,10 +72,6 @@ fn ObObjectCloseProcess { handle process -- ok }
 	auto obh
 	object@ ObHeader_SIZEOF - obh!
 
-	obh@ ObHeader_QuotaCharge + @ // charge
-	process@ PsProcess_QuotaBlock + @ // quotablock
-	MmQuotaBlockUncharge
-
 	object@ ObObjectHandleCountDecrement drop
 
 	auto type
@@ -94,6 +90,25 @@ fn ObObjectCloseProcess { handle process -- ok }
 	end
 
 	object@ ObObjectDereferenceByPointer drop
+end
+
+fn ObObjectUncharge { obh -- }
+	auto quotablock
+	obh@ ObHeader_QuotaBlock + @ quotablock!
+
+	if (DEBUGCHECKS)
+		if (quotablock@ ~~)
+			"ObObjectUncharge: no quotablock\n" KeCrash
+		end
+	end
+
+	0 obh@ ObHeader_QuotaBlock + !
+
+	obh@ ObHeader_QuotaCharge + @ // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUncharge
+
+	quotablock@ MmQuotaBlockDereference
 end
 
 fn ObObjectOpen { nocheck access object -- handle ok }
@@ -121,9 +136,46 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	auto obh
 	object@ ObHeader_SIZEOF - obh!
 
+	auto quotablock
+	0 quotablock!
+
+	if (obh@ ObHeader_QuotaBlock + @ ~~)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		if (obh@ ObHeader_QuotaBlock + @ ~~)
+			if (obh@ ObHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
+				// no quotablock and object isnt permanent; claim quota for
+				// current process
+
+				KeProcessCurrent PsProcess_QuotaBlock + @ quotablock!
+
+				obh@ ObHeader_QuotaCharge + @ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockCharge ok!
+
+				if (ok@)
+					ipl@ KeIPLLower
+
+					return
+				end
+
+				quotablock@ MmQuotaBlockReference
+
+				quotablock@ obh@ ObHeader_QuotaBlock + !
+			end
+		end
+
+		ipl@ KeIPLLower
+	end
+
 	handletable@ ExHandleTableLock ok!
 
 	if (ok@)
+		if (quotablock@)
+			obh@ ObObjectUncharge
+		end
+
 		return
 	end
 
@@ -134,20 +186,14 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 		SeCheckAccessObjectUser ok!
 
 		if (ok@)
+			if (quotablock@)
+				obh@ ObObjectUncharge
+			end
+
 			handletable@ ExHandleTableUnlock
 
 			return
 		end
-	end
-
-	obh@ ObHeader_QuotaCharge + @ // charge
-	process@ PsProcess_QuotaBlock + @ // quotablock
-	MmQuotaBlockCharge ok!
-
-	if (ok@)
-		handletable@ ExHandleTableUnlock
-
-		return
 	end
 
 	auto entryptr
@@ -158,9 +204,9 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	ExHandleCreate ok! entryptr! handle!
 
 	if (ok@)
-		obh@ ObHeader_QuotaCharge + @ // charge
-		process@ PsProcess_QuotaBlock + @ // quotablock
-		MmQuotaBlockUncharge
+		if (quotablock@)
+			obh@ ObObjectUncharge
+		end
 
 		handletable@ ExHandleTableUnlock
 
@@ -183,6 +229,10 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 			openfunc@ ObTypeOpenFunction ok!
 
 			if (ok@)
+				if (quotablock@)
+					obh@ ObObjectUncharge
+				end
+
 				handle@ // handle
 				handletable@ // handletable
 				1 // locked
@@ -193,10 +243,6 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 						"ObObjectOpenProcess: failed to delete handle\n" KeCrash
 					end
 				end
-
-				obh@ ObHeader_QuotaCharge + @ // charge
-				process@ PsProcess_QuotaBlock + @ // quotablock
-				MmQuotaBlockUncharge
 
 				handletable@ ExHandleTableUnlock
 

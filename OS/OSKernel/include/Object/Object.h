@@ -18,6 +18,7 @@ struct ObHeader
 	4 Permissions
 
 	4 QuotaCharge
+	4 QuotaBlock
 
 	4 Deleted
 
@@ -92,6 +93,8 @@ extern ObObjectReferenceByHandleProcess { type handle process -- access object o
 
 extern ObObjectClose { handle -- ok }
 extern ObObjectCloseProcess { handle process -- ok }
+
+extern ObObjectUncharge { obh -- }
 
 extern ObObjectOpen { nocheck access object -- handle ok }
 extern ObObjectOpenProcess { nocheck access object process -- handle ok }

@@ -19,6 +19,8 @@ struct ObHeader
 
 	4 QuotaCharge
 
+	4 Deleted
+
 	4 Name
 endstruct
 

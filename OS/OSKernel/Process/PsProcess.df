@@ -21,6 +21,11 @@
 #include "<inc>/HALDebug.h"
 
 fn PsProcessSignalObject { signal processobject -- ok }
+	if (processobject@ PsSystemProcess@ ==)
+		STATUS_FORBIDDEN_OPERATION ok!
+		return
+	end
+
 	1 // needsthread
 	processobject@ // processobject
 	PsProcessCreateDeleteAcquireCheck ok!
@@ -153,7 +158,7 @@ fn PsProcessCreateDeleteUnlock { processobject -- }
 	processobject@ PsProcess_ThreadCreateDeleteRwLock + ExRwLockRelease
 end
 
-fn PsProcessLookupPID { pid -- processobject ok }
+fn PsProcessReferenceByPID { pid -- processobject ok }
 	PsProcessTable@ ExHandleTableLockShared ok!
 
 	if (ok@)
@@ -175,7 +180,105 @@ fn PsProcessLookupPID { pid -- processobject ok }
 
 	entryptr@@ processobject!
 
+	if (processobject@ ObHeader_SIZEOF - ObHeader_Deleted + @)
+		// see function ObObjectDereferenceByPointer for an explanation on
+		// this check.
+
+		PsProcessTable@ ExHandleTableUnlock
+
+		STATUS_PROCESS_IS_TERMINATED ok!
+
+		return
+	end
+
 	processobject@ ObObjectReferenceByPointer drop
 
 	PsProcessTable@ ExHandleTableUnlock
+end
+
+fn PsProcessOpenByPID { access pid -- processhandle ok }
+	auto processobject
+	pid@ PsProcessReferenceByPID ok! processobject!
+
+	if (ok@)
+		return
+	end
+
+	0 // nocheck
+	access@ // access
+	processobject@ // object
+	KeProcessCurrent // process
+	ObObjectOpenProcess ok! processhandle!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+	end
+end
+
+fn PsProcessInformationQueryObject { processobject query -- ok }
+	0 ok!
+
+	processobject@ PsProcess_PID + @ query@ OSProcessInformation_PID + !
+	processobject@ PsProcess_ParentPID + @ query@ OSProcessInformation_ParentPID + !
+
+	if (processobject@ ObHeader_SIZEOF - ObHeader_Name + @)
+		query@ OSProcessInformation_Name + // dest
+		processobject@ ObHeader_SIZEOF - ObHeader_Name + @ // src
+		OBNAMEMAX 1 - // max
+		strncpy
+	end else
+		0 query@ OSProcessInformation_Name + sb
+	end
+
+	// TODO console name
+	0 query@ OSProcessInformation_ControllingConsole + sb
+
+	processobject@ PsProcess_OwningUser + @ SeUser_UID + @ query@ OSProcessInformation_OwningUID + !
+	processobject@ PsProcess_OwningUser + @ SeUser_GID + @ query@ OSProcessInformation_OwningGID + !
+
+	processobject@ KeProcess_Terminated + @ query@ OSProcessInformation_Terminated + !
+	processobject@ KeProcess_KilledStatus + @ query@ OSProcessInformation_ExitStatus + !
+end
+
+fn PsProcessInformationQuery { processhandle query -- ok }
+	auto processobject
+
+	PsProcessObjectType@ // type
+	processhandle@ // handle
+	ObObjectReferenceByHandle ok! processobject! drop
+
+	if (ok@)
+		return
+	end
+
+	processobject@ // processobject
+	query@ // query
+	PsProcessInformationQueryObject ok!
+
+	processobject@ ObObjectDereferenceByPointer drop
+end
+
+fn PsProcessInformationQueryByPID { pid query -- ok }
+	auto processobject
+	pid@ PsProcessReferenceByPID ok! processobject!
+
+	if (ok@)
+		return
+	end
+
+	processobject@ // object
+	SeUserCurrentGet // user
+	SeCheckAccessObjectOwner ok!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	processobject@ // processobject
+	query@ // query
+	PsProcessInformationQueryObject ok!
+
+	processobject@ ObObjectDereferenceByPointer drop
 end

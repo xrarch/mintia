@@ -48,11 +48,14 @@ extern OSRemapView { pageprotection length vaddr processhandle -- ok }
 extern OSSetSwappiness { swappiness -- ok }
 
 // Ps
-extern OSThreadSleep { ms -- ok }
-
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 extern OSProcessSignal { signal processhandle -- ok }
+extern OSProcessOpenByPID { access pid -- processhandle ok }
 
+extern OSProcessQuery { processhandle query -- ok }
+extern OSProcessQueryByPID { pid query -- ok }
+
+extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }
 extern OSThreadResume { threadhandle -- ok }

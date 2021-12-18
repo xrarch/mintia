@@ -7,6 +7,7 @@ struct PsProcess
 	4 GlobalListPrev
 
 	4 PID
+	4 ParentPID
 
 	4 CleanedUp
 
@@ -118,6 +119,12 @@ extern PsProcessCreateDeleteLock { processobject -- ok }
 extern PsProcessCreateDeleteLockShared { processobject -- ok }
 extern PsProcessCreateDeleteAcquireCheck { needsthread processobject -- ok }
 extern PsProcessCreateDeleteUnlock { processobject -- }
+
+extern PsProcessOpenByPID { access pid -- processhandle ok }
+
+extern PsProcessInformationQueryObject { processobject query -- ok }
+extern PsProcessInformationQuery { processhandle query -- ok }
+extern PsProcessInformationQueryByPID { pid query -- ok }
 
 extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }

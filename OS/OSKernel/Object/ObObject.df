@@ -397,6 +397,23 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 
 	oldcount@ 1 - object@ ObHeader_PointerCount + !
 
+	if (oldcount@ 1 ==)
+		// atomically mark the object deleted -- this is useful for locking
+		// out auxiliary methods of acquiring an object pointer i.e. taking a
+		// process object by its PID. these aren't dangerous because the
+		// assumption is that the object type's deletion routine will
+		// eliminate that method of acquisition, i.e. delete the PID,
+		// between now and the object's final deallocation. whatever routine
+		// performs this elimination needs to check this value BEFORE it
+		// references the object by pointer, otherwise everything will
+		// explode. locking considerations can be complex.
+
+		// XXX couldn't this be done just as well by checking the pointer
+		// count? wouldn't a value of 0 there be equivalent to this?
+
+		1 object@ ObHeader_Deleted + !
+	end
+
 	rs@ HALCPUInterruptRestore
 
 	auto ok
@@ -413,8 +430,9 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 		if (KeIPLCurrentGet IPLLOW ==)
 			// delete immediately
 
-			// make sure to ignore weird wait effects etc due to having been nuked.
-			// these are undesirable while doing something like cleaning up a dead object
+			// make sure to ignore weird wait effects etc due to having been
+			// nuked. these are undesirable while doing something like
+			// cleaning up a dead object.
 			KeThreadCurrent@ KeThreadIgnoreKill drop
 
 			object@ ObHeader_SIZEOF + ObObjectFree ok!

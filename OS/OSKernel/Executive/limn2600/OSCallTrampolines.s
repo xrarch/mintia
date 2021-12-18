@@ -32,9 +32,12 @@
 .extern OSUnmapView
 .extern OSRemapView
 .extern OSSetSwappiness
-.extern OSThreadSleep
 .extern OSProcessCreate
 .extern OSProcessSignal
+.extern OSProcessOpenByPID
+.extern OSProcessQuery
+.extern OSProcessQueryByPID
+.extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
 .extern OSThreadResume
@@ -44,7 +47,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 39
+	.dl 42
 
 OSCallTable:
 .global OSCallTable
@@ -79,15 +82,18 @@ OSCallTable:
 	.dl OSTOSUnmapView                                   ;28
 	.dl OSTOSRemapView                                   ;29
 	.dl OSTOSSetSwappiness                               ;30
-	.dl OSTOSThreadSleep                                 ;31
-	.dl OSTOSProcessCreate                               ;32
-	.dl OSTOSProcessSignal                               ;33
-	.dl OSTOSThreadCreate                                ;34
-	.dl OSTOSThreadTerminate                             ;35
-	.dl OSTOSThreadResume                                ;36
-	.dl OSTOSThreadReadStatus                            ;37
-	.dl OSTOSProcessReadStatus                           ;38
-	.dl OSTOSSetSystemConsole                            ;39
+	.dl OSTOSProcessCreate                               ;31
+	.dl OSTOSProcessSignal                               ;32
+	.dl OSTOSProcessOpenByPID                            ;33
+	.dl OSTOSProcessQuery                                ;34
+	.dl OSTOSProcessQueryByPID                           ;35
+	.dl OSTOSThreadSleep                                 ;36
+	.dl OSTOSThreadCreate                                ;37
+	.dl OSTOSThreadTerminate                             ;38
+	.dl OSTOSThreadResume                                ;39
+	.dl OSTOSThreadReadStatus                            ;40
+	.dl OSTOSProcessReadStatus                           ;41
+	.dl OSTOSSetSystemConsole                            ;42
 
 
 OSTOSConsolePutCharacter:
@@ -579,20 +585,6 @@ OSTOSSetSwappiness:
 	addi sp, sp, 4
 	ret
 
-OSTOSThreadSleep:
-.global OSTOSThreadSleep
-	subi sp, sp, 4
-	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-
-	jal  OSThreadSleep
-
-	mov  long [s18 + 4], a0 ;t1
-
-	mov  lr, long [sp]
-	addi sp, sp, 4
-	ret
-
 OSTOSProcessCreate:
 .global OSTOSProcessCreate
 	subi sp, sp, 4
@@ -619,6 +611,66 @@ OSTOSProcessSignal:
 	mov  a1, long [s18 + 8] ;t2
 
 	jal  OSProcessSignal
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessOpenByPID:
+.global OSTOSProcessOpenByPID
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessOpenByPID
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessQuery:
+.global OSTOSProcessQuery
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessQuery
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessQueryByPID:
+.global OSTOSProcessQueryByPID
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessQueryByPID
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadSleep:
+.global OSTOSThreadSleep
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSThreadSleep
 
 	mov  long [s18 + 4], a0 ;t1
 

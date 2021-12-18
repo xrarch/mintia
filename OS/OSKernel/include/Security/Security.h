@@ -37,3 +37,4 @@ extern SeAmIAdmin { -- admin }
 extern SeCheckAccess { access permission -- ok }
 extern SeCheckAccessFilesystem { access permbits owninguid owninggid user -- ok }
 extern SeCheckAccessObjectUser { access object user -- ok }
+extern SeCheckAccessObjectOwner { object user -- ok }

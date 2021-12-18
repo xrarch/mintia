@@ -22,6 +22,21 @@ fn (ObTypeDeleteFunction) PsProcessObjectDelete { object -- }
 	// the last reference to this process object was removed.
 	// finally free all resources associated with it.
 
+	// destroy PID
+
+	auto ok
+
+	object@ PsProcess_PID + @ // handle
+	PsProcessTable@ // handletable
+	0 // locked
+	ExHandleDelete ok! drop drop
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "PsProcessObjectDelete: failed to delete PID (%i)\n" KeCrash
+		end
+	end
+
 	object@ PsProcessCleanup
 
 	// deref quota block
@@ -130,21 +145,6 @@ fn PsProcessCleanup { process -- }
 
 	1 process@ PsProcess_CleanedUp + !
 
-	// destroy PID
-
-	auto ok
-
-	process@ PsProcess_PID + @ // handle
-	PsProcessTable@ // handletable
-	0 // locked
-	ExHandleDelete ok! drop drop
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "PsProcessObjectDelete: failed to delete PID (%i)\n" KeCrash
-		end
-	end
-
 	// destroy handle table
 
 	pointerof ObHandleDestroyFunction // enum func
@@ -153,6 +153,7 @@ fn PsProcessCleanup { process -- }
 
 	// remove from the global process list
 
+	auto ok
 	PsProcessListLock ok!
 
 	if (DEBUGCHECKS)
@@ -206,6 +207,15 @@ fn PsThreadExit { -- }
 	// ignore kill so nothing bad happens while we're cleaning up
 	current@ KeThreadIgnoreKill drop
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	PRIORITY_HIGHREALTIME 1 - // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	ipl@ KeIPLLower
+
 	current@ KeThreadRundown
 
 	current@ MmThreadUninitialize drop
@@ -227,7 +237,6 @@ fn PsThreadExit { -- }
 	current@ PsThread_TerminationEvent + // event
 	KeEventSignal
 
-	auto ipl
 	IPLDPC KeIPLRaise drop
 
 	// add ourselves to the reaper thread list and signal its event.

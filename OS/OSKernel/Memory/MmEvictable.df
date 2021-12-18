@@ -33,6 +33,12 @@ public MmEvictableFastPageCount
 var MmEvictableSlowPageCount 0
 public MmEvictableSlowPageCount
 
+var MmTotalWorkingSetSize 0
+public MmTotalWorkingSetSize
+
+var MmPeakWorkingSetSize 0
+public MmPeakWorkingSetSize
+
 fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 	priority@ // priority
 	MmPageAlloc ok! pfn! pfdbe!
@@ -51,10 +57,30 @@ fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 	0 pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
 
 	evictablefuncs@ pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + !
+
+	if (flags@ MMEVICTFLAG_WORKINGSET &)
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		// allocation of evictable page implies addition to a working set.
+
+		1 MmTotalWorkingSetSize +=
+
+		if (MmTotalWorkingSetSize@ MmPeakWorkingSetSize@ >)
+			MmTotalWorkingSetSize@ MmPeakWorkingSetSize!
+		end
+
+		rs@ HALCPUInterruptRestore
+	end
 end
 
 fn MmEvictablePageInsert { pfdbe -- }
 	// assumes IPLDPC or equivalent
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+		// insertion to evictable list implies removal from a working set.
+		1 MmTotalWorkingSetSize -=
+	end
 
 	1 MmEvictablePageCount +=
 
@@ -140,8 +166,27 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	rs@ HALCPUInterruptRestore
 end
 
+fn MmEvictablePageRemoveForDeletion { pfdbe -- }
+	// assumes IPLDPC or equivalent
+
+	pfdbe@ MmEvictablePageRemove
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+		1 MmTotalWorkingSetSize -=
+	end
+end
+
 fn MmEvictablePageRemove { pfdbe -- }
 	// assumes IPLDPC or equivalent
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+		// removal from evictable list implies addition to a working set.
+		1 MmTotalWorkingSetSize +=
+
+		if (MmTotalWorkingSetSize@ MmPeakWorkingSetSize@ >)
+			MmTotalWorkingSetSize@ MmPeakWorkingSetSize!
+		end
+	end
 
 	1 MmEvictablePageCount -=
 
@@ -306,7 +351,7 @@ fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 
 				1 succeedcount +=
 
-				pfdbe@ MmEvictablePageRemove
+				pfdbe@ MmEvictablePageRemoveForDeletion
 
 				pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
 				MmPageFree
@@ -385,7 +430,7 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 				end
 			end
 
-			pfdbe@ MmEvictablePageRemove
+			pfdbe@ MmEvictablePageRemoveForDeletion
 
 			ipl@ KeIPLLower
 
@@ -447,7 +492,7 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 					end
 				end
 
-				pfdbe@ MmEvictablePageRemove
+				pfdbe@ MmEvictablePageRemoveForDeletion
 
 				ipl@ KeIPLLower
 

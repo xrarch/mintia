@@ -103,6 +103,9 @@ externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
 
+externptr MmTotalWorkingSetSize
+externptr MmPeakWorkingSetSize
+
 const MMMUSTSUCCEEDL2PAGES 8
 const MMMUSTSUCCEEDPAGES   18
 

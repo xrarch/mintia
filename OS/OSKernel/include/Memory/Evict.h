@@ -72,14 +72,16 @@ struct MmPageFrameEntryAnonymous
 	4 PrototypePTE
 endstruct
 
-const MMEVICTFLAG_FAST 1
-const MMEVICTFLAG_COW  16
+const MMEVICTFLAG_FAST       1
+const MMEVICTFLAG_COW        16
+const MMEVICTFLAG_WORKINGSET 32
 
 extern MmEvictionWorker { context1 context2 -- }
 extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }
 extern MmEvictablePageRemove { pfdbe -- }
+extern MmEvictablePageRemoveForDeletion { pfdbe -- }
 extern MmEvictablePageInsert { pfdbe -- }
 
 extern MmEvictFromList { trycount fast listhead -- succeedcount done ok }

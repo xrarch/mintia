@@ -19,14 +19,14 @@ struct OSProcessInformation
 	OBNAMEMAX ControllingConsole
 	4 OwningUID
 	4 OwningGID
+	4 Status
 	4 Terminated
 	4 ExitStatus
 	48 Reserved
 endstruct
 
 struct OSThreadInformation
-	4 PID
-	OBNAMEMAX Name
+	4 Status
 	4 Terminated
 	4 ExitStatus
 	48 Reserved

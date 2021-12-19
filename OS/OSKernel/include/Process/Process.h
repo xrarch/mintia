@@ -109,6 +109,9 @@ extern PsThreadReadStatus { threadhandle -- status ok }
 extern PsThreadResumeObject { threadobject -- }
 extern PsThreadResume { threadhandle -- ok }
 
+extern PsThreadInformationQueryObject { threadobject query -- ok }
+extern PsThreadInformationQuery { threadhandle query -- ok }
+
 extern PsProcessSignalObject { signal processobject -- ok }
 extern PsProcessSignal { signal processhandle -- ok }
 

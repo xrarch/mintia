@@ -38,6 +38,7 @@ DLLMainTrampoline:
 
 DLLThreadExit:
 .global DLLThreadExit
+	;return value is already in a0
 	j    OSThreadExit
 
 .section data

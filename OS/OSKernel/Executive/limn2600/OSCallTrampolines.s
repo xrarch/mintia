@@ -37,17 +37,18 @@
 .extern OSProcessOpenByPID
 .extern OSProcessQuery
 .extern OSProcessQueryByPID
+.extern OSProcessReadStatus
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
 .extern OSThreadResume
 .extern OSThreadReadStatus
-.extern OSProcessReadStatus
+.extern OSThreadQuery
 .extern OSSetSystemConsole
 
 OSCallCount:
 .global OSCallCount
-	.dl 42
+	.dl 43
 
 OSCallTable:
 .global OSCallTable
@@ -87,13 +88,14 @@ OSCallTable:
 	.dl OSTOSProcessOpenByPID                            ;33
 	.dl OSTOSProcessQuery                                ;34
 	.dl OSTOSProcessQueryByPID                           ;35
-	.dl OSTOSThreadSleep                                 ;36
-	.dl OSTOSThreadCreate                                ;37
-	.dl OSTOSThreadTerminate                             ;38
-	.dl OSTOSThreadResume                                ;39
-	.dl OSTOSThreadReadStatus                            ;40
-	.dl OSTOSProcessReadStatus                           ;41
-	.dl OSTOSSetSystemConsole                            ;42
+	.dl OSTOSProcessReadStatus                           ;36
+	.dl OSTOSThreadSleep                                 ;37
+	.dl OSTOSThreadCreate                                ;38
+	.dl OSTOSThreadTerminate                             ;39
+	.dl OSTOSThreadResume                                ;40
+	.dl OSTOSThreadReadStatus                            ;41
+	.dl OSTOSThreadQuery                                 ;42
+	.dl OSTOSSetSystemConsole                            ;43
 
 
 OSTOSConsolePutCharacter:
@@ -664,6 +666,21 @@ OSTOSProcessQueryByPID:
 	addi sp, sp, 4
 	ret
 
+OSTOSProcessReadStatus:
+.global OSTOSProcessReadStatus
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSProcessReadStatus
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
 OSTOSThreadSleep:
 .global OSTOSThreadSleep
 	subi sp, sp, 4
@@ -746,16 +763,16 @@ OSTOSThreadReadStatus:
 	addi sp, sp, 4
 	ret
 
-OSTOSProcessReadStatus:
-.global OSTOSProcessReadStatus
+OSTOSThreadQuery:
+.global OSTOSThreadQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
 
-	jal  OSProcessReadStatus
+	jal  OSThreadQuery
 
 	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

@@ -51,17 +51,16 @@ extern OSSetSwappiness { swappiness -- ok }
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 extern OSProcessSignal { signal processhandle -- ok }
 extern OSProcessOpenByPID { access pid -- processhandle ok }
-
 extern OSProcessQuery { processhandle query -- ok }
 extern OSProcessQueryByPID { pid query -- ok }
+extern OSProcessReadStatus { processhandle -- status ok }
 
 extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }
 extern OSThreadResume { threadhandle -- ok }
 extern OSThreadReadStatus { threadhandle -- status ok }
-
-extern OSProcessReadStatus { processhandle -- status ok }
+extern OSThreadQuery { threadhandle query -- ok }
 
 // Co
 extern OSSetSystemConsole { filehandle -- ok }

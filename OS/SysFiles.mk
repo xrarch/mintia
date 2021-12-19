@@ -1,6 +1,6 @@
 DISTIMAGE  := ../../build/mintia-dist.img
 FST        := ../../../sdk/fstool.sh
-OFFSET     := 2
+OFFSET     := 4
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
 sysfiles:

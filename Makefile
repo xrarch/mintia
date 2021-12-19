@@ -1,11 +1,11 @@
 DISTIMAGE  := ./build/mintia-dist.img
-DISTIMGSZ  := 2048
+DISTIMGSZ  := 16384
 FST        := ../sdk/fstool.sh
 OBJTOOL    := ../sdk/link.sh
 SYSTOOL    := ../sdk/gensyscalls.sh
 
 DISKLABEL  := ./build/defaultdisklabel
-OFFSET     := 2
+OFFSET     := 4
 
 OS_DIR     := ./OS
 LOAD_DIR   := $(OS_DIR)/Loader/LIMNstation
@@ -25,8 +25,8 @@ dist: $(DISTIMAGE) bootable sysfiles
 
 bootable:
 	make -C $(LOAD_DIR)
-	dd if=$(LOAD_DIR)/BootSector.bin of=$(DISTIMAGE) bs=4096 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
-	dd if=$(LOAD_DIR)/Loader.a3x of=$(DISTIMAGE) bs=4096 conv=notrunc seek=$$((2 + $(OFFSET))) 2>/dev/null
+	dd if=$(LOAD_DIR)/BootSector.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
+	dd if=$(LOAD_DIR)/Loader.a3x of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((4 + $(OFFSET))) 2>/dev/null
 
 sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll
 	make -C $(RTL_DIR)
@@ -54,8 +54,8 @@ $(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	$(OBJTOOL) move $(SYSBIN_DIR)/Dragonfruit.dll mintiadll text=0x80300000,data=text+text_size+align,bss=data+data_size+align
 
 $(DISTIMAGE):
-	dd if=/dev/zero of=$(DISTIMAGE) bs=4096 count=$(DISTIMGSZ) 2>/dev/null
-	dd if=$(DISKLABEL) of=$(DISTIMAGE) bs=4096 count=1 seek=0 conv=notrunc
+	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null
+	dd if=$(DISKLABEL) of=$(DISTIMAGE) bs=512 count=1 seek=0 conv=notrunc
 	$(FSTOOL) f
 
 cleanup:

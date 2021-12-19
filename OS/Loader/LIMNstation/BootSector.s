@@ -6,12 +6,14 @@
 .ds "MINTIA\0\0\0\0\0\0\0\0\0\0"
 
 ;boot program offset in blocks
-.dl 2
+.dl 4
 ;boot program length in blocks
-.dl 14
+.dl 60
 
 ;reserved
 .dl 0
+
+.align 512
 
 ;boot picker icon bitmap
 .static mint.bmp

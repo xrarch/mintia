@@ -11,7 +11,7 @@ WIP: MINTIA is not currently in an even minimally usable state.
 1. Dynamically-linked kernel modules.
 2. Priority-based preemptive multitasking with wait boosting.
 3. Nested interrupts.
-4. IPLs (analogous to Windows IRQLs), DPCs, and APCs.
+4. IPLs (analogous to Windows IRQLs) and DPCs.
 5. Waiting on multiple events at once (akin to win32's WaitForMultipleObjects).
 6. An Object Manager for centralized resource tracking and IPC.
 7. Unix-like permissions model.
@@ -24,8 +24,9 @@ WIP: MINTIA is not currently in an even minimally usable state.
 
 ## Planned features (in rough descending order of priority)
 
-1. Command-line interface over TTY. (in progress)
-2. AisixFS write support, FAT32 driver
-3. Mac OS 9-lookalike window system.
+1. Minimal command-line interface over TTY. (in progress)
+2. AisixFS write support.
+3. MBR partition table support; FAT32 driver
+4. Mac OS 9-lookalike window system.
 
 ![Running](https://i.imgur.com/ITFIXBl.png)

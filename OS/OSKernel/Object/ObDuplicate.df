@@ -1,0 +1,100 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn ObHandleDuplicateObject { handle access srcprocessobject destprocessobject -- newhandle ok }
+	auto destlocked
+	0 destlocked!
+
+	auto currentproc
+	KeProcessCurrent currentproc!
+
+	if (currentproc@ destprocessobject@ ~=)
+		1 // needsthread
+		destprocessobject@ // processobject
+		PsProcessCreateDeleteAcquireCheck ok!
+
+		if (ok@)
+			return
+		end
+
+		1 destlocked!
+	end
+
+	auto srclocked
+	0 srclocked!
+
+	if (currentproc@ srcprocessobject@ ~=)
+		if (destprocessobject@ srcprocessobject@ ~=)
+			1 // needsthread
+			srcprocessobject@ // processobject
+			PsProcessCreateDeleteAcquireCheck ok!
+
+			if (ok@)
+				if (destlocked@)
+					destprocessobject@ PsProcessCreateDeleteUnlock
+				end
+
+				return
+			end
+
+			1 srclocked!
+		end
+	end
+
+	auto object
+
+	0 // type (any)
+	handle@ // handle
+	srcprocessobject@ // process
+	ObObjectReferenceByHandleProcess ok! object! drop
+
+	if (ok@)
+		if (srclocked@)
+			srcprocessobject@ PsProcessCreateDeleteUnlock
+		end
+
+		if (destlocked@)
+			destprocessobject@ PsProcessCreateDeleteUnlock
+		end
+
+		return
+	end
+
+	// ObObjectOpenProcess will check to see if caller has permission to open
+	// this object with the given access bits.
+
+	0 // nocheck
+	access@ // access
+	object@ // object
+	destprocessobject@ // process
+	ObObjectOpenProcess ok! newhandle!
+
+	if (ok@)
+		object@ ObObjectDereferenceByPointer drop
+	end
+
+	if (srclocked@)
+		srcprocessobject@ PsProcessCreateDeleteUnlock
+	end
+
+	if (destlocked@)
+		destprocessobject@ PsProcessCreateDeleteUnlock
+	end
+end

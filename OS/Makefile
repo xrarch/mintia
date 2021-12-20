@@ -13,4 +13,4 @@ cleanup:
 	make -C $(DRIVER_DIR) cleanup
 	make -C $(RTL_DIR) cleanup
 	make -C SystemInit cleanup
-	make -C Cmd cleanup
+	make -C Commands cleanup

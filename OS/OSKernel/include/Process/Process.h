@@ -13,6 +13,11 @@ struct PsProcess
 
 	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
 
+	KeEvent_SIZEOF TerminationEvent
+
+	KeEvent_SIZEOF ActivationEvent
+	4 ActivationStatus
+
 	// memory management
 
 	4 QuotaBlock
@@ -24,8 +29,6 @@ struct PsProcess
 	// object manager
 
 	4 HandleTable
-
-	KeEvent_SIZEOF TerminationEvent
 
 	// virtual memory information
 
@@ -117,6 +120,10 @@ extern PsProcessSignal { signal processhandle -- ok }
 
 extern PsProcessReadStatusObject { processobject -- status ok }
 extern PsProcessReadStatus { processhandle -- status ok }
+
+extern PsProcessSignalActivation { activationstatus -- ok }
+extern PsProcessWaitForActivationObject { timeout processobject -- activationstatus ok }
+extern PsProcessWaitForActivation { timeout processhandle -- activationstatus ok }
 
 extern PsProcessCreateDeleteLock { processobject -- ok }
 extern PsProcessCreateDeleteLockShared { processobject -- ok }

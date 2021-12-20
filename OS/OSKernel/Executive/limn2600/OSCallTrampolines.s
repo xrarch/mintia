@@ -44,6 +44,8 @@
 .extern OSProcessQuery
 .extern OSProcessQueryByPID
 .extern OSProcessReadStatus
+.extern OSProcessSignalActivation
+.extern OSProcessWaitForActivation
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
@@ -54,7 +56,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 49
+	.dl 51
 
 OSCallTable:
 .global OSCallTable
@@ -101,13 +103,15 @@ OSCallTable:
 	.dl OSTOSProcessQuery                                ;40
 	.dl OSTOSProcessQueryByPID                           ;41
 	.dl OSTOSProcessReadStatus                           ;42
-	.dl OSTOSThreadSleep                                 ;43
-	.dl OSTOSThreadCreate                                ;44
-	.dl OSTOSThreadTerminate                             ;45
-	.dl OSTOSThreadResume                                ;46
-	.dl OSTOSThreadReadStatus                            ;47
-	.dl OSTOSThreadQuery                                 ;48
-	.dl OSTOSSetSystemConsole                            ;49
+	.dl OSTOSProcessSignalActivation                     ;43
+	.dl OSTOSProcessWaitForActivation                    ;44
+	.dl OSTOSThreadSleep                                 ;45
+	.dl OSTOSThreadCreate                                ;46
+	.dl OSTOSThreadTerminate                             ;47
+	.dl OSTOSThreadResume                                ;48
+	.dl OSTOSThreadReadStatus                            ;49
+	.dl OSTOSThreadQuery                                 ;50
+	.dl OSTOSSetSystemConsole                            ;51
 
 
 OSTOSConsolePutCharacter:
@@ -775,6 +779,36 @@ OSTOSProcessReadStatus:
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSProcessReadStatus
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessSignalActivation:
+.global OSTOSProcessSignalActivation
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSProcessSignalActivation
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessWaitForActivation:
+.global OSTOSProcessWaitForActivation
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessWaitForActivation
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2

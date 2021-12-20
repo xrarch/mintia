@@ -33,14 +33,11 @@ struct OSThreadInformation
 endstruct
 
 struct OSCreationParams
-	// handles to use as the process's stdio.
-	// any not specified will be inherited.
+	// handles to use as the process's stdio if OSPROCESS_NOINHERIT is
+	// specified.
 	4 StdIn
 	4 StdOut
 	4 StdErr
-
-	// inherited if not specified
-	4 CurrentDirectoryPath
 
 	48 Reserved
 endstruct

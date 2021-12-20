@@ -55,6 +55,12 @@ extern IOMountObject { flags fileobject fsname -- mount ok }
 extern IOFilesystemUnmount { handle -- ok }
 extern IOUnmountObject { fileobject -- ok }
 
+extern IOMountUpdateFlags { newflags handle -- ok }
+extern IOMountUpdateFlagsObject { newflags fileobject -- ok }
+
+extern IOMountGetFilesystemName { buffer handle -- ok }
+extern IOMountGetFilesystemNameObject { buffer fileobject -- ok }
+
 extern IOMountGetFlags { mount -- flags }
 extern IOMountSetFlags { flags mount -- }
 extern IOMountSetContext { context mount -- }

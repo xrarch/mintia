@@ -107,3 +107,6 @@ extern ObObjectDereferenceByPointer { object -- oldcount }
 
 extern ObObjectQueryObject { object query -- ok }
 extern ObObjectQuery { objecthandle query -- ok }
+
+extern ObHandleDuplicateObject { handle access srcprocessobject destprocessobject -- newhandle ok }
+extern ObHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }

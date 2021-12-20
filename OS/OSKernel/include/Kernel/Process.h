@@ -55,7 +55,7 @@ const THREADSTATUS_TERMINATED         7
 const QUEUEFRONT 1
 const QUEUEBACK  0
 
-const THREADDEFAULTQUANTUM 50 // in milliseconds
+const THREADDEFAULTQUANTUM 30 // in milliseconds
 
 const QUANTUMUNITSPERTICK 3
 

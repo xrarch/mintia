@@ -6,6 +6,8 @@ extern OSSystemAbort { num1 num2 msg -- ok }
 
 extern OSGetSystemConsoleName { namebuf -- ok }
 
+extern OSGetBootFlags { -- bootflags ok }
+
 extern OSEventCreate { signaled type permissions name -- eventhandle ok }
 extern OSEventReset { eventhandle -- signaled ok }
 extern OSEventSignal { eventhandle -- ok }
@@ -29,6 +31,8 @@ extern OSClose { handle -- ok }
 extern OSWaitForMultipleObjects { waittype timeout objectcount objecthandletable -- ok }
 extern OSWaitForObject { timeout objecthandle -- ok }
 
+extern OSHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }
+
 // IO
 extern OSFileQuery { filehandle query -- ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }
@@ -39,6 +43,11 @@ extern OSSwapFileCreate { filehandle -- sizeinpages ok }
 
 extern OSIOControl { arg2 arg1 filehandle -- ret ok }
 
+extern OSGetBootDevicePath { buffer -- ok }
+
+extern OSMountUpdateFlags { newflags handle -- ok }
+extern OSMountGetFilesystemName { buffer handle -- ok }
+
 // Mm
 extern OSSectionCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
 extern OSSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
@@ -46,6 +55,8 @@ extern OSUnmapView { length vaddr processhandle -- ok }
 extern OSRemapView { pageprotection length vaddr processhandle -- ok }
 
 extern OSSetSwappiness { swappiness -- ok }
+
+extern OSMemoryQuery { query -- ok }
 
 // Ps
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }

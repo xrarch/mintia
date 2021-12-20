@@ -45,11 +45,8 @@ fn OSCreationBlockInitialize { creationparams -- }
 	OSNONE creationparams@ OSCreationParams_StdErr + !
 end
 
-fn DLLConstructParameters { argcn argvt path pebaddr -- ok }
+fn DLLConstructParameters { argcn argvt path fullpath pebaddr -- ok }
 	0 ok!
-
-	auto fullpath
-	OSFILEPATHMAX alloc fullpath!
 
 	path@ // path
 	fullpath@ // canon
@@ -111,7 +108,7 @@ fn DLLConstructParameters { argcn argvt path pebaddr -- ok }
 	argcn@ pebaddr@ OSPEBs_ParameterCount + !
 end
 
-fn DLLPEBInitialize { argcn argvt path creationflags creationparams pebaddr -- ok }
+fn DLLPEBInitialize { argcn argvt path creationflags creationparams pebaddr processhandle -- ok }
 	if (creationflags@ OSPROCESS_NOINHERITENV & ~~)
 		// inherit the environment
 
@@ -119,11 +116,31 @@ fn DLLPEBInitialize { argcn argvt path creationflags creationparams pebaddr -- o
 		OSPEB OSPEBs_Environment + // src
 		OSENVIRONMENTSIZE // size
 		memcpy
+	end else
+		// inherit only PWD
+
+		auto buf
+		"PWD" // name
+		OSPEB OSPEBs_Environment + // envblock
+		DLLFindEnvironmentVariable ok! buf! drop
+
+		if (ok@)
+			return
+		end
+
+		buf@ // env
+		"PWD" // name
+		pebaddr@ OSPEBs_Environment + // envblock
+		DLLSetEnvironmentVariable drop
 	end
+
+	auto fullpath
+	OSFILEPATHMAX alloc fullpath!
 
 	argcn@ // argcn
 	argvt@ // argvt
 	path@ // path
+	fullpath@ // fullpath
 	pebaddr@ // pebaddr
 	DLLConstructParameters ok!
 
@@ -137,17 +154,69 @@ fn DLLPEBInitialize { argcn argvt path creationflags creationparams pebaddr -- o
 		OSPEB OSPEBs_StdErr + @ pebaddr@ OSPEBs_StdErr + !
 		OSPEB OSPEBs_CurrentDirectory + @ pebaddr@ OSPEBs_CurrentDirectory + !
 	end else
-		// TODO explicit stdio/current directory specification.
+		"DLLPEBInitialize: UNTESTED explicit inheritance codepath\n" OSAbort
 
-		OSNONE pebaddr@ OSPEBs_StdIn + !
-		OSNONE pebaddr@ OSPEBs_StdOut + !
-		OSNONE pebaddr@ OSPEBs_StdErr + !
-		OSNONE pebaddr@ OSPEBs_CurrentDirectory + !
+		auto handle
 
-		"/" // env
-		"PWD" // name
-		pebaddr@ OSPEBs_Environment + // envblock
-		DLLSetEnvironmentVariable drop
+		if (creationparams@ OSCreationParams_StdIn + @ OSNONE ~=)
+			creationparams@ OSCreationParams_StdIn + @ // handle
+			-1 // access
+			OSCURRENTPROCESS // srcprocesshandle
+			processhandle@ // destprocesshandle
+			OSHandleDuplicate ok! handle!
+
+			if (ok@)
+				return
+			end
+
+			handle@ pebaddr@ OSPEBs_StdIn + !
+		end else
+			OSNONE pebaddr@ OSPEBs_StdIn + !
+		end
+
+		if (creationparams@ OSCreationParams_StdOut + @ OSNONE ~=)
+			creationparams@ OSCreationParams_StdOut + @ // handle
+			-1 // access
+			OSCURRENTPROCESS // srcprocesshandle
+			processhandle@ // destprocesshandle
+			OSHandleDuplicate ok! handle!
+
+			if (ok@)
+				return
+			end
+
+			handle@ pebaddr@ OSPEBs_StdOut + !
+		end else
+			OSNONE pebaddr@ OSPEBs_StdOut + !
+		end
+
+		if (creationparams@ OSCreationParams_StdErr + @ OSNONE ~=)
+			creationparams@ OSCreationParams_StdErr + @ // handle
+			-1 // access
+			OSCURRENTPROCESS // srcprocesshandle
+			processhandle@ // destprocesshandle
+			OSHandleDuplicate ok! handle!
+
+			if (ok@)
+				return
+			end
+
+			handle@ pebaddr@ OSPEBs_StdErr + !
+		end else
+			OSNONE pebaddr@ OSPEBs_StdErr + !
+		end
+
+		OSPEB OSPEBs_CurrentDirectory + @ // handle
+		-1 // access
+		OSCURRENTPROCESS // srcprocesshandle
+		processhandle@ // destprocesshandle
+		OSHandleDuplicate ok! handle!
+
+		if (ok@)
+			return
+		end
+
+		handle@ pebaddr@ OSPEBs_CurrentDirectory + !
 	end
 end
 
@@ -190,7 +259,6 @@ table DLLCreationBlockDefault
 	OSNONE // StdIn
 	OSNONE // StdOut
 	OSNONE // StdErr
-	0 // CurrentDirectoryPath
 	// ... omitted until it exists ...
 endtable
 
@@ -256,6 +324,7 @@ fn OSSpawnV { argcn argvt path creationflags creationparams permissions name -- 
 	creationflags@ // creationflags
 	creationparams@ // creationparams
 	pebaddr@ // pebaddr
+	processhandle@ // processhandle
 	DLLPEBInitialize ok!
 
 	pebaddr@ // pebaddr

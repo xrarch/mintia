@@ -50,5 +50,7 @@ const STATUS_PROCESS_IS_TERMINATED -48
 const STATUS_ALIVE                 -49
 const STATUS_ARGUMENTS_TOO_LONG    -50
 const STATUS_PROCESS_NO_THREAD     -51
+const STATUS_ENVIRON_NOT_FOUND     -52
+const STATUS_ENVIRON_TOO_LARGE     -53
 
 extern OSStatusGetName { status -- name }

@@ -64,6 +64,8 @@ extern MmUsageDump { -- }
 extern MmInitPhase0 { -- }
 extern MmInitPhase1 { -- }
 
+extern MmQuery { query -- ok }
+
 extern MmResourceJettison { -- }
 
 extern MmPoolInit { -- }
@@ -103,6 +105,7 @@ externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
 
+externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize
 externptr MmPeakWorkingSetSize
 

@@ -10,6 +10,7 @@
 #include "<inc>/HALLIMNstationEBus.h"
 #include "<inc>/HALInterrupt.h"
 #include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
 
 #include "<inc>/Kernel.h"
 
@@ -30,8 +31,8 @@ table DriverKinnowFBDispatch
 	0                                    // open
 	0                                    // close
 	pointerof KinnowFBIOControl          // iocontrol
-	0                                    // read
-	0                                    // write
+	pointerof KinnowFBRead               // read
+	pointerof KinnowFBWrite              // write
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -184,4 +185,179 @@ fn (IODispatchGetPageAddressFunction) KinnowFBGetPageAddress { offset fcb -- phy
 
 	0 ok!
 	kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ + phyaddr!
+end
+
+fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
+	auto kinnowfb
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
+
+	auto vramsize
+	kinnowfb@ KinnowCard_VRAMSize + @ vramsize!
+
+	if (offset@ vramsize@ >=)
+		0 bytesread!
+
+		return
+	end
+
+	vramsize@ offset@ -
+	length@
+	min length!
+
+	0 bytesread!
+
+	auto lastpageno
+	-1 lastpageno!
+
+	auto vaddr
+	-1 vaddr!
+
+	while (bytesread@ length@ <)
+		auto pageoff
+		offset@ PAGEOFFSETMASK & pageoff!
+
+		auto pageno
+		offset@ PAGESHIFT >> pageno!
+
+		auto m
+		length@ bytesread@ -
+		PAGESIZE pageoff@ -
+		min m!
+
+		if (pageno@ lastpageno@ ~=)
+			if (vaddr@ -1 ~=)
+				PAGESIZE // length
+				vaddr@ // vaddr
+				MmIORegionUnmap
+			end
+
+			0 // cached
+			PAGESIZE // length
+			kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ PAGENUMBERMASK & + // phyaddr
+			MmIORegionMap ok! vaddr!
+
+			if (ok@)
+				return
+			end
+
+			pageno@ lastpageno!
+		end
+
+		if (lastmode@ USERMODE ==)
+			buffer@ // dest
+			vaddr@ pageoff@ + // src
+			m@ // size
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				PAGESIZE // length
+				vaddr@ // vaddr
+				MmIORegionUnmap
+
+				return
+			end
+		end else
+			buffer@ // dest
+			vaddr@ pageoff@ + // src
+			m@ // size
+			memcpy
+		end
+
+		m@ buffer +=
+		m@ bytesread +=
+		m@ offset +=
+	end
+
+	if (vaddr@ -1 ~=)
+		PAGESIZE // length
+		vaddr@ // vaddr
+		MmIORegionUnmap
+	end
+end
+
+fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
+	auto kinnowfb
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
+
+	auto vramsize
+	kinnowfb@ KinnowCard_VRAMSize + @ vramsize!
+
+	if (offset@ vramsize@ >=)
+		STATUS_IO_END_OF_DISK ok!
+		return
+	end
+
+	vramsize@ offset@ -
+	length@
+	min length!
+
+	0 byteswritten!
+
+	auto lastpageno
+	-1 lastpageno!
+
+	auto vaddr
+	-1 vaddr!
+
+	while (byteswritten@ length@ <)
+		auto pageoff
+		offset@ PAGEOFFSETMASK & pageoff!
+
+		auto pageno
+		offset@ PAGESHIFT >> pageno!
+
+		auto m
+		length@ byteswritten@ -
+		PAGESIZE pageoff@ -
+		min m!
+
+		if (pageno@ lastpageno@ ~=)
+			if (vaddr@ -1 ~=)
+				PAGESIZE // length
+				vaddr@ // vaddr
+				MmIORegionUnmap
+			end
+
+			0 // cached
+			PAGESIZE // length
+			kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ PAGENUMBERMASK & + // phyaddr
+			MmIORegionMap ok! vaddr!
+
+			if (ok@)
+				return
+			end
+
+			pageno@ lastpageno!
+		end
+
+		if (lastmode@ USERMODE ==)
+			vaddr@ pageoff@ + // dest
+			buffer@ // src
+			m@ // size
+			KeSafeCopyIn ok!
+
+			if (ok@)
+				PAGESIZE // length
+				vaddr@ // vaddr
+				MmIORegionUnmap
+
+				return
+			end
+		end else
+			vaddr@ pageoff@ + // dest
+			buffer@ // src
+			m@ // size
+			memcpy
+		end
+
+		m@ buffer +=
+		m@ byteswritten +=
+		m@ offset +=
+	end
+
+	if (vaddr@ -1 ~=)
+		PAGESIZE // length
+		vaddr@ // vaddr
+		MmIORegionUnmap
+	end
 end

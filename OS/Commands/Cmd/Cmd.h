@@ -12,11 +12,12 @@ externptr CmdSymbolStdErrHandle
 const CMDSTREAM_OK  0
 const CMDSTREAM_EOF 1
 
-const CMDTOKENTYPE_NORMAL 1
-const CMDTOKENTYPE_EOF    2
-const CMDTOKENTYPE_TOOBIG 3
-const CMDTOKENTYPE_EOL    4
-const CMDTOKENTYPE_UNFINISHEDSTRING 5
+const CMDTOKENTYPE_NORMAL  1
+const CMDTOKENTYPE_EOF     2
+const CMDTOKENTYPE_TOOBIG  3
+const CMDTOKENTYPE_EOL     4
+const CMDTOKENTYPE_INVALID 5
+const CMDTOKENTYPE_STRING  6
 
 extern CmdDoNextStatement { -- done ok }
 
@@ -36,6 +37,7 @@ extern CmdSymbolSet { contents name -- sym ok }
 extern CmdSymbolDeletePtr { sym -- }
 extern CmdSymbolDelete { name -- ok }
 
+extern CmdSymbolSetStdIOHandle { path access retptr -- ok }
 extern CmdSymbolSetStdIO { -- oldstdin oldstdout oldstderr }
 extern CmdSymbolGetStdIOHandles { -- stdin stdout stderr ok }
 

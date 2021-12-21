@@ -10,6 +10,8 @@ table CmdArguments[CMDARGUMENTSMAX]
 var CmdLastStatusCode 0
 public CmdLastStatusCode
 
+var CmdSyntaxError 0
+
 const ARGSIZE 1024
 
 fn CmdArgumentsCleanup { topindex -- }
@@ -19,15 +21,20 @@ fn CmdArgumentsCleanup { topindex -- }
 	end
 end
 
+var CmdNewStdInHandle 0
+var CmdNewStdOutHandle 0
+var CmdNewStdErrHandle 0
+
 fn CmdDoNextStatement { -- done ok }
 	auto argindex
 	0 argindex!
+
+	auto tokentype
 
 	0 done!
 	0 ok!
 
 	auto length
-	auto tokentype
 
 	auto argcn
 	0 argcn!
@@ -35,13 +42,16 @@ fn CmdDoNextStatement { -- done ok }
 	auto wait
 	1 wait!
 
+	OSNONE CmdNewStdInHandle!
+	OSNONE CmdNewStdOutHandle!
+	OSNONE CmdNewStdErrHandle!
+
 	while (1)
 		auto argbuffer
 		ARGSIZE OSHeapAllocate ok! argbuffer!
 
 		if (ok@)
-			argindex@ CmdArgumentsCleanup
-			return
+			break
 		end
 
 		argbuffer@ [argindex@]CmdArguments!
@@ -53,69 +63,124 @@ fn CmdDoNextStatement { -- done ok }
 		CmdGetNextToken ok! tokentype! length!
 
 		if (ok@)
-			argindex@ CmdArgumentsCleanup
-			return
-		end
-
-		if (tokentype@ CMDTOKENTYPE_UNFINISHEDSTRING ==)
-			argindex@ CmdArgumentsCleanup
-			CmdTokenLineNumber@ "cmd: line %d: unfinished string\n" OSGetStdErr FPrintf
-			1 done!
-			return
-		end
-
-		if (argbuffer@ "&" strcmp)
-			0 wait!
-			break
-		end elseif (argbuffer@ "&&" strcmp)
 			break
 		end
 
-		1 argcn +=
+		if (tokentype@ CMDTOKENTYPE_INVALID ==)
+			1 CmdSyntaxError!
+			2 done!
+			break
+		end
+
+		auto syntax
+		0 syntax!
+
+		if (CmdSyntaxError@ ~~)
+			if (tokentype@ CMDTOKENTYPE_STRING ~=)
+				0 ok!
+
+				if (argbuffer@ "&" strcmp)
+					0 wait!
+					break
+				end elseif (argbuffer@ "&&" strcmp)
+					break
+				end elseif (argbuffer@ "<" strcmp)
+					1 syntax!
+
+					ACCESS_READ // access
+					CmdNewStdInHandle // retptr
+					CmdSetStdioForStatement ok! tokentype!
+				end elseif (argbuffer@ ">" strcmp)
+					1 syntax!
+
+					ACCESS_WRITE // access
+					CmdNewStdOutHandle // retptr
+					CmdSetStdioForStatement ok! tokentype!
+				end elseif (argbuffer@ "2>" strcmp)
+					1 syntax!
+
+					ACCESS_WRITE // access
+					CmdNewStdErrHandle // retptr
+					CmdSetStdioForStatement ok! tokentype!
+				end
+
+				if (syntax@)
+					argbuffer@ OSHeapFree
+					1 argindex -=
+				end
+
+				if (tokentype@ CMDTOKENTYPE_INVALID ==)
+					1 done!
+					break
+				end
+
+				if (ok@)
+					1 CmdSyntaxError!
+					2 done!
+					0 ok!
+				end
+			end
+
+			if (syntax@ ~~)
+				1 argcn +=
+			end
+		end
 
 		if (tokentype@ CMDTOKENTYPE_EOF ==)
+			0 CmdSyntaxError!
 			1 done!
 			break
 		end elseif (tokentype@ CMDTOKENTYPE_EOL ==)
-			if (length@ ~~)
-				1 argcn -=
+			if (CmdSyntaxError@ ~~)
+				if (length@ ~~)
+					1 argcn -=
+				end
+			end else
+				2 done!
+				0 CmdSyntaxError!
 			end
 
 			break
 		end
 	end
 
-	if (done@ ~~)
-		auto commandname
-		[0]CmdArguments@ commandname!
+	if (ok@ ~~)
+		if (done@ ~~)
+			auto commandname
+			[0]CmdArguments@ commandname!
 
-		if (commandname@ gb)
-			auto ran
+			if (commandname@ gb)
+				auto ran
 
-			CmdArguments // argvt
-			argcn@ // argcn
-			CmdBuiltinRun ok! ran!
-
-			if (ok@)
-				argindex@ CmdArgumentsCleanup
-				return
-			end
-
-			if (ran@ ~~)
 				CmdArguments // argvt
 				argcn@ // argcn
-				wait@ // wait
-				CmdProgramRun ok!
+				CmdBuiltinRun ok! ran!
 
-				if (ok@)
-					argindex@ CmdArgumentsCleanup
-					return
+				if (ok@ ~~)
+					if (ran@ ~~)
+						CmdArguments // argvt
+						argcn@ // argcn
+						wait@ // wait
+						CmdProgramRun ok!
+					end
 				end
 			end
 		end
 	end
 
 	argindex@ CmdArgumentsCleanup
+
+	if (CmdNewStdInHandle@ OSNONE ~=)
+		CmdNewStdInHandle@ OSClose drop
+	end
+
+	if (CmdNewStdOutHandle@ OSNONE ~=)
+		CmdNewStdOutHandle@ OSClose drop
+	end
+
+	if (CmdNewStdErrHandle@ OSNONE ~=)
+		CmdNewStdErrHandle@ OSClose drop
+	end
 end
 
 buffer PathBuffer OSFILEPATHMAX
@@ -256,19 +321,25 @@ fn CmdProgramRunPath { argvt argcn path wait -- status ok }
 
 	creationparams@ OSCreationBlockInitialize
 
-	if (CmdSymbolStdInHandle@ OSNONE ~=)
+	if (CmdNewStdInHandle@ OSNONE ~=)
+		CmdNewStdInHandle@ creationparams@ OSCreationParams_StdIn + !
+	end elseif (CmdSymbolStdInHandle@ OSNONE ~=)
 		CmdSymbolStdInHandle@ creationparams@ OSCreationParams_StdIn + !
 	end else
 		OSGetStdIn creationparams@ OSCreationParams_StdIn + !
 	end
 
-	if (CmdSymbolStdOutHandle@ OSNONE ~=)
+	if (CmdNewStdOutHandle@ OSNONE ~=)
+		CmdNewStdOutHandle@ creationparams@ OSCreationParams_StdOut + !
+	end elseif (CmdSymbolStdOutHandle@ OSNONE ~=)
 		CmdSymbolStdOutHandle@ creationparams@ OSCreationParams_StdOut + !
 	end else
 		OSGetStdOut creationparams@ OSCreationParams_StdOut + !
 	end
 
-	if (CmdSymbolStdErrHandle@ OSNONE ~=)
+	if (CmdNewStdErrHandle@ OSNONE ~=)
+		CmdNewStdErrHandle@ creationparams@ OSCreationParams_StdErr + !
+	end elseif (CmdSymbolStdErrHandle@ OSNONE ~=)
 		CmdSymbolStdErrHandle@ creationparams@ OSCreationParams_StdErr + !
 	end else
 		OSGetStdErr creationparams@ OSCreationParams_StdErr + !
@@ -286,11 +357,12 @@ fn CmdProgramRunPath { argvt argcn path wait -- status ok }
 	path@ OSLastComponent // name
 	OSSpawnV ok! processhandle! threadhandle!
 
+	threadhandle@ OSClose drop
+
 	if (ok@)
+		processhandle@ OSClose drop
 		return
 	end
-
-	threadhandle@ OSClose drop
 
 	if (wait@)
 		OSWAIT_TIMEOUTINFINITE // timeout
@@ -307,4 +379,29 @@ fn CmdProgramRunPath { argvt argcn path wait -- status ok }
 	end
 
 	processhandle@ OSClose drop
+end
+
+fn CmdSetStdioForStatement { access retptr -- tokentype ok }
+	auto path
+	OSFILEPATHMAX alloc path!
+
+	auto length
+
+	path@ // tokenbuf
+	OSFILEPATHMAX // bufsize
+	1 // issyntactic
+	CmdGetNextToken ok! tokentype! length!
+
+	if (ok@)
+		return
+	end
+
+	if (tokentype@ CMDTOKENTYPE_INVALID ==)
+		return
+	end
+
+	path@ // path
+	access@ // access
+	retptr@ // retptr
+	CmdSymbolSetStdIOHandle ok!
 end

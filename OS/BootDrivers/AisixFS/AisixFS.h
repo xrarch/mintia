@@ -46,11 +46,11 @@ struct AFSData
 endstruct
 
 struct AFSFCBData
-	4 NextFCB
-	4 PrevFCB
-
 	4 NextReusableFCB
 	4 PrevReusableFCB
+	
+	4 NextFCB
+	4 PrevFCB
 	
 	4 INum
 	4 FirstFATLink

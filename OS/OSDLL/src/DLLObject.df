@@ -70,10 +70,6 @@ end
 fn OSLastComponent { path -- lcomp }
 	// get pointer to last component of path
 
-	if (path@ "//:/" 4 strncmp)
-		4 path +=
-	end
-
 	path@ lcomp!
 
 	auto ins
@@ -109,7 +105,8 @@ fn OSDirectoryName { path dirname bufsize -- ok }
 end
 
 fn OSRealPath { path canon bufsize -- ok }
-	// get canonized version of path in canon
+	// get canonized version of path in canon.
+	// this is a horrible horrible function.
 
 	if (bufsize@ 4 <)
 		-1 ok!
@@ -125,21 +122,29 @@ fn OSRealPath { path canon bufsize -- ok }
 	auto pcomp
 	OSFILEPATHMAX alloc pcomp!
 
-	auto obpath
-	0 obpath!
-
 	0 ok!
 
+	auto off
+
 	if (path@ gb '/' ==)
-		if (path@ "//:/" 4 strncmp)
-			1 obpath!
-			3 path +=
-			canon@ // dest
-			"//:/" // src
-			strcpy
-		end else
-			'/' canon@ sb
+		1 off!
+		'/' canon@ sb
+	end elseif (path@ gb ':' ==)
+		0 off!
+
+		while (path@ gb)
+			if (path@ gb '/' ==)
+				break
+			end
+
+			path@ gb canon@ off@ + sb
+
+			1 path +=
+			1 off +=
 		end
+
+		'/' canon@ off@ + sb
+		1 off +=
 	end else
 		canon@ bufsize@ OSGetCWD ok!
 		
@@ -147,8 +152,18 @@ fn OSRealPath { path canon bufsize -- ok }
 			return
 		end
 
-		if (canon@ "//:/" 4 strncmp)
-			1 obpath!
+		if (canon@ gb ':' ==)
+			while (canon@ off@ + gb)
+				if (canon@ off@ + gb '/' ==)
+					break
+				end
+
+				1 off +=
+			end
+
+			1 off +=
+		end else
+			1 off!
 		end
 	end
 
@@ -208,15 +223,9 @@ fn OSRealPath { path canon bufsize -- ok }
 				1 lenleft +=
 			end
 
-			if (obpath@)
-				if (ci@ 3 ==)
-					'/' canon@ ci@ + sb
-					4 ci!
-				end
-			end else
-				if (ci@ 0 ==)
-					1 ci!
-				end
+			if (ci@ off@ 1 - ==)
+				'/' canon@ ci@ + sb
+				off@ ci!
 			end
 
 			canon@ ci@ + strzero
@@ -224,18 +233,10 @@ fn OSRealPath { path canon bufsize -- ok }
 			continue
 		end
 
-		if (obpath@)
-			if (ci@ 4 >)
-				'/' canon@ ci@ + sb
-				1 ci +=
-				1 lenleft -=
-			end
-		end else
-			if (ci@ 1 >)
-				'/' canon@ ci@ + sb
-				1 ci +=
-				1 lenleft -=
-			end
+		if (ci@ off@ >)
+			'/' canon@ ci@ + sb
+			1 ci +=
+			1 lenleft -=
 		end
 
 		pcomp@ strlen pr!
@@ -259,6 +260,8 @@ fn OSOpen { flags access path -- handle ok }
 	auto dirh
 
 	if (path@ gb '/' ==)
+		-1 dirh!
+	end elseif (path@ gb ':' ==)
 		-1 dirh!
 	end else
 		OSPEB OSPEBs_CurrentDirectory + @ dirh!

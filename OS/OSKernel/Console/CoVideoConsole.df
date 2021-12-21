@@ -69,6 +69,8 @@ var CoVideoConsoleDirtyY2 0
 
 var CoVideoConsoleNeedsDraw 1
 
+var CoVideoConsoleEscape 0
+
 buffer CoVideoConsoleOutputEvent KeEvent_SIZEOF
 
 fn CoVideoConsoleInit { -- }
@@ -222,6 +224,24 @@ fn CoVideoConsoleDraw { -- }
 	HALConsoleStolen
 end
 
+fn CoVideoConsoleClear { -- }
+	CoVideoConsoleUpdateBuffer@ // ptr
+	CoVideoConsoleColumns@ CoVideoConsoleRows@ * 1 << // size
+	0 // word
+	memset
+
+	0 CoVideoConsoleDirtyX1!
+	0 CoVideoConsoleDirtyY1!
+
+	0 CoVideoConsoleUpdateCursorX!
+	0 CoVideoConsoleUpdateCursorY!
+
+	CoVideoConsoleColumns@ 1 - CoVideoConsoleDirtyX2!
+	CoVideoConsoleRows@ 1 - CoVideoConsoleDirtyY2!
+
+	1 CoVideoConsoleIsDirty!
+end
+
 fn CoVideoConsoleScroll { -- }
 	CoVideoConsoleUpdateBuffer@ // dest
 	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ 1 << + // src
@@ -274,6 +294,43 @@ fn CoVideoConsoleRubout { -- }
 	CoVideoConsoleBackUp
 end
 
+const PARAMCOUNT 4
+table CoVideoConsoleEscapeParameters[PARAMCOUNT]
+
+var CoVideoConsoleEscapeIndex 0
+
+fn CoVideoConsoleParseEscape { c -- }
+	if (c@ '0' >= c@ '9' <= &&)
+		auto np
+		[CoVideoConsoleEscapeIndex@]CoVideoConsoleEscapeParameters np!
+
+		10 np@ *=
+		c@ '0' - np@ +=
+
+		return
+	end
+
+	if (c@ '[' ==)
+		return
+	end elseif (c@ ';' ==)
+		1 CoVideoConsoleEscapeIndex +=
+
+		if (CoVideoConsoleEscapeIndex@ PARAMCOUNT >=)
+			0 CoVideoConsoleEscapeIndex!
+		end
+
+		return
+	end elseif (c@ 'm' ==)
+		// TODO set color
+	end elseif (c@ 'c' ==)
+		CoVideoConsoleClear
+	end elseif (c@ 'K' ==)
+		// TODO clear line
+	end
+
+	0 CoVideoConsoleEscape!
+end
+
 fn CoVideoConsolePutCharacter { c -- }
 	if (c@ 0x7F >)
 		return
@@ -286,7 +343,16 @@ fn CoVideoConsolePutCharacter { c -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (c@ '\n' ==)
+	if (CoVideoConsoleEscape@)
+		c@ CoVideoConsoleParseEscape
+		ipl@ KeIPLLower
+		return
+	end elseif (c@ 0x1B ==)
+		0 CoVideoConsoleEscapeIndex!
+		1 CoVideoConsoleEscape!
+		ipl@ KeIPLLower
+		return
+	end elseif (c@ '\n' ==)
 		CoVideoConsoleNewline
 		ipl@ KeIPLLower
 		return
@@ -548,7 +614,7 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 	while (1)
 		KERNELMODE // waitmode
 		0 // alertable
-		40 // timeout
+		25 // timeout
 		CoVideoConsoleOutputEvent // object
 		KeThreadWaitForObject drop
 

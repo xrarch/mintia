@@ -187,6 +187,10 @@ fn (IODispatchGetPageAddressFunction) KinnowFBGetPageAddress { offset fcb -- phy
 	kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ + phyaddr!
 end
 
+const IOUNIT (PAGESIZE 8 *)
+const IOUNITOFFSETMASK (IOUNIT 1 -)
+const IOUNITNUMBERMASK (IOUNITOFFSETMASK ~)
+
 fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
 	auto kinnowfb
 	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
@@ -206,41 +210,23 @@ fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags length offset bu
 
 	0 bytesread!
 
-	auto lastpageno
-	-1 lastpageno!
-
-	auto vaddr
-	-1 vaddr!
-
 	while (bytesread@ length@ <)
 		auto pageoff
-		offset@ PAGEOFFSETMASK & pageoff!
-
-		auto pageno
-		offset@ PAGESHIFT >> pageno!
+		offset@ IOUNITOFFSETMASK & pageoff!
 
 		auto m
 		length@ bytesread@ -
-		PAGESIZE pageoff@ -
+		IOUNIT pageoff@ -
 		min m!
 
-		if (pageno@ lastpageno@ ~=)
-			if (vaddr@ -1 ~=)
-				PAGESIZE // length
-				vaddr@ // vaddr
-				MmIORegionUnmap
-			end
+		auto vaddr
+		0 // cached
+		IOUNIT // length
+		kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ IOUNITNUMBERMASK & + // phyaddr
+		MmIORegionMap ok! vaddr!
 
-			0 // cached
-			PAGESIZE // length
-			kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ PAGENUMBERMASK & + // phyaddr
-			MmIORegionMap ok! vaddr!
-
-			if (ok@)
-				return
-			end
-
-			pageno@ lastpageno!
+		if (ok@)
+			return
 		end
 
 		if (lastmode@ USERMODE ==)
@@ -248,14 +234,6 @@ fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags length offset bu
 			vaddr@ pageoff@ + // src
 			m@ // size
 			KeSafeCopyOut ok!
-
-			if (ok@)
-				PAGESIZE // length
-				vaddr@ // vaddr
-				MmIORegionUnmap
-
-				return
-			end
 		end else
 			buffer@ // dest
 			vaddr@ pageoff@ + // src
@@ -263,15 +241,17 @@ fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags length offset bu
 			memcpy
 		end
 
+		IOUNIT // length
+		vaddr@ // vaddr
+		MmIORegionUnmap
+
+		if (ok@)
+			return
+		end
+
 		m@ buffer +=
 		m@ bytesread +=
 		m@ offset +=
-	end
-
-	if (vaddr@ -1 ~=)
-		PAGESIZE // length
-		vaddr@ // vaddr
-		MmIORegionUnmap
 	end
 end
 
@@ -293,41 +273,23 @@ fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags length offset buffer f
 
 	0 byteswritten!
 
-	auto lastpageno
-	-1 lastpageno!
-
-	auto vaddr
-	-1 vaddr!
-
 	while (byteswritten@ length@ <)
 		auto pageoff
-		offset@ PAGEOFFSETMASK & pageoff!
-
-		auto pageno
-		offset@ PAGESHIFT >> pageno!
+		offset@ IOUNITOFFSETMASK & pageoff!
 
 		auto m
 		length@ byteswritten@ -
-		PAGESIZE pageoff@ -
+		IOUNIT pageoff@ -
 		min m!
 
-		if (pageno@ lastpageno@ ~=)
-			if (vaddr@ -1 ~=)
-				PAGESIZE // length
-				vaddr@ // vaddr
-				MmIORegionUnmap
-			end
+		auto vaddr
+		0 // cached
+		IOUNIT // length
+		kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ IOUNITNUMBERMASK & + // phyaddr
+		MmIORegionMap ok! vaddr!
 
-			0 // cached
-			PAGESIZE // length
-			kinnowfb@ KinnowCard_BaseAddress + @ LGVRAMOffset + offset@ PAGENUMBERMASK & + // phyaddr
-			MmIORegionMap ok! vaddr!
-
-			if (ok@)
-				return
-			end
-
-			pageno@ lastpageno!
+		if (ok@)
+			return
 		end
 
 		if (lastmode@ USERMODE ==)
@@ -335,14 +297,6 @@ fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags length offset buffer f
 			buffer@ // src
 			m@ // size
 			KeSafeCopyIn ok!
-
-			if (ok@)
-				PAGESIZE // length
-				vaddr@ // vaddr
-				MmIORegionUnmap
-
-				return
-			end
 		end else
 			vaddr@ pageoff@ + // dest
 			buffer@ // src
@@ -350,14 +304,16 @@ fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags length offset buffer f
 			memcpy
 		end
 
-		m@ buffer +=
-		m@ byteswritten +=
-		m@ offset +=
-	end
-
-	if (vaddr@ -1 ~=)
 		PAGESIZE // length
 		vaddr@ // vaddr
 		MmIORegionUnmap
+
+		if (ok@)
+			return
+		end
+
+		m@ buffer +=
+		m@ byteswritten +=
+		m@ offset +=
 	end
 end

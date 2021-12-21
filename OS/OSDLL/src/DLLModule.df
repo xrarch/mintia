@@ -84,7 +84,7 @@ end
 // user libraries directory.
 
 fn DLLModuleOpenFile { name -- handle ok }
-	if (name@ gb '/' ==)
+	if (name@ gb '/' == name@ gb ':' == ||)
 		// it's a straight absolute path, just use it.
 
 		0 // flags
@@ -194,6 +194,7 @@ fn DLLModuleDoImports { dll -- ok }
 	while (i@ count@ <)
 		auto dllp
 
+		0 // flags
 		ptr@ LOFFImport_Name + @ strtab@ + // name
 		OSModuleLoad ok! dllp!
 
@@ -303,6 +304,10 @@ fn DLLModuleMap { section dll -- ok }
 		OSSectionMapView ok! realva!
 
 		if (ok@)
+			if (ok@ STATUS_INVALID_ARGUMENT ==)
+				STATUS_BAD_EXECUTABLE ok!
+			end
+
 			return
 		end
 
@@ -359,6 +364,10 @@ fn DLLModuleMap { section dll -- ok }
 		bsssection@ OSClose drop
 
 		if (ok@)
+			if (ok@ STATUS_INVALID_ARGUMENT ==)
+				STATUS_BAD_EXECUTABLE ok!
+			end
+
 			// unmap data section
 
 			head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
@@ -404,6 +413,14 @@ fn DLLModuleMap { section dll -- ok }
 		end
 
 		if (ok@)
+			if (ok@ STATUS_UNAVAILABLE_ADDRESS ~=)
+				if (ok@ STATUS_INVALID_ARGUMENT ==)
+					STATUS_BAD_EXECUTABLE ok!
+				end
+
+				return
+			end
+
 			// couldn't map, try again COW...
 
 			sectionheader@ LOFFSectionHeader_SectionSize + @ // length
@@ -416,6 +433,10 @@ fn DLLModuleMap { section dll -- ok }
 			OSSectionMapView ok! realva!
 
 			if (ok@)
+				if (ok@ STATUS_INVALID_ARGUMENT ==)
+					STATUS_BAD_EXECUTABLE ok!
+				end
+
 				// unmap data
 
 				head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
@@ -566,11 +587,13 @@ fn DLLModuleResolveSymbols { dll -- ok }
 			OSGetSymbolAddress ok! addr!
 
 			if (ok@)
-				import@ LOFFImport_Name + @ OSModule_Name + @
-				name@
-				dll@ OSModule_Name + @
-				"OSDLL: %s: couldn't find symbol '%s' in '%s'\n"
-				OSGetStdErr FPrintf
+				if (DLLProcessInit@)
+					import@ LOFFImport_Name + @ OSModule_Name + @
+					name@
+					dll@ OSModule_Name + @
+					"LINK ERROR: %s: couldn't find symbol '%s' in '%s'\n"
+					OSGetStdErr FPrintf
+				end
 
 				return
 			end

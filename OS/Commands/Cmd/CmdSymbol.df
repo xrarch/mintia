@@ -1,0 +1,197 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "Cmd.h"
+
+var CmdSymbolStdInHandle OSNONE
+public CmdSymbolStdInHandle
+
+var CmdSymbolStdOutHandle OSNONE
+public CmdSymbolStdOutHandle
+
+var CmdSymbolStdErrHandle OSNONE
+public CmdSymbolStdErrHandle
+
+fn CmdSymbolSetStdIO { -- oldstdin oldstdout oldstderr }
+	OSGetStdIn oldstdin!
+	if (CmdSymbolStdInHandle@ OSNONE ~=)
+		CmdSymbolStdInHandle@ OSSetStdIn
+	end
+
+	OSGetStdOut oldstdout!
+	if (CmdSymbolStdOutHandle@ OSNONE ~=)
+		CmdSymbolStdOutHandle@ OSSetStdOut
+	end
+
+	OSGetStdErr oldstderr!
+	if (CmdSymbolStdErrHandle@ OSNONE ~=)
+		CmdSymbolStdErrHandle@ OSSetStdErr
+	end
+end
+
+fn CmdSymbolSetStdIOHandle { path access retptr -- }
+	if (retptr@@ OSNONE ~=)
+		retptr@@ OSClose drop
+	end
+
+	auto ok
+
+	0 // flags
+	access@ // access
+	path@ // path
+	0 // ftype
+	OSFileOpen ok! retptr@!
+
+	if (ok@)
+		OSNONE retptr@!
+
+		ok@ OSStatusGetName
+		path@
+		"cmd: %s: %s\n" OSGetStdErr FPrintf
+	end
+end
+
+var CmdSymbolListHead 0
+
+fn CmdSymbolFind { name -- sym ok }
+	CmdSymbolListHead@ sym!
+	-1 ok!
+
+	while (sym@)
+		if (sym@ CmdSymbol_Name + @ name@ strcmp)
+			0 ok!
+			return
+		end
+
+		sym@ CmdSymbol_Next + @ sym!
+	end
+end
+
+fn CmdSymbolGet { name -- contents ok }
+	auto sym
+	name@ CmdSymbolFind ok! sym!
+
+	if (ok@)
+		return
+	end
+
+	sym@ CmdSymbol_Contents + @ contents!
+end
+
+fn CmdSymbolSet { contents name -- sym ok }
+	auto cbuf
+	contents@ strlen 1 + OSHeapAllocate ok! cbuf!
+
+	if (ok@)
+		return
+	end
+
+	cbuf@ // dest
+	contents@ // src
+	strcpy
+
+	name@ CmdSymbolFind ok! sym!
+
+	if (ok@ ~~)
+		// already exists, replace old contents with new
+
+		sym@ CmdSymbol_Contents + @ OSHeapFree
+	end else
+		// doesn't exist, make it and link it into the symbol list
+
+		CmdSymbol_SIZEOF OSHeapAllocate ok! sym!
+
+		if (ok@)
+			cbuf@ OSHeapFree
+			return
+		end
+
+		auto h
+		CmdSymbolListHead@ h!
+
+		0 sym@ CmdSymbol_Prev + !
+		h@ sym@ CmdSymbol_Next + !
+
+		if (h@)
+			sym@ h@ CmdSymbol_Prev + !
+		end
+
+		sym@ CmdSymbolListHead!
+
+		auto nbuf
+		name@ strlen 1 + OSHeapAllocate ok! nbuf!
+
+		if (ok@)
+			return
+		end
+
+		nbuf@ // dest
+		name@ // src
+		strcpy
+
+		nbuf@ sym@ CmdSymbol_Name + !
+	end
+
+	cbuf@ sym@ CmdSymbol_Contents + !
+
+	if (name@ "stdin" strcmp)
+		cbuf@ // path
+		ACCESS_READ // access
+		CmdSymbolStdInHandle // retptr
+		CmdSymbolSetStdIOHandle
+	end elseif (name@ "stdout" strcmp)
+		cbuf@ // path
+		ACCESS_WRITE // access
+		CmdSymbolStdOutHandle // retptr
+		CmdSymbolSetStdIOHandle
+	end elseif (name@ "stderr" strcmp)
+		cbuf@ // path
+		ACCESS_WRITE // access
+		CmdSymbolStdErrHandle // retptr
+		CmdSymbolSetStdIOHandle
+	end
+end
+
+fn CmdSymbolDeletePtr { sym -- }
+	auto p
+	sym@ CmdSymbol_Prev + @ p!
+
+	if (p@)
+		sym@ CmdSymbol_Next + @ p@ CmdSymbol_Next + !
+	end else
+		sym@ CmdSymbol_Next + @ CmdSymbolListHead!
+	end
+
+	sym@ CmdSymbol_Next + @ p!
+
+	if (p@)
+		sym@ CmdSymbol_Prev + @ p@ CmdSymbol_Prev + !
+	end
+
+	sym@ CmdSymbol_Contents + @ OSHeapFree
+	sym@ CmdSymbol_Name + @ OSHeapFree
+	sym@ OSHeapFree
+end
+
+fn CmdSymbolDelete { name -- ok }
+	auto sym
+	name@ CmdSymbolFind ok! sym!
+
+	if (ok@)
+		return
+	end
+
+	if (name@ "stdin" strcmp)
+		CmdSymbolStdInHandle@ OSClose drop
+		OSNONE CmdSymbolStdInHandle!
+	end elseif (name@ "stdout" strcmp)
+		CmdSymbolStdOutHandle@ OSClose drop
+		OSNONE CmdSymbolStdOutHandle!
+	end elseif (name@ "stderr" strcmp)
+		CmdSymbolStdErrHandle@ OSClose drop
+		OSNONE CmdSymbolStdErrHandle!
+	end
+
+	sym@ CmdSymbolDeletePtr
+end

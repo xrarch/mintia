@@ -1,0 +1,187 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "Cmd.h"
+
+const BUILTINCOUNT 5
+
+table CmdBuiltins
+	"help"
+	"Displays help text"
+	pointerof CmdBuiltinHelp
+
+	"set"
+	"[symbol] [contents] Sets the value of a symbol"
+	pointerof CmdBuiltinSet
+
+	"unset"
+	"[symbol] Undefines a symbol"
+	pointerof CmdBuiltinUnset
+
+	"stdio"
+	"Resets stdio redirection."
+	pointerof CmdBuiltinStdio
+
+	"cd"
+	"[path] Changes the current working directory."
+	pointerof CmdBuiltinCd
+endtable
+
+struct CmdBuiltin
+	4 Name
+	4 HelpText
+	4 Function
+endstruct
+
+fn CmdBuiltinRun { argvt argcn -- ran ok }
+	auto builtinname
+	argvt@@ builtinname!
+
+	auto bcount
+	BUILTINCOUNT bcount!
+
+	auto b
+	CmdBuiltins b!
+
+	0 ran!
+	0 ok!
+
+	while (bcount@)
+		if (b@ CmdBuiltin_Name + @ builtinname@ strcmp)
+			1 ran!
+
+			auto oldstdin
+			auto oldstdout
+			auto oldstderr
+			auto ret
+
+			CmdSymbolSetStdIO oldstderr! oldstdout! oldstdin!
+
+			argvt@ // argvt
+			argcn@ // argcn
+			b@ CmdBuiltin_Function + @ CmdBuiltinF ok! ret!
+
+			oldstdin@ OSSetStdIn
+			oldstdout@ OSSetStdOut
+			oldstderr@ OSSetStdErr
+
+			ret@ CmdLastStatusCode!
+
+			return
+		end
+
+		CmdBuiltin_SIZEOF b +=
+		1 bcount -=
+	end
+end
+
+fn (CmdBuiltinF) CmdBuiltinHelp { argvt argcn -- ret ok }
+	0 ok!
+	0 ret!
+
+	auto bcount
+	BUILTINCOUNT bcount!
+
+	auto b
+	CmdBuiltins b!
+
+	while (bcount@)
+		b@ CmdBuiltin_HelpText + @
+		b@ CmdBuiltin_Name + @
+		"%10s %s\n" Printf
+
+		CmdBuiltin_SIZEOF b +=
+		1 bcount -=
+	end
+end
+
+fn (CmdBuiltinF) CmdBuiltinSet { argvt argcn -- ret ok }
+	0 ok!
+	0 ret!
+
+	if (argcn@ 2 <)
+		"set: argcount<2\n" OSGetStdErr FPrintf
+		-1 ret!
+		return
+	end
+
+	if (argcn@ 3 >)
+		"set: argcount>3\n" OSGetStdErr FPrintf
+		-1 ret!
+		return
+	end
+
+	auto name
+	argvt@ 4 + @ name!
+
+	if (name@ gb ~~)
+		"set: empty name\n" OSGetStdErr FPrintf
+		-1 ret!
+		return
+	end
+
+	auto contents
+	if (argcn@ 3 ==)
+		argvt@ 8 + @ contents!
+	end else
+		"" contents!
+	end
+
+	contents@
+	name@
+	CmdSymbolSet ok! drop
+end
+
+fn (CmdBuiltinF) CmdBuiltinUnset { argvt argcn -- ret ok }
+	0 ok!
+	0 ret!
+
+	if (argcn@ 2 ~=)
+		"unset: argcount!=2\n" OSGetStdErr FPrintf
+		-1 ret!
+		return
+	end
+
+	auto name
+	argvt@ 4 + @ name!
+
+	if (name@ gb ~~)
+		"unset: empty name\n" OSGetStdErr FPrintf
+		-1 ret!
+		return
+	end
+
+	name@ // name
+	CmdSymbolDelete drop
+end
+
+fn (CmdBuiltinF) CmdBuiltinStdio { argvt argcn -- ret ok }
+	"stdin" CmdSymbolDelete drop
+	"stdout" CmdSymbolDelete drop
+	"stderr" CmdSymbolDelete drop
+end
+
+fn (CmdBuiltinF) CmdBuiltinCd { argvt argcn -- ret ok }
+	0 ok!
+	0 ret!
+
+	if (argcn@ 2 <)
+		return
+	end
+
+	auto path
+	argvt@ 4 + @ path!
+
+	if (path@ gb ~~)
+		return
+	end
+
+	path@ OSChangeCWD ret!
+
+	if (ret@)
+		ret@ OSStatusGetName
+		path@
+		"%s: %s\n" OSGetStdErr FPrintf
+	end
+end

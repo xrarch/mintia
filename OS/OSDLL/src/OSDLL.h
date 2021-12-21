@@ -21,6 +21,8 @@ extern DLLSetEnvironmentVariable { env name envblock -- ok }
 
 // module stuff
 
+externptr DLLProcessInit
+
 extern DLLDoFixup { ptr value type -- ok }
 
 // heap stuff

@@ -1,0 +1,197 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "Cmd.h"
+
+const CHARBUFFERSIZE 4096
+buffer CmdTokenBuffer CHARBUFFERSIZE
+
+var CmdTokenStreamHandle OSNONE
+public CmdTokenStreamHandle
+
+var CmdTokenBufferPointer 0
+var CmdTokenValidCharacterCount 0
+
+var CmdTokenLineNumber 1
+public CmdTokenLineNumber
+
+fn CmdGetNextCharacter { issyntactic -- c streamstate ok }
+	CMDSTREAM_OK streamstate!
+	0 ok!
+
+	if (CmdTokenValidCharacterCount@ ~~)
+		if (issyntactic@)
+			if (CmdInteractiveMode@)
+				"> " Printf
+				OSFlushLine
+			end
+		end
+
+		0 CmdTokenBufferPointer!
+
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		CHARBUFFERSIZE // length
+		CmdTokenBuffer // buffer
+		CmdTokenStreamHandle@ // filehandle
+		OSFileRead ok! CmdTokenValidCharacterCount!
+
+		if (ok@)
+			return
+		end
+
+		if (CmdTokenValidCharacterCount@ ~~)
+			CMDSTREAM_EOF streamstate!
+			return
+		end
+	end
+
+	CmdTokenBuffer CmdTokenBufferPointer@ + gb c!
+
+	if (c@ '\n' ==)
+		1 CmdTokenLineNumber +=
+	end
+
+	1 CmdTokenBufferPointer +=
+	1 CmdTokenValidCharacterCount -=
+end
+
+fn CmdGetNextToken { tokenbuf bufsize issyntactic -- length tokentype ok }
+	CMDTOKENTYPE_NORMAL tokentype!
+	0 length!
+	0 ok!
+
+	auto ws
+	1 ws!
+
+	while (1)
+		auto c
+		auto ss
+
+		issyntactic@ CmdGetNextCharacter ok! ss! c!
+
+		if (ok@)
+			return
+		end
+
+		if (ss@ CMDSTREAM_EOF ==)
+			CMDTOKENTYPE_EOF tokentype!
+			break
+		end
+
+		if (c@ 92 ==) // backslash
+			1 CmdGetNextCharacter ok! ss! c!
+
+			if (ok@)
+				return
+			end
+
+			if (ss@ CMDSTREAM_EOF ==)
+				CMDTOKENTYPE_EOF tokentype!
+				break
+			end
+
+			if (c@ '\n' ==)
+				1 issyntactic!
+				continue
+			end
+		end elseif (c@ ' ' ==)
+			if (ws@)
+				continue
+			end
+
+			break
+		end elseif (c@ '\n' ==)
+			if (CmdInteractiveMode@ ~~)
+				if (ws@)
+					continue
+				end
+			end
+
+			CMDTOKENTYPE_EOL tokentype!
+			break
+		end
+
+		0 ws!
+
+		if (c@ 34 ==) // doublequote
+			tokenbuf@ // tokenbuf
+			bufsize@ // bufsize
+			CmdGetNextString ok! tokentype! length!
+
+			if (ok@)
+				return
+			end
+
+			length@ tokenbuf +=
+
+			break
+		end
+
+		if (bufsize@ ~~)
+			CMDTOKENTYPE_TOOBIG tokentype!
+			break
+		end
+
+		c@ tokenbuf@ sb
+
+		1 bufsize -=
+		1 length +=
+		1 tokenbuf +=
+	end
+
+	if (bufsize@ ~~)
+		CMDTOKENTYPE_TOOBIG tokentype!
+		return
+	end
+
+	0 tokenbuf@ sb
+end
+
+fn CmdGetNextString { tokenbuf bufsize -- length tokentype ok }
+	0 ok!
+
+	while (1)
+		auto c
+		auto ss
+
+		1 CmdGetNextCharacter ok! ss! c!
+
+		if (ok@)
+			return
+		end
+
+		if (ss@ CMDSTREAM_EOF ==)
+			CMDTOKENTYPE_UNFINISHEDSTRING tokentype!
+			return
+		end
+
+		if (c@ 34 ==) // doublequote
+			CMDTOKENTYPE_NORMAL tokentype!
+			return
+		end elseif (c@ 92 ==) // backslash
+			1 CmdGetNextCharacter ok! ss! c!
+
+			if (ok@)
+				return
+			end
+
+			if (ss@ CMDSTREAM_EOF ==)
+				CMDTOKENTYPE_UNFINISHEDSTRING tokentype!
+				return
+			end
+		end
+
+		if (bufsize@ ~~)
+			CMDTOKENTYPE_TOOBIG tokentype!
+			return
+		end
+
+		c@ tokenbuf@ sb
+
+		1 bufsize -=
+		1 length +=
+		1 tokenbuf +=
+	end
+end

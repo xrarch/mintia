@@ -7,6 +7,8 @@ const OSPROCESS_SUSPENDED     16384
 
 const OSTHREAD_SUSPENDED 1
 
+extern OSCreationBlockInitialize { creationparams -- }
+
 extern OSSpawnV { argcn argvt path creationflags creationparams permissions name -- threadhandle processhandle ok }
 extern OSSpawn { ... path creationflags creationparams permissions name -- threadhandle processhandle ok }
 

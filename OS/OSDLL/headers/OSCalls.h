@@ -38,6 +38,7 @@ extern OSFileQuery { filehandle query -- ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }
 extern OSFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
+extern OSDirectoryRead { dirent filehandle -- ok }
 
 extern OSSwapFileCreate { filehandle -- sizeinpages ok }
 

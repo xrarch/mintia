@@ -97,12 +97,12 @@ fn IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 	buffer@ // buffer
 	fileobject@ // fileobject
 	KeProcessCurrent // process
-	IOFileReadProcess ok! bytesread!
+	IOFileReadObject ok! bytesread!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesread ok }
+fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesread ok }
 	if (process@ PsSystemProcess@ ==)
 		0 process!
 	end
@@ -240,7 +240,7 @@ fn IOFileReadProcess { timeout flags length buffer fileobject process -- bytesre
 	end
 
 	fcb@ // fcb
-	IOFileControlBlockLock ok!
+	IOFileControlBlockLockShared ok!
 
 	if (ok@)
 		return
@@ -306,12 +306,12 @@ fn IOFileWrite { flags length buffer filehandle -- byteswritten ok }
 	buffer@ // buffer
 	fileobject@ // fileobject
 	KeProcessCurrent // process
-	IOFileWriteProcess ok! byteswritten!
+	IOFileWriteObject ok! byteswritten!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten ok }
+fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok }
 	if (process@ PsSystemProcess@ ==)
 		0 process!
 	end
@@ -448,7 +448,7 @@ fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten o
 	end
 
 	fcb@ // fcb
-	IOFileControlBlockLock ok!
+	IOFileControlBlockLockShared ok!
 
 	if (ok@)
 		return
@@ -486,4 +486,81 @@ fn IOFileWriteProcess { flags length buffer fileobject process -- byteswritten o
 	HALCPUInterruptDisable rs!
 	byteswritten@ fileobject@ IOFile_Offset + +=
 	rs@ HALCPUInterruptRestore
+end
+
+fn IODirectoryRead { dirent filehandle -- ok }
+	auto access
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	filehandle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_READ SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	dirent@ // dirent
+	fileobject@ // fileobject
+	IODirectoryReadObject ok!
+
+	fileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IODirectoryReadObject { dirent fileobject -- ok }
+	auto fcb
+	auto dispatchtable
+
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	if (DEBUGCHECKS)
+		if (fcb@ 0 ==)
+			"IODirectoryReadObject: file object had no FCB\n" KeCrash
+		end
+	end
+
+	fcb@ IOFileControlBlock_DispatchTable + @ dispatchtable!
+
+	if (DEBUGCHECKS)
+		if (dispatchtable@ 0 ==)
+			"IODirectoryReadObject: file object had no dispatch table\n" KeCrash
+		end
+	end
+
+	auto readfunc
+	dispatchtable@ IODispatchTable_ReadDirectory + @ readfunc!
+
+	if (readfunc@ ~~)
+		STATUS_IO_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+		STATUS_NOT_A_DIRECTORY ok!
+
+		return
+	end
+
+	fcb@ // fcb
+	IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	fileobject@ IOFile_Offset + @ // seek
+	dirent@ // dirent
+	fcb@ // fcb
+	readfunc@ IODispatchReadDirectoryFunction ok! fileobject@ IOFile_Offset + !
+
+	fcb@ IOFileControlBlockUnlock
 end

@@ -27,6 +27,7 @@
 .extern OSFileSeek
 .extern OSFileRead
 .extern OSFileWrite
+.extern OSDirectoryRead
 .extern OSSwapFileCreate
 .extern OSIOControl
 .extern OSGetBootDevicePath
@@ -56,7 +57,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 51
+	.dl 52
 
 OSCallTable:
 .global OSCallTable
@@ -86,32 +87,33 @@ OSCallTable:
 	.dl OSTOSFileSeek                                    ;23
 	.dl OSTOSFileRead                                    ;24
 	.dl OSTOSFileWrite                                   ;25
-	.dl OSTOSSwapFileCreate                              ;26
-	.dl OSTOSIOControl                                   ;27
-	.dl OSTOSGetBootDevicePath                           ;28
-	.dl OSTOSMountUpdateFlags                            ;29
-	.dl OSTOSMountGetFilesystemName                      ;30
-	.dl OSTOSSectionCreate                               ;31
-	.dl OSTOSSectionMapView                              ;32
-	.dl OSTOSUnmapView                                   ;33
-	.dl OSTOSRemapView                                   ;34
-	.dl OSTOSSetSwappiness                               ;35
-	.dl OSTOSMemoryQuery                                 ;36
-	.dl OSTOSProcessCreate                               ;37
-	.dl OSTOSProcessSignal                               ;38
-	.dl OSTOSProcessOpenByPID                            ;39
-	.dl OSTOSProcessQuery                                ;40
-	.dl OSTOSProcessQueryByPID                           ;41
-	.dl OSTOSProcessReadStatus                           ;42
-	.dl OSTOSProcessSignalActivation                     ;43
-	.dl OSTOSProcessWaitForActivation                    ;44
-	.dl OSTOSThreadSleep                                 ;45
-	.dl OSTOSThreadCreate                                ;46
-	.dl OSTOSThreadTerminate                             ;47
-	.dl OSTOSThreadResume                                ;48
-	.dl OSTOSThreadReadStatus                            ;49
-	.dl OSTOSThreadQuery                                 ;50
-	.dl OSTOSSetSystemConsole                            ;51
+	.dl OSTOSDirectoryRead                               ;26
+	.dl OSTOSSwapFileCreate                              ;27
+	.dl OSTOSIOControl                                   ;28
+	.dl OSTOSGetBootDevicePath                           ;29
+	.dl OSTOSMountUpdateFlags                            ;30
+	.dl OSTOSMountGetFilesystemName                      ;31
+	.dl OSTOSSectionCreate                               ;32
+	.dl OSTOSSectionMapView                              ;33
+	.dl OSTOSUnmapView                                   ;34
+	.dl OSTOSRemapView                                   ;35
+	.dl OSTOSSetSwappiness                               ;36
+	.dl OSTOSMemoryQuery                                 ;37
+	.dl OSTOSProcessCreate                               ;38
+	.dl OSTOSProcessSignal                               ;39
+	.dl OSTOSProcessOpenByPID                            ;40
+	.dl OSTOSProcessQuery                                ;41
+	.dl OSTOSProcessQueryByPID                           ;42
+	.dl OSTOSProcessReadStatus                           ;43
+	.dl OSTOSProcessSignalActivation                     ;44
+	.dl OSTOSProcessWaitForActivation                    ;45
+	.dl OSTOSThreadSleep                                 ;46
+	.dl OSTOSThreadCreate                                ;47
+	.dl OSTOSThreadTerminate                             ;48
+	.dl OSTOSThreadResume                                ;49
+	.dl OSTOSThreadReadStatus                            ;50
+	.dl OSTOSThreadQuery                                 ;51
+	.dl OSTOSSetSystemConsole                            ;52
 
 
 OSTOSConsolePutCharacter:
@@ -503,6 +505,21 @@ OSTOSFileWrite:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSDirectoryRead:
+.global OSTOSDirectoryRead
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSDirectoryRead
+
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

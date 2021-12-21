@@ -9,7 +9,7 @@ LD      =  $(OBJTOOL) link
 
 SYSBINDIR  = ../SystemBin
 
-DCFLAGS = incdir=../HAL/include/:../OSKernel/include/:./include/
+DCFLAGS = incdir=../HAL/include/:../OSKernel/include/:./include/:../HAL/limn2600/include/
 
 all: $(SYSBINDIR)/224Debug.exe
 

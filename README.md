@@ -29,4 +29,4 @@ WIP: MINTIA is not currently in an even minimally usable state.
 3. MBR partition table support; FAT32 driver
 4. Mac OS 9-lookalike window system.
 
-![Running](https://i.imgur.com/ITFIXBl.png)
+![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)

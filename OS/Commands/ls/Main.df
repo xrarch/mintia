@@ -2,81 +2,321 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+var AFlag 0
+var LFlag 0
+var DFlag 0
+
+fn Usage { -- }
+	"usage: ls [-adl] [file ...]\n" OSGetStdErr FPrintf
+end
+
 fn Main { ... -- ret }
 	0 ret!
 
+	auto i
+	1 i!
+
+	auto chk
+	2 chk!
+
 	if (argc@ 2 >=)
-		auto i
-		1 i!
+		auto sw
+		[1]argv@ sw!
 
-		while (i@ argc@ <)
-			argc@ 2 > // announce
-			[i@]argv@ // path
-			List ret!
+		if (sw@ gb '-' ==)
+			2 i!
+			3 chk!
 
-			if (ret@)
-				break
+			1 sw +=
+
+			while (sw@ gb 0 ~=)
+				if (sw@ gb 'a' ==)
+					1 AFlag!
+				end elseif (sw@ gb 'd' ==)
+					1 DFlag!
+				end elseif (sw@ gb 'l' ==)
+					1 LFlag!
+				end else
+					Usage
+					-1 OSExit
+				end
+
+				1 sw +=
 			end
+		end
+	end
+
+	if (argc@ chk@ <)
+		"." Ls
+	end else
+		while (i@ argc@ <)
+			[i@]argv@ Ls
 
 			1 i +=
 		end
-	end else
-		0 // announce
-		"." // path
-		List ret!
-	end
-
-	if (ret@)
-		ret@ OSStatusGetName
-		[i@]argv@
-		"ls: %s: %s\n" OSError
 	end
 end
 
+buffer FileInformation OSFileInformation_SIZEOF
+buffer ObjectQuery OSObjectQuery_SIZEOF
 buffer DirectoryEntry OSDirectoryEntry_SIZEOF
 
-fn List { announce path -- ok }
-	auto handle
+fn FileQueryHandle { handle -- ok }
+	handle@ // filehandle
+	FileInformation // query
+	OSFileQuery ok!
 
+	if (ok@)
+		return
+	end
+
+	handle@ // handle
+	ObjectQuery // query
+	OSQuery ok!
+end
+
+fn FileQueryPath { path -- ok }
+	auto handle
 	0 // flags
-	ACCESS_READ // access
+	0 // access (no access bits required for query)
 	path@ // path
-	OSFILETYPE_DIRECTORY // ftype
+	0 // ftype
 	OSFileOpen ok! handle!
 
 	if (ok@)
 		return
 	end
 
-	if (announce@)
-		path@ "%s:\n" Printf
+	handle@ FileQueryHandle ok!
+
+	handle@ OSClose drop
+end
+
+fn Ls { path -- }
+	auto handle
+	auto ok
+
+	0 // flags
+	ACCESS_READ // access
+	path@ // path
+	0 // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "ls: couldn't open %s: %s\n" OSError
 	end
 
-	while (ok@ ~~)
+	handle@ FileQueryHandle ok!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "ls: couldn't stat %s: %s\n" OSError
+	end
+
+	if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
+		if (DFlag@)
+			path@ EInfo
+			if (LFlag@ ~~)
+				'\n' Putc
+			end
+		end else
+			path@ handle@ ListDir
+		end
+	end else
+		path@ EInfo
+		if (LFlag@ ~~)
+			'\n' Putc
+		end
+	end
+
+	handle@ OSClose drop
+end
+
+var Gap 26
+var ItemPerRow 3
+var ItemsLeft 3
+
+const PATHBUFSZ 128
+buffer Pathbuf PATHBUFSZ
+
+fn ListDir { path handle -- }
+	auto ok
+
+	if (AFlag@)
+		"." EInfo
+		".." FileQueryPath ok!
+		if (ok@)
+			ok@ OSStatusGetName "ls: couldn't stat ..: %s\n" OSGetStdErr FPrintf
+		end else
+			".." EInfo
+		end
+	end
+
+	auto pl
+	path@ strlen pl!
+
+	while (1)
 		DirectoryEntry // dirent
 		handle@ // filehandle
 		OSDirectoryRead ok!
 
-		if (ok@)
-			handle@ OSClose drop
-
-			if (ok@ STATUS_IO_END_OF_FILE ==)
-				if (announce@)
-					'\n' Putc
-				end
-			
-				0 ok!
-			end
-
-			return
+		if (ok@ STATUS_IO_END_OF_FILE ==)
+			break
+		end elseif (ok@)
+			ok@ OSStatusGetName path@ "ls: couldn't read %s: %s\n" OSError
 		end
 
-		DirectoryEntry OSDirectoryEntry_Name + "%s\n" Printf
+		if (DirectoryEntry OSDirectoryEntry_Name + gb '.' ~= AFlag@ ||)
+			auto buf
+			auto alloced
+			0 alloced!
+
+			auto namelen
+			DirectoryEntry OSDirectoryEntry_Name + strlen namelen!
+
+			if (namelen@ pl@ + 2 + PATHBUFSZ >=)
+				// avoid using heap if possible
+				namelen@ pl@ + 2 + Malloc buf!
+				1 alloced!
+			end else
+				Pathbuf buf!
+			end
+
+			buf@ path@ strcpy
+
+			'/' buf@ pl@ + sb
+
+			buf@ pl@ + 1 + DirectoryEntry OSDirectoryEntry_Name + strcpy
+
+			buf@ FileQueryPath ok!
+			if (ok@)
+				ok@ buf@ "ls: couldn't stat %s: %s\n" OSGetStdErr FPrintf
+
+				if (alloced@)
+					buf@ Free
+				end
+
+				continue
+			end
+
+			DirectoryEntry OSDirectoryEntry_Name + EInfo
+
+			if (alloced@)
+				buf@ Free
+			end
+		end
 	end
 
-	if (announce@)
+	if (ItemsLeft@ ItemPerRow@ ~=)
 		'\n' Putc
 	end
+end
 
-	handle@ OSClose drop
+table TypeNames
+	0
+	'-'
+	'd'
+	'c'
+	'b'
+endtable
+
+table TypeColors
+	0
+	""
+	"\[[94m"
+	"\[[102m\[[30m"
+	"\[[46m\[[30m"
+endtable
+
+table ModeNames
+	"---"
+	"--x"
+	"-w-"
+	"-wx"
+	"r--"
+	"r-x"
+	"rw-"
+	"rwx"
+endtable
+
+fn EInfo { name -- }
+	auto q
+	FileInformation OSFileInformation_Type + @ q!
+
+	auto mode
+	ObjectQuery OSObjectQuery_Permissions + @ mode!
+
+	auto pad
+	0 pad!
+
+	auto auxc
+	"" auxc!
+
+	auto ind
+	if (q@ OSFILETYPE_DIRECTORY ==)
+		"/" ind!
+		1 pad!
+	end elseif (mode@ ACCESS_ANY_EXEC &)
+		"\[[91m" auxc!
+		"*" ind!
+		1 pad!
+	end else
+		"" ind!
+	end
+
+	auto mygap
+	Gap@ mygap!
+
+	if (LFlag@)
+		if (q@ OSFILETYPE_BLOCKDEVICE >)
+			'?' Putc
+		end else
+			[q@]TypeNames@ Putc
+		end
+
+		[mode@ 6 >> 7 &]ModeNames@ Puts
+		[mode@ 3 >> 7 &]ModeNames@ Puts
+		[mode@ 7 &]ModeNames@ Puts
+
+		' ' Putc
+
+		ObjectQuery OSObjectQuery_UID + @ "%4d " Printf
+		FileInformation OSFileInformation_Size + @ "%8d " Printf
+	end else
+		auto nl
+		name@ strlen nl!
+		pad@ nl +=
+
+		while (nl@ mygap@ >=)
+			26 mygap +=
+
+			1 ItemsLeft -=
+
+			if (ItemsLeft@ 1 <=)
+				break
+			end
+		end
+	end
+
+	ind@ name@ auxc@ [q@]TypeColors@ "%s%s%s\[[0m%s" Printf
+
+	if (LFlag@)
+		'\n' Putc
+	end else
+		1 ItemsLeft -=
+
+		if (ItemsLeft@ 0 ==)
+			ItemPerRow@ ItemsLeft!
+			'\n' Putc
+		end else
+			if (mygap@ nl@ >=)
+				auto spaces
+				mygap@ nl@ - spaces!
+
+				while (spaces@)
+					' ' Putc
+					1 spaces -=
+				end
+			end
+		end
+	end
 end

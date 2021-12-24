@@ -812,46 +812,41 @@ fn KeThreadPriorityBoost { boost thread -- }
 end
 
 fn KeThreadNextSwitch { -- }
-	while (KeThreadNext@)
-		// XXX I can't remember why I made this a while loop,
-		// but I would like to note that it was important.
+	auto next
+	KeThreadNext@ next!
 
-		auto next
-		KeThreadNext@ next!
+	0 KeThreadNext!
 
-		0 KeThreadNext!
+	auto current
+	KeThreadCurrent@ current!
 
-		auto current
-		KeThreadCurrent@ current!
+	auto cause
+	KeThreadNextReason@ cause!
 
-		auto cause
-		KeThreadNextReason@ cause!
+	0 KeThreadNextReason!
 
-		0 KeThreadNextReason!
+	if (cause@ THREADYIELD_QUANTUMEND ==)
+		// the quantum ended, place it at the back
 
-		if (cause@ THREADYIELD_QUANTUMEND ==)
-			// the quantum ended, place it at the back
+		current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
 
-			current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
+		QUEUEBACK current@ KeThreadReady
+	end elseif (cause@ THREADYIELD_PREEMPTED ==)
+		// it was preempted, place it at the front
 
-			QUEUEBACK current@ KeThreadReady
-		end elseif (cause@ THREADYIELD_PREEMPTED ==)
-			// it was preempted, place it at the front
+		1 current@ KeThreadQuantumDecrement drop
 
-			1 current@ KeThreadQuantumDecrement drop
-
-			QUEUEFRONT current@ KeThreadReady
-		end else
-			cause@ "KeThreadNextSwitch: weird cause (0x%x)\n" KeCrash
-		end
-
-		// if a reschedule was deferred, do it here
-
-		// this is done here instead of in a DPC to ensure that the entire
-		// DPC queue is processed before the thread switch occurs.
-
-		next@ KeThreadSwitch
+		QUEUEFRONT current@ KeThreadReady
+	end else
+		cause@ "KeThreadNextSwitch: weird cause (0x%x)\n" KeCrash
 	end
+
+	// if a reschedule was deferred, do it here
+
+	// this is done here instead of in a DPC to ensure that the entire
+	// DPC queue is processed before the thread switch occurs.
+
+	next@ KeThreadSwitch
 end
 
 // for when you want to yield NOW and in a particular state

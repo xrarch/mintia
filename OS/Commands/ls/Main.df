@@ -62,17 +62,21 @@ buffer ObjectQuery OSObjectQuery_SIZEOF
 buffer DirectoryEntry OSDirectoryEntry_SIZEOF
 
 fn FileQueryHandle { handle -- ok }
-	handle@ // filehandle
-	FileInformation // query
-	OSFileQuery ok!
+	handle@ // handle
+	ObjectQuery // query
+	OSQuery ok!
 
 	if (ok@)
 		return
 	end
 
-	handle@ // handle
-	ObjectQuery // query
-	OSQuery ok!
+	if (ObjectQuery OSObjectQuery_TypeName + "File" strcmp ~~)
+		STATUS_INVALID_OBJECT_TYPE ok!
+	end
+
+	handle@ // filehandle
+	FileInformation // query
+	OSFileQuery ok!
 end
 
 fn FileQueryPath { path -- ok }
@@ -80,8 +84,7 @@ fn FileQueryPath { path -- ok }
 	0 // flags
 	0 // access (no access bits required for query)
 	path@ // path
-	0 // ftype
-	OSFileOpen ok! handle!
+	OSOpen ok! handle!
 
 	if (ok@)
 		return
@@ -99,30 +102,55 @@ fn Ls { path -- }
 	0 // flags
 	ACCESS_READ // access
 	path@ // path
-	0 // ftype
-	OSFileOpen ok! handle!
+	OSOpen ok! handle!
 
 	if (ok@)
 		ok@ OSStatusGetName path@ "ls: couldn't open %s: %s\n" OSError
 	end
 
-	handle@ FileQueryHandle ok!
+	handle@ // handle
+	ObjectQuery // query
+	OSQuery ok!
 
 	if (ok@)
-		ok@ OSStatusGetName path@ "ls: couldn't stat %s: %s\n" OSError
+		ok@ OSStatusGetName path@ "ls: couldn't query %s: %s\n" OSError
 	end
 
-	if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
-		if (DFlag@)
+	if (ObjectQuery OSObjectQuery_TypeName + "File" strcmp)
+		handle@ FileQueryHandle ok!
+
+		if (ok@)
+			ok@ OSStatusGetName path@ "ls: couldn't stat %s: %s\n" OSError
+		end
+
+		if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
+			if (DFlag@)
+				path@ EInfo
+				if (LFlag@ ~~)
+					'\n' Putc
+				end
+			end else
+				path@ handle@ ListDir
+			end
+		end else
 			path@ EInfo
 			if (LFlag@ ~~)
 				'\n' Putc
 			end
+		end
+	end elseif (ObjectQuery OSObjectQuery_TypeName + "Directory" strcmp)
+		// this is an object directory, do special things
+
+		if (DFlag@)
+			path@ 0 OInfo
+			if (LFlag@ ~~)
+				'\n' Putc
+			end
 		end else
-			path@ handle@ ListDir
+			path@ handle@ ListDirObject
 		end
 	end else
-		path@ EInfo
+		path@ 0 OInfo
 		if (LFlag@ ~~)
 			'\n' Putc
 		end
@@ -189,7 +217,7 @@ fn ListDir { path handle -- }
 
 			buf@ FileQueryPath ok!
 			if (ok@)
-				ok@ buf@ "ls: couldn't stat %s: %s\n" OSGetStdErr FPrintf
+				ok@ OSStatusGetName buf@ "ls: couldn't stat %s: %s\n" OSGetStdErr FPrintf
 
 				if (alloced@)
 					buf@ Free
@@ -298,6 +326,130 @@ fn EInfo { name -- }
 	end
 
 	ind@ name@ auxc@ [q@]TypeColors@ "%s%s%s\[[0m%s" Printf
+
+	if (LFlag@)
+		'\n' Putc
+	end else
+		1 ItemsLeft -=
+
+		if (ItemsLeft@ 0 ==)
+			ItemPerRow@ ItemsLeft!
+			'\n' Putc
+		end else
+			if (mygap@ nl@ >=)
+				auto spaces
+				mygap@ nl@ - spaces!
+
+				while (spaces@)
+					' ' Putc
+					1 spaces -=
+				end
+			end
+		end
+	end
+end
+
+fn ListDirObject { path handle -- }
+	auto ok
+
+	auto pl
+	path@ strlen pl!
+
+	auto maxquery
+	handle@ OSDirectoryCountQuery ok! maxquery!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "ls: couldn't query count %s: %s\n" OSError
+	end
+
+	if (maxquery@ ~~)
+		return
+	end
+
+	auto querybuffer
+	maxquery@ OSObjectQuery_SIZEOF * OSHeapAllocate ok! querybuffer!
+
+	if (ok@)
+		ok@ OSStatusGetName "ls: couldn't allocate buffer: %s\n" OSError
+	end
+
+	auto count
+
+	querybuffer@ // buffer
+	maxquery@ // maxquery
+	handle@ // directoryhandle
+	OSDirectoryQueryAll ok! count!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "ls: couldn't query object list %s: %s\n" OSError
+	end
+
+	auto record
+	querybuffer@ record!
+
+	while (count@)
+		record@ OSObjectQuery_Name + record@ OInfo
+
+		1 count -=
+		OSObjectQuery_SIZEOF record +=
+	end
+
+	querybuffer@ OSHeapFree
+
+	if (ItemsLeft@ ItemPerRow@ ~=)
+		'\n' Putc
+	end
+end
+
+fn OInfo { name query -- }
+	if (query@ ~~)
+		ObjectQuery query!
+	end
+
+	auto mode
+	query@ OSObjectQuery_Permissions + @ mode!
+
+	auto pad
+	0 pad!
+
+	auto ind
+	if (query@ OSObjectQuery_TypeName + "Directory" strcmp)
+		"/" ind!
+		1 pad!
+	end else
+		"" ind!
+	end
+
+	auto mygap
+	Gap@ mygap!
+
+	if (LFlag@)
+		'o' Putc
+
+		[mode@ 6 >> 7 &]ModeNames@ Puts
+		[mode@ 3 >> 7 &]ModeNames@ Puts
+		[mode@ 7 &]ModeNames@ Puts
+
+		' ' Putc
+
+		query@ OSObjectQuery_UID + @ "%4d " Printf
+	end else
+		auto nl
+		name@ strlen nl!
+		pad@ nl +=
+
+		while (nl@ mygap@ >=)
+			26 mygap +=
+
+			1 ItemsLeft -=
+
+			if (ItemsLeft@ 1 <=)
+				break
+			end
+		end
+	end
+
+	ind@ name@ "%s%s" Printf
 
 	if (LFlag@)
 		'\n' Putc

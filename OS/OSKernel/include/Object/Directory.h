@@ -6,6 +6,8 @@ extern ObRootDirectoryUnlock { -- }
 
 extern ObDirectoryCreate { permissions name -- dirhandle ok }
 extern ObDirectoryCreateObject { permissions name flags -- dirobject ok }
+extern ObDirectoryCountQuery { directoryhandle -- count ok }
+extern ObDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
 extern ObDirectoryInsert { objecthandle directoryhandle -- ok }
 extern ObDirectoryRemove { objecthandle -- ok }
 extern ObDirectoryRemoveByPointer { locked object -- ok }

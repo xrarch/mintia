@@ -112,6 +112,86 @@ fn ObDirectoryCreate { permissions name -- dirhandle ok }
 	end
 end
 
+fn ObDirectoryCountQuery { directoryhandle -- count ok }
+	auto dir
+
+	ObTypeDirectoryType@ // type
+	directoryhandle@ // handle
+	ObObjectReferenceByHandle ok! dir! drop
+
+	if (ok@)
+		return
+	end
+
+	dir@ ObDirectory_ChildCount + @ count!
+
+	dir@ ObObjectDereferenceByPointer drop
+end
+
+fn ObDirectoryQueryAllObject { buffer maxquery dirobject -- count ok }
+	ObRootDirectoryLockShared ok!
+
+	if (ok@)
+		return
+	end
+
+	auto obh
+	dirobject@ ObDirectory_ObjectListHead + @ obh!
+
+	0 count!
+
+	while (obh@)
+		if (maxquery@ ~~)
+			break
+		end
+
+		obh@ ObHeader_SIZEOF + // processobject
+		buffer@ // query
+		ObObjectQueryObject ok!
+
+		if (ok@)
+			ObRootDirectoryUnlock
+
+			return
+		end
+
+		1 count +=
+		1 maxquery -=
+		OSObjectQuery_SIZEOF buffer +=
+		obh@ ObHeader_DirectoryListNext + @ obh!
+	end
+
+	ObRootDirectoryUnlock
+end
+
+fn ObDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
+	auto dir
+	auto access
+
+	ObTypeDirectoryType@ // type
+	directoryhandle@ // handle
+	ObObjectReferenceByHandle ok! dir! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_READ SeCheckAccess ok!
+
+	if (ok@)
+		dir@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	buffer@ // buffer
+	maxquery@ // maxquery
+	dir@ // dirobject
+	ObDirectoryQueryAllObject ok! count!
+
+	dir@ ObObjectDereferenceByPointer drop
+end
+
 fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
 	auto handletable
 	KeProcessCurrent PsProcess_HandleTable + @ handletable!
@@ -283,6 +363,7 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 	end
 
 	object@ directory@ ObDirectory_ObjectListHead + !
+	1 directory@ ObDirectory_ChildCount + +=
 
 	directory@ object@ ObHeader_DirectoryObject + !
 
@@ -293,8 +374,8 @@ end
 
 fn ObDirectoryRemoveByPointer { locked object -- ok }
 	// must be passed the object's header.
-	// assumes the caller locked the handletable shared. i don't know if
-	// that is strictly necessary for removal, but i know it is for insertion,
+	// assumes the caller locked the handletable shared. i don't know if that
+	// is strictly necessary for removal, but i know it is for insertion,
 	// which makes me paranoid.
 
 	if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT &)
@@ -345,6 +426,8 @@ fn ObDirectoryRemoveByPointer { locked object -- ok }
 
 		n@ dir@ ObDirectory_ObjectListHead + !
 	end
+
+	1 dir@ ObDirectory_ChildCount + -=
 
 	0 object@ ObHeader_DirectoryObject + !
 
@@ -406,7 +489,7 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 			IODevicesDirectoryObject@ object!
 		end elseif (path@ "//:/" 4 strncmp)
 			if (flags@ OSFILEFLAG_MUSTBEFILE &)
-				STATUS_INVALID_OBJECT_TYPE ok!
+				STATUS_NOT_FOUND ok!
 				return
 			end
 

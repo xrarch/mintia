@@ -33,6 +33,9 @@ extern OSWaitForObject { timeout objecthandle -- ok }
 
 extern OSHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }
 
+extern OSDirectoryCountQuery { directoryhandle -- count ok }
+extern OSDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
+
 // IO
 extern OSFileQuery { filehandle query -- ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }

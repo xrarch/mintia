@@ -585,11 +585,35 @@ OSProcessExit:
 
 	ret
 
+OSProcessCountQuery:
+.global OSProcessCountQuery
+
+	li   t0, 47
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSProcessQueryAll:
+.global OSProcessQueryAll
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 48
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
 OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 47
+	li   t0, 49
 	sys  0
 
 	mov  a0, t1
@@ -605,7 +629,7 @@ OSThreadCreate:
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
 
-	li   t0, 48
+	li   t0, 50
 	sys  0
 
 	mov  a1, t2
@@ -618,7 +642,7 @@ OSThreadTerminate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 49
+	li   t0, 51
 	sys  0
 
 	mov  a0, t1
@@ -629,7 +653,7 @@ OSThreadResume:
 .global OSThreadResume
 	mov  t1, a0
 
-	li   t0, 50
+	li   t0, 52
 	sys  0
 
 	mov  a0, t1
@@ -640,7 +664,7 @@ OSThreadReadStatus:
 .global OSThreadReadStatus
 	mov  t1, a0
 
-	li   t0, 51
+	li   t0, 53
 	sys  0
 
 	mov  a1, t2
@@ -653,7 +677,7 @@ OSThreadQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 52
+	li   t0, 54
 	sys  0
 
 	mov  a0, t1
@@ -664,7 +688,7 @@ OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 53
+	li   t0, 55
 	sys  0
 
 	mov  a0, t1

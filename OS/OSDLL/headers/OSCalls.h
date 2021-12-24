@@ -72,6 +72,9 @@ extern OSProcessWaitForActivation { timeout processhandle -- activationstatus ok
 
 extern OSProcessExit { status -- }
 
+extern OSProcessCountQuery { -- count ok }
+extern OSProcessQueryAll { buffer maxquery -- count ok }
+
 extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }

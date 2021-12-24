@@ -22,8 +22,11 @@ struct OSProcessInformation
 	4 OwningUID
 	4 OwningGID
 	4 Status
+	4 Priority
 	4 Terminated
 	4 ExitStatus
+	4 WorkingSetSize
+	4 PageFaultCount
 	48 Reserved
 endstruct
 

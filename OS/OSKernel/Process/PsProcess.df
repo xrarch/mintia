@@ -34,6 +34,10 @@ fn PsProcessSignalObject { signal processobject -- ok }
 		return
 	end
 
+	if (signal@ OSSIGNAL_KILL ==)
+		137 processobject@ KeProcess_KilledStatus + !
+	end
+
 	signal@ // signal
 	processobject@ // process
 	KeProcessSignal ok!
@@ -245,14 +249,19 @@ fn PsProcessInformationQueryObject { processobject query -- ok }
 	if (signalthread@)
 		// report the signalthread's scheduling status
 		signalthread@ KeThread_Status + @ query@ OSProcessInformation_Status + !
+		signalthread@ KeThread_Priority + @ query@ OSProcessInformation_Priority + !
 		rs@ HALCPUInterruptRestore
 	end else
 		rs@ HALCPUInterruptRestore
+		0 query@ OSProcessInformation_Priority + !
 		0 query@ OSProcessInformation_Status + !
 	end
 
 	processobject@ KeProcess_Terminated + @ query@ OSProcessInformation_Terminated + !
 	processobject@ KeProcess_KilledStatus + @ query@ OSProcessInformation_ExitStatus + !
+
+	processobject@ PsProcess_WorkingSetSize + @ query@ OSProcessInformation_WorkingSetSize + !
+	processobject@ PsProcess_PageFaultCount + @ query@ OSProcessInformation_PageFaultCount + !
 end
 
 fn PsProcessInformationQuery { processhandle query -- ok }
@@ -296,6 +305,42 @@ fn PsProcessInformationQueryByPID { pid query -- ok }
 	PsProcessInformationQueryObject ok!
 
 	processobject@ ObObjectDereferenceByPointer drop
+end
+
+fn PsProcessQueryAll { buffer maxquery -- count ok }
+	PsProcessListLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto process
+	PsProcessListHead@ process!
+
+	0 count!
+
+	while (process@)
+		if (maxquery@ ~~)
+			break
+		end
+
+		process@ // processobject
+		buffer@ // query
+		PsProcessInformationQueryObject ok!
+
+		if (ok@)
+			PsProcessListUnlock
+
+			return
+		end
+
+		1 count +=
+		1 maxquery -=
+		OSProcessInformation_SIZEOF buffer +=
+		process@ PsProcess_GlobalListNext + @ process!
+	end
+
+	PsProcessListUnlock
 end
 
 fn PsProcessSignalActivation { activationstatus -- ok }

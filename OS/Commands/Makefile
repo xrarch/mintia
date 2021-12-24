@@ -4,6 +4,7 @@ all:
 	make -C cat
 	make -C clear
 	make -C ls
+	make -C ps
 
 cleanup:
 	make -C cmd cleanup
@@ -11,3 +12,4 @@ cleanup:
 	make -C cat cleanup
 	make -C clear cleanup
 	make -C ls cleanup
+	make -C ps cleanup

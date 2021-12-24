@@ -91,6 +91,8 @@ externptr PsProcessTable
 externptr PsProcessListHead
 externptr PsProcessListTail
 
+externptr PsActiveProcessCount
+
 externptr PsSystemProcess
 
 externptr PsOSDLLInformation
@@ -135,6 +137,7 @@ extern PsProcessOpenByPID { access pid -- processhandle ok }
 extern PsProcessInformationQueryObject { processobject query -- ok }
 extern PsProcessInformationQuery { processhandle query -- ok }
 extern PsProcessInformationQueryByPID { pid query -- ok }
+extern PsProcessQueryAll { buffer maxquery -- count ok }
 
 extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }

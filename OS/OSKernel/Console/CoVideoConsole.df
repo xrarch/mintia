@@ -69,7 +69,32 @@ var CoVideoConsoleDirtyY2 0
 
 var CoVideoConsoleNeedsDraw 1
 
+const VIDEOCONSOLEDEFAULTFG 0 // black
+const VIDEOCONSOLEDEFAULTBG 15 // white
+
+var CoVideoConsoleFG VIDEOCONSOLEDEFAULTFG
+var CoVideoConsoleBG VIDEOCONSOLEDEFAULTBG
+
 var CoVideoConsoleEscape 0
+
+table CoVideoConsoleColorTable
+	0x000000 // black
+	0xFF0000 // red
+	0x007300 // green
+	0xFFFF00 // yellow
+	0x0000A4 // blue
+	0xFF00FF // magenta
+	0x00FFFF // cyan
+	0xB4B4B4 // light gray
+	0x393939 // dark gray
+	0xF68373 // light red
+	0x7BFFBD // light green
+	0xFFFFB4 // light yellow
+	0xB4D5FF // light blue
+	0xFF7BFF // light magenta
+	0xB4FFFF // light cyan
+	0xFFFFFF // white
+endtable
 
 buffer CoVideoConsoleOutputEvent KeEvent_SIZEOF
 
@@ -109,7 +134,7 @@ fn CoVideoConsoleInit { -- }
 	0 // quotablock
 	"ttyV0" // name
 	SeSystemUser@ // owninguser
-	ACCESS_OWNER_ALL // permissions
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
 	1 // permanent
 	CoConsoleCreateObject ok! deviceobject! drop
 
@@ -140,10 +165,8 @@ fn CoVideoConsoleInit { -- }
 	buf@ CoVideoConsoleUpdateBuffer!
 	buf@ CoVideoConsoleRows@ CoVideoConsoleColumns@ * 2 * + CoVideoConsoleOnScreenBuffer!
 
-	buf@ // ptr
-	CoVideoConsoleRows@ CoVideoConsoleColumns@ * 4 * // size
-	0 // word
-	memset
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleInitializeBuffer
+	CoVideoConsoleOnScreenBuffer@ CoVideoConsoleInitializeBuffer
 
 	CoVideoConsoleColumns@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowWidth!
 	CoVideoConsoleRows@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowHeight!
@@ -156,6 +179,14 @@ fn CoVideoConsoleInit { -- }
 	"CoVideoConsoleOutputEvent" // name
 	CoVideoConsoleOutputEvent // event
 	KeEventInitialize
+
+	auto i
+	0 i!
+
+	while (i@ 16 <)
+		[i@]CoVideoConsoleColorTable@ KVRGB24ToNative [i@]CoVideoConsoleColorTable!
+		1 i +=
+	end
 
 	deviceobject@ IODeviceGetExtension CoVideoConsole!
 
@@ -176,9 +207,8 @@ end
 const VIDEOCONSOLEWINDOWBGCOLOR 0xFFFFFF // white
 const VIDEOCONSOLETITLEBGCOLOR  0xE0E0E0 // light gray
 const VIDEOCONSOLEBGCOLOR       0x8ADFC9 // a shade of mint
-const VIDEOCONSOLEFGCOLOR       0x000000 // black
 
-const VIDEOCONSOLEDECOMARGINS 15 // pixel margin required for window decoration drawing
+const VIDEOCONSOLEDECOMARGINS 30 // pixel margin required for window decoration drawing
 
 const VIDEOCONSOLETEXTMARGINS 8 // pixel margin between window border and text
 
@@ -325,11 +355,16 @@ fn CoVideoConsoleDraw { -- }
 	HALConsoleStolen
 end
 
-fn CoVideoConsoleClear { -- }
-	CoVideoConsoleUpdateBuffer@ // ptr
+fn CoVideoConsoleInitializeBuffer { buf -- }
+	buf@ // ptr
 	CoVideoConsoleColumns@ CoVideoConsoleRows@ * 1 << // size
-	0 // word
+	VIDEOCONSOLEDEFAULTBG 28 << VIDEOCONSOLEDEFAULTFG 24 << |
+	VIDEOCONSOLEDEFAULTBG 12 << VIDEOCONSOLEDEFAULTFG 8 << | | // word
 	memset
+end
+
+fn CoVideoConsoleClear { -- }
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleInitializeBuffer
 
 	0 CoVideoConsoleDirtyX1!
 	0 CoVideoConsoleDirtyY1!
@@ -339,6 +374,9 @@ fn CoVideoConsoleClear { -- }
 
 	CoVideoConsoleColumns@ 1 - CoVideoConsoleDirtyX2!
 	CoVideoConsoleRows@ 1 - CoVideoConsoleDirtyY2!
+
+	VIDEOCONSOLEDEFAULTFG CoVideoConsoleFG!
+	VIDEOCONSOLEDEFAULTBG CoVideoConsoleBG!
 
 	1 CoVideoConsoleIsDirty!
 end
@@ -351,7 +389,8 @@ fn CoVideoConsoleScroll { -- }
 
 	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ CoVideoConsoleRows@ 1 - * 1 << + // ptr
 	CoVideoConsoleColumns@ 1 << // size
-	0 // word
+	VIDEOCONSOLEDEFAULTBG 28 << VIDEOCONSOLEDEFAULTFG 24 << |
+	VIDEOCONSOLEDEFAULTBG 12 << VIDEOCONSOLEDEFAULTFG 8 << | | // word // word
 	memset
 
 	0 CoVideoConsoleDirtyX1!
@@ -400,6 +439,46 @@ table CoVideoConsoleEscapeParameters[PARAMCOUNT]
 
 var CoVideoConsoleEscapeIndex 0
 
+var CoVideoConsoleInverted 0
+
+fn CoVideoConsoleSetColor { -- }
+	auto color
+
+	auto param0
+	[0]CoVideoConsoleEscapeParameters@ param0!
+
+	if (param0@ 0 ==)
+		VIDEOCONSOLEDEFAULTFG CoVideoConsoleFG!
+		VIDEOCONSOLEDEFAULTBG CoVideoConsoleBG!
+
+		0 CoVideoConsoleInverted!
+
+		return
+	end elseif (param0@ 7 ==)
+		if (CoVideoConsoleInverted@ ~~)
+			CoVideoConsoleFG@ color!
+			CoVideoConsoleBG@ CoVideoConsoleFG!
+			color@ CoVideoConsoleBG!
+
+			1 CoVideoConsoleInverted!
+		end
+
+		return
+	end elseif (param0@ 39 ==)
+		VIDEOCONSOLEDEFAULTFG CoVideoConsoleFG!
+	end elseif (param0@ 49 ==)
+		VIDEOCONSOLEDEFAULTBG CoVideoConsoleBG!
+	end elseif (param0@ 30 >= param0@ 37 <= &&) // foreground, first 8
+		param0@ 30 - CoVideoConsoleFG!
+	end elseif (param0@ 40 >= param0@ 47 <= &&) // background, first 8
+		param0@ 40 - CoVideoConsoleBG!
+	end elseif (param0@ 90 >= param0@ 97 <= &&) // foreground, second 8
+		param0@ 90 - 8 + CoVideoConsoleFG!
+	end elseif (param0@ 100 >= param0@ 107 <= &&) // background, second 8
+		param0@ 100 - 8 + CoVideoConsoleBG!
+	end
+end
+
 fn CoVideoConsoleParseEscape { c -- }
 	if (c@ '0' >= c@ '9' <= &&)
 		auto np
@@ -422,7 +501,7 @@ fn CoVideoConsoleParseEscape { c -- }
 
 		return
 	end elseif (c@ 'm' ==)
-		// TODO set color
+		CoVideoConsoleSetColor
 	end elseif (c@ 'c' ==)
 		CoVideoConsoleClear
 	end elseif (c@ 'K' ==)
@@ -451,6 +530,15 @@ fn CoVideoConsolePutCharacter { c -- }
 	end elseif (c@ 0x1B ==)
 		0 CoVideoConsoleEscapeIndex!
 		1 CoVideoConsoleEscape!
+
+		auto i
+		0 i!
+
+		while (i@ PARAMCOUNT <)
+			0 [i@]CoVideoConsoleEscapeParameters!
+			1 i +=
+		end
+
 		ipl@ KeIPLLower
 		return
 	end elseif (c@ '\n' ==)
@@ -485,6 +573,7 @@ fn CoVideoConsolePutCharacter { c -- }
 	cury@ CoVideoConsoleColumns@ * 1 << +
 	curx@ 1 << + bufp!
 
+	CoVideoConsoleFG@ CoVideoConsoleBG@ 4 << | bufp@ 1 + sb
 	c@ bufp@ sb
 
 	if (CoVideoConsoleDirtyX1@ -1 ==)
@@ -548,7 +637,7 @@ fn (CoOutputFunction) CoVideoConsoleOutput { echo console -- ok }
 	end
 end
 
-fn CoVideoConsoleClearCursor { nativefg nativebg -- }
+fn CoVideoConsoleClearCursor { -- }
 	auto ux
 	CoVideoConsoleUpdateCursorX@ ux!
 
@@ -567,22 +656,25 @@ fn CoVideoConsoleClearCursor { nativefg nativebg -- }
 	osx@ 1 << + bufp!
 
 	auto ch
-	bufp@ gi 0xFF & ch!
+	bufp@ gb ch!
 
 	if (ch@ ~~)
 		' ' ch!
 	end
 
+	auto col
+	bufp@ 1 + gb col!
+
 	ch@ // char
-	nativefg@ // nativefg
-	nativebg@ // nativebg
+	[col@ 15 &]CoVideoConsoleColorTable@ // nativefg
+	[col@ 4 >> 15 &]CoVideoConsoleColorTable@ // nativebg
 	osx@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowX@ + // x
 	osy@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowY@ + // y
 	CoVideoConsoleFont@ // font
 	KVDrawCharacter
 end
 
-fn CoVideoConsoleDrawCursor { nativefg nativebg -- }
+fn CoVideoConsoleDrawCursor { -- }
 	auto ux
 	CoVideoConsoleUpdateCursorX@ ux!
 
@@ -595,15 +687,18 @@ fn CoVideoConsoleDrawCursor { nativefg nativebg -- }
 	ux@ 1 << + bufp!
 
 	auto ch
-	bufp@ gi 0xFF & ch!
+	bufp@ gb ch!
 
 	if (ch@ ~~)
 		' ' ch!
 	end
 
+	auto col
+	bufp@ 1 + gb col!
+
 	ch@ // char
-	nativebg@ // nativefg
-	nativefg@ // nativebg
+	[col@ 4 >> 15 &]CoVideoConsoleColorTable@ // nativefg
+	[col@ 15 &]CoVideoConsoleColorTable@ // nativebg
 	ux@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowX@ + // x
 	uy@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowY@ + // y
 	CoVideoConsoleFont@ // font
@@ -619,13 +714,7 @@ fn CoVideoConsoleUpdate { -- }
 		0 CoVideoConsoleNeedsDraw!
 	end
 
-	auto nativefg
-	VIDEOCONSOLEFGCOLOR KVRGB24ToNative nativefg!
-
-	auto nativebg
-	VIDEOCONSOLEWINDOWBGCOLOR KVRGB24ToNative nativebg!
-
-	nativefg@ nativebg@ CoVideoConsoleClearCursor
+	CoVideoConsoleClearCursor
 
 	if (CoVideoConsoleDirtyX1@ -1 ~=)
 		auto x
@@ -676,9 +765,12 @@ fn CoVideoConsoleUpdate { -- }
 						' ' ch!
 					end
 
+					auto col
+					ct@ 8 >> col!
+
 					ch@ // char
-					nativefg@ // nativefg
-					nativebg@ // nativebg
+					[col@ 15 &]CoVideoConsoleColorTable@ // nativefg
+					[col@ 4 >> 15 &]CoVideoConsoleColorTable@ // nativebg
 					qx@ CoVideoConsoleFontWidth@ * CoVideoConsoleWindowX@ + // x
 					y@ CoVideoConsoleFontHeight@ * CoVideoConsoleWindowY@ + // y
 					font@ // font
@@ -700,7 +792,7 @@ fn CoVideoConsoleUpdate { -- }
 
 	0 CoVideoConsoleIsDirty!
 
-	nativefg@ nativebg@ CoVideoConsoleDrawCursor
+	CoVideoConsoleDrawCursor
 end
 
 fn CoVideoConsoleDrawWorker { context1 context2 -- }

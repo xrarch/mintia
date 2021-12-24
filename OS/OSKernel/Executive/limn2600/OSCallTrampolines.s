@@ -48,6 +48,8 @@
 .extern OSProcessSignalActivation
 .extern OSProcessWaitForActivation
 .extern OSProcessExit
+.extern OSProcessCountQuery
+.extern OSProcessQueryAll
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
@@ -58,7 +60,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 53
+	.dl 55
 
 OSCallTable:
 .global OSCallTable
@@ -109,13 +111,15 @@ OSCallTable:
 	.dl OSTOSProcessSignalActivation                     ;44
 	.dl OSTOSProcessWaitForActivation                    ;45
 	.dl OSTOSProcessExit                                 ;46
-	.dl OSTOSThreadSleep                                 ;47
-	.dl OSTOSThreadCreate                                ;48
-	.dl OSTOSThreadTerminate                             ;49
-	.dl OSTOSThreadResume                                ;50
-	.dl OSTOSThreadReadStatus                            ;51
-	.dl OSTOSThreadQuery                                 ;52
-	.dl OSTOSSetSystemConsole                            ;53
+	.dl OSTOSProcessCountQuery                           ;47
+	.dl OSTOSProcessQueryAll                             ;48
+	.dl OSTOSThreadSleep                                 ;49
+	.dl OSTOSThreadCreate                                ;50
+	.dl OSTOSThreadTerminate                             ;51
+	.dl OSTOSThreadResume                                ;52
+	.dl OSTOSThreadReadStatus                            ;53
+	.dl OSTOSThreadQuery                                 ;54
+	.dl OSTOSSetSystemConsole                            ;55
 
 
 OSTOSConsolePutCharacter:
@@ -844,6 +848,36 @@ OSTOSProcessExit:
 
 	jal  OSProcessExit
 
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessCountQuery:
+.global OSTOSProcessCountQuery
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSProcessCountQuery
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessQueryAll:
+.global OSTOSProcessQueryAll
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessQueryAll
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

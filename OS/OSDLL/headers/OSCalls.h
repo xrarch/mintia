@@ -70,6 +70,8 @@ extern OSProcessReadStatus { processhandle -- status ok }
 extern OSProcessSignalActivation { activationstatus -- ok }
 extern OSProcessWaitForActivation { timeout processhandle -- activationstatus ok }
 
+extern OSProcessExit { status -- }
+
 extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }

@@ -47,6 +47,7 @@
 .extern OSProcessReadStatus
 .extern OSProcessSignalActivation
 .extern OSProcessWaitForActivation
+.extern OSProcessExit
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
@@ -57,7 +58,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 52
+	.dl 53
 
 OSCallTable:
 .global OSCallTable
@@ -107,13 +108,14 @@ OSCallTable:
 	.dl OSTOSProcessReadStatus                           ;43
 	.dl OSTOSProcessSignalActivation                     ;44
 	.dl OSTOSProcessWaitForActivation                    ;45
-	.dl OSTOSThreadSleep                                 ;46
-	.dl OSTOSThreadCreate                                ;47
-	.dl OSTOSThreadTerminate                             ;48
-	.dl OSTOSThreadResume                                ;49
-	.dl OSTOSThreadReadStatus                            ;50
-	.dl OSTOSThreadQuery                                 ;51
-	.dl OSTOSSetSystemConsole                            ;52
+	.dl OSTOSProcessExit                                 ;46
+	.dl OSTOSThreadSleep                                 ;47
+	.dl OSTOSThreadCreate                                ;48
+	.dl OSTOSThreadTerminate                             ;49
+	.dl OSTOSThreadResume                                ;50
+	.dl OSTOSThreadReadStatus                            ;51
+	.dl OSTOSThreadQuery                                 ;52
+	.dl OSTOSSetSystemConsole                            ;53
 
 
 OSTOSConsolePutCharacter:
@@ -829,6 +831,19 @@ OSTOSProcessWaitForActivation:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessExit:
+.global OSTOSProcessExit
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSProcessExit
+
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

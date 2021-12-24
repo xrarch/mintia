@@ -52,6 +52,7 @@ endstruct
 
 struct ObDirectory
 	4 ObjectListHead
+	4 ChildCount
 endstruct
 
 // modify OBHANDLEENTRYSIZELOG if you change the size of this structure

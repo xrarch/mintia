@@ -58,6 +58,20 @@ fn AFSFCBCacheLockBucket { bucket mount -- ok }
 	KeThreadWaitForObject ok!
 end
 
+fn AFSFCBCacheLockBucketUnalertable { bucket mount -- }
+	if (DEBUGCHECKS)
+		if (bucket@ AFSFCBBUCKETS >=)
+			"AFSFCBCacheLockBucketUnalertable: bucket >= AFSFCBBUCKETS\n" KeCrash
+		end
+	end
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * + // object
+	KeThreadWaitForObject drop
+end
+
 fn AFSFCBCacheUnlockBucket { bucket mount -- }
 	if (DEBUGCHECKS)
 		if (bucket@ AFSFCBBUCKETS >=)
@@ -354,6 +368,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			// while above the limit, any FCBs whose refcounts
 			// drop to 0 get instantly freed...
 
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
 			mount@ IOMountGetContext AFSData_FCBReusableListHead + @ fcb!
 
 			if (fcb@)
@@ -364,30 +381,64 @@ fn AFSFCBRead { inum mount -- fcb ok }
 				// IOFileControlBlockInitialize.
 				fcb@ AFSFCBReference drop
 
-				auto cacheblock
-				fcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
+				ipl@ KeIPLLower
 
-				if (cacheblock@)
-					1 // writeout
-					cacheblock@ // cacheblock
-					IOCacheInfoBlockDestroy ok!
+				auto rbucket
+				fcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ AFSFCBMASK & rbucket!
 
-					if (DEBUGCHECKS)
-						if (ok@)
-							ok@ "AFSFCBRead: couldn't destroy cacheblock (%i)\n" KeCrash
-						end
+				auto rbuckethead
+				afsdata@ AFSData_FCBBucketListHeads + rbucket@ 3 << + rbuckethead!
+
+				if (rbucket@ bucket@ ~=)
+					rbucket@ // bucket
+					mount@ // mount
+					AFSFCBCacheLockBucketUnalertable
+				end
+
+				if (DEBUGCHECKS)
+					if (fcb@ IOFileControlBlockGetReferences 1 <)
+						"AFSFCBRead: ref < 1\n" KeCrash
 					end
 				end
 
-				// remove from hash bucket
+				if (fcb@ IOFileControlBlockGetReferences 1 >)
+					// someone referenced this fcb while we were blocked on
+					// the rainbow mutex. give up, lets just allocate a new
+					// one
 
-				fcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ AFSFCBMASK & bucket!
+					fcb@ AFSFCBDereference drop
+					0 fcb!
+				end else
+					// evict fully by destroying cacheblock and removing
+					// from bucket
 
-				afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
+					auto cacheblock
+					fcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
 
-				fcb@ // fcb
-				buckethead@ // buckethead
-				AFSFCBRemove
+					if (cacheblock@)
+						1 // writeout
+						cacheblock@ // cacheblock
+						IOCacheInfoBlockDestroy ok!
+
+						if (DEBUGCHECKS)
+							if (ok@)
+								ok@ "AFSFCBRead: couldn't destroy cacheblock (%i)\n" KeCrash
+							end
+						end
+					end
+
+					fcb@ // fcb
+					rbuckethead@ // buckethead
+					AFSFCBRemove
+				end
+
+				if (rbucket@ bucket@ ~=)
+					rbucket@ // bucket
+					mount@ // mount
+					AFSFCBCacheUnlockBucket
+				end
+			end else
+				ipl@ KeIPLLower
 			end
 		end
 

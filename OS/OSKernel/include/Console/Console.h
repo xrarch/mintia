@@ -28,7 +28,7 @@ fnptr CoOutputFunction { echo console -- ok }
 extern CoConsoleOutputBufferGet { console -- outputbuffer }
 extern CoConsoleRawBufferGet { console -- rawbuffer }
 extern CoConsoleGetContext { console -- context }
-extern CoConsoleCreateObject { outputfunc context rawbuffer quotablock name owninguser permissions permanent -- fileobject deviceobject ok }
+extern CoConsoleCreateObject { outputfunc context rawbuffer quotablock name permissions permanent -- fileobject deviceobject ok }
 
 extern CoConsoleCook { console -- }
 

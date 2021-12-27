@@ -1,6 +1,6 @@
 extern ExEventInit { -- }
 
-extern ExEventCreateObject { signaled type owninguser permissions name -- eventobject ok }
+extern ExEventCreateObject { signaled type permissions name -- eventobject ok }
 extern ExEventCreate { signaled type permissions name -- eventhandle ok }
 
 extern ExEventResetObject { eventobject -- signaled }

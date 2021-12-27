@@ -1,6 +1,6 @@
 extern ExMutexInit { -- }
 
-extern ExMutexCreateObject { owninguser permissions name -- mutexobject ok }
+extern ExMutexCreateObject { permissions name -- mutexobject ok }
 extern ExMutexCreate { permissions name -- mutexhandle ok }
 
 extern ExMutexRelease { mutexhandle -- ok }

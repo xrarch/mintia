@@ -14,7 +14,8 @@ struct ObHeader
 	4 HandleCount
 	4 PointerCount
 
-	4 OwningUser
+	4 UID
+	4 GID
 	4 Permissions
 
 	4 QuotaCharge
@@ -82,7 +83,7 @@ extern ObInitPhase1 { -- }
 extern ObHandleDestroyFunction { entryptr handle handletable -- ok }
 extern ObHandleInheritFunction { entryptr handle handletable -- ok }
 
-extern ObObjectCreate { name flags permissions owninguser quotabias bodysize type -- object ok }
+extern ObObjectCreate { name flags permissions quotabias bodysize type -- object ok }
 extern ObObjectFree { object -- ok }
 extern ObObjectDeallocate { object -- }
 
@@ -111,3 +112,6 @@ extern ObObjectQuery { objecthandle query -- ok }
 
 extern ObHandleDuplicateObject { handle access srcprocessobject destprocessobject -- newhandle ok }
 extern ObHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }
+
+extern ObObjectSetUID { uid object -- }
+extern ObObjectSetGID { gid object -- }

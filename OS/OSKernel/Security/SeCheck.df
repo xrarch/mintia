@@ -19,23 +19,24 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn SePermissionsInitialize { permissions -- ok }
-	0 ok!
-
+fn SePermissionsInitialize { inheritfrom permissions -- }
 	auto p
 	permissions@ SePermissions_PermissionsBitmap + p!
 
-	auto m
-	p@ SEPERMISSIONSBITMAPSIZE + m!
-
-	while (p@ m@ <)
-		0 p@ sb
-
-		1 p +=
+	if (inheritfrom@)
+		p@ // dest
+		inheritfrom@ // src
+		SEPERMISSIONSBITMAPSIZE // size
+		memcpy
+	end else
+		p@ // ptr
+		SEPERMISSIONSBITMAPSIZE // size
+		0 // word
+		memset
 	end
 end
 
-fn SeUserGrantPermission { permission user -- ok }
+fn SeProcessGrantPermission { permission process -- ok }
 	if (permission@ SEMAXPERMISSION >=)
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -45,30 +46,30 @@ fn SeUserGrantPermission { permission user -- ok }
 	0 ok!
 
 	auto p
-	user@ SeUser_Permissions + SePermissions_PermissionsBitmap + p!
+	process@ PsProcess_Permissions + SePermissions_PermissionsBitmap + p!
 
 	permission@ 8 / p +=
 
 	p@ gb 1 permission@ 7 & << | p@ sb
 end
 
-fn SeUserCheckPermission { permission user -- ok }
+fn SeProcessCheckPermission { permission process -- ok }
 	0 ok!
 
-	if (SYSTEMPERMISSION_SYSTEM user@ SeUserCheckPermission1)
+	if (SYSTEMPERMISSION_SYSTEM process@ SeProcessCheckPermission1)
 		return
 	end
 
-	if (permission@ user@ SeUserCheckPermission1)
+	if (permission@ process@ SeProcessCheckPermission1)
 		return
 	end
 
 	STATUS_PERMISSION_DENIED ok!
 end
 
-fn SeUserCheckPermission1 { permission user -- ok }
+fn SeProcessCheckPermission1 { permission process -- ok }
 	auto p
-	user@ SeUser_Permissions + SePermissions_PermissionsBitmap + p!
+	process@ PsProcess_Permissions + SePermissions_PermissionsBitmap + p!
 
 	permission@ 8 / p +=
 
@@ -77,8 +78,8 @@ end
 
 fn SeAmIAdmin { -- admin }
 	SYSTEMPERMISSION_ADMIN // permission
-	KeProcessCurrent PsProcess_OwningUser + @ // user
-	SeUserCheckPermission admin!
+	KeProcessCurrent // process
+	SeProcessCheckPermission admin!
 end
 
 fn SeCheckAccess { access permission -- ok }
@@ -89,10 +90,10 @@ fn SeCheckAccess { access permission -- ok }
 	end
 end
 
-fn SeCheckAccessFilesystem { access permbits owninguid owninggid user -- ok }
+fn SeCheckAccessFilesystemX { access permbits owninguid owninggid process -- ok }
 	SYSTEMPERMISSION_ADMIN // permission
-	user@ // user
-	SeUserCheckPermission ok!
+	process@ // process
+	SeProcessCheckPermission ok!
 
 	if (ok@ ~~)
 		return
@@ -102,9 +103,9 @@ fn SeCheckAccessFilesystem { access permbits owninguid owninggid user -- ok }
 
 	auto shift
 
-	if (owninguid@ user@ SeUser_UID + @ ==)
+	if (owninguid@ process@ PsProcess_UID + @ ==)
 		6 shift! // owner
-	end elseif (owninggid@ user@ SeUser_GID + @ ==)
+	end elseif (owninggid@ process@ PsProcess_GID + @ ==)
 		3 shift! // group
 	end else
 		0 shift! // world
@@ -117,7 +118,7 @@ fn SeCheckAccessFilesystem { access permbits owninguid owninggid user -- ok }
 	end
 end
 
-fn SeCheckAccessObjectUser { access object user -- ok }
+fn SeCheckAccessObjectUserX { access object process -- ok }
 	auto obh
 	object@ ObHeader_SIZEOF - obh!
 
@@ -135,20 +136,20 @@ fn SeCheckAccessObjectUser { access object user -- ok }
 
 	access@ // access
 	obh@ ObHeader_Permissions + @ // permbits
-	obh@ ObHeader_OwningUser + @ SeUser_UID + @ // owninguid
-	obh@ ObHeader_OwningUser + @ SeUser_GID + @ // owninggid
-	user@ // user
-	SeCheckAccessFilesystem ok!
+	obh@ ObHeader_UID + @ // owninguid
+	obh@ ObHeader_GID + @ // owninggid
+	process@ // process
+	SeCheckAccessFilesystemX ok!
 end
 
-fn SeCheckAccessObjectOwner { object user -- ok }
+fn SeCheckAccessObjectOwnerX { object process -- ok }
 	SeAmIAdmin ok!
 
 	if (ok@ ~~)
 		return
 	end
 
-	if (object@ ObHeader_SIZEOF - ObHeader_OwningUser + @ user@ ~=)
+	if (object@ ObHeader_SIZEOF - ObHeader_UID + @ process@ PsProcess_UID + @ ~=)
 		STATUS_PERMISSION_DENIED ok!
 		return
 	end

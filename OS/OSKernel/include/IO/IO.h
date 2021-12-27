@@ -6,7 +6,7 @@ const IOKFLAG_SWAPOUT 1 // this read is involved in a swapout operation which
 
 extern IOInitPhase1 { -- }
 
-extern IODeviceCreateEx { name sizeinbytes driver owninguser permissions permanent -- deviceobject ok }
+extern IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
 extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
 extern IODeviceDeleteFileObject { object -- ok }
 
@@ -16,7 +16,7 @@ externptr IODevicesDirectoryObject
 externptr IODeviceTypeObject
 externptr IOFileTypeObject
 
-extern IOFileCreateObject { openedpath flags owninguser permissions fcb -- fileobject ok }
+extern IOFileCreateObject { openedpath flags permissions fcb -- fileobject ok }
 extern IOFileOpenObject { access object process -- ok }
 extern IOFileCloseObject { access object process -- }
 extern IOFileDeleteObject { object -- }

@@ -24,7 +24,9 @@ struct PsProcess
 
 	// security
 
-	4 OwningUser
+	4 UID
+	4 GID
+	SePermissions_SIZEOF Permissions
 
 	// object manager
 
@@ -139,7 +141,7 @@ extern PsProcessInformationQuery { processhandle query -- ok }
 extern PsProcessInformationQueryByPID { pid query -- ok }
 extern PsProcessQueryAll { buffer maxquery -- count ok }
 
-extern PsProcessCreateObject { sectionobject creationflags owninguser parentprocess permissions name -- processobject ok }
+extern PsProcessCreateObject { sectionobject creationflags parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 extern PsThreadCreateObject { context1 context2 startfunc creationflags permissions name processobject -- threadobject ok }
 extern PsThreadCreate { context1 context2 startfunc creationflags permissions name processhandle -- threadhandle ok }
@@ -152,7 +154,8 @@ extern PsThreadExit { -- }
 extern PsThreadTerminateObject { status threadobject -- ok }
 extern PsThreadTerminate { status threadhandle -- ok }
 
-extern PsProcessGetOwner { process -- owninguser }
+extern PsProcessGetUID { process -- uid }
+extern PsProcessGetGID { process -- gid }
 
 extern PsProcessRemove { process -- }
 extern PsProcessInsert { process -- }

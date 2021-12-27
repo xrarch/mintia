@@ -13,11 +13,13 @@
 
 #include "<inc>/Executive.h"
 
+#include "<inc>/Security.h"
+
 #include "<inc>/Memory.h"
 
-#include "<inc>/Process.h"
+#include "<inc>/Object.h"
 
-#include "<inc>/Security.h"
+#include "<inc>/Process.h"
 
 #include "<inc>/IO.h"
 
@@ -83,8 +85,8 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					fcbdata@ AFSFCBData_Permissions + @ // permbits
 					fcbdata@ AFSFCBData_UID + @ // owninguid
 					fcbdata@ AFSFCBData_GID + @ // owninggid 
-					SeUserCurrentGet // user
-					SeCheckAccessFilesystem ok!
+					KeProcessCurrent // process
+					SeCheckAccessFilesystemX ok!
 
 					if (ok@)
 						// no rights
@@ -233,34 +235,11 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 	// at this point the FCB should be refed but unlocked
 
-	auto owninguser
-
-	if (mount@ IOMountGetFlags OSMOUNT_NOUID &)
-		process@ PsProcessGetOwner owninguser!
-	end else
-		initialfcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ // uid
-		0 // userlistlocked
-		SeUserGetByUID ok! owninguser!
-
-		if (ok@)
-			if (ok@ STATUS_NO_SUCH_USER ~=)
-				initialfcb@ AFSFCBDereference drop
-
-				return
-			end
-
-			// user not found... make calling process the owner
-
-			process@ PsProcessGetOwner owninguser!
-		end
-	end
-
 	initialfcb@ IOFileControlBlockGetMount // mount
 	AFSMountReference drop
 
 	fullpath@ // openedpath
 	flags@ // flags
-	owninguser@ // owninguser
 	initialfcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
 	initialfcb@ // fcb
 	IOFileCreateObject ok! object!
@@ -270,6 +249,14 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 		initialfcb@ IOFileControlBlockGetContext // mount
 		AFSMountDereference drop
+	end
+
+	if (mount@ IOMountGetFlags OSMOUNT_NOUID &)
+		process@ PsProcessGetUID object@ ObObjectSetUID
+		process@ PsProcessGetGID object@ ObObjectSetGID
+	end else
+		initialfcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ object@ ObObjectSetUID
+		initialfcb@ IOFileControlBlockGetContext AFSFCBData_GID + @ object@ ObObjectSetGID
 	end
 end
 

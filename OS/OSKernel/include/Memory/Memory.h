@@ -109,6 +109,9 @@ externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize
 externptr MmPeakWorkingSetSize
 
+externptr MmCommitLimit
+externptr MmCommitUsage
+
 const MMMUSTSUCCEEDL2PAGES 8
 const MMMUSTSUCCEEDPAGES   18
 

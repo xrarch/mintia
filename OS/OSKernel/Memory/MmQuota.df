@@ -107,11 +107,11 @@ fn MmQuotaBlockCharge { charge quotablock -- ok }
 
 	0 ok!
 
-	auto heapmax
-	quotablock@ MmQuotaBlock_HeapMax + @ heapmax!
-
 	auto rs
 	HALCPUInterruptDisable rs!
+
+	auto heapmax
+	quotablock@ MmQuotaBlock_HeapMax + @ heapmax!
 
 	auto oldcharge
 	quotablock@ MmQuotaBlock_HeapUsed + @ oldcharge!
@@ -162,17 +162,31 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 
 	0 ok!
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto commitlimit
+	MmCommitLimit@ commitlimit!
+
+	auto commitused
+	MmCommitUsage@ commitused!
+
+	if (commitused@ charge@ PAGESHIFT >> + commitlimit@ >)
+		ipl@ KeIPLLower
+
+		STATUS_COMMIT_EXCEEDED ok!
+
+		return
+	end
+
 	auto vmmax
 	quotablock@ MmQuotaBlock_VMMax + @ vmmax!
-
-	auto rs
-	HALCPUInterruptDisable rs!
 
 	auto oldcharge
 	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ + vmmax@ >)
-		rs@ HALCPUInterruptRestore
+		ipl@ KeIPLLower
 
 		STATUS_VM_QUOTA_EXCEEDED ok!
 
@@ -180,8 +194,9 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 	end
 
 	oldcharge@ charge@ + quotablock@ MmQuotaBlock_VMUsed + !
+	commitused@ charge@ PAGESHIFT >> + MmCommitUsage!
 
-	rs@ HALCPUInterruptRestore
+	ipl@ KeIPLLower
 end
 
 fn MmQuotaBlockUnchargeVM { charge quotablock -- }
@@ -197,13 +212,23 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 	auto oldcharge
 	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
 
+	auto commitused
+	MmCommitUsage@ commitused!
+
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
 			"MmQuotaBlockUnchargeVM: attempt to uncharge more than was charged\n" KeCrash
 		end
+
+		if (charge@ PAGESHIFT >> commitused@ >)
+			commitused@
+			charge@ PAGESHIFT >>
+			"MmQuotaBlockUnchargeVM: attempt to uncharge more commit than was charged %d > %d\n" KeCrash
+		end
 	end
 
 	oldcharge@ charge@ - quotablock@ MmQuotaBlock_VMUsed + !
+	commitused@ charge@ PAGESHIFT >> - MmCommitUsage!
 
 	rs@ HALCPUInterruptRestore
 end
@@ -217,11 +242,11 @@ fn MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
 
 	0 ok!
 
-	auto wsmax
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ wsmax!
-
 	auto rs
 	HALCPUInterruptDisable rs!
+
+	auto wsmax
+	quotablock@ MmQuotaBlock_WorkingSetMax + @ wsmax!
 
 	auto oldcharge
 	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
@@ -266,11 +291,11 @@ fn MmQuotaBlockChargeModifiedPages { charge quotablock -- ok }
 
 	0 ok!
 
-	auto modmax
-	quotablock@ MmQuotaBlock_ModifiedPagesMax + @ modmax!
-
 	auto rs
 	HALCPUInterruptDisable rs!
+
+	auto modmax
+	quotablock@ MmQuotaBlock_ModifiedPagesMax + @ modmax!
 
 	auto oldcharge
 	quotablock@ MmQuotaBlock_ModifiedPagesUsed + @ oldcharge!

@@ -24,6 +24,9 @@ struct OSMemoryInformation
 
 	4 PageFaultCount
 
+	4 CommitLimit
+	4 CommitUsage
+
 	48 Reserved
 endstruct
 

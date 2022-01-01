@@ -92,7 +92,6 @@ externptr IOCachePagesModifiedCount
 
 externptr IOCachePagesUsed
 
-externptr IOCachePagesLowWatermark
 externptr IOCachePagesModifiedMaximum
 
 externptr IOModifiedPageEvent

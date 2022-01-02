@@ -48,9 +48,9 @@ struct MmPageFrameEntrySlab
 	4 Context6
 	4 Context7
 	4 Context8
-	4 Context9
-	4 Context10
 	4 BucketIndex
+	4 PoolListNext
+	4 PoolListPrev
 endstruct
 
 struct MmPageFrameEntryAnonymous

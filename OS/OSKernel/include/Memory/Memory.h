@@ -54,9 +54,9 @@ struct MmPageFrameEntryPool
 	4 Context8
 	4 Context9
 	4 Context10
-	4 Context11
-	4 Context12
-	4 Context13
+	4 BucketIndex
+	4 PoolListNext
+	4 PoolListPrev
 endstruct
 
 extern MmUsageDump { -- }

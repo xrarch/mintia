@@ -21,6 +21,8 @@ buffer MmPoolSpaceBitmap (POOLPAGES 7 + 3 >>)
 var MmPoolBytesUsed 0
 public MmPoolBytesUsed
 
+var MmPoolPageListHead 0
+
 externptr MmSlabEvictableFunctions
 
 // The heap is managed within a 32MB region of kernel space called
@@ -59,6 +61,47 @@ end
 
 fn MmHeapDumpBlockInfo { block -- }
 
+end
+
+fn MmPoolDump { -- }
+	auto pfdbe
+	MmPoolPageListHead@ pfdbe!
+
+	while (pfdbe@)
+		auto bucketindex
+		pfdbe@ MmPageFrameEntryPool_BucketIndex + @ bucketindex!
+
+		if (bucketindex@ -1 ==)
+			// page-aligned
+			pfdbe@ MmPageFrameEntryPool_Tag + @ MmHeapPrintTag
+			pfdbe@ MmPageFrameEntryPool_VirtualAddress + @
+			" %08x\n" Printf
+		end else
+			// slab
+
+			auto slab
+			pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << IDENTITYSPACE | slab!
+
+			auto sz
+			1 MMSLABPO2START bucketindex@ + << sz!
+
+			auto slabsperpage
+			PAGESIZE bucketindex@ MMSLABPO2START + >> slabsperpage!
+
+			while (slabsperpage@)
+				if (slab@ MmPoolSlab_Magic + gi MMSLABSWIFTMAGIC ==)
+					slab@ MmPoolSlab_TagOrNextFree + @ MmHeapPrintTag
+					slab@ MmPoolSlab_SIZEOF +
+					" %08x\n" Printf
+				end
+
+				sz@ slab +=
+				1 slabsperpage -=
+			end
+		end
+
+		pfdbe@ MmPageFrameEntryPool_PoolListNext + @ pfdbe!
+	end
 end
 
 fn MmAllocWithTag { bytes tag -- ptr ok }
@@ -251,6 +294,7 @@ fn MmPoolPageAlignedAlloc { bytes tag -- pfdbe ptr ok }
 		tag@ pfdbe@ MmPageFrameEntryPool_Tag + !
 		pagesneeded@ PAGESHIFT << pfdbe@ MmPageFrameEntryPool_ByteSize + !
 		vaddr@ pfdbe@ MmPageFrameEntryPool_VirtualAddress + !
+		-1 pfdbe@ MmPageFrameEntryPool_BucketIndex + !
 
 		PAGESIZE vaddr +=
 		1 i +=
@@ -260,6 +304,11 @@ fn MmPoolPageAlignedAlloc { bytes tag -- pfdbe ptr ok }
 	HALCPUInterruptDisable rs!
 	pagesneeded@ PAGESHIFT << MmPoolBytesUsed +=
 	rs@ HALCPUInterruptRestore
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+	firstpfdbe@ MmPoolPageInsert
+	ipl@ KeIPLLower
 
 	firstpfdbe@ pfdbe!
 end
@@ -283,7 +332,6 @@ fn MmPoolPageAlignedFree { ptr -- }
 	ptr@ POOLSPACE - PAGESHIFT >> offset!
 
 	auto pfdbe
-
 	ptr@ MmPoolPageGetPhysical pfdbe! drop
 
 	auto pages
@@ -329,6 +377,11 @@ fn MmPoolPageAlignedFree { ptr -- }
 	pages@ // pages
 	offset@ // offset
 	MmPoolSpaceRelease
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+	pfdbe@ MmPoolPageRemove
+	ipl@ KeIPLLower
 end
 
 fn MmChargeBytesGet { bytes -- charge }
@@ -426,4 +479,44 @@ fn MmPoolPageGetPhysical { ptr -- pfn pfdbe }
 	phyaddr@ PAGESHIFT >> pfn!
 
 	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+end
+
+fn MmPoolPageRemove { pfdbe -- }
+	// assumes IPLDPC or equivalent
+
+	auto ls
+	pfdbe@ MmPageFrameEntryPool_PoolListPrev + @ ls!
+
+	auto ns
+	pfdbe@ MmPageFrameEntryPool_PoolListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ MmPageFrameEntryPool_PoolListNext + !
+	end else
+		ns@ MmPoolPageListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ MmPageFrameEntryPool_PoolListPrev + !
+	end
+end
+
+fn MmPoolPageInsert { pfdbe -- }
+	// assumes IPLDPC or equivalent
+
+	auto h
+	MmPoolPageListHead@ h!
+
+	if (h@ ~~)
+		0 pfdbe@ MmPageFrameEntryPool_PoolListNext + !
+		0 pfdbe@ MmPageFrameEntryPool_PoolListPrev + !
+
+		pfdbe@ MmPoolPageListHead!
+	end else
+		0 pfdbe@ MmPageFrameEntryPool_PoolListPrev + !
+
+		h@ pfdbe@ MmPageFrameEntryPool_PoolListNext + !
+		pfdbe@ h@ MmPageFrameEntryPool_PoolListPrev + !
+		pfdbe@ MmPoolPageListHead!
+	end
 end

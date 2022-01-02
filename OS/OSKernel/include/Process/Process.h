@@ -100,6 +100,9 @@ externptr PsSystemProcess
 externptr PsOSDLLInformation
 externptr PsOSDLLSectionObject
 
+externptr PsProcessCreationCount
+externptr PsProcessDeletionCount
+
 extern PsProcessListLock { -- ok }
 extern PsProcessListTryLock { -- ok }
 extern PsProcessListIsLocked { -- locked }

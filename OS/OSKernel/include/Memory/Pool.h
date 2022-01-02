@@ -22,3 +22,7 @@ externptr MmSlabBytesUsedInternally
 
 extern MmSlabAlloc { bytes tag -- ptr ok }
 extern MmSlabFree  { ptr -- }
+
+extern MmPoolPageRemove { pfdbe -- }
+extern MmPoolPageInsert { pfdbe -- }
+extern MmPoolDump { -- }

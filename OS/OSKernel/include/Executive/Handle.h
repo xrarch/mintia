@@ -17,7 +17,6 @@ endstruct
 
 extern ExHandleTableDelete { func handletable -- }
 extern ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
-extern ExHandleTableDuplicate { func handletablesrc chargedprocess -- handletable ok }
 
 extern ExHandleTableLockUnalertable { handletable -- }
 extern ExHandleTableLockSharedUnalertable { handletable -- }

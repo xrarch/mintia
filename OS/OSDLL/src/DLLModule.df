@@ -541,6 +541,70 @@ fn DLLGetSymbol { name dll -- symbol ok }
 	end
 end
 
+fn DLLGetSymbolByAddress { address dll -- symbase symname symbol ok }
+	auto head
+	dll@ OSModule_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+
+	STATUS_NO_SYMBOL ok!
+
+	0 symbol!
+
+	if (address@ sectionheader@ LOFFSectionHeader_LinkedAddress + @ <)
+		return
+	end
+
+	if (address@ sectionheader@ LOFFSectionHeader_LinkedAddress + @
+		sectionheader@ LOFFSectionHeader_SectionSize + @ + >=)
+		return
+	end
+
+	auto symptr
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + symptr!
+
+	auto strtab
+	head@ LOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ LOFFHeader_SymbolCount + @ count!
+
+	while (i@ count@ <)
+		if (symptr@ LOFFSymbol_Type + @ LOFFGLOBAL == symptr@ LOFFSymbol_Section + @ LOFFTEXT == &&)
+			auto sbase
+			symptr@ LOFFSymbol_Value + @ sectionheader@ LOFFSectionHeader_LinkedAddress + @ + sbase!
+
+			if (address@ sbase@ >=)
+				if (symptr@ LOFFSymbol_NameOffset + @ 0xFFFFFFFF ==)
+					0 symname!
+				end else
+					symptr@ LOFFSymbol_NameOffset + @ strtab@ + symname!
+				end
+
+				symptr@ symbol!
+				sbase@ symbase!
+			end elseif (address@ sbase@ <)
+				if (symbol@)
+					0 ok!
+				end
+
+				return
+			end
+		end
+
+		LOFFSymbol_SIZEOF symptr +=
+		1 i +=
+	end
+
+	if (symbol@)
+		0 ok!
+	end
+end
+
 fn DLLModuleResolveSymbols { dll -- ok }
 	auto head
 	dll@ OSModule_HeadVAddr + @ head!

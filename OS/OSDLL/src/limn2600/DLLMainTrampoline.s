@@ -30,7 +30,7 @@ DLLMainTrampoline:
 
 .done:
 	subi sp, sp, 4
-	mov  long [sp], lr
+	mov  long [sp], zero
 
 	jalr lr, a2, 0
 
@@ -40,6 +40,19 @@ DLLThreadExit:
 .global DLLThreadExit
 	;return value is already in a0
 	j    OSThreadExit
+	nop
+	nop
+
+.extern DLLSignalDispatchHL
+
+DLLSignalDispatch:
+.global DLLSignalDispatch
+	subi sp, sp, 4
+	mov  long [sp], zero
+
+	jal DLLSignalDispatchHL
+	nop
+	nop
 
 .section data
 

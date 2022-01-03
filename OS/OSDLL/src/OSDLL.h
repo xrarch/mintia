@@ -19,11 +19,16 @@ extern DLLFindEnvironmentVariable { name envblock -- entry env ok }
 extern DLLGetEnvironmentVariable { env name bufsize envblock -- ok }
 extern DLLSetEnvironmentVariable { env name envblock -- ok }
 
+// debug stuff
+
+extern DLLDebugTrace { context -- }
+
 // module stuff
 
 externptr DLLProcessInit
 
 extern DLLDoFixup { ptr value type -- ok }
+extern DLLGetSymbolByAddress { address dll -- symbase symname symbol ok }
 
 // heap stuff
 

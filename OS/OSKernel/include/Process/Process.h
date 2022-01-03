@@ -71,6 +71,7 @@ endstruct
 struct PsOSDLLInfo
 	4 StartFunction
 	4 ExitFunction
+	4 SignalDispatchFunction
 
 	4 HeadSize
 
@@ -143,6 +144,9 @@ extern PsProcessInformationQueryObject { processobject query -- ok }
 extern PsProcessInformationQuery { processhandle query -- ok }
 extern PsProcessInformationQueryByPID { pid query -- ok }
 extern PsProcessQueryAll { buffer maxquery -- count ok }
+
+extern PsProcessMaskSignal { signal processhandle -- ok }
+extern PsProcessUnmaskSignal { signal processhandle -- ok }
 
 extern PsProcessCreateObject { sectionobject creationflags parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }

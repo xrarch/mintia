@@ -7,6 +7,8 @@ const OSPROCESS_NOINHERITH    32768
 
 const OSTHREAD_SUSPENDED 1
 
+extern OSGetImageName { -- imagename }
+
 extern OSCreationBlockInitialize { creationparams -- }
 
 extern OSSpawnV { argcn argvt path creationflags creationparams permissions name -- threadhandle processhandle ok }

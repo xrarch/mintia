@@ -111,6 +111,10 @@ struct KeThread
 
 	4 SafeAccessAbort
 	4 SafeAccessSP
+
+	4 ExceptionSignals
+
+	4 TrapFrame
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }
@@ -120,10 +124,17 @@ extern KeSafeStringCopyOut { dest src max -- ok }
 extern KeSafeStoreByte { byte dest -- ok }
 extern KeSafeGetByte { src -- byte ok }
 
+extern KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
+
+extern KeThreadContinue { context thread -- }
+
 extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name asid process -- }
 extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
+
+extern KeProcessMaskSignal { signal process -- ok }
+extern KeProcessUnmaskSignal { signal process -- ok }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess
@@ -132,10 +143,12 @@ extern KeThreadInitialize { context1 context2 startfunc process kstack name thre
 extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
+extern KeThreadException { signal thread -- }
 extern KeThreadTerminate { status thread -- }
 extern KeThreadResume { thread -- }
 extern KeThreadWakeForSignal { sig thread -- }
 extern KeThreadRundown { thread -- }
+extern KeThreadNextSignal { thread -- signum }
 extern KeThreadIsKilled { mode alertable thread -- ok }
 extern KeThreadEnqueue { front thread -- }
 extern KeThreadDequeue { thread -- }

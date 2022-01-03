@@ -1,0 +1,150 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSProcess.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSSignal.h"
+
+#include "OSDLL.h"
+
+table DLLSignalMessages
+	0 // OSSIGNAL_NONE
+	0 // OSSIGNAL_HUP
+	0 // OSSIGNAL_INT
+	"Quit" // OSSIGNAL_QUIT
+	"Illegal instruction" // OSSIGNAL_ILL
+	"Trap" // OSSIGNAL_TRAP
+	"Abort" // OSSIGNAL_ABRT
+	"Emulator trap" // OSSIGNAL_EMT
+	"Floating point exception" // OSSIGNAL_FPE
+	0 // OSSIGNAL_KILL
+	"Bus error" // OSSIGNAL_BUS
+	"Segmentation fault" // OSSIGNAL_SEGV
+	"Bad syscall" // OSSIGNAL_SYS
+	0 // OSSIGNAL_PIPE
+	0 // OSSIGNAL_ALRM
+	0 // OSSIGNAL_TERM
+	0 // OSSIGNAL_URG
+	0 // OSSIGNAL_STOP
+	0 // OSSIGNAL_TSTP
+	0 // OSSIGNAL_CONT
+	0 // OSSIGNAL_CHLD
+	0 // OSSIGNAL_TTIN
+	0 // OSSIGNAL_TTOU
+	0 // OSSIGNAL_IO
+	0 // OSSIGNAL_XCPU
+	0 // OSSIGNAL_XFSZ
+	0 // OSSIGNAL_VTALRM
+	0 // OSSIGNAL_PROF
+	0 // OSSIGNAL_WINCH
+	0 // OSSIGNAL_INFO
+	0 // OSSIGNAL_USR1
+	0 // OSSIGNAL_USR2
+endtable
+
+table DLLSignalDefaultActions
+	0 // OSSIGNAL_NONE
+	1 // OSSIGNAL_HUP
+	1 // OSSIGNAL_INT
+	2 // OSSIGNAL_QUIT
+	2 // OSSIGNAL_ILL
+	2 // OSSIGNAL_TRAP
+	2 // OSSIGNAL_ABRT
+	2 // OSSIGNAL_EMT
+	2 // OSSIGNAL_FPE
+	1 // OSSIGNAL_KILL
+	2 // OSSIGNAL_BUS
+	2 // OSSIGNAL_SEGV
+	2 // OSSIGNAL_SYS
+	1 // OSSIGNAL_PIPE
+	1 // OSSIGNAL_ALRM
+	1 // OSSIGNAL_TERM
+	0 // OSSIGNAL_URG
+	3 // OSSIGNAL_STOP
+	3 // OSSIGNAL_TSTP
+	4 // OSSIGNAL_CONT
+	0 // OSSIGNAL_CHLD
+	3 // OSSIGNAL_TTIN
+	3 // OSSIGNAL_TTOU
+	0 // OSSIGNAL_IO
+	2 // OSSIGNAL_XCPU
+	2 // OSSIGNAL_XFSZ
+	0 // OSSIGNAL_VTALRM
+	1 // OSSIGNAL_PROF
+	0 // OSSIGNAL_WINCH
+	0 // OSSIGNAL_INFO
+	1 // OSSIGNAL_USR1
+	1 // OSSIGNAL_USR2
+endtable
+
+table DLLSignalActions[32]
+
+fn OSSignalSetAction { action signum -- oldaction }
+	if (action@ OSSIGNALACTION_IGNORE ==)
+		signum@ // signal
+		OSCURRENTPROCESS // processhandle
+		OSProcessMaskSignal drop
+	end else
+		signum@ // signal
+		OSCURRENTPROCESS // processhandle
+		OSProcessUnmaskSignal drop
+	end
+
+	action@ [signum@]DLLSignalActions!
+end
+
+var dieonce 1
+
+fn DLLSignalDispatchHL { context signum -- }
+	auto ok
+
+	auto action
+	[signum@]DLLSignalActions@ action!
+
+	if (action@ OSSIGNALACTION_DEFAULT ==)
+		[signum@]DLLSignalDefaultActions@ action!
+
+		if (action@ 1 ==)
+			// terminate
+			signum@ 128 + OSExit
+		end elseif (action@ 2 ==)
+			// print debug information/coredump and terminate
+
+			auto message
+			[signum@]DLLSignalMessages@ message!
+
+			if (message@)
+				message@ OSGetImageName "%s: %s\n" OSGetStdErr FPrintf
+			end else
+				OSGetImageName "%s: Exception\n" OSGetStdErr FPrintf
+			end
+
+			context@ DLLDebugTrace
+
+			if (DLLProcessInit@)
+				STATUS_FAULT // activationstatus
+				OSProcessSignalActivation drop
+			end
+
+			signum@ 128 + OSExit
+		end elseif (action@ 3 ==)
+			// stop
+		end
+	end elseif (action@ OSSIGNALACTION_IGNORE ~=)
+		if (action@ OSPAGESIZE >=)
+			context@ // context
+			signum@ // signum
+			action@ OSSignalHandler
+		end
+	end
+
+	context@ OSContinue ok!
+
+	// if OSContinue returned, something bad happened.
+	ok@ OSStatusGetName "DLLSignalDispatch: couldn't OSContinue: %s\n" OSError
+end

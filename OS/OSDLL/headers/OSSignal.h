@@ -1,3 +1,5 @@
+fnptr OSSignalHandler { context signum -- }
+
 const OSSIGNALACTION_DEFAULT 0
 const OSSIGNALACTION_IGNORE  1
 

@@ -115,6 +115,10 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_SafeAccessSP + !
 
 	"NA" 0 thread@ KeThread_Timer + KeTimerInitialize
+
+	0 thread@ KeThread_ExceptionSignals + !
+
+	0 thread@ KeThread_TrapFrame + !
 end
 
 fn KeThreadUninitialize { thread -- }
@@ -286,6 +290,32 @@ fn KeThreadRundown { thread -- }
 	ipl@ KeIPLLower
 end
 
+fn KeThreadNextSignal { thread -- signum }
+	// assumes IPLDPC or equivalent.
+
+	auto excsignals
+	thread@ KeThread_ExceptionSignals + @ excsignals!
+
+	auto signals
+	thread@ KeThread_Process + @ KeProcess_Signaled + @ signals!
+
+	0 signum!
+
+	while (signum@ 32 <)
+		if (excsignals@ 1 signum@ << &)
+			return
+		end
+
+		if (signals@ 1 signum@ << &)
+			return
+		end
+
+		1 signum +=
+	end
+
+	0 signum!
+end
+
 fn KeThreadIsKilled { mode alertable thread -- ok }
 	// gives the status code that should be returned for the thread's signal
 	// state. this only determines what should interrupt a syscall and be
@@ -319,7 +349,7 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 	thread@ KeThread_Process + @ process!
 
 	auto sig
-	process@ KeProcess_Signaled + @ sig!
+	process@ KeProcess_Signaled + @ thread@ KeThread_ExceptionSignals + @ | sig!
 
 	if (sig@ ~~)
 		// no signals, return now
@@ -343,10 +373,14 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 	end
 
 	if (process@ KeProcess_SignalThread + @ thread@ ~=)
-		// not the designated signal handling thread, ignore
-		0 ok!
+		thread@ KeThread_ExceptionSignals + @ sig!
 
-		return
+		if (sig@ ~~)
+			// not the designated signal handling thread, ignore
+			0 ok!
+
+			return
+		end
 	end
 
 	if (alertable@ ~~)
@@ -362,6 +396,20 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 	end else
 		0 ok!
 	end
+end
+
+fn KeThreadException { signal thread -- }
+	if (DEBUGCHECKS)
+		if (signal@ ~~)
+			"KeThreadException: signal==0\n" KeCrash
+		end
+
+		if (signal@ 32 >=)
+			"KeThreadException: signal>=32\n" KeCrash
+		end
+	end
+
+	1 signal@ << thread@ KeThread_ExceptionSignals + |=
 end
 
 fn KeThreadEnqueue { front thread -- }

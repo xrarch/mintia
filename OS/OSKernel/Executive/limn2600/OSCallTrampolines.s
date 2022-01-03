@@ -6,6 +6,7 @@
 .extern OSSystemAbort
 .extern OSGetSystemConsoleName
 .extern OSGetBootFlags
+.extern OSContinue
 .extern OSEventCreate
 .extern OSEventReset
 .extern OSEventSignal
@@ -47,6 +48,8 @@
 .extern OSProcessQuery
 .extern OSProcessQueryByPID
 .extern OSProcessReadStatus
+.extern OSProcessMaskSignal
+.extern OSProcessUnmaskSignal
 .extern OSProcessSignalActivation
 .extern OSProcessWaitForActivation
 .extern OSProcessExit
@@ -62,7 +65,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 57
+	.dl 60
 
 OSCallTable:
 .global OSCallTable
@@ -71,59 +74,62 @@ OSCallTable:
 	.dl OSTOSSystemAbort                                 ;2
 	.dl OSTOSGetSystemConsoleName                        ;3
 	.dl OSTOSGetBootFlags                                ;4
-	.dl OSTOSEventCreate                                 ;5
-	.dl OSTOSEventReset                                  ;6
-	.dl OSTOSEventSignal                                 ;7
-	.dl OSTOSEventPulse                                  ;8
-	.dl OSTOSEventReadState                              ;9
-	.dl OSTOSSemaphoreCreate                             ;10
-	.dl OSTOSSemaphoreRelease                            ;11
-	.dl OSTOSSemaphoreReadState                          ;12
-	.dl OSTOSMutexCreate                                 ;13
-	.dl OSTOSMutexRelease                                ;14
-	.dl OSTOSMutexReadState                              ;15
-	.dl OSTOSObjectOpen                                  ;16
-	.dl OSTOSQuery                                       ;17
-	.dl OSTOSClose                                       ;18
-	.dl OSTOSWaitForMultipleObjects                      ;19
-	.dl OSTOSWaitForObject                               ;20
-	.dl OSTOSHandleDuplicate                             ;21
-	.dl OSTOSDirectoryCountQuery                         ;22
-	.dl OSTOSDirectoryQueryAll                           ;23
-	.dl OSTOSFileQuery                                   ;24
-	.dl OSTOSFileSeek                                    ;25
-	.dl OSTOSFileRead                                    ;26
-	.dl OSTOSFileWrite                                   ;27
-	.dl OSTOSDirectoryRead                               ;28
-	.dl OSTOSSwapFileCreate                              ;29
-	.dl OSTOSIOControl                                   ;30
-	.dl OSTOSGetBootDevicePath                           ;31
-	.dl OSTOSMountUpdateFlags                            ;32
-	.dl OSTOSMountGetFilesystemName                      ;33
-	.dl OSTOSSectionCreate                               ;34
-	.dl OSTOSSectionMapView                              ;35
-	.dl OSTOSUnmapView                                   ;36
-	.dl OSTOSRemapView                                   ;37
-	.dl OSTOSSetSwappiness                               ;38
-	.dl OSTOSMemoryQuery                                 ;39
-	.dl OSTOSProcessCreate                               ;40
-	.dl OSTOSProcessSignal                               ;41
-	.dl OSTOSProcessOpenByPID                            ;42
-	.dl OSTOSProcessQuery                                ;43
-	.dl OSTOSProcessQueryByPID                           ;44
-	.dl OSTOSProcessReadStatus                           ;45
-	.dl OSTOSProcessSignalActivation                     ;46
-	.dl OSTOSProcessWaitForActivation                    ;47
-	.dl OSTOSProcessExit                                 ;48
-	.dl OSTOSProcessCountQuery                           ;49
-	.dl OSTOSProcessQueryAll                             ;50
-	.dl OSTOSThreadSleep                                 ;51
-	.dl OSTOSThreadCreate                                ;52
-	.dl OSTOSThreadTerminate                             ;53
-	.dl OSTOSThreadResume                                ;54
-	.dl OSTOSThreadReadStatus                            ;55
-	.dl OSTOSThreadQuery                                 ;56
-	.dl OSTOSSetSystemConsole                            ;57
+	.dl OSTOSContinue                                    ;5
+	.dl OSTOSEventCreate                                 ;6
+	.dl OSTOSEventReset                                  ;7
+	.dl OSTOSEventSignal                                 ;8
+	.dl OSTOSEventPulse                                  ;9
+	.dl OSTOSEventReadState                              ;10
+	.dl OSTOSSemaphoreCreate                             ;11
+	.dl OSTOSSemaphoreRelease                            ;12
+	.dl OSTOSSemaphoreReadState                          ;13
+	.dl OSTOSMutexCreate                                 ;14
+	.dl OSTOSMutexRelease                                ;15
+	.dl OSTOSMutexReadState                              ;16
+	.dl OSTOSObjectOpen                                  ;17
+	.dl OSTOSQuery                                       ;18
+	.dl OSTOSClose                                       ;19
+	.dl OSTOSWaitForMultipleObjects                      ;20
+	.dl OSTOSWaitForObject                               ;21
+	.dl OSTOSHandleDuplicate                             ;22
+	.dl OSTOSDirectoryCountQuery                         ;23
+	.dl OSTOSDirectoryQueryAll                           ;24
+	.dl OSTOSFileQuery                                   ;25
+	.dl OSTOSFileSeek                                    ;26
+	.dl OSTOSFileRead                                    ;27
+	.dl OSTOSFileWrite                                   ;28
+	.dl OSTOSDirectoryRead                               ;29
+	.dl OSTOSSwapFileCreate                              ;30
+	.dl OSTOSIOControl                                   ;31
+	.dl OSTOSGetBootDevicePath                           ;32
+	.dl OSTOSMountUpdateFlags                            ;33
+	.dl OSTOSMountGetFilesystemName                      ;34
+	.dl OSTOSSectionCreate                               ;35
+	.dl OSTOSSectionMapView                              ;36
+	.dl OSTOSUnmapView                                   ;37
+	.dl OSTOSRemapView                                   ;38
+	.dl OSTOSSetSwappiness                               ;39
+	.dl OSTOSMemoryQuery                                 ;40
+	.dl OSTOSProcessCreate                               ;41
+	.dl OSTOSProcessSignal                               ;42
+	.dl OSTOSProcessOpenByPID                            ;43
+	.dl OSTOSProcessQuery                                ;44
+	.dl OSTOSProcessQueryByPID                           ;45
+	.dl OSTOSProcessReadStatus                           ;46
+	.dl OSTOSProcessMaskSignal                           ;47
+	.dl OSTOSProcessUnmaskSignal                         ;48
+	.dl OSTOSProcessSignalActivation                     ;49
+	.dl OSTOSProcessWaitForActivation                    ;50
+	.dl OSTOSProcessExit                                 ;51
+	.dl OSTOSProcessCountQuery                           ;52
+	.dl OSTOSProcessQueryAll                             ;53
+	.dl OSTOSThreadSleep                                 ;54
+	.dl OSTOSThreadCreate                                ;55
+	.dl OSTOSThreadTerminate                             ;56
+	.dl OSTOSThreadResume                                ;57
+	.dl OSTOSThreadReadStatus                            ;58
+	.dl OSTOSThreadQuery                                 ;59
+	.dl OSTOSSetSystemConsole                            ;60
 
 
 OSTOSConsolePutCharacter:
@@ -179,6 +185,20 @@ OSTOSGetBootFlags:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSContinue:
+.global OSTOSContinue
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSContinue
+
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -841,6 +861,36 @@ OSTOSProcessReadStatus:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessMaskSignal:
+.global OSTOSProcessMaskSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessMaskSignal
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessUnmaskSignal:
+.global OSTOSProcessUnmaskSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessUnmaskSignal
+
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

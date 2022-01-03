@@ -12,3 +12,5 @@
 #include "<ll>/OSDLL/OSProcess.h"
 #include "<ll>/OSDLL/OSEnvironment.h"
 #include "<ll>/OSDLL/OSMemory.h"
+
+#include "<ll>/OSDLL/OSContext.h"

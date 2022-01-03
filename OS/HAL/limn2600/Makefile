@@ -14,7 +14,7 @@ all: HALlimn2600.o
 HALlimn2600.o: $(OBJ)
 	$(LD) -f HALlimn2600.o $(OBJ)
 
-%.o: %.df ./include/*.h ../include/*.h
+%.o: %.df ../include/*.h
 	$(DC) $(DCFLAGS) $< $@
 
 %.o: %.s

@@ -1,0 +1,177 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSModule.h"
+#include "<inc>/OSAlloc.h"
+#include "<inc>/OSWait.h"
+#include "<inc>/OSContext.h"
+
+#include "../OSDLL.h"
+
+table DLLContextNames
+	"t0"  "t1"
+	"t2"  "t3"
+	"t4"  "t5"
+	"a0"  "a1"
+	"a2"  "a3"
+	"s0"  "s1"
+	"s2"  "s3"
+	"s4"  "s5"
+	"s6"  "s7"
+	"s8"  "s9"
+	"s10" "s11"
+	"s12" "s13"
+	"s14" "s15"
+	"s16" "s17"
+	"s18"
+
+	"sp"
+	0
+	"pc"
+	"lr"
+
+	"baddr"
+endtable
+
+fn DLLDebugGetSymbol { address -- dll symbase symname symbol ok }
+	OSPEB OSPEBs_DLLListHead + @ dll!
+
+	STATUS_NO_SYMBOL ok!
+
+	while (dll@)
+		address@ // address
+		dll@ // dll
+		DLLGetSymbolByAddress ok! symbol! symname! symbase!
+
+		if (ok@ ~~)
+			return
+		end
+
+		dll@ OSModule_Next + @ dll!
+	end
+end
+
+fn DLLDebugTrace { context -- }
+	auto ctxrows
+	OSCONTEXTCOUNT 4 + 5 / ctxrows!
+
+	auto ictx
+	0 ictx!
+
+	while (ctxrows@)
+		auto ctxcols
+		5 ctxcols!
+
+		while (ctxcols@)
+			if (ictx@ OSCONTEXTCOUNT <)
+				auto off
+				ictx@ 2 << off!
+
+				auto name
+				DLLContextNames off@ + @ name!
+
+				if (name@)
+					name@ "%-5s " OSGetStdErr FPrintf
+					context@ off@ + @ "%08x " OSGetStdErr FPrintf
+				end
+			end
+
+			1 ictx +=
+			1 ctxcols -=
+		end
+
+		"\n" OSGetStdErr FPrintf
+
+		1 ctxrows -=
+	end
+
+	auto links
+	0 links!
+
+	auto link
+	context@ OSContext_sp + @ link!
+
+	if (link@ 0 ==)
+		" zero link!\n" OSGetStdErr FPrintf
+		return
+	end
+
+	if (link@ 3 &)
+		" unaligned!\n" OSGetStdErr FPrintf
+		return
+	end
+
+	auto pc
+	context@ OSContext_epc + @ pc!
+
+	if (pc@ 3 &)
+		" unaligned pc!\n" OSGetStdErr FPrintf
+	end
+
+	auto tracenamebuf
+	256 alloc tracenamebuf!
+
+	while (pc@)
+		if (links@ 128 >=)
+			" maxtrace!\n" OSGetStdErr FPrintf
+			return
+		end
+
+		auto ok
+		auto symbol
+		auto dll
+		auto symname
+		auto symbase
+
+		pc@ // address
+		DLLDebugGetSymbol ok! symbol! symname! symbase! dll!
+
+		if (ok@)
+			pc@
+			"%08x UNKNOWN\n" OSGetStdErr FPrintf
+
+			break
+		end else
+			if (symname@ ~~)
+				"NAMELESS" symname!
+			end
+
+			symname@
+			dll@ OSModule_Name + @ OSLastComponent
+			pc@
+			"%08x %s!%s\n" OSGetStdErr FPrintf
+		end
+
+		auto offset
+		0 offset!
+
+		while (pc@ symbase@ >=)
+			if (pc@@ 0xFFFF & 0xF7B4 ==)
+				pc@@ 16 >> offset!
+				break
+			end
+
+			4 pc -=
+		end
+
+		link@@ pc!
+		link@ offset@ + link!
+
+		if (pc@ 3 &)
+			" unaligned pc!\n" OSGetStdErr FPrintf
+		end
+
+		if (link@ 3 &)
+			" unaligned link!\n" OSGetStdErr FPrintf
+			return
+		end
+
+		1 links +=
+	end
+end

@@ -18,7 +18,7 @@ struct OSProcessInformation
 	4 PID
 	4 ParentPID
 	OBNAMEMAX Name
-	OBNAMEMAX ControllingConsole
+	OBNAMEMAX ConsoleName
 	4 OwningUID
 	4 OwningGID
 	4 Status

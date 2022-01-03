@@ -18,6 +18,12 @@ struct PsProcess
 	KeEvent_SIZEOF ActivationEvent
 	4 ActivationStatus
 
+	// console
+
+	4 ConsoleObject
+	4 ConsoleListNext
+	4 ConsoleListPrev
+
 	// memory management
 
 	4 QuotaBlock
@@ -147,6 +153,9 @@ extern PsProcessQueryAll { buffer maxquery -- count ok }
 
 extern PsProcessMaskSignal { signal processhandle -- ok }
 extern PsProcessUnmaskSignal { signal processhandle -- ok }
+
+extern PsProcessSetConsoleGroup { filehandle processhandle -- ok }
+extern PsProcessClearConsoleGroup { processhandle -- ok }
 
 extern PsProcessCreateObject { sectionobject creationflags parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }

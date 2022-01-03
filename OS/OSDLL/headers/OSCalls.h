@@ -8,7 +8,7 @@ extern OSGetSystemConsoleName { namebuf -- ok }
 
 extern OSGetBootFlags { -- bootflags ok }
 
-extern OSContinue { context -- ok }
+extern OSContinue { context -- }
 
 extern OSEventCreate { signaled type permissions name -- eventhandle ok }
 extern OSEventReset { eventhandle -- signaled ok }
@@ -73,6 +73,8 @@ extern OSProcessQueryByPID { pid query -- ok }
 extern OSProcessReadStatus { processhandle -- status ok }
 extern OSProcessMaskSignal { signal processhandle -- ok }
 extern OSProcessUnmaskSignal { signal processhandle -- ok }
+extern OSProcessSetConsoleGroup { filehandle processhandle -- ok }
+extern OSProcessClearConsoleGroup { processhandle -- ok }
 
 extern OSProcessSignalActivation { activationstatus -- ok }
 extern OSProcessWaitForActivation { timeout processhandle -- activationstatus ok }

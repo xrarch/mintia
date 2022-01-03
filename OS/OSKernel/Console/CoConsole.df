@@ -167,8 +167,105 @@ fn CoConsoleCreateObject { outputfunc context rawbuffer quotablock name permissi
 	context@ console@ CoConsole_Context + !
 	0 console@ CoConsole_Mode + !
 	0 console@ CoConsole_Detached + !
+	0 console@ CoConsole_ProcessListHead + !
 
 	1 console@ CoConsole_Initialized + !
+end
+
+fn CoConsoleSignal { signal console -- }
+	auto process
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	console@ CoConsole_ProcessListHead + @ process!
+
+	while (process@)
+		signal@ // signal
+		process@ // process
+		KeProcessSignal drop
+
+		process@ PsProcess_ConsoleListNext + @ process!
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn CoConsoleRemoveProcess { process -- ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto consoleobject
+	process@ PsProcess_ConsoleObject + @ consoleobject!
+
+	if (consoleobject@ ~~)
+		ipl@ KeIPLLower
+		STATUS_NO_CONSOLE ok!
+		return
+	end
+
+	auto console
+	consoleobject@ IODeviceGetExtension console!
+
+	0 ok!
+
+	auto ls
+	process@ PsProcess_ConsoleListPrev + @ ls!
+
+	auto ns
+	process@ PsProcess_ConsoleListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ PsProcess_ConsoleListNext + !
+	end else
+		ns@ console@ CoConsole_ProcessListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ PsProcess_ConsoleListPrev + !
+	end
+
+	0 process@ PsProcess_ConsoleObject + !
+
+	ipl@ KeIPLLower
+
+	consoleobject@ ObObjectDereferenceByPointer drop
+end
+
+fn CoConsoleInsertProcess { process consoleobject -- ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (process@ PsProcess_ConsoleObject + @)
+		ipl@ KeIPLLower
+		STATUS_HAS_CONSOLE ok!
+		return
+	end
+
+	consoleobject@ process@ PsProcess_ConsoleObject + !
+
+	auto console
+	consoleobject@ IODeviceGetExtension console!
+
+	auto h
+	console@ CoConsole_ProcessListHead + @ h!
+
+	if (h@ ~~)
+		0 process@ PsProcess_ConsoleListNext + !
+		0 process@ PsProcess_ConsoleListPrev + !
+
+		process@ console@ CoConsole_ProcessListHead + !
+	end else
+		0 process@ PsProcess_ConsoleListPrev + !
+
+		h@ process@ PsProcess_ConsoleListNext + !
+		process@ h@ PsProcess_ConsoleListPrev + !
+		process@ console@ CoConsole_ProcessListHead + !
+	end
+
+	ipl@ KeIPLLower
+
+	consoleobject@ ObObjectReferenceByPointer drop
 end
 
 fn CoConsoleRawBufferGet { console -- rawbuffer }
@@ -264,16 +361,6 @@ table CoCtrl
 	' '
 endtable
 
-asm "
-
-brk:
-	brk 0
-	ret
-
-"
-
-extern brk { -- }
-
 fn CoConsoleCook { console -- }
 	auto mode
 	console@ CoConsole_Mode + @ mode!
@@ -353,13 +440,13 @@ fn CoConsoleCook { console -- }
 			end
 
 			if (c@ 3 ==) // ^C
-				"CoConsoleCook: TODO: process ^C\n" KeCrash
+				OSSIGNAL_INT // signal
+				console@ // console
+				CoConsoleSignal
 			end elseif (c@ 26 ==) // ^Z
 				0 // ret
 				HALEXIT_SHUTDOWN // mode
 				HALExit
-			end elseif (c@ 25 ==) // ^Y
-				brk
 			end
 
 			if (ok@ ~~)

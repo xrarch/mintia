@@ -35,3 +35,8 @@ const OSSIGNAL_WINCH  28
 const OSSIGNAL_INFO   29
 const OSSIGNAL_USR1   30
 const OSSIGNAL_USR2   31
+
+const OSSIGNALCOUNT 32
+
+extern OSSignalSetDefaults { -- }
+extern OSSignalSetAction { action signum -- oldaction }

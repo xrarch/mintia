@@ -129,7 +129,7 @@ extern KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 extern KeThreadContinue { context thread -- }
 
 extern KeProcessCurrent { -- current }
-extern KeProcessInitialize { name asid process -- }
+extern KeProcessInitialize { name asid parentprocess process -- }
 extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
 

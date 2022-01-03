@@ -1,6 +1,8 @@
 #include "<df>/dragonfruit.h"
 
 #include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
 
 #include "<inc>/Kernel.h"
 
@@ -14,11 +16,9 @@
 
 #include "<inc>/Process.h"
 
+#include "<inc>/Console.h"
+
 #include "<ll>/OSDLL/OS.h"
-
-#include "<inc>/HALCPU.h"
-
-#include "<inc>/HALDebug.h"
 
 fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions name -- processobject ok }
 	auto initial
@@ -68,6 +68,10 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 
 	parentprocess@ PsProcess_UID + @ processobject@ PsProcess_UID + !
 	parentprocess@ PsProcess_GID + @ processobject@ PsProcess_GID + !
+
+	0 processobject@ PsProcess_ConsoleObject + !
+	0 processobject@ PsProcess_ConsoleListNext + !
+	0 processobject@ PsProcess_ConsoleListPrev + !
 
 	parentprocess@ PsProcess_Permissions + // inheritfrom
 	processobject@ PsProcess_Permissions + // permissions
@@ -159,6 +163,7 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 
 	name@ // name
 	pid@ // asid
+	parentprocess@ // parentprocess
 	processobject@ // process
 	KeProcessInitialize
 
@@ -227,6 +232,21 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 	PsProcessListUnlock
 
 	PsProcessTable@ ExHandleTableUnlock
+
+	if (creationflags@ OSPROCESS_DETACHCONSOLE & ~~)
+		// inherit the console group
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		if (parentprocess@ PsProcess_ConsoleObject + @)
+			processobject@ // process
+			parentprocess@ PsProcess_ConsoleObject + @ // console
+			CoConsoleInsertProcess drop
+		end
+
+		ipl@ KeIPLLower
+	end
 
 	auto rs
 	HALCPUInterruptDisable rs!

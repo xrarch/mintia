@@ -10,7 +10,7 @@
 var KeProcessListHead 0
 public KeProcessListHead
 
-fn KeProcessInitialize { name asid process -- }
+fn KeProcessInitialize { name asid parentprocess process -- }
 	process@ KeProcess_Name + name@ KEPROCESSNAMELEN 1 - strncpy
 
 	0 process@ KeProcess_ThreadCount + !
@@ -21,8 +21,13 @@ fn KeProcessInitialize { name asid process -- }
 	PRIORITY_DEFAULT process@ KeProcess_BasePriority + !
 
 	0 process@ KeProcess_SignalThread + !
-	0          process@ KeProcess_Signaled + !
-	0xCF66FFFF process@ KeProcess_AcceptMask + !
+	0 process@ KeProcess_Signaled + !
+
+	if (parentprocess@)
+		parentprocess@ KeProcess_AcceptMask + @ process@ KeProcess_AcceptMask + !
+	end else
+		0 process@ KeProcess_AcceptMask + !
+	end
 
 	0 process@ KeProcess_Terminated + !
 	0 process@ KeProcess_KilledStatus + !
@@ -57,14 +62,14 @@ fn KeProcessSignal { signal process -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (DEBUGCHECKS)
-		if (process@ KeProcess_Terminated + @)
-			"KeProcessSignal: process was terminated\n" KeCrash
-		end
+	if (process@ KeProcess_Terminated + @)
+		ipl@ KeIPLLower
+		return
+	end
 
-		if (process@ KeProcess_SignalThread + @ ~~)
-			"KeProcessSignal: process had no signalthread\n" KeCrash
-		end
+	if (process@ KeProcess_SignalThread + @ ~~)
+		ipl@ KeIPLLower
+		return
 	end
 
 	if (signal@ OSSIGNAL_CONT ==)
@@ -90,6 +95,11 @@ fn KeProcessSignal { signal process -- ok }
 
 		ipl@ KeIPLLower
 
+		return
+	end
+
+	if (process@ KeProcess_AcceptMask + @ 1 signal@ << & ~~)
+		ipl@ KeIPLLower
 		return
 	end
 

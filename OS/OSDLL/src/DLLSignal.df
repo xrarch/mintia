@@ -9,6 +9,7 @@
 #include "<inc>/OSProcess.h"
 #include "<inc>/OSFile.h"
 #include "<inc>/OSSignal.h"
+#include "<inc>/OSContext.h"
 
 #include "OSDLL.h"
 
@@ -82,9 +83,36 @@ table DLLSignalDefaultActions
 	1 // OSSIGNAL_USR2
 endtable
 
-table DLLSignalActions[32]
+const DEFAULTSIGNALMASK 0xCF66FFFF
+
+fn OSSignalSetDefaults { -- }
+	auto sign
+	0 sign!
+
+	while (sign@ OSSIGNALCOUNT <)
+		if (DEFAULTSIGNALMASK 1 sign@ << &)
+			OSSIGNALACTION_DEFAULT // action
+			sign@ // signum
+			OSSignalSetAction drop
+		end else
+			OSSIGNALACTION_IGNORE // action
+			sign@ // signum
+			OSSignalSetAction drop
+		end
+
+		1 sign +=
+	end
+end
 
 fn OSSignalSetAction { action signum -- oldaction }
+	if (signum@ ~~)
+		return
+	end
+
+	if (signum@ OSSIGNALCOUNT >=)
+		return
+	end
+
 	if (action@ OSSIGNALACTION_IGNORE ==)
 		signum@ // signal
 		OSCURRENTPROCESS // processhandle
@@ -95,16 +123,14 @@ fn OSSignalSetAction { action signum -- oldaction }
 		OSProcessUnmaskSignal drop
 	end
 
-	action@ [signum@]DLLSignalActions!
+	action@ OSPEB OSPEBs_SignalActions + signum@ 2 << + !
 end
-
-var dieonce 1
 
 fn DLLSignalDispatchHL { context signum -- }
 	auto ok
 
 	auto action
-	[signum@]DLLSignalActions@ action!
+	OSPEB OSPEBs_SignalActions + signum@ 2 << + @ action!
 
 	if (action@ OSSIGNALACTION_DEFAULT ==)
 		[signum@]DLLSignalDefaultActions@ action!
@@ -143,8 +169,8 @@ fn DLLSignalDispatchHL { context signum -- }
 		end
 	end
 
-	context@ OSContinue ok!
+	context@ OSContinue
 
 	// if OSContinue returned, something bad happened.
-	ok@ OSStatusGetName "DLLSignalDispatch: couldn't OSContinue: %s\n" OSError
+	"DLLSignalDispatch: couldn't OSContinue\n" OSError
 end

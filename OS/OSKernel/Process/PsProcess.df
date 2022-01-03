@@ -1,6 +1,8 @@
 #include "<df>/dragonfruit.h"
 
 #include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
 
 #include "<inc>/Kernel.h"
 
@@ -14,11 +16,9 @@
 
 #include "<inc>/Process.h"
 
+#include "<inc>/Console.h"
+
 #include "<ll>/OSDLL/OS.h"
-
-#include "<inc>/HALCPU.h"
-
-#include "<inc>/HALDebug.h"
 
 fn PsProcessSignalObject { signal processobject -- ok }
 	if (processobject@ PsSystemProcess@ ==)
@@ -234,8 +234,26 @@ fn PsProcessInformationQueryObject { processobject query -- ok }
 		0 query@ OSProcessInformation_Name + sb
 	end
 
-	// TODO console name
-	0 query@ OSProcessInformation_ConsoleName + sb
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto consoleobject
+	processobject@ PsProcess_ConsoleObject + @ consoleobject!
+
+	if (consoleobject@)
+		if (consoleobject@ ObHeader_SIZEOF - ObHeader_Name + @)
+			query@ OSProcessInformation_ConsoleName + // dest
+			consoleobject@ ObHeader_SIZEOF - ObHeader_Name + @ // src
+			OBNAMEMAX 1 - // max
+			strncpy
+		end else
+			0 query@ OSProcessInformation_ConsoleName + sb
+		end
+	end else
+		0 query@ OSProcessInformation_ConsoleName + sb
+	end
+
+	ipl@ KeIPLLower
 
 	processobject@ PsProcess_UID + @ query@ OSProcessInformation_OwningUID + !
 	processobject@ PsProcess_GID + @ query@ OSProcessInformation_OwningGID + !
@@ -441,6 +459,71 @@ fn PsProcessUnmaskSignal { signal processhandle -- ok }
 	signal@ // signal
 	processobject@ // process
 	KeProcessUnmaskSignal ok!
+
+	processobject@ ObObjectDereferenceByPointer drop
+end
+
+fn PsProcessSetConsoleGroup { filehandle processhandle -- ok }
+	auto processobject
+	auto access
+
+	PsProcessObjectType@ // type
+	processhandle@ // handle
+	ObObjectReferenceByHandle ok! processobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto consoleobject
+	ACCESS_READ // permissions
+	filehandle@ // filehandle
+	CoConsoleByFileHandle ok! consoleobject!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	processobject@ // process
+	consoleobject@ // console
+	CoConsoleInsertProcess ok!
+
+	consoleobject@ ObObjectDereferenceByPointer drop
+	processobject@ ObObjectDereferenceByPointer drop
+end
+
+fn PsProcessClearConsoleGroup { processhandle -- ok }
+	auto processobject
+	auto access
+
+	PsProcessObjectType@ // type
+	processhandle@ // handle
+	ObObjectReferenceByHandle ok! processobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	processobject@ // process
+	CoConsoleRemoveProcess ok!
 
 	processobject@ ObObjectDereferenceByPointer drop
 end

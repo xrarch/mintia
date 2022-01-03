@@ -50,6 +50,8 @@
 .extern OSProcessReadStatus
 .extern OSProcessMaskSignal
 .extern OSProcessUnmaskSignal
+.extern OSProcessSetConsoleGroup
+.extern OSProcessClearConsoleGroup
 .extern OSProcessSignalActivation
 .extern OSProcessWaitForActivation
 .extern OSProcessExit
@@ -65,7 +67,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 60
+	.dl 62
 
 OSCallTable:
 .global OSCallTable
@@ -118,18 +120,20 @@ OSCallTable:
 	.dl OSTOSProcessReadStatus                           ;46
 	.dl OSTOSProcessMaskSignal                           ;47
 	.dl OSTOSProcessUnmaskSignal                         ;48
-	.dl OSTOSProcessSignalActivation                     ;49
-	.dl OSTOSProcessWaitForActivation                    ;50
-	.dl OSTOSProcessExit                                 ;51
-	.dl OSTOSProcessCountQuery                           ;52
-	.dl OSTOSProcessQueryAll                             ;53
-	.dl OSTOSThreadSleep                                 ;54
-	.dl OSTOSThreadCreate                                ;55
-	.dl OSTOSThreadTerminate                             ;56
-	.dl OSTOSThreadResume                                ;57
-	.dl OSTOSThreadReadStatus                            ;58
-	.dl OSTOSThreadQuery                                 ;59
-	.dl OSTOSSetSystemConsole                            ;60
+	.dl OSTOSProcessSetConsoleGroup                      ;49
+	.dl OSTOSProcessClearConsoleGroup                    ;50
+	.dl OSTOSProcessSignalActivation                     ;51
+	.dl OSTOSProcessWaitForActivation                    ;52
+	.dl OSTOSProcessExit                                 ;53
+	.dl OSTOSProcessCountQuery                           ;54
+	.dl OSTOSProcessQueryAll                             ;55
+	.dl OSTOSThreadSleep                                 ;56
+	.dl OSTOSThreadCreate                                ;57
+	.dl OSTOSThreadTerminate                             ;58
+	.dl OSTOSThreadResume                                ;59
+	.dl OSTOSThreadReadStatus                            ;60
+	.dl OSTOSThreadQuery                                 ;61
+	.dl OSTOSSetSystemConsole                            ;62
 
 
 OSTOSConsolePutCharacter:
@@ -198,7 +202,6 @@ OSTOSContinue:
 
 	jal  OSContinue
 
-	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -889,6 +892,35 @@ OSTOSProcessUnmaskSignal:
 	mov  a1, long [s18 + 8] ;t2
 
 	jal  OSProcessUnmaskSignal
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessSetConsoleGroup:
+.global OSTOSProcessSetConsoleGroup
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSProcessSetConsoleGroup
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSProcessClearConsoleGroup:
+.global OSTOSProcessClearConsoleGroup
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSProcessClearConsoleGroup
 
 	mov  long [s18 + 4], a0 ;t1
 

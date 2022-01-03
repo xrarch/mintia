@@ -18,6 +18,8 @@ struct CoConsole
 	4 Initialized
 
 	4 Context
+
+	4 ProcessListHead
 endstruct
 
 externptr CoDispatch
@@ -25,10 +27,17 @@ externptr CoDriver
 
 fnptr CoOutputFunction { echo console -- ok }
 
+extern CoConsoleByFileHandle { permissions filehandle -- consoleobject ok }
+
 extern CoConsoleOutputBufferGet { console -- outputbuffer }
 extern CoConsoleRawBufferGet { console -- rawbuffer }
 extern CoConsoleGetContext { console -- context }
 extern CoConsoleCreateObject { outputfunc context rawbuffer quotablock name permissions permanent -- fileobject deviceobject ok }
+
+extern CoConsoleSignal { signal console -- }
+
+extern CoConsoleRemoveProcess { process -- ok }
+extern CoConsoleInsertProcess { process consoleobject -- ok }
 
 extern CoConsoleCook { console -- }
 

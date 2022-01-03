@@ -19,6 +19,9 @@ const CMDTOKENTYPE_EOL     4
 const CMDTOKENTYPE_INVALID 5
 const CMDTOKENTYPE_STRING  6
 
+extern CmdIgnoreSignals { -- }
+extern CmdResetSignals { -- }
+
 extern CmdDoNextStatement { -- done ok }
 
 extern CmdGetNextToken { tokenbuf bufsize issyntactic -- length tokentype ok }

@@ -1,0 +1,108 @@
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSEnvironment.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSWait.h"
+#include "<inc>/OSFastMutex.h"
+#include "<inc>/OSAbort.h"
+
+#include "OSDLL.h"
+
+buffer DLLFastMutexSemMutex OSFastMutex_SIZEOF
+
+fn DLLFastMutexInit { -- }
+	"DLLFastMutexSemMutex" // name
+	DLLFastMutexSemMutex // fastmutex
+	OSFastMutexInitialize
+
+	auto ok
+	auto semaphore
+	0 // count
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSemaphoreCreate ok! semaphore!
+
+	if (ok@)
+		ok@ OSStatusGetName "DLLFastMutexInit: %s\n" OSError
+	end
+
+	semaphore@ DLLFastMutexSemMutex OSFastMutex_SemaphoreHandle + !
+end
+
+fn OSFastMutexInitialize { name fastmutex -- }
+	OSNONE fastmutex@ OSFastMutex_SemaphoreHandle + !
+	-1 fastmutex@ OSFastMutex_LockCount + !
+
+	if (name@)
+		name@ fastmutex@ OSFastMutex_Name + !
+	end else
+		"unnamed" fastmutex@ OSFastMutex_Name + !
+	end
+end
+
+fn OSFastMutexDelete { fastmutex -- }
+	if (fastmutex@ OSFastMutex_SemaphoreHandle + @ OSNONE ~=)
+		fastmutex@ OSFastMutex_SemaphoreHandle + @ OSClose drop
+	end
+end
+
+fn DLLFastMutexWait { fastmutex -- }
+	auto semaphore
+	fastmutex@ OSFastMutex_SemaphoreHandle + @ semaphore!
+
+	if (semaphore@ OSNONE ==)
+		fastmutex@ DLLFastMutexCreateSemaphore semaphore!
+	end
+
+	auto ok
+	0 // alertable
+	10000 // timeout
+	semaphore@ // objecthandle
+	OSWaitForObject ok!
+
+	if (ok@)
+		ok@ OSStatusGetName
+		fastmutex@ OSFastMutex_Name + @
+		"DLLFastMutexWait: %s: %s\n" OSAbort
+	end
+end
+
+fn DLLFastMutexWake { fastmutex -- }
+	auto semaphore
+	fastmutex@ OSFastMutex_SemaphoreHandle + @ semaphore!
+
+	if (semaphore@ OSNONE ==)
+		fastmutex@ DLLFastMutexCreateSemaphore semaphore!
+	end
+
+	1 // adjustment
+	semaphore@ // semaphorehandle
+	OSSemaphoreRelease drop
+end
+
+fn DLLFastMutexCreateSemaphore { fastmutex -- semaphore }
+	DLLFastMutexSemMutex OSFastMutexAcquire
+
+	fastmutex@ OSFastMutex_SemaphoreHandle + @ semaphore!
+
+	if (semaphore@ OSNONE ==)
+		auto ok
+		0 // count
+		ACCESS_OWNER_ALL // permissions
+		0 // name
+		OSSemaphoreCreate ok! semaphore!
+
+		if (ok@)
+			ok@ OSStatusGetName "DLLFastMutexCreateSemaphore: %s\n" OSAbort
+		end
+
+		semaphore@ fastmutex@ OSFastMutex_SemaphoreHandle + !
+	end
+
+	DLLFastMutexSemMutex OSFastMutexRelease
+end

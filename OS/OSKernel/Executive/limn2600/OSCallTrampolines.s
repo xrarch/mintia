@@ -424,19 +424,22 @@ OSTOSClose:
 
 OSTOSWaitForMultipleObjects:
 .global OSTOSWaitForMultipleObjects
-	subi sp, sp, 4
+	subi sp, sp, 8
 	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
 	mov  a3, long [s18 + 16] ;t4
 
+	mov  t0, long [s18 + 20] ;t5
+	mov  long [sp + 4], t0
+
 	jal  OSWaitForMultipleObjects
 
 	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
-	addi sp, sp, 4
+	addi sp, sp, 8
 	ret
 
 OSTOSWaitForObject:
@@ -445,6 +448,7 @@ OSTOSWaitForObject:
 	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
 
 	jal  OSWaitForObject
 

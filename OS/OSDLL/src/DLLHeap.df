@@ -5,13 +5,14 @@
 #include "<inc>/OSAccess.h"
 #include "<inc>/OSFile.h"
 #include "<inc>/OSAbort.h"
+#include "<inc>/OSFastMutex.h"
 
 #include "OSDLL.h"
 
 // usermode heap allocator
 // allocates in units of 32 bytes
 
-// TODO protect with mutex
+buffer DLLHeapMutex OSFastMutex_SIZEOF
 
 // TODO maybe free backend allocations when all heap blocks within have been
 // freed (though that would be hard because it would involve unlinking those
@@ -21,13 +22,26 @@ table DLLHeapBucketListHeads[(DLLHEAPBLOCKBUCKETS 1 +)]
 
 const DLLHEAPEXTENSIONSIZE 2 // in units of pages
 
+fn DLLHeapInit { -- }
+	"DLLHeapMutex" // name
+	DLLHeapMutex // fastmutex
+	OSFastMutexInitialize
+end
+
 fn OSHeapAllocate { bytes -- ptr ok }
 	if (bytes@ 0 ==)
 		"OSHeapAllocate: 0 byte allocation\n" OSAbort
 	end
 
+	auto mutex
+	DLLHeapMutex mutex!
+
 	if (bytes@ DLLHeapBlock_SIZEOF + OSPAGESIZE DLLHEAPBLOCKMINSIZE - >=)
+		mutex@ OSFastMutexAcquire
+
 		bytes@ DLLPagePoolAlloc ok! ptr!
+
+		mutex@ OSFastMutexRelease
 
 		return
 	end
@@ -40,6 +54,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	bytes@ DLLHEAPBLOCKSIZEMASK + DLLHEAPBLOCKSIZESHIFT >> bucketindex!
 
 	bucketindex@ DLLHEAPBLOCKSIZESHIFT << bytes!
+
+	mutex@ OSFastMutexAcquire
 
 	[bucketindex@]DLLHeapBucketListHeads@ ptr!
 
@@ -65,6 +81,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		end
 
 		n@ [bucketindex@]DLLHeapBucketListHeads!
+
+		mutex@ OSFastMutexRelease
 
 		// return block
 		DLLHeapBlock_SIZEOF ptr +=
@@ -141,6 +159,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 
 			newblock@ [newbucketindex@]DLLHeapBucketListHeads!
 
+			mutex@ OSFastMutexRelease
+
 			// return block
 			DLLHeapBlock_SIZEOF ptr +=
 
@@ -161,6 +181,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	DLLPagePoolAlloc ok! ptr!
 
 	if (ok@)
+		mutex@ OSFastMutexRelease
+
 		return
 	end
 
@@ -216,14 +238,23 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		1 i +=
 	end
 
+	mutex@ OSFastMutexRelease
+
 	DLLHeapBlock_SIZEOF ptr +=
 
 	0 ok!
 end
 
 fn OSHeapFree { ptr -- }
+	auto mutex
+	DLLHeapMutex mutex!
+
 	if (ptr@ OSPAGEOFFSETMASK & ~~)
+		mutex@ OSFastMutexAcquire
+
 		ptr@ DLLPagePoolFree
+
+		mutex@ OSFastMutexRelease
 
 		return
 	end
@@ -242,6 +273,8 @@ fn OSHeapFree { ptr -- }
 	DLLHeapBlock_SIZEOF ptr -=
 
 	ptr@ DLLHeapBlock_BucketIndex + gb bucketindex!
+
+	mutex@ OSFastMutexAcquire
 
 	if (ptr@ OSPAGEOFFSETMASK &)
 		// we're not at the start of the page, check left
@@ -352,6 +385,8 @@ fn OSHeapFree { ptr -- }
 	0 ptr@ DLLHeapBlock_PrevFree + !
 
 	ptr@ [bucketindex@]DLLHeapBucketListHeads!
+
+	mutex@ OSFastMutexRelease
 end
 
 fn Malloc { size -- ptr }

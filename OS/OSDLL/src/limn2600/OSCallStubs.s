@@ -237,6 +237,7 @@ OSWaitForMultipleObjects:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
+	mov  t5, long [sp + 4]
 
 	li   t0, 20
 	sys  0
@@ -249,6 +250,7 @@ OSWaitForObject:
 .global OSWaitForObject
 	mov  t1, a0
 	mov  t2, a1
+	mov  t3, a2
 
 	li   t0, 21
 	sys  0

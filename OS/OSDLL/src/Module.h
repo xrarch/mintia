@@ -12,3 +12,6 @@ extern DLLGetSymbol { name dll -- symbol ok }
 extern DLLModuleResolveSymbols { dll -- ok }
 extern DLLModuleApplyFixups { sectionheader id dll -- ok }
 extern DLLModuleRebase { dll -- ok }
+
+extern DLLModuleLoad { flags name -- dll ok }
+extern DLLModuleUnload { dll -- }

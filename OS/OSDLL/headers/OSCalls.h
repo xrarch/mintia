@@ -30,8 +30,8 @@ extern OSQuery { handle query -- ok }
 
 extern OSClose { handle -- ok }
 
-extern OSWaitForMultipleObjects { waittype timeout objectcount objecthandletable -- ok }
-extern OSWaitForObject { timeout objecthandle -- ok }
+extern OSWaitForMultipleObjects { alertable waittype timeout objectcount objecthandletable -- ok }
+extern OSWaitForObject { alertable timeout objecthandle -- ok }
 
 extern OSHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }
 

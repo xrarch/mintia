@@ -8,6 +8,7 @@
 #include "<inc>/OSStatus.h"
 #include "<inc>/OSSignal.h"
 #include "<inc>/OSProcess.h"
+#include "<inc>/OSFastMutex.h"
 
 #include "OSDLL.h"
 
@@ -45,6 +46,10 @@ fn OSAbort { ... fmt -- }
 	OSPEB OSPEBs_StdErr + @
 	VFPrintf
 
+	OSSIGNALACTION_DEFAULT // action
+	OSSIGNAL_ABRT // signum
+	OSSignalSetAction drop
+
 	// send OSSIGNAL_ABRT to ourselves
 
 	OSSIGNAL_ABRT // signal
@@ -79,15 +84,31 @@ fn VPrintf { argvt argcn fmt -- }
 	VFPrintf
 end
 
+buffer DLLPrintMutex OSFastMutex_SIZEOF
+
+fn DLLPrintInit { -- }
+	"DLLPrintMutex" // name
+	DLLPrintMutex // fastmutex
+	OSFastMutexInitialize
+end
+
 const LINEBUFFERMAX 80
 buffer FPutcLineBuffer (LINEBUFFERMAX 16 +)
 var FPutcLineBufferLength 0
 
 fn OSFlushLine { -- }
+	if (OSPEB OSPEBs_StdOut + @ OSNONE ==)
+		return
+	end
+
+	DLLPrintMutex OSFastMutexAcquire
+
 	auto len
 	FPutcLineBufferLength@ len!
 
 	if (len@ ~~)
+		DLLPrintMutex OSFastMutexRelease
+
 		return
 	end
 
@@ -98,6 +119,8 @@ fn OSFlushLine { -- }
 	FPutcLineBuffer // buffer
 	OSPEB OSPEBs_StdOut + @ // filehandle
 	OSFileWrite drop drop
+
+	DLLPrintMutex OSFastMutexRelease
 end
 
 fn OSPutc { c filehandle -- ok }
@@ -117,16 +140,20 @@ fn FPutc { fd c -- }
 	if (fd@ OSNONE ==)
 		c@ OSConsolePutCharacter drop
 	end elseif (fd@ OSPEB OSPEBs_StdOut + @ ==)
-		// XXX NOT reentrant!! should be!!
+		DLLPrintMutex OSFastMutexAcquire
 
 		c@ FPutcLineBuffer FPutcLineBufferLength@ + sb
 		
 		1 FPutcLineBufferLength +=
 
 		if (FPutcLineBufferLength@ LINEBUFFERMAX ==)
+			DLLPrintMutex OSFastMutexRelease
 			OSFlushLine
 		end elseif (c@ '\n' ==)
+			DLLPrintMutex OSFastMutexRelease
 			OSFlushLine
+		end else
+			DLLPrintMutex OSFastMutexRelease
 		end
 	end else
 		c@ fd@ OSPutc drop

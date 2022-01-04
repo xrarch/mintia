@@ -1,10 +1,19 @@
 .extern OSExit
 .extern OSThreadExit
+.extern DLLMainHL
 
 .section text
 
 ; copy arguments table from OSPEB to stack and jump to entrypoint
 ; does not return
+
+DLLMain:
+.global DLLMain
+	subi sp, sp, 4
+	mov  long [sp], zero
+
+	jal DLLMainHL
+	nop
 
 ;a2 - program entry
 ;a1 - argv

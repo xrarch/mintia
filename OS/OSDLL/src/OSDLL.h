@@ -21,6 +21,16 @@ extern DLLFindEnvironmentVariable { name envblock -- entry env ok }
 extern DLLGetEnvironmentVariable { env name bufsize envblock -- ok }
 extern DLLSetEnvironmentVariable { env name envblock -- ok }
 
+// print stuff
+
+extern DLLPrintInit { -- }
+
+// fastmutex stuff
+
+extern DLLFastMutexInit { -- }
+extern DLLFastMutexWait { fastmutex -- }
+extern DLLFastMutexWake { fastmutex -- }
+
 // debug stuff
 
 extern DLLDebugTrace { context -- }
@@ -28,9 +38,13 @@ extern DLLDebugTrace { context -- }
 // module stuff
 
 externptr DLLProcessInit
+externptr DLLModuleMutex
+
+extern DLLModuleInit { -- }
 
 extern DLLDoFixup { ptr value type -- ok }
 extern DLLGetSymbolByAddress { address dll -- symbase symname symbol ok }
+extern DLLGetSymbolAddress { name dll -- address ok }
 
 // heap stuff
 
@@ -71,5 +85,6 @@ struct DLLHeapBlock
 	4 PrevFree
 endstruct
 
+extern DLLHeapInit { -- }
 extern DLLPagePoolAlloc { length -- vaddr ok }
 extern DLLPagePoolFree { vaddr -- }

@@ -26,11 +26,6 @@ extern DLLFindEnvironmentVariable { name envblock -- entry env ok }
 extern DLLGetEnvironmentVariable { env name bufsize envblock -- ok }
 extern DLLSetEnvironmentVariable { env name envblock -- ok }
 
-// print stuff
-
-externptr DLLNoFlush
-extern DLLPrintInit { -- }
-
 // fastmutex stuff
 
 extern DLLFastMutexInit { -- }

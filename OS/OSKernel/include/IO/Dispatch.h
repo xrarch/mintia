@@ -11,6 +11,7 @@ fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
+fnptr IODispatchReclaimFCBFunction { fcb -- reclaimed ok }
 
 struct IODispatchTable
 	4 Open
@@ -18,13 +19,13 @@ struct IODispatchTable
 	4 IOControl
 	4 Read
 	4 Write
-	4 SystemControl
+	4 Reserved1
 	4 Parse
-	4 Create
+	4 Reserved2
 	4 Flush
 	4 DeleteObject
-	4 SetInformation
-	4 GetInformation
+	4 Reserved3
+	4 Reserved4
 	4 Rename
 	4 ReadBlock
 	4 WriteBlock
@@ -32,8 +33,8 @@ struct IODispatchTable
 	4 ReadDirectory
 	4 GetPageAddress
 	4 DeleteDeviceObject
+	4 ReclaimFCB
+	4 Reserved5
+	4 Reserved6
 	4 Reserved7
-	4 Reserved8
-	4 Reserved9
-	4 Reserved10
 endstruct

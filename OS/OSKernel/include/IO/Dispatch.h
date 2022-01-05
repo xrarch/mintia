@@ -11,7 +11,7 @@ fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
-fnptr IODispatchReclaimFCBFunction { fcb -- reclaimed ok }
+fnptr IODispatchReclaimFCBFunction { fcb -- reclaimed }
 
 struct IODispatchTable
 	4 Open

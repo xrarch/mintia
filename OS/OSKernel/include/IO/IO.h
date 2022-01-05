@@ -44,6 +44,10 @@ struct IOFileControlBlock
 	4 UncachedIOCount
 	4 SystemFile
 
+	4 ReusableListNext
+	4 ReusableListPrev
+	4 ReusableInserted
+
 	ExRwLock_SIZEOF RwLock
 
 	KeTime_SIZEOF AccessTime
@@ -68,6 +72,7 @@ extern IOFileControlBlockSetChangeTime { time fcb -- }
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
 extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
+extern IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- }
 extern IOFileControlBlockReference { fcb -- oldcount }

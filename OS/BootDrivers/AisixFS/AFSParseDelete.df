@@ -50,11 +50,21 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			return
 		end
 
-		initialfcb@ AFSFCBReference drop
+		if (initialfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+			1 // wantcaching
+			initialfcb@ // fcb
+			IOFileControlBlockCacheCheck ok! drop
+
+			if (ok@)
+				return
+			end
+		end
+
+		initialfcb@ IOFileControlBlockReference drop
 		initialfcb@ IOFileControlBlockLockShared ok!
 
 		if (ok@)
-			initialfcb@ AFSFCBDereference drop
+			initialfcb@ IOFileControlBlockDereference drop
 			return
 		end
 
@@ -92,7 +102,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 						// no rights
 
 						initialfcb@ IOFileControlBlockUnlock
-						initialfcb@ AFSFCBDereference drop
+						initialfcb@ IOFileControlBlockDereference drop
 
 						return
 					end
@@ -113,7 +123,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 				if (len@ 59 >)
 					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ AFSFCBDereference drop
+					initialfcb@ IOFileControlBlockDereference drop
 
 					STATUS_NAME_TOO_LONG ok!
 
@@ -147,16 +157,28 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				AFSFCBRead ok! nextfcb!
 
 				initialfcb@ IOFileControlBlockUnlock
-				initialfcb@ AFSFCBDereference drop
+				initialfcb@ IOFileControlBlockDereference drop
 
 				if (ok@)
 					return
 				end
 
+				if (nextfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+					1 // wantcaching
+					nextfcb@ // fcb
+					IOFileControlBlockCacheCheck ok! drop
+
+					if (ok@)
+						nextfcb@ IOFileControlBlockDereference drop
+
+						return
+					end
+				end
+
 				nextfcb@ IOFileControlBlockLockShared ok!
 
 				if (ok@)
-					nextfcb@ AFSFCBDereference drop
+					nextfcb@ IOFileControlBlockDereference drop
 
 					return
 				end
@@ -177,7 +199,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 				if (ok@)
 					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ AFSFCBDereference drop
+					initialfcb@ IOFileControlBlockDereference drop
 
 					if (ok@ STATUS_IO_END_OF_FILE ==)
 						STATUS_NOT_FOUND ok!
@@ -194,7 +216,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					AFSFCBRead ok! nextfcb!
 
 					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ AFSFCBDereference drop
+					initialfcb@ IOFileControlBlockDereference drop
 
 					if (ok@)
 						return
@@ -202,7 +224,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 					if (path@ gb)
 						if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
-							nextfcb@ AFSFCBDereference drop
+							nextfcb@ IOFileControlBlockDereference drop
 
 							STATUS_NOT_A_DIRECTORY ok!
 
@@ -211,10 +233,22 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					end
 
 					if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
+						if (nextfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+							1 // wantcaching
+							nextfcb@ // fcb
+							IOFileControlBlockCacheCheck ok! drop
+
+							if (ok@)
+								nextfcb@ IOFileControlBlockDereference drop
+
+								return
+							end
+						end
+					
 						nextfcb@ IOFileControlBlockLockShared ok!
 
 						if (ok@)
-							nextfcb@ AFSFCBDereference drop
+							nextfcb@ IOFileControlBlockDereference drop
 							return
 						end
 					end
@@ -230,7 +264,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			end
 		end
 	end else
-		initialfcb@ AFSFCBReference drop
+		initialfcb@ IOFileControlBlockReference drop
 	end
 
 	// at this point the FCB should be refed but unlocked
@@ -245,7 +279,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 	IOFileCreateObject ok! object!
 
 	if (ok@)
-		initialfcb@ AFSFCBDereference drop
+		initialfcb@ IOFileControlBlockDereference drop
 
 		initialfcb@ IOFileControlBlockGetContext // mount
 		AFSMountDereference drop
@@ -277,13 +311,7 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	0 nuked!
 
 	if (oldcount@ 1 ==)
-		// TODO: delete file if this is the last reference and a deletion is
-		// pending. may be annoying to synchronize.
-
-		if (mountctx@ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
-			// we're in a low-fcb condition, remove this one immediately if
-			// still possible
-
+		if (0)
 			auto fcbdata
 			fcb@ IOFileControlBlockGetContext fcbdata!
 
@@ -305,30 +333,8 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 			end
 
 			if (fcb@ IOFileControlBlockGetReferences 1 ==)
-				if (mountctx@ AFSData_FCBUsedCount + @ AFSFCBCacheCount@ >=)
-					// FCB refcount still 1, and still in low-fcb condition...
-					// nuke it.
-
-					auto buckethead
-					mountctx@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
-
-					fcb@ // fcb
-					buckethead@ // buckethead
-					AFSFCBRemove
-
-					1 // writeout
-					fcb@ // fcb
-					IOFileControlBlockDelete
-
-					fcbdata@ MmFree
-
-					auto rs
-					HALCPUInterruptDisable rs!
-					1 mountctx@ AFSData_FCBUsedCount + -=
-					rs@ HALCPUInterruptRestore
-
-					1 nuked!
-				end
+				// TODO: delete file if this is the last reference and a deletion is
+				// pending. may be annoying to synchronize.
 			end
 
 			bucket@ // bucket
@@ -338,7 +344,7 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	end
 
 	if (nuked@ ~~)
-		fcb@ AFSFCBDereference drop
+		fcb@ IOFileControlBlockDereference drop
 	end
 
 	mount@ // mount

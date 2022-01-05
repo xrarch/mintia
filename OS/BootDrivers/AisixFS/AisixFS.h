@@ -36,19 +36,11 @@ struct AFSData
 
 	4 FCBRefTotal
 
-	4 FCBUsedCount
-
-	4 FCBReusableListHead
-	4 FCBReusableListTail
-
 	(AFSFCBBUCKETS KeMutex_SIZEOF *) FCBCacheMutexes
 	(AFSFCBBUCKETS 8 *) FCBBucketListHeads
 endstruct
 
 struct AFSFCBData
-	4 NextReusableFCB
-	4 PrevReusableFCB
-	
 	4 NextFCB
 	4 PrevFCB
 	
@@ -85,11 +77,10 @@ const AFSSUPERBLOCKVERSION 0x6
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
-extern AFSFCBReference { fcb -- oldcount }
-extern AFSFCBDereference { fcb -- oldcount }
-
 extern AFSFCBRemove { fcb buckethead -- }
 extern AFSFCBInsert { fcb buckethead -- }
+
+extern AFSFCBReclaim { fcb -- reclaimed }
 
 extern AFSFCBCacheLockBucket { bucket mount -- ok }
 extern AFSFCBCacheUnlockBucket { bucket mount -- }

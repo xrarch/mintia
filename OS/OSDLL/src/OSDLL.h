@@ -1,3 +1,8 @@
+// init stuff
+
+externptr DLLComponentsInitialized
+externptr DLLProcessInit
+
 // PEB stuff
 
 const OSENVIRONMENTSIZE 2048
@@ -23,6 +28,7 @@ extern DLLSetEnvironmentVariable { env name envblock -- ok }
 
 // print stuff
 
+externptr DLLNoFlush
 extern DLLPrintInit { -- }
 
 // fastmutex stuff
@@ -37,7 +43,6 @@ extern DLLDebugTrace { context -- }
 
 // module stuff
 
-externptr DLLProcessInit
 externptr DLLModuleMutex
 
 extern DLLModuleInit { -- }

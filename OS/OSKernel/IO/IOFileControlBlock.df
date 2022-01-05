@@ -22,7 +22,13 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-var IOFileControlBlockStandbyListHead 0
+var IOFileControlBlockReusableListHead 0
+var IOFileControlBlockReusableListTail 0
+
+var IOFileControlBlockMaximum 0
+public IOFileControlBlockMaximum
+
+var IOFileControlBlockCount 0
 
 fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	devobj@ fcb@ IOFileControlBlock_DeviceObject + !
@@ -39,6 +45,10 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	0 fcb@ IOFileControlBlock_ParseCount + !
 	0 fcb@ IOFileControlBlock_UncachedIOCount + !
 	0 fcb@ IOFileControlBlock_SystemFile + !
+
+	0 fcb@ IOFileControlBlock_ReusableListNext + !
+	0 fcb@ IOFileControlBlock_ReusableListPrev + !
+	0 fcb@ IOFileControlBlock_ReusableInserted + !
 
 	"FCBRwLock" // name
 	fcb@ IOFileControlBlock_RwLock + // rwlock
@@ -60,6 +70,80 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	memset
 end
 
+fn IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
+	// like IOFileControlBlockCreate but will steal from the pool of reusable
+	// FCBs if the count is above the maximum.
+
+	0 fcb!
+	0 ok!
+
+	if (IOFileControlBlockCount@ 1 + IOFileControlBlockMaximum@ >=)
+		// above the maximum, try to reclaim one.
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		IOFileControlBlockReusableListHead@ fcb!
+
+		while (fcb@)
+			auto reclaimfunc
+			fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @ reclaimfunc!
+
+			if (DEBUGCHECKS)
+				if (reclaimfunc@ ~~)
+					"IOFileControlBlockAllocate: no reclaimfunc\n" KeCrash
+				end
+			end
+
+			KeThreadCurrent@ KeThreadIgnoreKill drop
+
+			auto reclaimed
+			fcb@ // fcb
+			fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @
+			IODispatchReclaimFCBFunction reclaimed!
+
+			KeThreadCurrent@ KeThreadAcceptKill drop
+
+			if (reclaimed@)
+				fcb@ IOFileControlBlockRemove
+
+				ipl@ KeIPLLower
+
+				1 // writeout
+				fcb@ // fcb
+				IOFileControlBlockReclaim
+
+				break
+			end
+
+			fcb@ IOFileControlBlock_ReusableListNext + @ fcb!
+		end
+
+		ipl@ KeIPLLower
+	end
+
+	if (fcb@ ~~)
+		// didn't get an FCB by now, create it.
+
+		dispatchtable@ // dispatchtable
+		devobj@ // devobj
+		filetype@ // filetype
+		flags@ // flags
+		IOFileControlBlockCreate ok! fcb!
+
+		if (ok@)
+			return
+		end
+	end else
+		dispatchtable@ // dispatchtable
+		devobj@ // devobj
+		filetype@ // filetype
+		flags@ // flags
+		fcb@ // fcb
+		IOFileControlBlockInitialize
+	end
+end
+
 fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 	IOFileControlBlock_SIZEOF // bytes
 	'IOFC' // tag
@@ -75,15 +159,23 @@ fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 	flags@ // flags
 	fcb@ // fcb
 	IOFileControlBlockInitialize
+
+	if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
+		// only count it if its reclaimable.
+		auto rs
+		HALCPUInterruptDisable rs!
+		1 IOFileControlBlockCount +=
+		rs@ HALCPUInterruptRestore
+	end
 end
 
-fn IOFileControlBlockDelete { writeout fcb -- }
+fn IOFileControlBlockReclaim { writeout fcb -- }
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 	if (cacheblock@)
 		if (writeout@ -1 ==)
-			"IOFileControlBlockDelete: didn't expect a cacheblock\n" KeCrash
+			"IOFileControlBlockReclaim: didn't expect a cacheblock\n" KeCrash
 		end
 
 		auto ok
@@ -93,9 +185,31 @@ fn IOFileControlBlockDelete { writeout fcb -- }
 		IOCacheInfoBlockDestroy ok!
 
 		if (ok@)
-			"IOFileControlBlockDelete: failed to destroy cacheblock\n" KeCrash
+			"IOFileControlBlockReclaim: failed to destroy cacheblock\n" KeCrash
 		end
 	end
+end
+
+fn IOFileControlBlockDelete { writeout fcb -- }
+	// caller should be 100% sure this FCB won't be used again.
+	// it also should have removed it from the reusable list by now.
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlock_ReusableInserted + @)
+			"IOFileControlBlockDelete: FCB was reusable\n" KeCrash
+		end
+	end
+
+	if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
+		auto rs
+		HALCPUInterruptDisable rs!
+		1 IOFileControlBlockCount -=
+		rs@ HALCPUInterruptRestore
+	end
+
+	writeout@ // writeout
+	fcb@ // fcb
+	IOFileControlBlockReclaim
 
 	fcb@ MmFree
 end
@@ -145,21 +259,28 @@ end
 fn IOFileControlBlockReference { fcb -- oldcount }
 	// should be called by filesystem driver in its parse method.
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	fcb@ IOFileControlBlock_References + @ oldcount!
 
 	oldcount@ 1 + fcb@ IOFileControlBlock_References + !
 
-	rs@ HALCPUInterruptRestore
+	if (oldcount@ ~~)
+		if (fcb@ IOFileControlBlock_ReusableInserted + @)
+			0 fcb@ IOFileControlBlock_ReusableInserted + !
+			fcb@ IOFileControlBlockRemove
+		end
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn IOFileControlBlockDereference { fcb -- oldcount }
 	// should be called by filesystem driver in its delete method.
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	fcb@ IOFileControlBlock_References + @ oldcount!
 
@@ -171,7 +292,81 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 
 	oldcount@ 1 - fcb@ IOFileControlBlock_References + !
 
-	rs@ HALCPUInterruptRestore
+	if (oldcount@ 1 ==)
+		if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
+			if (IOFileControlBlockCount@ IOFileControlBlockMaximum@ >=)
+				// above the maximum! attempt to free this FCB immediately.
+
+				KeThreadCurrent@ KeThreadIgnoreKill drop
+
+				auto reclaimed
+				fcb@ // fcb
+				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @
+				IODispatchReclaimFCBFunction reclaimed!
+
+				KeThreadCurrent@ KeThreadAcceptKill drop
+
+				if (reclaimed@)
+					ipl@ KeIPLLower
+
+					1 // writeout
+					fcb@ // fcb
+					IOFileControlBlockDelete
+
+					return
+				end
+			end
+
+			1 fcb@ IOFileControlBlock_ReusableInserted + !
+			fcb@ IOFileControlBlockInsert
+		end
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn IOFileControlBlockRemove { fcb -- }
+	// assumes IPLDPC or equivalent
+
+	auto ls
+	fcb@ IOFileControlBlock_ReusableListPrev + @ ls!
+
+	auto ns
+	fcb@ IOFileControlBlock_ReusableListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IOFileControlBlock_ReusableListNext + !
+	end else
+		ns@ IOFileControlBlockReusableListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ IOFileControlBlock_ReusableListPrev + !
+	end else
+		ls@ IOFileControlBlockReusableListTail!
+	end
+end
+
+fn IOFileControlBlockInsert { fcb -- }
+	// assumes IPLDPC or equivalent
+
+	auto t
+
+	IOFileControlBlockReusableListTail@ t!
+
+	if (t@ ~~)
+		0 fcb@ IOFileControlBlock_ReusableListNext + !
+		0 fcb@ IOFileControlBlock_ReusableListPrev + !
+
+		fcb@ IOFileControlBlockReusableListHead!
+		fcb@ IOFileControlBlockReusableListTail!
+	end else
+		0 fcb@ IOFileControlBlock_ReusableListNext + !
+
+		t@ fcb@ IOFileControlBlock_ReusableListPrev + !
+		fcb@ t@ IOFileControlBlock_ReusableListNext + !
+		fcb@ IOFileControlBlockReusableListTail!
+	end
 end
 
 fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }

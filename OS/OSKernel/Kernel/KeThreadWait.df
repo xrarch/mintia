@@ -204,20 +204,6 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 	auto current
 	KeThreadCurrent@ current!
 
-	auto waitipl
-	IPLDPC KeIPLRaise waitipl!
-
-	waitmode@ // mode
-	alertable@ // alertable
-	current@ // thread
-	KeThreadIsKilled ok!
-
-	if (ok@)
-		waitipl@ KeIPLLower
-
-		return
-	end
-
 	auto i
 	0 i!
 
@@ -232,7 +218,8 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		1 satisfied!
 	end
 
-	objectcount@ current@ KeThread_WaitCount + !
+	auto waitipl
+	IPLDPC KeIPLRaise waitipl!
 
 	while (i@ objectcount@ <)
 		auto object
@@ -338,6 +325,23 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		return
 	end
 
+	waitmode@ // mode
+	alertable@ // alertable
+	current@ // thread
+	KeThreadIsKilled ok!
+
+	if (ok@)
+		// we died, don't sleep
+
+		current@ KeThreadWaitBlocksDequeue
+
+		waitipl@ KeIPLLower
+
+		return
+	end
+
+	objectcount@ current@ KeThread_WaitCount + !
+
 	if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
 		// there's a timeout and its not infinite, set up a timer waitblock
 
@@ -375,19 +379,10 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 	auto current
 	KeThreadCurrent@ current!
 
+	0 ok!
+
 	auto waitipl
 	IPLDPC KeIPLRaise waitipl!
-
-	waitmode@ // mode
-	alertable@ // alertable
-	current@ // thread
-	KeThreadIsKilled ok!
-
-	if (ok@)
-		waitipl@ KeIPLLower
-
-		return
-	end
 
 	if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
 		if (object@ KeDispatchHeader_Signaled + @ 0 s>)
@@ -454,7 +449,18 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 		return
 	end
 
-	1 current@ KeThread_WaitCount + !
+	waitmode@ // mode
+	alertable@ // alertable
+	current@ // thread
+	KeThreadIsKilled ok!
+
+	if (ok@)
+		// we died, don't go to sleep
+
+		waitipl@ KeIPLLower
+
+		return
+	end
 
 	OSWAITANY // waittype
 	current@ KeThread_WaitBlocks + // waitblock
@@ -463,8 +469,6 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 
 	if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
 		// there's a timeout and its not infinite, set up a timer waitblock
-
-		2 current@ KeThread_WaitCount + !
 
 		"WaitTimeout" // name
 		0 // function

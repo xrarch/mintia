@@ -2,6 +2,9 @@ struct MmVAD
 	4 Next
 	4 Prev
 
+	4 LRUNext
+	4 LRUPrev
+
 	4 StartVA
 	4 EndVA
 

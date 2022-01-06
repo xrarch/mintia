@@ -81,6 +81,9 @@ fn MmVADCreate { startva endva prot offset processobject sectionobject quotabloc
 	0 vad@ MmVAD_Next + !
 	0 vad@ MmVAD_Prev + !
 
+	0 vad@ MmVAD_LRUNext + !
+	0 vad@ MmVAD_LRUPrev + !
+
 	startva@ vad@ MmVAD_StartVA + !
 	endva@ vad@ MmVAD_EndVA + !
 	0 vad@ MmVAD_FurthestExtentMapped + !
@@ -124,110 +127,69 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 
 	// assumes the caller locked the process VAD list.
 
-	processobject@ PsProcess_VADLookupHint + @ vad!
-
-	if (vad@ ~~)
-		// no hint, start at listhead
-		processobject@ PsProcess_VADListHead + @ vad!
-	end
-
 	0 ok!
 
-	// fast check for if the hint is immediately the correct VAD (common)
-	if (vaddr@ vad@ MmVAD_StartVA + @ >=)
-		if (vaddr@ vad@ MmVAD_EndVA + @ <)
-			// found it
+	processobject@ PsProcess_VADListLRUHead + @ vad!
 
-			if (mustbestart@)
-				if (vad@ MmVAD_StartVA + @ vaddr@ ~=)
-					STATUS_BAD_ADDRESS ok!
+	auto searches
+	0 searches!
 
-					return
-				end
-
-				if (vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - length@ ~=)
-					STATUS_BAD_ADDRESS ok!
-
-					return
-				end
-			end else
-				vad@ processobject@ PsProcess_VADLookupHint + !
-			end
-
-			return
-		end
-	end
-
-	// hint was not the correct VAD, check if it is before or after the hint
-	// and search in the appropriate direction.
-
-	if (vaddr@ vad@ MmVAD_StartVA + @ >)
-		// after the hint, search forwards
-
-		while (vad@)
-			if (vaddr@ vad@ MmVAD_StartVA + @ <)
-				// vaddr was before this VAD which means we missed it, which
-				// means it's not mapped
-
-				STATUS_BAD_ADDRESS ok!
-
-				return
-			end
-
+	while (vad@)
+		if (vaddr@ vad@ MmVAD_StartVA + @ >=)
 			if (vaddr@ vad@ MmVAD_EndVA + @ <)
-				// found it!
+				// found it
 
-				if (mustbestart@ ~~)
-					vad@ processobject@ PsProcess_VADLookupHint + !
+				if (mustbestart@)
+					if (vad@ MmVAD_StartVA + @ vaddr@ ~=)
+						STATUS_BAD_ADDRESS ok!
+
+						return
+					end
+
+					if (vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - length@ ~=)
+						STATUS_BAD_ADDRESS ok!
+
+						return
+					end
 				end
 
-				break
-			end
+				if (processobject@ PsProcess_VADListLRUHead + @ vad@ ~=)
+					// remove from LRU list
 
-			vad@ MmVAD_Next + @ vad!
-		end
-	end else
-		// before the hint, search backwards
+					auto n
+					vad@ MmVAD_LRUNext + @ n!
 
-		while (vad@)
-			if (vaddr@ vad@ MmVAD_EndVA + @ >=)
-				// vaddr was after this VAD which means we missed it, which
-				// means it's not mapped
+					if (n@)
+						vad@ MmVAD_LRUPrev + @ n@ MmVAD_LRUPrev + !
+					end
 
-				STATUS_BAD_ADDRESS ok!
+					vad@ MmVAD_LRUPrev + @ n!
+
+					if (n@)
+						vad@ MmVAD_LRUNext + @ n@ MmVAD_LRUNext + !
+					end
+
+					// reinsert at head of LRU list
+
+					processobject@ PsProcess_VADListLRUHead + @ n!
+
+					if (n@)
+						vad@ n@ MmVAD_LRUPrev + !
+					end
+
+					0 vad@ MmVAD_LRUPrev + !
+					n@ vad@ MmVAD_LRUNext + !
+					vad@ processobject@ PsProcess_VADListLRUHead + !
+				end
 
 				return
 			end
-
-			if (vaddr@ vad@ MmVAD_StartVA + @ >=)
-				// found it!
-
-				if (mustbestart@ ~~)
-					vad@ processobject@ PsProcess_VADLookupHint + !
-				end
-
-				break
-			end
-
-			vad@ MmVAD_Prev + @ vad!
 		end
+
+		vad@ MmVAD_LRUNext + @ vad!
 	end
 
-	if (vad@ ~~)
-		STATUS_BAD_ADDRESS ok!
-	end elseif (mustbestart@)
-		if (vad@ MmVAD_StartVA + @ vaddr@ ~=)
-			STATUS_BAD_ADDRESS ok!
-
-			return
-		end
-
-		if (vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - length@ ~=)
-			STATUS_BAD_ADDRESS ok!
-
-			return
-		end
-	end
+	STATUS_BAD_ADDRESS ok!
 end
 
 fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }
@@ -384,6 +346,17 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 		vad@ lastsufficientvad@ MmVAD_Next + !
 	end
 
+	// insert at head of LRU list
+
+	processobject@ PsProcess_VADListLRUHead + @ h!
+
+	if (h@)
+		vad@ h@ MmVAD_LRUPrev + !
+		h@ vad@ MmVAD_LRUNext + !
+	end
+
+	vad@ processobject@ PsProcess_VADListLRUHead + !
+
 	processobject@ MmVADListUnlock
 end
 
@@ -524,13 +497,7 @@ fn MmVADUnmap { vad processobject -- }
 		end
 	end
 
-	if (vad@ processobject@ PsProcess_VADLookupHint + @ ==)
-		0 processobject@ PsProcess_VADLookupHint + !
-	end
-
-	if (vad@ processobject@ PsProcess_VADMapHint + @ ==)
-		0 processobject@ PsProcess_VADMapHint + !
-	end
+	// remove from VAD list
 
 	auto n
 	vad@ MmVAD_Next + @ n!
@@ -548,6 +515,25 @@ fn MmVADUnmap { vad processobject -- }
 	end else // no prev means we were the head
 		vad@ MmVAD_Next + @ processobject@ PsProcess_VADListHead + !
 	end
+
+	// remove from LRU list
+
+	vad@ MmVAD_LRUNext + @ n!
+
+	if (n@)
+		vad@ MmVAD_LRUPrev + @ n@ MmVAD_LRUPrev + !
+	end
+
+	vad@ MmVAD_LRUPrev + @ n!
+
+	if (n@)
+		vad@ MmVAD_LRUNext + @ n@ MmVAD_LRUNext + !
+	end else
+		// no prev means we were the head
+		vad@ MmVAD_LRUNext + @ processobject@ PsProcess_VADListLRUHead + !
+	end
+
+	// uncharge quota
 
 	auto quotablock
 	vad@ MmVAD_QuotaBlock + @ quotablock!

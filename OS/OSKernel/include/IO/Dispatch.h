@@ -12,6 +12,7 @@ fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
 fnptr IODispatchReclaimFCBFunction { fcb -- reclaimed }
+fnptr IODispatchEnsureBlocksForPage { offset fcb -- ok }
 
 struct IODispatchTable
 	4 Open
@@ -34,7 +35,7 @@ struct IODispatchTable
 	4 GetPageAddress
 	4 DeleteDeviceObject
 	4 ReclaimFCB
-	4 Reserved5
+	4 EnsureBlocksForPage
 	4 Reserved6
 	4 Reserved7
 endstruct

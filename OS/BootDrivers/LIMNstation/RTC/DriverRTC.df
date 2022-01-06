@@ -20,10 +20,9 @@ const RTCCMDQUERYSEC 2
 const RTCCMDQUERYMS  3
 
 buffer DriverRTCTimeCurrent KeTime_SIZEOF
+buffer DriverRTCUptime      KeTime_SIZEOF
 
 extern DriverRTCInterrupt { int -- }
-
-buffer DriverRTCUpdateLast KeTime_SIZEOF
 
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_PRETASKING ==)
@@ -40,6 +39,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		DriverRTCTimeCurrent DriverRTCQuerySlow
 
 		pointerof DriverRTCQuery HALRTCQueryFunction!
+		pointerof DriverRTCUptimeQuery HALUptimeQueryFunction!
 	end
 
 	0 ok!
@@ -48,6 +48,14 @@ end
 fn (HALRTCQueryF) DriverRTCQuery { time -- }
 	auto ctime
 	DriverRTCTimeCurrent ctime!
+
+	ctime@ KeTime_SecPart + @ time@ KeTime_SecPart + !
+	ctime@ KeTime_MsPart + @ time@ KeTime_MsPart + !
+end
+
+fn (HALUptimeQueryF) DriverRTCUptimeQuery { time -- }
+	auto ctime
+	DriverRTCUptime ctime!
 
 	ctime@ KeTime_SecPart + @ time@ KeTime_SecPart + !
 	ctime@ KeTime_MsPart + @ time@ KeTime_MsPart + !
@@ -74,6 +82,8 @@ externptr KeTimerExpirationDPC
 fn (HALInterruptHandler) DriverRTCInterrupt { int -- }
 	auto currenttime
 
+	HALRTCINTERVAL DriverRTCUptime KeTimeAddMs
+
 	DriverRTCTimeCurrent currenttime!
 
 	currenttime@ DriverRTCQuerySlow
@@ -82,7 +92,7 @@ fn (HALInterruptHandler) DriverRTCInterrupt { int -- }
 	KeTimerExpirationDPC expdpc!
 
 	if (expdpc@ KeDPC_Enqueued + @ ~~)
-		if (KeTimerExpirationEarliest currenttime@ KeTimeCompare TIMEEARLIER ==)
+		if (KeTimerExpirationEarliest DriverRTCUptime KeTimeCompare TIMEEARLIER ==)
 			0 // context1
 			0 // context2
 			DPCLOWIMPORTANCE // importance

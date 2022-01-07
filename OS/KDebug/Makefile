@@ -11,11 +11,11 @@ SYSBINDIR  = ../SystemBin
 
 DCFLAGS = incdir=../HAL/include/:../OSKernel/include/:./include/:../HAL/limn2600/include/
 
-all: $(SYSBINDIR)/224Debug.exe
+all: $(SYSBINDIR)/KDebug.dll
 
-$(SYSBINDIR)/224Debug.exe: $(OBJ)
-	$(LD) $(SYSBINDIR)/224Debug.exe $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(SYSBINDIR)/224Debug.exe text=0x80600000,data=text+text_size+align,bss=data+data_size+align
+$(SYSBINDIR)/KDebug.dll: $(OBJ)
+	$(LD) $(SYSBINDIR)/KDebug.dll $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(OBJTOOL) move $(SYSBINDIR)/KDebug.dll text=0x80600000,data=text+text_size+align,bss=data+data_size+align
 
 %.o: %.df ../HAL/include/*.h ../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@
@@ -24,4 +24,4 @@ $(SYSBINDIR)/224Debug.exe: $(OBJ)
 	$(AS) $< $@
 
 cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF $(SYSBINDIR)/224Debug.exe
+	rm -f ${OBJ} *.a3x *.LOFF $(SYSBINDIR)/KDebug.dll

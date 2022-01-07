@@ -1,7 +1,7 @@
 LOAD_DIR := Loader/LIMNstation
 KERN_DIR := OSKernel
 HAL_DIR  := HAL
-DBG_DIR  := 224Debug
+DBG_DIR  := KDebug
 DRIVER_DIR := BootDrivers
 RTL_DIR  := OSDLL
 

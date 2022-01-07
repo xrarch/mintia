@@ -1,0 +1,119 @@
+//
+// Implements usermode entry.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn PsThreadUserEntry { context1 context2 -- }
+	// this is the start function for every usermode thread ever.
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	HALCPUInterruptDisable drop
+
+	0 PsPrepareUsermode
+
+	PsOSDLLInformation PsOSDLLInfo_ExitFunction + @ // exitfunc
+	context2@ // context
+	KeThreadCurrent@ PsThread_UserStackTop + @ // ustack
+	context1@ // entryfunc
+	HALCPUEnterUserMode
+
+	// HALCPUEnterUserMode should not return
+
+	"PsThreadUserEntry\n" KeCrash
+end
+
+fn PsPrepareUsermode { trapframe -- }
+	// called before the exception handler returns to usermode.
+	// handles thread termination and signal dispatch.
+
+	auto whatnow
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	HALCPUInterruptEnable
+
+	while (1)
+		USERMODE // mode
+		1 // alertable
+		KeThreadCurrent@ // thread
+		KeThreadIsKilled whatnow!
+
+		if (whatnow@ STATUS_KILLED ==)
+			// don't return to userland.
+			// our journey ends here
+
+			ipl@ KeIPLLower
+
+			PsThreadExit
+
+			// PsThreadExit should not return
+
+			"PsPrepareUsermode\n" KeCrash
+		end elseif (whatnow@ STATUS_SIGNALLED ==)
+			auto sig
+			KeThreadCurrent@ KeThread_Process + @ KeProcess_Signaled + @ sig!
+
+			if (sig@ 1 OSSIGNAL_STOP << &)
+				// suspend!
+
+				1 KeThreadCurrent@ KeThread_Suspended + !
+				THREADSTATUS_SUSPENDED KeThreadYield
+
+				// continue and recheck signals because things probably
+				// changed since we napped.
+				continue
+			end
+
+			auto nextsig
+			KeThreadCurrent@ KeThreadNextSignal nextsig!
+
+			ipl@ KeIPLLower
+
+			if (trapframe@)
+				auto recheck
+				nextsig@ // signum
+				PsOSDLLInformation PsOSDLLInfo_SignalDispatchFunction + @ // dispatchfunc
+				KeThreadCurrent@ // thread
+				trapframe@ // trapframe
+				KeCopySignalFrame recheck!
+
+				if (recheck@)
+					IPLDPC KeIPLRaise ipl!
+					continue
+				end
+			end
+
+			break
+		end else
+			ipl@ KeIPLLower
+
+			break
+		end
+	end
+
+	HALCPUInterruptDisable drop
+end

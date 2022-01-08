@@ -21,11 +21,12 @@ WIP: MINTIA is not currently in an even minimally usable state.
 11. Demand paging, memory-mapped files, etc.
 12. Userspace dynamic linking.
 13. Swapping and working set management.
+14. Minimal command-line interface over TTY.
 
 ## Planned features (in rough descending order of priority)
 
-1. Minimal command-line interface over TTY. (in progress)
-2. AisixFS write support.
+1. AisixFS write support. (in progress)
+2. Useful command-line interface.
 3. MBR partition table support; FAT32 driver
 4. Mac OS 9-lookalike window system.
 

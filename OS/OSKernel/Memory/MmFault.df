@@ -234,8 +234,11 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 				PTE_V flags!
 
-				if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
-					PTE_W flags |=
+				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ -1 ==)
+					// no swap page, fine to map writable
+					if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
+						PTE_W flags |=
+					end
 				end
 
 				phyaddr@ // phyaddr
@@ -489,8 +492,12 @@ fn MmSatisfyAnonFault { section offset vad -- flags pfdbe phyaddr ok }
 
 	PTE_V flags!
 
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
-		PTE_W flags |=
+	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ -1 ==)
+		// no swap page, it's okay to map writable since we're either already
+		// dirty or have never been written to swap.
+		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+			PTE_W flags |=
+		end
 	end
 end
 
@@ -502,140 +509,184 @@ fn MmWriteFault { vaddr process -- signal }
 	auto pteaddr
 	auto phyaddr
 
-	process@ MmWorkingSetLock drop
+	auto cowpfdbe
+	auto cowaddr
+	0 cowaddr!
 
-	// re-check the PTE with the working set mutex held, since it may have
-	// been trimmed since we decided it was valid. we know that it's the same
-	// PTE if it's still valid, and hasn't been switched out with something
-	// else, because the VAD list mutex is held during all such events.
-	// the loss of this convenient assumption is one reason that it sounds
-	// hard to allow multiple threads to take a page fault per process without
-	// waiting for eachother.
+	while (1)
+		process@ MmWorkingSetLock drop
 
-	vaddr@ // vaddr
-	process@ KeProcess_PageDirectory + @ // pagemap
-	MmVirtualtoPTEAddress ok! pteaddr!
+		// re-check the PTE with the working set mutex held, since it may have
+		// been trimmed since we decided it was valid. we know that it's the same
+		// PTE if it's still valid, and hasn't been switched out with something
+		// else, because the VAD list mutex is held during all such events.
+		// the loss of this convenient assumption is one reason that it sounds
+		// hard to allow multiple threads to take a page fault per process without
+		// waiting for eachother.
 
-	if (ok@)
-		// invalid
-		process@ MmWorkingSetUnlock
-		-1 signal!
-		return
-	end
-
-	pteaddr@ // pteaddr
-	MmPTEInterpret ok! drop phyaddr!
-
-	if (ok@)
-		// invalid
-		process@ MmWorkingSetUnlock
-		-1 signal!
-		return
-	end
-
-	auto section
-	auto vad
-	auto ok
-	auto pfdbe
-	auto wsli
-	auto wsleptr
-
-	vaddr@ // vaddr
-	process@ // process
-	MmFaultParameters ok! vad! section! drop
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
-		end
-	end
-
-	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
-		// COW, allocate a page frame and copy the old page frame into it.
-
-		// XXX this is a unique situation where a page allocation occurs
-		// with the working set mutex held. this could prevent the process's
-		// working set from being trimmed while it's blocked waiting for a
-		// page to become available, which could lead to an unnecessary
-		// early demise for the process.
-
-		auto cowpfdbe
-		auto cowaddr
-
-		process@ // sectionobject
-		pteaddr@ // pte
-		FREEFIRST // pri
-		MmAnonymousPageAlloc ok! cowaddr! cowpfdbe!
-
-		if (ok@)
-			process@ MmWorkingSetUnlock
-			OSSIGNAL_KILL signal!
-			return
-		end
-
-		MMEVICTFLAG_COW cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
-
-		PAGESHIFT cowaddr <<=
-
-		cowaddr@ IDENTITYSPACE | // dest
-		phyaddr@ IDENTITYSPACE | // src
-		PAGESIZE // size
-		memcpy
-
-		cowaddr@ // phyaddr
-		PTE_V PTE_W | // flags
 		vaddr@ // vaddr
-		pteaddr@ // pteaddr
-		process@ KeProcess_ASID + @ // asid
-		MmPTEUpdate drop drop drop
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmVirtualtoPTEAddress ok! pteaddr!
 
-		// we COW'd over top of the old page frame and no longer have it
-		// mapped, so dereference it
-		pfdbe@ MmEvictablePageDereference drop
-	end elseif (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE & ~~)
-		// privilege violation
-		OSSIGNAL_SEGV signal!
-	end else
-		// dirty fault. mark the file page modified.
-
-		if (DEBUGCHECKS)
-			if (section@ MmSection_FileObject + @ ~~)
-				"MmWriteFault: no fileobject\n" KeCrash
-			end
+		if (ok@)
+			// invalid
+			process@ MmWorkingSetUnlock
+			-1 signal!
+			break
 		end
 
-		KeProcessCurrent PsProcess_QuotaBlock + @ // quotablock
-		pfdbe@ // pfdbe
-		IOCachePageModifyQuotaCharge drop
+		pteaddr@ // pteaddr
+		MmPTEInterpret ok! drop phyaddr!
 
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
+		if (ok@)
+			// invalid
+			process@ MmWorkingSetUnlock
+			-1 signal!
+			break
+		end
 
-		pfdbe@ IOCachePageModifyFunction ok!
+		auto section
+		auto vad
+		auto ok
+		auto pfdbe
+		auto wsli
+		auto wsleptr
+
+		vaddr@ // vaddr
+		process@ // process
+		MmFaultParameters ok! vad! section! drop
 
 		if (DEBUGCHECKS)
 			if (ok@)
-				"MmWriteFault: failed to modify page\n" KeCrash
+				ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
 			end
 		end
 
-		phyaddr@ // phyaddr
-		PTE_V PTE_W | // flags
-		vaddr@ // vaddr
-		pteaddr@ // pteaddr
-		process@ KeProcess_ASID + @ // asid
-		MmPTEUpdate drop drop drop
+		auto ipl
 
-		if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
-			pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmPTEUnmodify
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+				// dirtied an anonymous page, free its swap page
+
+				pfdbe@ MmAnonymousPageDirty
+
+				phyaddr@ // phyaddr
+				PTE_V PTE_W | // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				process@ KeProcess_ASID + @ // asid
+				MmPTEUpdate drop drop drop
+
+				process@ MmWorkingSetUnlock
+
+				break
+			end
+
+			// COW, allocate a page frame and copy the old page frame into it.
+
+			if (cowaddr@ ~~)
+				process@ MmWorkingSetUnlock
+
+				process@ // sectionobject
+				pteaddr@ // pte
+				FREEFIRST // pri
+				MmAnonymousPageAlloc ok! cowaddr! cowpfdbe!
+
+				if (ok@)
+					OSSIGNAL_KILL signal!
+					return
+				end
+
+				// we unlocked the working set mutex so we have to recheck
+				// everything...
+
+				continue
+			end
+
+			MMEVICTFLAG_COW cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+
+			PAGESHIFT cowaddr <<=
+
+			cowaddr@ IDENTITYSPACE | // dest
+			phyaddr@ IDENTITYSPACE | // src
+			PAGESIZE // size
+			memcpy
+
+			cowaddr@ // phyaddr
+			PTE_V PTE_W | // flags
+			vaddr@ // vaddr
+			pteaddr@ // pteaddr
+			process@ KeProcess_ASID + @ // asid
+			MmPTEUpdate drop drop drop
+
+			// we COW'd over top of the old page frame and no longer have it
+			// mapped, so dereference it
+			pfdbe@ MmEvictablePageDereference drop
+
+			process@ MmWorkingSetUnlock
+
+			return
+		end elseif (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE & ~~)
+			// privilege violation
+			OSSIGNAL_SEGV signal!
+		end else
+			if (section@ MmSection_FileObject + @ ~~)
+				// dirtied an anonymous page, free its swap page
+
+				pfdbe@ MmAnonymousPageDirty
+
+				phyaddr@ // phyaddr
+				PTE_V PTE_W | // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				process@ KeProcess_ASID + @ // asid
+				MmPTEUpdate drop drop drop
+
+				process@ MmWorkingSetUnlock
+
+				break
+			end
+
+			// dirty fault. mark the file page modified.
+
+			KeProcessCurrent PsProcess_QuotaBlock + @ // quotablock
+			pfdbe@ // pfdbe
+			IOCachePageModifyQuotaCharge drop
+
+			IPLDPC KeIPLRaise ipl!
+
+			pfdbe@ IOCachePageModifyFunction ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"MmWriteFault: failed to modify page\n" KeCrash
+				end
+			end
+
+			phyaddr@ // phyaddr
+			PTE_V PTE_W | // flags
+			vaddr@ // vaddr
+			pteaddr@ // pteaddr
+			process@ KeProcess_ASID + @ // asid
+			MmPTEUpdate drop drop drop
+
+			if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
+				pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmPTEUnmodify
+			end
+
+			pteaddr@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+
+			ipl@ KeIPLLower
 		end
 
-		pteaddr@ pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+		process@ MmWorkingSetUnlock
 
-		ipl@ KeIPLLower
+		break
 	end
 
-	process@ MmWorkingSetUnlock
+	if (cowaddr@)
+		cowaddr@ MmPageFree
+	end
 end

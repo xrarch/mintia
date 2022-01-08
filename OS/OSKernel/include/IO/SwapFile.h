@@ -7,3 +7,6 @@ extern IOSwapPageRead { pageframe pno -- ok }
 externptr IOSwapPagesUsed
 externptr IOSwapPagesCount
 externptr IOSwapPagesUsedPeak
+
+externptr IOSwapPagesWritten
+externptr IOSwapPagesRead

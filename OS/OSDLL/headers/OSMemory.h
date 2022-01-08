@@ -13,6 +13,9 @@ struct OSMemoryInformation
 	4 SwapPageUsedCount
 	4 SwapPagePeakCount
 
+	4 SwapPagesRead
+	4 SwapPagesWritten
+
 	4 PoolBytesUsedInternally
 	4 PoolBytesUsedExternally
 

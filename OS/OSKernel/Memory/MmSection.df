@@ -136,6 +136,11 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 								1 MmAnonymousPageCount -=
 								rs@ HALCPUInterruptRestore
 
+								if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ -1 ~=)
+									// free in swap
+									pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
+								end
+
 								ppte@ PAGESHIFT >> MmPageFree
 							end elseif (ppte@ PTE_INSWAP &)
 								// free in swap
@@ -176,6 +181,11 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 						pfdbe@ MmEvictablePageRemoveForDeletion
 						1 MmAnonymousPageCount -=
 						rs@ HALCPUInterruptRestore
+
+						if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ -1 ~=)
+							// free in swap
+							pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
+						end
 
 						ppte@ PAGESHIFT >> MmPageFree
 					end elseif (ppte@ PTE_INSWAP &)
@@ -426,28 +436,44 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- dropped evicted o
 		return
 	end
 
-	IPLLOW KeIPLLower
-
-	1 dropped!
-
-	// write out to swapfile
-
 	auto pno
-	pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << IDENTITYSPACE | // pageframe
-	IOSwapPageWrite ok! pno!
+	pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ pno!
 
-	if (ok@)
-		// uh-oh, failed to write to swapfile
+	if (pno@ -1 ==)
+		IPLLOW KeIPLLower
 
-		IPLDPC KeIPLRaise drop
-
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-			sectionobject@ MmVADListUnlock
-		end else
-			sectionobject@ MmSectionPPTUnlock
+		if (DEBUGCHECKS)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
+				"MmAnonymousEvictionFunction: had no swap pno but was on fast list\n" KeCrash
+			end
 		end
 
-		return
+		1 dropped!
+
+		// write out to swapfile
+
+		pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << IDENTITYSPACE | // pageframe
+		IOSwapPageWrite ok! pno!
+
+		if (ok@)
+			// uh-oh, failed to write to swapfile
+
+			IPLDPC KeIPLRaise drop
+
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+				sectionobject@ MmVADListUnlock
+			end else
+				sectionobject@ MmSectionPPTUnlock
+			end
+
+			return
+		end
+
+		IPLDPC KeIPLRaise drop
+	end elseif (DEBUGCHECKS)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST & ~~)
+			"MmAnonymousEvictionFunction: had swap pno but wasn't on fast list\n" KeCrash
+		end
 	end
 
 	1 evicted!
@@ -457,15 +483,34 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- dropped evicted o
 
 	pno@ PAGESHIFT << PTE_INSWAP | ppte@!
 
-	IPLDPC KeIPLRaise drop
-
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
 		sectionobject@ MmVADListUnlock
 	end else
 		sectionobject@ MmSectionPPTUnlock
 	end
 
+	auto old
+	MmAnonymousPageCount@ old!
+
 	1 MmAnonymousPageCount -=
+end
+
+fn MmAnonymousPageDirty { pfdbe -- }
+	auto pno
+
+	auto rs
+	HALCPUInterruptDisable rs!
+	pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ pno!
+	-1 pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+	MMEVICTFLAG_FAST ~ pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + &=
+	rs@ HALCPUInterruptRestore
+
+	if (pno@ -1 ==)
+		// nothing to do
+		return
+	end
+
+	pno@ IOSwapPageFree
 end
 
 fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
@@ -480,6 +525,7 @@ fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
 		return
 	end
 
+	-1 pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
 	sectionobject@ pfdbe@ MmPageFrameEntryAnonymous_SectionObject + !
 	pte@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
 
@@ -508,6 +554,11 @@ fn MmAnonymousSwapIn { sectionobject pte pno -- pfdbe pfn ok }
 
 		return
 	end
+
+	pno@ pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+
+	// fast page until dirtied
+	MMEVICTFLAG_FAST pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
 end
 
 fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }

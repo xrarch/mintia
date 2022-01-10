@@ -24,7 +24,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmSectionPrepare { prot endofview sectionobject -- ok }
+fn MmSectionPrepare { prot endofview offset sectionobject -- ok }
 	// helper function
 
 	0 ok!
@@ -74,10 +74,18 @@ fn MmSectionPrepare { prot endofview sectionobject -- ok }
 				end
 			end
 
+			fcb@ IOFileControlBlockLockShared ok!
+
+			if (ok@)
+				return
+			end
+
 			cacheblock@ // cacheblock
 			IOCacheInfoBlockTryReference ok! drop
 
 			if (ok@)
+				fcb@ IOFileControlBlockUnlock
+
 				return
 			end
 
@@ -87,10 +95,37 @@ fn MmSectionPrepare { prot endofview sectionobject -- ok }
 				cacheblock@ // cacheblock
 				IOCacheInfoBlockDereference drop
 
+				fcb@ IOFileControlBlockUnlock
+
 				STATUS_IO_END_OF_FILE ok!
 
 				return
 			end
+
+			if (prot@ PAGEACCESS_WRITE &)
+				if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_EnsureBlocksForRange + @)
+					// file may be sparsely allocated on disk -- ensure the
+					// blocks on disk are available before allowing this
+					// writable mapping.
+
+					endofview@ offset@ - // length
+					offset@ // offset
+					fcb@ // fcb
+					fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_EnsureBlocksForRange + @
+					IODispatchEnsureBlocksForRange ok!
+
+					if (ok@)
+						cacheblock@ // cacheblock
+						IOCacheInfoBlockDereference drop
+
+						fcb@ IOFileControlBlockUnlock
+
+						return
+					end
+				end
+			end
+
+			fcb@ IOFileControlBlockUnlock
 		end
 	end else
 		if (DEBUGCHECKS)
@@ -220,6 +255,7 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 
 	pageprotection@ // prot
 	endofview@ // endofview
+	sectionoffset@ // offset
 	sectionobject@ // sectionobject
 	MmSectionPrepare ok!
 

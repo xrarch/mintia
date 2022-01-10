@@ -38,6 +38,9 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
+	auto ensurefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_EnsureBlocksForRange + @ ensurefunc!
+
 	auto truncfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
 
@@ -114,8 +117,26 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			end
 		end
 
+		if (ensurefunc@)
+			// file may be sparsely allocated -- call the ensure function to
+			// prevent us from finding out too late that there aren't enough
+			// disk blocks to complete the write.
+
+			OSPAGESIZE // length
+			offset@ PAGENUMBERMASK & // offset
+			fcb@ // fcb
+			ensurefunc@ IODispatchEnsureBlocksForRange ok!
+
+			if (ok@)
+				fcb@ IOFileControlBlockUnlock
+
+				return
+			end
+		end
+
 		if (m@ PAGESIZE ==)
-			// writing a full page -- no need to read something we're about to overwrite
+			// writing a full page -- no need to read something we're about to
+			// overwrite.
 
 			0 // kflags
 			0 // locked
@@ -171,7 +192,9 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			memcpy
 		end
 
-		pfdbe@ IOCachePageModifyFunction ok!
+		pageoff@ m@ + // extent
+		pfdbe@ // pfdbe
+		IOCachePageModifyFunction ok!
 
 		if (DEBUGCHECKS)
 			if (ok@)

@@ -73,7 +73,7 @@ extern IOCachePageWriteModified { dontunbias pfdbe -- ok }
 
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
-extern IOCachePageModifyFunction { pfdbe -- ok }
+extern IOCachePageModifyFunction { extent pfdbe -- ok }
 
 extern IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
 extern IOCachePageModifyQuotaUncharge { pfdbe -- }

@@ -171,6 +171,10 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
 	end
 
+	auto extent
+	pfdbe@ IOPageFrameEntryCache_ModifiedExtent + @ extent!
+	0 pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
+
 	ipl@ KeIPLLower
 
 	auto writefunc
@@ -179,22 +183,19 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	auto off
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
-	auto len
-
 	if (DEBUGCHECKS)
-		if (off@ fcb@ IOFileControlBlock_SizeInBytes + @ >=)
-			pfdbe@ "IOCachePageWriteModified: modified page offset beyond end of file (0x%08x)\n" KeCrash
+		if (off@ extent@ + fcb@ IOFileControlBlock_SizeInBytes + @ >)
+			fcb@ IOFileControlBlock_SizeInBytes + @
+			off@ extent@ +
+			"IOCachePageWriteModified: modified page extent (%d) beyond end of file (%d)\n" KeCrash
 		end
 	end
 
 	// perform the write operation
 
-	fcb@ IOFileControlBlock_SizeInBytes + @ off@ -
-	PAGESIZE min len!
-
 	0 // flags
 	0 // kflags
-	len@ // length
+	extent@ // length
 	off@ // offset
 	pfdbe@ IOPageFrameEntryCache_PFN + @ PAGESHIFT << IDENTITYSPACE | // buffer
 	fcb@ // fcb
@@ -359,10 +360,11 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 			rs@ HALCPUInterruptRestore
 		end
 
-		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
 		0 pfdbe@ IOPageFrameEntryCache_Flags + !
 		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
+		0 pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
+		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
 		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
 		0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
 		0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
@@ -642,14 +644,17 @@ fn IOCachePageModifyQuotaUncharge { pfdbe -- }
 	quotablock@ MmQuotaBlockDereference
 end
 
-fn IOCachePageModifyFunction { pfdbe -- ok }
+fn IOCachePageModifyFunction { extent pfdbe -- ok }
 	// mark a page modified and insert it on the modified page list if
 	// necessary.
 
 	0 ok!
 
+	auto fcb
+	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
+
 	auto cacheblock
-	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 	if (DEBUGCHECKS)
 		if (cacheblock@ ~~)
@@ -659,6 +664,14 @@ fn IOCachePageModifyFunction { pfdbe -- ok }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	if (extent@ pfdbe@ IOPageFrameEntryCache_ModifiedExtent + @ >)
+		fcb@ IOFileControlBlock_SizeInBytes + @ pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ -
+		extent@
+		min extent!
+
+		extent@ pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
+	end
 
 	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
 		ipl@ KeIPLLower

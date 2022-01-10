@@ -25,7 +25,7 @@ struct IOPageFrameEntryCache
 	4 References
 	4 WorkingSetIndexHint
 	4 Context3
-	4 ModifiedOffsetAndExtent
+	4 ModifiedExtent
 	4 ModifiedQuotaBlock
 	4 ModifiedPTE
 	4 FCB

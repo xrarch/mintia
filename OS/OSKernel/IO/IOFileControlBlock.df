@@ -225,6 +225,11 @@ fn IOFileControlBlockLock { fcb -- ok }
 	ExRwLockAcquireExclusive ok!
 end
 
+fn IOFileControlBlockDemoteToShared { fcb -- ok }
+	fcb@ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockDemoteToShared ok!
+end
+
 fn IOFileControlBlockLockShared { fcb -- ok }
 	1 // alertable
 	0 // nowait
@@ -430,6 +435,70 @@ fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 	end
 
 	fcb@ IOFileControlBlockUnlock
+end
+
+fn IOFileControlBlockTruncate { newsize growing keeplocked fcb -- ok }
+	auto truncfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
+
+	if (DEBUGCHECKS)
+		if (truncfunc@ ~~)
+			"IOFileControlBlockTruncate: no truncate dispatch function\n" KeCrash
+		end
+	end
+
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	while (1)
+		auto oldsize
+		fcb@ IOFileControlBlock_SizeInBytes + @ oldsize!
+
+		if (newsize@ oldsize@ <)
+			// shrinking
+			if (growing@)
+				// don't shrink
+				break
+			end
+
+			newsize@ // newsize
+			1 // writeout
+			fcb@ IOFileControlBlock_CacheInfoBlock + @ // cacheblock
+			IOCacheInfoBlockTruncate ok!
+
+			if (ok@)
+				fcb@ IOFileControlBlockUnlock
+				return
+			end
+		end
+
+		newsize@ // newsize
+		fcb@ // fcb
+		truncfunc@ IODispatchTruncateFunction ok!
+
+		if (ok@)
+			fcb@ IOFileControlBlockUnlock
+			return
+		end
+
+		newsize@ fcb@ IOFileControlBlock_SizeInBytes + !
+
+		break
+	end
+
+	if (keeplocked@)
+		fcb@ IOFileControlBlockDemoteToShared ok!
+
+		if (ok@)
+			fcb@ IOFileControlBlockUnlock
+			return
+		end
+	end else
+		fcb@ IOFileControlBlockUnlock
+	end
 end
 
 // millions of getters and setters so we don't break every driver whenever we

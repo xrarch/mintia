@@ -6,10 +6,10 @@ The boot process starts when the [LIMNstation BIOS](https://github.com/limnarch/
 |-----------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | MINTIA Kernel               | /mintia/OSKernel.exe | The main body of kernel code, the center of the operating system.                                                                      |
 | Hardware Abstraction Layer  | /mintia/HALLIMNstation.dll  | Anything and everything platform-specific in the kernel is put in the HAL, which forms the very lowest layer of the operating system.  |
-| Dragonfruit Runtime Library | /mintia/Dragonfruit.dll     | The dragonfruit library. User programs also link with this library.                                                                    |
+| Dragonfruit Runtime Library | /mintia/Dragonfruit.dll     | The dragonfruit library.                                                                    |
 | Drivers                     | /mintia/BootDrivers/        | Any drivers that Loader determines are necessary to operate the machine.                                                               |
 | Binary Resources            | /mintia/BootResources/      | Large reclaimable resources like fonts and logos.                                                                                      |
-| Kernel Debugger             | /mintia/224Debug.exe        | Optionally loadable kernel debugger.                                                                                                   |
+| Kernel Debugger             | /mintia/KDebug.dll          | Optionally loadable kernel debugger.                                                                                                   |
 
 ## Loader
 Source code: `/OS/Loader/`
@@ -18,7 +18,7 @@ Loader starts by loading the kernel, OSKernel.exe, from the system directory. It
 
 Loader will then iterate through the BIOS device tree and load the drivers for any unique device models it finds. It will try to load them as "[model]:[revision].sys". It will also read the `BootDrivers.txt` file, and load any modules it finds there, assuming they are not already loaded.
 
-It will then read the `BootResources.txt` file to locate resources and load that are needed by the kernel, such as the HAL font or the boot logo.
+It will then read the `BootResources.txt` file to locate resources that are needed by the kernel, such as the HAL font or the boot logo.
 
 After loading all required files, Loader will jump to the HAL's entry point.
 

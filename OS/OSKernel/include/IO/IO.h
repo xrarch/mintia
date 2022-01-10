@@ -83,6 +83,8 @@ extern IOFileControlBlockTryLock { fcb -- ok }
 extern IOFileControlBlockTryLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 
+extern IOFileControlBlockTruncate { newsize growing keeplocked fcb -- ok }
+
 extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 
 extern IOFileGetFileControlBlock { fileobject -- fcb }

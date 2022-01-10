@@ -7,7 +7,7 @@ fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath obj
 fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
-fnptr IODispatchTruncateFunction { newsize growing fcb -- ok }
+fnptr IODispatchTruncateFunction { newsize fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }

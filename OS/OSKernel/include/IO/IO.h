@@ -69,6 +69,10 @@ extern IOFileControlBlockSetAccessTime { time fcb -- }
 extern IOFileControlBlockSetModifyTime { time fcb -- }
 extern IOFileControlBlockSetChangeTime { time fcb -- }
 
+extern IOFileControlBlockGetAccessTime { fcb -- time }
+extern IOFileControlBlockGetModifyTime { fcb -- time }
+extern IOFileControlBlockGetChangeTime { fcb -- time }
+
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
 extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }

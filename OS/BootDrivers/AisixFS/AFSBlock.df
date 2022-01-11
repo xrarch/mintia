@@ -25,7 +25,7 @@
 
 #include "AisixFS.h"
 
-fn AFSWalkFAT { growing startcount startblkno mount kflags -- left blkno ok }
+fn AFSWalkFAT { startcount startblkno mode mount kflags -- left blkno ok }
 	startblkno@ blkno!
 	startcount@ left!
 
@@ -49,37 +49,35 @@ fn AFSWalkFAT { growing startcount startblkno mount kflags -- left blkno ok }
 
 	while (left@)
 		if (blkno@ 0xFFFFFFFF ==)
-			if (growing@ ~~)
+			if (mode@ AFSFATWALKMODE_GROW ~=)
 				"AFSWalkFAT: blkno == 0xFFFFFFFF\n" KeCrash
 			end
+		end else
+			blkno@ 2 << AFSBLOCKSIZE / fatblkno!
+			blkno@ 2 << AFSBLOCKOFFMASK & off!
 
-			return
-		end
+			if (fatblkno@ curfatblkno@ ~=)
+				// must read in a new FAT block
 
-		blkno@ 2 << AFSBLOCKSIZE / fatblkno!
-		blkno@ 2 << AFSBLOCKOFFMASK & off!
+				if (fatpfdbe@)
+					fatpfdbe@ MmEvictablePageDereference drop
+				end
 
-		if (fatblkno@ curfatblkno@ ~=)
-			// must read in a new FAT block
+				0 // flags
+				kflags@ // kflags
+				fatbase@ fatblkno@ + AFSBLOCKSHIFT << // offset
+				mount@ // mount
+				FSVolumeBlockRead ok! fatpfdbe! fatdata!
 
-			if (fatpfdbe@)
-				fatpfdbe@ MmEvictablePageDereference drop
+				if (ok@)
+					return
+				end
+
+				fatblkno@ curfatblkno!
 			end
 
-			0 // flags
-			kflags@ // kflags
-			fatbase@ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
-
-			if (ok@)
-				return
-			end
-
-			fatblkno@ curfatblkno!
+			fatdata@ off@ + @ blkno!
 		end
-
-		fatdata@ off@ + @ blkno!
 
 		1 left -=
 	end
@@ -132,9 +130,9 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 		fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
 	end
 
-	0 // growing
 	walkcount@ // startcount
 	walkstart@ // startblkno
+	AFSFATWALKMODE_SEEK // mode
 	fcb@ IOFileControlBlockGetMount // mount
 	kflags@ // kflags
 	AFSWalkFAT ok! blkno! walkcount!
@@ -147,8 +145,42 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 		walkcount@ "AFSBlockMap: walkcount = %d\n" KeCrash
 	end
 
-	if (blkoff@ lastlookup@ >= blkoff@ 2 >= ||)
+	if (blkoff@ lastlookup@ >= blkoff@ 8 >= ||)
 		blkoff@ fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
 		blkno@ fcbdata@ AFSFCBData_LastFATLinkValue + !
 	end
+end
+
+fn AFSBlockTruncate { newblocks oldblocks fcb -- ok }
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto lastlookup
+	fcbdata@ AFSFCBData_LastFATLinkBlkOff + @ lastlookup!
+
+	auto walkcount
+	auto walkstart
+
+	if (newblocks@ oldblocks@ > oldblocks@ lastlookup@ >= &&)
+		oldblocks@ lastlookup@ - walkcount!
+		fcbdata@ AFSFCBData_LastFATLinkValue + @ walkstart!
+	end else
+		oldblocks@ walkcount!
+		fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
+	end
+
+	auto mode
+	if (newblocks@ oldblocks@ <)
+		AFSFATWALKMODE_TRUNC mode!
+	end else
+		AFSFATWALKMODE_GROW mode!
+	end
+
+	auto blkno
+	walkcount@ // startcount
+	walkstart@ // startblkno
+	mode@ // mode
+	fcb@ IOFileControlBlockGetMount // mount
+	0 // kflags
+	AFSWalkFAT ok! blkno! walkcount!
 end

@@ -98,5 +98,69 @@ end
 fn (IODispatchWriteFunction) AFSWriteFile { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 	// XXX remember IOCACHEGETFLAG_SWAPOUT in kflags semantics
 
-	"AFSWriteFile: TODO\n" KeCrash
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
+
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	0 ok!
+
+	0 byteswritten!
+
+	if (offset@ bytesize@ >=)
+		STATUS_IO_END_OF_DISK ok!
+
+		return
+	end
+
+	bytesize@ offset@ -
+	length@
+	min length!
+
+	while (byteswritten@ length@ <)
+		auto blockno
+		offset@ AFSBLOCKSHIFT >> blockno!
+
+		auto blockoff
+		offset@ AFSBLOCKOFFMASK & blockoff!
+
+		auto m
+
+		length@ byteswritten@ -
+		AFSBLOCKSIZE blockoff@ -
+		min AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & m!
+
+		blockno@ // blkoff
+		fcb@ // fcb
+		kflags@ // kflags
+		AFSBlockMap ok! blockno!
+
+		if (ok@)
+			return
+		end
+
+		auto bw
+
+		m@ // length
+		blockno@ AFSBLOCKSHIFT << blockoff@ + // offset
+		buffer@ // buf
+		lastmode@ // lastmode
+		mount@ // mount
+		FSVolumeWrite ok! bw!
+
+		if (ok@)
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (bw@ m@ ~=)
+				"AFSWriteFile: volume write failed\n" KeCrash
+			end
+		end
+
+		m@ buffer +=
+		m@ byteswritten +=
+		m@ offset +=
+	end
 end

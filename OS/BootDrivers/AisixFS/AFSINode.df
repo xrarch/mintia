@@ -29,8 +29,6 @@ fn AFSINodeRead { inum mount -- ptr pfdbe ok }
 	auto block
 	auto off
 
-	auto inode
-
 	inum@ AFSINode_SIZEOF * off!
 
 	mount@ IOMountGetContext AFSData_IStart + @ off@ AFSBLOCKSHIFT >> + AFSBLOCKSHIFT << block!
@@ -46,6 +44,47 @@ fn AFSINodeRead { inum mount -- ptr pfdbe ok }
 	end
 
 	off@ AFSBLOCKOFFMASK & ptr +=
+end
+
+fn AFSINodeUpdate { fcb -- ok }
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto inum
+	fcbdata@ AFSFCBData_INum + @ inum!
+
+	auto pfdbe
+	auto inode
+
+	inum@ // inum
+	mount@ // mount
+	AFSINodeRead ok! pfdbe! inode!
+
+	if (ok@)
+		return
+	end
+
+	fcb@ IOFileControlBlockGetSize inode@ AFSINode_bytesize + !
+	fcbdata@ AFSFCBData_FirstFATLink + @ inode@ AFSINode_startblock + !
+	fcbdata@ AFSFCBData_IParent + @ inode@ AFSINode_iparent + !
+	fcbdata@ AFSFCBData_Permissions + @ inode@ AFSINode_permissions + !
+	fcbdata@ AFSFCBData_UID + @ inode@ AFSINode_uid + !
+	fcb@ IOFileControlBlockGetModifyTime KeTime_SecPart + @ inode@ AFSINode_timestamp + !
+
+	pfdbe@ // pfdbe
+	mount@ // mount
+	FSVolumeBlockWrite ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "AFSINodeUpdate: couldn't modify block (%i)\n" KeCrash
+		end
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
 end
 
 fn AFSFCBCacheTryLockBucket { bucket mount -- ok }

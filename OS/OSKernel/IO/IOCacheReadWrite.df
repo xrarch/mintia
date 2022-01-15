@@ -38,9 +38,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 	auto bytesize
 	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
-	auto ensurefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_EnsureBlocksForRange + @ ensurefunc!
-
 	auto truncfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
 
@@ -136,23 +133,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			end
 		end
 
-		if (ensurefunc@)
-			// file may be sparsely allocated -- call the ensure function to
-			// prevent us from finding out too late that there aren't enough
-			// disk blocks to complete the write.
-
-			OSPAGESIZE // length
-			offset@ PAGENUMBERMASK & // offset
-			fcb@ // fcb
-			ensurefunc@ IODispatchEnsureBlocksForRange ok!
-
-			if (ok@)
-				fcb@ IOFileControlBlockUnlock
-
-				return
-			end
-		end
-
 		if (m@ PAGESIZE ==)
 			// writing a full page -- no need to read something we're about to
 			// overwrite.
@@ -168,6 +148,7 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 					// we grew the file but we were never able to zero the
 					// garbage at the end, so do that now.
 
+					0 // pfdbe
 					offset@ // offset
 					fcb@ // fcb
 					IOCacheInfoBlockZeroEnd
@@ -191,6 +172,7 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 					// we grew the file but we were never able to zero the
 					// garbage at the end, so do that now.
 
+					0 // pfdbe
 					offset@ // offset
 					fcb@ // fcb
 					IOCacheInfoBlockZeroEnd
@@ -209,16 +191,17 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			KeSafeCopyIn ok!
 
 			if (ok@)
-				pfdbe@ MmEvictablePageDereference drop
-
 				if (grew@ pageoff@ &&)
 					// we grew the file but we were never able to zero the
 					// garbage at the end, so do that now.
 
+					pfdbe@ // pfdbe
 					offset@ // offset
 					fcb@ // fcb
 					IOCacheInfoBlockZeroEnd
 				end
+
+				pfdbe@ MmEvictablePageDereference drop
 
 				fcb@ IOFileControlBlockUnlock
 

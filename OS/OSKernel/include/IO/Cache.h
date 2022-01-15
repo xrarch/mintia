@@ -63,7 +63,7 @@ extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
-extern IOCacheInfoBlockZeroEnd { offset fcb -- }
+extern IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
 
 extern IOCachePageRemove { pfdbe buckethead -- }
 extern IOCachePageInsert { pfdbe buckethead -- }

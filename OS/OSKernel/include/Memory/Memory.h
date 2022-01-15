@@ -115,7 +115,7 @@ externptr MmCommitUsage
 const MMMUSTSUCCEEDL2PAGES 8
 const MMMUSTSUCCEEDPAGES   18
 
-const MMDIREPAGES          15
+const MMDIREPAGES          20
 const MMLOWWATERMARK       40
 const MMHIGHWATERMARK      95
 

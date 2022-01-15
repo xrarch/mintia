@@ -25,9 +25,16 @@
 
 #include "AisixFS.h"
 
-fn AFSINodeRead { inum mount -- ptr pfdbe ok }
+fn AFSINodeRead { inum mount urgent -- ptr pfdbe ok }
 	auto block
 	auto off
+
+	auto kflags
+	if (urgent@)
+		IOKFLAG_URGENT kflags!
+	end else
+		0 kflags!
+	end
 
 	inum@ AFSINode_SIZEOF * off!
 
@@ -46,7 +53,7 @@ fn AFSINodeRead { inum mount -- ptr pfdbe ok }
 	off@ AFSBLOCKOFFMASK & ptr +=
 end
 
-fn AFSINodeUpdate { fcb -- ok }
+fn AFSINodeUpdate { fcb -- }
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
 
@@ -56,15 +63,20 @@ fn AFSINodeUpdate { fcb -- ok }
 	auto inum
 	fcbdata@ AFSFCBData_INum + @ inum!
 
+	auto ok
+
 	auto pfdbe
 	auto inode
 
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
 	inum@ // inum
 	mount@ // mount
+	1 // urgent
 	AFSINodeRead ok! pfdbe! inode!
 
 	if (ok@)
-		return
+		ok@ "AFSINodeUpdate: couldn't read inode (%i)\n" KeCrash
 	end
 
 	fcb@ IOFileControlBlockGetSize inode@ AFSINode_bytesize + !
@@ -85,6 +97,8 @@ fn AFSINodeUpdate { fcb -- ok }
 	end
 
 	pfdbe@ MmEvictablePageDereference drop
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn AFSFCBCacheTryLockBucket { bucket mount -- ok }
@@ -383,6 +397,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		auto ptr
 		inum@ // inum
 		mount@ // mount
+		0 // urgent
 		AFSINodeRead ok! pfdbe! ptr!
 
 		if (ok@)

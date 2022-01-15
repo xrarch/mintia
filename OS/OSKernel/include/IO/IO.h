@@ -4,6 +4,8 @@ const IOVERSION_MINOR 0
 const IOKFLAG_SWAPOUT 1 // this read is involved in a swapout operation which
                         // means different page allocation behavior is needed
 
+const IOKFLAG_URGENT  2
+
 extern IOInitPhase1 { -- }
 
 extern IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }

@@ -58,6 +58,7 @@
 .extern OSProcessExit
 .extern OSProcessCountQuery
 .extern OSProcessQueryAll
+.extern OSThreadSetFilePermissions
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
@@ -68,7 +69,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 63
+	.dl 64
 
 OSCallTable:
 .global OSCallTable
@@ -129,13 +130,14 @@ OSCallTable:
 	.dl OSTOSProcessExit                                 ;54
 	.dl OSTOSProcessCountQuery                           ;55
 	.dl OSTOSProcessQueryAll                             ;56
-	.dl OSTOSThreadSleep                                 ;57
-	.dl OSTOSThreadCreate                                ;58
-	.dl OSTOSThreadTerminate                             ;59
-	.dl OSTOSThreadResume                                ;60
-	.dl OSTOSThreadReadStatus                            ;61
-	.dl OSTOSThreadQuery                                 ;62
-	.dl OSTOSSetSystemConsole                            ;63
+	.dl OSTOSThreadSetFilePermissions                    ;57
+	.dl OSTOSThreadSleep                                 ;58
+	.dl OSTOSThreadCreate                                ;59
+	.dl OSTOSThreadTerminate                             ;60
+	.dl OSTOSThreadResume                                ;61
+	.dl OSTOSThreadReadStatus                            ;62
+	.dl OSTOSThreadQuery                                 ;63
+	.dl OSTOSSetSystemConsole                            ;64
 
 
 OSTOSConsolePutCharacter:
@@ -1019,6 +1021,20 @@ OSTOSProcessQueryAll:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadSetFilePermissions:
+.global OSTOSThreadSetFilePermissions
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSThreadSetFilePermissions
+
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

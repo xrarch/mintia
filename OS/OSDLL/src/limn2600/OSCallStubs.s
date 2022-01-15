@@ -708,11 +708,22 @@ OSProcessQueryAll:
 
 	ret
 
+OSThreadSetFilePermissions:
+.global OSThreadSetFilePermissions
+	mov  t1, a0
+
+	li   t0, 57
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 57
+	li   t0, 58
 	sys  0
 
 	mov  a0, t1
@@ -728,7 +739,7 @@ OSThreadCreate:
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
 
-	li   t0, 58
+	li   t0, 59
 	sys  0
 
 	mov  a1, t2
@@ -741,7 +752,7 @@ OSThreadTerminate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 59
+	li   t0, 60
 	sys  0
 
 	mov  a0, t1
@@ -752,7 +763,7 @@ OSThreadResume:
 .global OSThreadResume
 	mov  t1, a0
 
-	li   t0, 60
+	li   t0, 61
 	sys  0
 
 	mov  a0, t1
@@ -763,7 +774,7 @@ OSThreadReadStatus:
 .global OSThreadReadStatus
 	mov  t1, a0
 
-	li   t0, 61
+	li   t0, 62
 	sys  0
 
 	mov  a1, t2
@@ -776,7 +787,7 @@ OSThreadQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 62
+	li   t0, 63
 	sys  0
 
 	mov  a0, t1
@@ -787,7 +798,7 @@ OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 63
+	li   t0, 64
 	sys  0
 
 	mov  a0, t1

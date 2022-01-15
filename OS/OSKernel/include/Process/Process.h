@@ -71,6 +71,8 @@ struct PsThread
 	4 UserStackTop
 
 	KeEvent_SIZEOF TerminationEvent
+
+	4 FileCreationPermissions
 endstruct
 
 struct PsOSDLLInfo
@@ -118,6 +120,8 @@ extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
 
 extern PsThreadUserEntry { context1 context2 -- }
+
+extern PsThreadGetFilePermissions { threadobject -- filepermissions }
 
 extern PsThreadReadStatusObject { threadobject -- status ok }
 extern PsThreadReadStatus { threadhandle -- status ok }

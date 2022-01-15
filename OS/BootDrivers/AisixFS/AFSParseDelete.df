@@ -65,7 +65,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 		end
 
 		initialfcb@ IOFileControlBlockReference drop
-		initialfcb@ IOFileControlBlockLockShared ok!
+		initialfcb@ IOFileControlBlockLock ok!
 
 		if (ok@)
 			initialfcb@ IOFileControlBlockDereference drop
@@ -179,7 +179,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					end
 				end
 
-				nextfcb@ IOFileControlBlockLockShared ok!
+				nextfcb@ IOFileControlBlockLock ok!
 
 				if (ok@)
 					nextfcb@ IOFileControlBlockDereference drop
@@ -202,6 +202,16 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				AFSDirectoryGetEntry ok! seek!
 
 				if (ok@)
+					if (ok@ STATUS_IO_END_OF_FILE ==)
+						if (path@ gb ~~)
+							if (flags@ OSFILEFLAG_CREATE &)
+								pcomp@ // name
+								initialfcb@ // dirfcb
+								AFSCreateFile ok! object!
+							end
+						end
+					end
+
 					initialfcb@ IOFileControlBlockUnlock
 					initialfcb@ IOFileControlBlockDereference drop
 
@@ -249,7 +259,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 							end
 						end
 					
-						nextfcb@ IOFileControlBlockLockShared ok!
+						nextfcb@ IOFileControlBlockLock ok!
 
 						if (ok@)
 							nextfcb@ IOFileControlBlockDereference drop
@@ -273,29 +283,49 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 	// at this point the FCB should be refed but unlocked
 
-	initialfcb@ IOFileControlBlockGetMount // mount
+	fullpath@ // fullpath
+	flags@ // flags
+	initialfcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
+	process@ // process
+	initialfcb@ // fcb
+	AFSCreateFileObject ok! object!
+
+	if (ok@)
+		initialfcb@ IOFileControlBlockDereference drop
+	end
+end
+
+fn AFSCreateFileObject { fullpath flags permissions process fcb -- object ok }
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	mount@ // mount
 	AFSMountReference drop
 
 	fullpath@ // openedpath
 	flags@ // flags
-	initialfcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
-	initialfcb@ // fcb
+	fcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
+	fcb@ // fcb
 	IOFileCreateObject ok! object!
 
 	if (ok@)
-		initialfcb@ IOFileControlBlockDereference drop
-
-		initialfcb@ IOFileControlBlockGetContext // mount
+		fcb@ IOFileControlBlockGetContext // mount
 		AFSMountDereference drop
+
+		return
 	end
 
 	if (mount@ IOMountGetFlags OSMOUNT_NOUID &)
 		process@ PsProcessGetUID object@ ObObjectSetUID
 		process@ PsProcessGetGID object@ ObObjectSetGID
 	end else
-		initialfcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ object@ ObObjectSetUID
-		initialfcb@ IOFileControlBlockGetContext AFSFCBData_GID + @ object@ ObObjectSetGID
+		fcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ object@ ObObjectSetUID
+		fcb@ IOFileControlBlockGetContext AFSFCBData_GID + @ object@ ObObjectSetGID
 	end
+end
+
+fn AFSCreateFile { name dirfcb -- object ok }
+	"AFSCreateFile: TODO\n" KeCrash
 end
 
 fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }

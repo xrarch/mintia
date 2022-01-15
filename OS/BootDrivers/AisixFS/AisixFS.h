@@ -1,3 +1,5 @@
+const AFSDEBUG 2
+
 const AFSBLOCKSIZE 512
 const AFSBLOCKOFFMASK (AFSBLOCKSIZE 1 -)
 const AFSBLOCKNUMBERMASK (AFSBLOCKOFFMASK ~)
@@ -30,7 +32,11 @@ struct AFSData
 	4 IStart
 	4 ICount
 	4 VolSize
-	4 LastFreeBlock
+
+	ExBitmapHeader_SIZEOF FreeBlockBitmap
+	4 FreeBlockHint
+
+	KeMutex_SIZEOF FreeBlockBitmapMutex
 
 	4 WritableFiles
 
@@ -74,10 +80,6 @@ endstruct
 const AFSSUPERBLOCKMAGIC   0xAFBBAFBB
 const AFSSUPERBLOCKVERSION 0x6
 
-const AFSFATWALKMODE_SEEK  1
-const AFSFATWALKMODE_TRUNC 2
-const AFSFATWALKMODE_GROW  3
-
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
@@ -92,9 +94,14 @@ extern AFSFCBCacheUnlockBucket { bucket mount -- }
 extern AFSFCBCacheFlush { destroy mount -- ok }
 extern AFSFCBRead { inum mount -- fcb ok }
 
-extern AFSWalkFAT { startcount startblkno mode mount kflags -- left blkno ok }
+extern AFSBlockBitmapInitialize { mount -- ok }
+
+extern AFSBlockBitmapLockUnalertable { mount -- }
+extern AFSBlockBitmapUnlock { mount -- }
+
+extern AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 extern AFSBlockMap { blkoff fcb kflags -- blkno ok }
-extern AFSBlockTruncate { newblocks oldblocks fcb -- ok }
+extern AFSBlockTruncate { newblocks oldblocks zero fcb -- ok }
 
 extern AFSOpen { access fileobject -- ok }
 extern AFSClose { access fileobject -- ok }
@@ -106,7 +113,7 @@ extern AFSWriteFile { flags kflags length offset buffer fcb lastmode -- byteswri
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
-extern AFSTruncate { newsize fcb -- ok }
+extern AFSTruncate { newsize zero fcb -- ok }
 extern AFSINodeUpdate { fcb -- ok }
 
 externptr DriverAFSDispatch

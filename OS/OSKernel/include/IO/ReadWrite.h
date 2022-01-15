@@ -1,3 +1,5 @@
+extern IOFileTruncate { newsize growing handle -- oldsize ok }
+
 extern IOFileSeek { offset handle mode -- newoffset ok }
 
 extern IOFileRead { timeout flags length buffer filehandle -- bytesread ok }

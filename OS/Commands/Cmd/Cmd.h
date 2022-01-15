@@ -40,7 +40,7 @@ extern CmdSymbolSet { contents name -- sym ok }
 extern CmdSymbolDeletePtr { sym -- }
 extern CmdSymbolDelete { name -- ok }
 
-extern CmdSymbolSetStdIOHandle { path access retptr -- ok }
+extern CmdSymbolSetStdIOHandle { trunc path access retptr -- ok }
 extern CmdSymbolSetStdIO { -- oldstdin oldstdout oldstderr }
 extern CmdSymbolGetStdIOHandles { -- stdin stdout stderr ok }
 

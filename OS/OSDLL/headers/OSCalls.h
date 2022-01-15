@@ -40,9 +40,11 @@ extern OSDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
 
 // IO
 extern OSFileQuery { filehandle query -- ok }
+extern OSFileTruncate { newsize growing handle -- oldsize ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }
 extern OSFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
+
 extern OSDirectoryRead { dirent filehandle -- ok }
 
 extern OSSwapFileCreate { filehandle -- sizeinpages ok }

@@ -5,6 +5,7 @@ all:
 	make -C clear
 	make -C ls
 	make -C ps
+	make -C trunc
 
 cleanup:
 	make -C Cmd cleanup
@@ -13,3 +14,4 @@ cleanup:
 	make -C clear cleanup
 	make -C ls cleanup
 	make -C ps cleanup
+	make -C trunc cleanup

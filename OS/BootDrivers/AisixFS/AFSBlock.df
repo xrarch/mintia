@@ -25,9 +25,181 @@
 
 #include "AisixFS.h"
 
-fn AFSWalkFAT { startcount startblkno mode mount kflags -- left blkno ok }
+buffer ZeroBlock AFSBLOCKSIZE
+
+fn AFSBlockBitmapReadFAT { mount -- ok }
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto blocks
+	afsdata@ AFSData_VolSize + @ blocks!
+
+	auto fatpfdbe
+	0 fatpfdbe!
+
+	auto blkno
+	0 blkno!
+
+	auto runlength
+	0 runlength!
+
+	auto runtype
+	1 runtype!
+
+	auto runstart
+	0 runstart!
+
+	auto fatblkno
+	afsdata@ AFSData_FATStart + @ fatblkno!
+
+	auto off
+	0 off!
+
+	auto fatdata
+
+	while (blkno@ blocks@ <)
+		if (off@ AFSBLOCKOFFMASK & ~~)
+			// must read in a new FAT block
+
+			if (fatpfdbe@)
+				fatpfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			0 // kflags
+			afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << off@ + // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+			if (ok@)
+				return
+			end
+		end
+
+		auto type
+		fatdata@ off@ AFSBLOCKOFFMASK & + @ type!
+
+		if (type@ ~~)
+			if (runtype@)
+				if (AFSDEBUG)
+					runlength@ runstart@ "setrun start=%d length=%d\n" Printf
+				end
+
+				runlength@ // runlength
+				runstart@ // index
+				afsdata@ AFSData_FreeBlockBitmap + // header
+				ExBitmapSetBits
+
+				0 runtype!
+				1 runlength!
+				blkno@ runstart!
+			end else
+				1 runlength +=
+			end
+		end elseif (runtype@ ~~)
+			if (AFSDEBUG)
+				runlength@ runstart@ "clearrun start=%d length=%d\n" Printf
+			end
+
+			runlength@ // runlength
+			runstart@ // index
+			afsdata@ AFSData_FreeBlockBitmap + // header
+			ExBitmapClearBits
+
+			1 runtype!
+			1 runlength!
+			blkno@ runstart!
+		end else
+			1 runlength +=
+		end
+
+		4 off +=
+		1 blkno +=
+	end
+
+	if (runlength@)
+		if (runtype@)
+			if (AFSDEBUG)
+				runlength@ runstart@ "final setrun start=%d length=%d\n" Printf
+			end
+
+			runlength@ // runlength
+			runstart@ // index
+			afsdata@ AFSData_FreeBlockBitmap + // header
+			ExBitmapSetBits
+		end else
+			if (AFSDEBUG)
+				runlength@ runstart@ "final clearrun start=%d length=%d\n" Printf
+			end
+
+			runlength@ // runlength
+			runstart@ // index
+			afsdata@ AFSData_FreeBlockBitmap + // header
+			ExBitmapClearBits
+		end
+	end
+
+	if (fatpfdbe@)
+		fatpfdbe@ MmEvictablePageDereference drop
+	end
+
+	if (AFSDEBUG 2 >=)
+		blocks@ "total blocks=%d\n" Printf
+
+		2000 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
+	end
+end
+
+fn AFSBlockBitmapInitialize { mount -- ok }
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto blocks
+	afsdata@ AFSData_VolSize + @ blocks!
+
+	0 afsdata@ AFSData_FreeBlockHint + !
+
+	auto bmp
+	blocks@ 7 + 3 >> // size
+	'AFSb' // tag
+	MmAllocWithTag ok! bmp!
+
+	if (ok@)
+		return
+	end
+
+	blocks@ // sizeinbits
+	bmp@ // data
+	afsdata@ AFSData_FreeBlockBitmap + // header
+	ExBitmapInitialize
+
+	"AFSBlockBitmapMutex" // name
+	KERNELMODE // mode
+	afsdata@ AFSData_FreeBlockBitmapMutex + // mutex
+	KeMutexInitialize
+
+	mount@ AFSBlockBitmapReadFAT ok!
+end
+
+fn AFSBlockBitmapLockUnalertable { mount -- }
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMountGetContext AFSData_FreeBlockBitmapMutex + // object
+	KeThreadWaitForObject drop
+end
+
+fn AFSBlockBitmapUnlock { mount -- }
+	0 // abandon
+	mount@ IOMountGetContext AFSData_FreeBlockBitmapMutex + // mutex
+	KeMutexRelease drop
+end
+
+fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 	startblkno@ blkno!
-	startcount@ left!
 
 	auto fatblkno
 	0 fatblkno!
@@ -44,46 +216,319 @@ fn AFSWalkFAT { startcount startblkno mode mount kflags -- left blkno ok }
 
 	auto fatdata
 
-	auto fatbase
-	mount@ IOMountGetContext AFSData_FATStart + @ fatbase!
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
 
-	while (left@)
+	while (startcount@)
 		if (blkno@ 0xFFFFFFFF ==)
-			if (mode@ AFSFATWALKMODE_GROW ~=)
-				"AFSWalkFAT: blkno == 0xFFFFFFFF\n" KeCrash
-			end
-		end else
-			blkno@ 2 << AFSBLOCKSIZE / fatblkno!
-			blkno@ 2 << AFSBLOCKOFFMASK & off!
-
-			if (fatblkno@ curfatblkno@ ~=)
-				// must read in a new FAT block
-
-				if (fatpfdbe@)
-					fatpfdbe@ MmEvictablePageDereference drop
-				end
-
-				0 // flags
-				kflags@ // kflags
-				fatbase@ fatblkno@ + AFSBLOCKSHIFT << // offset
-				mount@ // mount
-				FSVolumeBlockRead ok! fatpfdbe! fatdata!
-
-				if (ok@)
-					return
-				end
-
-				fatblkno@ curfatblkno!
-			end
-
-			fatdata@ off@ + @ blkno!
+			"AFSWalkFAT: blkno == 0xFFFFFFFF\n" KeCrash
 		end
 
-		1 left -=
+		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+		blkno@ 2 << AFSBLOCKOFFMASK & off!
+
+		if (fatblkno@ curfatblkno@ ~=)
+			// must read in a new FAT block
+
+			if (fatpfdbe@)
+				fatpfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			kflags@ // kflags
+			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+			if (ok@)
+				return
+			end
+
+			fatblkno@ curfatblkno!
+		end
+
+		fatdata@ off@ + @ blkno!
+
+		1 startcount -=
 	end
 
 	if (fatpfdbe@)
 		fatpfdbe@ MmEvictablePageDereference drop
+	end
+end
+
+fn AFSBlockDeallocateChain { first blkno mount -- }
+	mount@ AFSBlockBitmapLockUnalertable
+
+	auto fatblkno
+	0 fatblkno!
+
+	auto curfatblkno
+	-1 curfatblkno!
+
+	auto fatpfdbe
+	0 fatpfdbe!
+
+	auto ok
+
+	auto off
+
+	auto fatdata
+
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	while (blkno@ 0xFFFFFFFF ~=)
+		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+		blkno@ 2 << AFSBLOCKOFFMASK & off!
+
+		if (fatblkno@ curfatblkno@ ~=)
+			// must read in a new FAT block
+
+			if (fatpfdbe@)
+				fatpfdbe@ // pfdbe
+				mount@ // mount
+				FSVolumeBlockWrite drop
+
+				fatpfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			IOKFLAG_SWAPOUT // kflags (not really swapping out but failure would be very hard to recover from here)
+			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+			if (ok@)
+				ok@ "AFSBlockDeallocateChain: failed to read FAT block (%i)\n" KeCrash
+			end
+
+			fatblkno@ curfatblkno!
+		end
+
+		if (first@ ~~)
+			1 // runlength
+			blkno@ // index
+			afsdata@ AFSData_FreeBlockBitmap + // header
+			ExBitmapClearBits
+		end
+
+		fatdata@ off@ + @ blkno!
+
+		if (first@)
+			0xFFFFFFFF fatdata@ off@ + !
+			0 first!
+		end else
+			0 fatdata@ off@ + !
+		end
+	end
+
+	if (fatpfdbe@)
+		fatpfdbe@ // pfdbe
+		mount@ // mount
+		FSVolumeBlockWrite drop
+
+		fatpfdbe@ MmEvictablePageDereference drop
+	end
+
+	mount@ AFSBlockBitmapUnlock
+end
+
+fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
+	mount@ AFSBlockBitmapLockUnalertable
+
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto run
+
+	auto blkno
+	afsdata@ AFSData_FreeBlockHint + @ // hint
+	blocks@ // runlength
+	afsdata@ AFSData_FreeBlockBitmap + // header
+	ExBitmapFindRun ok! blkno!
+
+	if (ok@ ~~)
+		// we were able to allocate the whole thing in one run!
+
+		blocks@ // runlength
+		blkno@ // index
+		afsdata@ AFSData_FreeBlockBitmap + // header
+		ExBitmapSetBits
+
+		blkno@ afsdata@ AFSData_FreeBlockHint + !
+
+		mount@ AFSBlockBitmapUnlock
+
+		1 run!
+	end else
+		// need to allocate one block at a time.
+
+		0 run!
+	end
+
+	auto fatblkno
+	0 fatblkno!
+
+	auto curfatblkno
+	-1 curfatblkno!
+
+	auto fatpfdbe
+	0 fatpfdbe!
+
+	auto first
+
+	// if we fail and need to undo the allocation chain we already did,
+	// does AFSBlockDeallocateChain need to write back a 0xFFFFFFFF or not?
+	if (lastblkno@ -1 ==)
+		0 first!
+	end else
+		lastblkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+
+		0 // flags
+		IOKFLAG_SWAPOUT // kflags (not really swapping out but failure would be very hard to recover from here)
+		afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
+		mount@ // mount
+		FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+		if (ok@)
+			ok@ "AFSBlockAllocateChain: failed to read FAT block (%i)\n" KeCrash
+		end
+
+		fatblkno@ curfatblkno!
+
+		if (DEBUGCHECKS)
+			if (fatdata@ lastblkno@ 2 << AFSBLOCKOFFMASK & + @ 0xFFFFFFFF ~=)
+				"AFSBlockAllocateChain: final block had a link\n" KeCrash
+			end
+		end
+
+		1 first!
+	end
+
+	auto killstart
+	lastblkno@ killstart!
+
+	-1 startblkno!
+
+	auto fatdata
+
+	while (blocks@)
+		if (run@ ~~)
+			// allocate next block
+
+			afsdata@ AFSData_FreeBlockHint + @ // hint
+			1 // runlength
+			afsdata@ AFSData_FreeBlockBitmap + // header
+			ExBitmapFindRun ok! blkno!
+
+			if (ok@)
+				// no space left on disk.
+				// undo the allocations we already did.
+
+				mount@ AFSBlockBitmapUnlock
+
+				if (fatpfdbe@)
+					fatpfdbe@ // pfdbe
+					mount@ // mount
+					FSVolumeBlockWrite drop
+
+					fatpfdbe@ MmEvictablePageDereference drop
+				end
+
+				if (killstart@ -1 ~=)
+					first@ // first
+					killstart@ // blkno
+					mount@ // mount
+					AFSBlockDeallocateChain
+				end
+
+				STATUS_IO_END_OF_DISK ok!
+
+				return
+			end
+
+			1 // runlength
+			blkno@ // index
+			afsdata@ AFSData_FreeBlockBitmap + // header
+			ExBitmapSetBits
+
+			blkno@ afsdata@ AFSData_FreeBlockHint + !
+		end
+
+		if (zero@)
+			// zero out the block on disk
+			AFSBLOCKSIZE // length
+			blkno@ AFSBLOCKSHIFT << // offset
+			ZeroBlock // buf
+			KERNELMODE // lastmode
+			mount@ // mount
+			FSVolumeWrite ok! drop
+
+			if (ok@)
+				ok@ "AFSBlockAllocateChain: failed to zero block (%i)\n" KeCrash
+			end
+		end
+
+		if (fatpfdbe@)
+			blkno@ fatdata@ lastblkno@ 2 << AFSBLOCKOFFMASK & + !
+		end else
+			if (DEBUGCHECKS)
+				if (startblkno@ -1 ~=)
+					"AFSBlockAllocateChain: startblkno != -1\n" KeCrash
+				end
+			end
+
+			blkno@ killstart!
+			blkno@ startblkno!
+		end
+
+		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+
+		if (fatblkno@ curfatblkno@ ~=)
+			// must read in a new FAT block
+
+			if (fatpfdbe@)
+				fatpfdbe@ // pfdbe
+				mount@ // mount
+				FSVolumeBlockWrite drop
+
+				fatpfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			IOKFLAG_SWAPOUT // kflags (not really swapping out but failure would be very hard to recover from here)
+			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+			if (ok@)
+				ok@ "AFSBlockAllocateChain: failed to read FAT block (%i)\n" KeCrash
+			end
+
+			fatblkno@ curfatblkno!
+		end
+
+		0xFFFFFFFF fatdata@ blkno@ 2 << AFSBLOCKOFFMASK & + !
+		blkno@ lastblkno!
+
+		if (run@)
+			1 blkno +=
+		end
+
+		1 blocks -=
+	end
+
+	if (fatpfdbe@)
+		fatpfdbe@ // pfdbe
+		mount@ // mount
+		FSVolumeBlockWrite drop
+
+		fatpfdbe@ MmEvictablePageDereference drop
+	end
+
+	if (run@ ~~)
+		mount@ AFSBlockBitmapUnlock
 	end
 end
 
@@ -132,17 +577,18 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 
 	walkcount@ // startcount
 	walkstart@ // startblkno
-	AFSFATWALKMODE_SEEK // mode
 	fcb@ IOFileControlBlockGetMount // mount
 	kflags@ // kflags
-	AFSWalkFAT ok! blkno! walkcount!
+	AFSWalkFAT ok! blkno!
 
 	if (ok@)
 		return
 	end
 
-	if (walkcount@)
-		walkcount@ "AFSBlockMap: walkcount = %d\n" KeCrash
+	if (DEBUGCHECKS)
+		if (blkno@ 0xFFFFFFFF ==)
+			"AFSBlockMap: blkno=0xFFFFFFFF\n" KeCrash
+		end
 	end
 
 	if (blkoff@ lastlookup@ >= blkoff@ 8 >= ||)
@@ -151,7 +597,7 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	end
 end
 
-fn AFSBlockTruncate { newblocks oldblocks fcb -- ok }
+fn AFSBlockTruncate { newblocks oldblocks zero fcb -- ok }
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
 
@@ -161,26 +607,106 @@ fn AFSBlockTruncate { newblocks oldblocks fcb -- ok }
 	auto walkcount
 	auto walkstart
 
-	auto mode
-	if (newblocks@ oldblocks@ <)
-		AFSFATWALKMODE_TRUNC mode!
-	end else
-		AFSFATWALKMODE_GROW mode!
-	end
+	0 ok!
 
-	if (mode@ AFSFATWALKMODE_GROW == oldblocks@ lastlookup@ >= &&)
-		oldblocks@ lastlookup@ - walkcount!
-		fcbdata@ AFSFCBData_LastFATLinkValue + @ walkstart!
-	end else
-		oldblocks@ walkcount!
+	if (newblocks@ oldblocks@ <)
+		// truncating, we need to seek to the new last block
+
+		if (newblocks@)
+			newblocks@ 1 - walkcount!
+		end else
+			newblocks@ walkcount!
+		end
+
 		fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
+	end else
+		// growing, we need to seek to the last block
+
+		if (oldblocks@)
+			oldblocks@ 1 - walkcount!
+
+			if (walkcount@ lastlookup@ >=)
+				walkcount@ lastlookup@ - walkcount!
+				fcbdata@ AFSFCBData_LastFATLinkValue + @ walkstart!
+			end else
+				fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
+			end
+		end else
+			-1 walkcount!
+		end
 	end
 
 	auto blkno
-	walkcount@ // startcount
-	walkstart@ // startblkno
-	mode@ // mode
-	fcb@ IOFileControlBlockGetMount // mount
-	0 // kflags
-	AFSWalkFAT ok! blkno! walkcount!
+
+	if (walkcount@)
+		if (walkcount@ -1 ~=)
+			walkcount@ // startcount
+			walkstart@ // startblkno
+			fcb@ IOFileControlBlockGetMount // mount
+			0 // kflags
+			AFSWalkFAT ok! blkno!
+
+			if (ok@)
+				return
+			end
+		end else
+			-1 blkno!
+		end
+	end else
+		walkstart@ blkno!
+	end
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	if (newblocks@ oldblocks@ <)
+		if (DEBUGCHECKS)
+			if (blkno@ -1 ==)
+				"AFSBlockTruncate: blkno == -1\n" KeCrash
+			end
+		end
+
+		if (newblocks@)
+			1 // first
+			blkno@ // blkno
+			fcb@ IOFileControlBlockGetMount // mount
+			AFSBlockDeallocateChain
+		end else
+			0 // first
+			blkno@ // blkno
+			fcb@ IOFileControlBlockGetMount // mount
+			AFSBlockDeallocateChain
+
+			0xFFFFFFFF fcbdata@ AFSFCBData_FirstFATLink + !
+		end
+
+		0 fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
+		fcbdata@ AFSFCBData_FirstFATLink + @ fcbdata@ AFSFCBData_LastFATLinkValue + !
+	end else
+		auto startblock
+		newblocks@ oldblocks@ - // blocks
+		blkno@ // lastblock
+		zero@ // zero
+		fcb@ IOFileControlBlockGetMount // mount
+		AFSBlockAllocateChain ok! startblock!
+
+		if (ok@)
+			KeThreadCurrent@ KeThreadAcceptKill drop
+
+			return
+		end
+
+		if (fcbdata@ AFSFCBData_FirstFATLink + @ -1 ==)
+			if (startblock@ -1 ==)
+				"AFSBlockTruncate: startblock == -1\n" KeCrash
+			end
+
+			startblock@ fcbdata@ AFSFCBData_FirstFATLink + !
+
+			if (lastlookup@ 0 ==)
+				startblock@ fcbdata@ AFSFCBData_LastFATLinkValue + !
+			end
+		end
+	end
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end

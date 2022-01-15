@@ -6,3 +6,4 @@ cat.exe cat.exe 493
 clear.exe clear.exe 493
 ls.exe ls.exe 493
 ps.exe ps.exe 493
+trunc.exe trunc.exe 493

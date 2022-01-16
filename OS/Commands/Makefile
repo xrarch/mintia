@@ -10,6 +10,7 @@ all:
 	make -C rm
 	make -C mount
 	make -C umount
+	make -C dhrystone
 
 cleanup:
 	make -C Cmd cleanup
@@ -23,3 +24,4 @@ cleanup:
 	make -C rm cleanup
 	make -C mount cleanup
 	make -C umount cleanup
+	make -C dhrystone cleanup

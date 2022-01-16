@@ -10,6 +10,8 @@ extern OSGetBootFlags { -- bootflags ok }
 
 extern OSContinue { context -- }
 
+extern OSQueryTime { -- sec ms }
+
 extern OSEventCreate { signaled type permissions name -- eventhandle ok }
 extern OSEventReset { eventhandle -- signaled ok }
 extern OSEventSignal { eventhandle -- ok }

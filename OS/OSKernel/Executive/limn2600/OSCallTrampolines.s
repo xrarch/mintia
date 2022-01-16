@@ -7,6 +7,7 @@
 .extern OSGetSystemConsoleName
 .extern OSGetBootFlags
 .extern OSContinue
+.extern OSQueryTime
 .extern OSEventCreate
 .extern OSEventReset
 .extern OSEventSignal
@@ -74,7 +75,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 69
+	.dl 70
 
 OSCallTable:
 .global OSCallTable
@@ -84,70 +85,71 @@ OSCallTable:
 	.dl OSTOSGetSystemConsoleName                        ;3
 	.dl OSTOSGetBootFlags                                ;4
 	.dl OSTOSContinue                                    ;5
-	.dl OSTOSEventCreate                                 ;6
-	.dl OSTOSEventReset                                  ;7
-	.dl OSTOSEventSignal                                 ;8
-	.dl OSTOSEventPulse                                  ;9
-	.dl OSTOSEventReadState                              ;10
-	.dl OSTOSSemaphoreCreate                             ;11
-	.dl OSTOSSemaphoreRelease                            ;12
-	.dl OSTOSSemaphoreReadState                          ;13
-	.dl OSTOSMutexCreate                                 ;14
-	.dl OSTOSMutexRelease                                ;15
-	.dl OSTOSMutexReadState                              ;16
-	.dl OSTOSObjectOpen                                  ;17
-	.dl OSTOSQuery                                       ;18
-	.dl OSTOSClose                                       ;19
-	.dl OSTOSWaitForMultipleObjects                      ;20
-	.dl OSTOSWaitForObject                               ;21
-	.dl OSTOSHandleDuplicate                             ;22
-	.dl OSTOSDirectoryCountQuery                         ;23
-	.dl OSTOSDirectoryQueryAll                           ;24
-	.dl OSTOSFileQuery                                   ;25
-	.dl OSTOSFileTruncate                                ;26
-	.dl OSTOSFileSeek                                    ;27
-	.dl OSTOSFileRead                                    ;28
-	.dl OSTOSFileWrite                                   ;29
-	.dl OSTOSDirectoryUnlink                             ;30
-	.dl OSTOSDirectoryRead                               ;31
-	.dl OSTOSSwapFileCreate                              ;32
-	.dl OSTOSIOControl                                   ;33
-	.dl OSTOSGetBootDevicePath                           ;34
-	.dl OSTOSFilesystemMount                             ;35
-	.dl OSTOSFilesystemUnmount                           ;36
-	.dl OSTOSMountQueryAll                               ;37
-	.dl OSTOSMountCountQuery                             ;38
-	.dl OSTOSMountUpdateFlags                            ;39
-	.dl OSTOSMountGetFilesystemName                      ;40
-	.dl OSTOSSectionCreate                               ;41
-	.dl OSTOSSectionMapView                              ;42
-	.dl OSTOSUnmapView                                   ;43
-	.dl OSTOSRemapView                                   ;44
-	.dl OSTOSSetSwappiness                               ;45
-	.dl OSTOSMemoryQuery                                 ;46
-	.dl OSTOSProcessCreate                               ;47
-	.dl OSTOSProcessSignal                               ;48
-	.dl OSTOSProcessOpenByPID                            ;49
-	.dl OSTOSProcessQuery                                ;50
-	.dl OSTOSProcessQueryByPID                           ;51
-	.dl OSTOSProcessReadStatus                           ;52
-	.dl OSTOSProcessMaskSignal                           ;53
-	.dl OSTOSProcessUnmaskSignal                         ;54
-	.dl OSTOSProcessSetConsoleGroup                      ;55
-	.dl OSTOSProcessClearConsoleGroup                    ;56
-	.dl OSTOSProcessSignalActivation                     ;57
-	.dl OSTOSProcessWaitForActivation                    ;58
-	.dl OSTOSProcessExit                                 ;59
-	.dl OSTOSProcessCountQuery                           ;60
-	.dl OSTOSProcessQueryAll                             ;61
-	.dl OSTOSThreadSetFilePermissions                    ;62
-	.dl OSTOSThreadSleep                                 ;63
-	.dl OSTOSThreadCreate                                ;64
-	.dl OSTOSThreadTerminate                             ;65
-	.dl OSTOSThreadResume                                ;66
-	.dl OSTOSThreadReadStatus                            ;67
-	.dl OSTOSThreadQuery                                 ;68
-	.dl OSTOSSetSystemConsole                            ;69
+	.dl OSTOSQueryTime                                   ;6
+	.dl OSTOSEventCreate                                 ;7
+	.dl OSTOSEventReset                                  ;8
+	.dl OSTOSEventSignal                                 ;9
+	.dl OSTOSEventPulse                                  ;10
+	.dl OSTOSEventReadState                              ;11
+	.dl OSTOSSemaphoreCreate                             ;12
+	.dl OSTOSSemaphoreRelease                            ;13
+	.dl OSTOSSemaphoreReadState                          ;14
+	.dl OSTOSMutexCreate                                 ;15
+	.dl OSTOSMutexRelease                                ;16
+	.dl OSTOSMutexReadState                              ;17
+	.dl OSTOSObjectOpen                                  ;18
+	.dl OSTOSQuery                                       ;19
+	.dl OSTOSClose                                       ;20
+	.dl OSTOSWaitForMultipleObjects                      ;21
+	.dl OSTOSWaitForObject                               ;22
+	.dl OSTOSHandleDuplicate                             ;23
+	.dl OSTOSDirectoryCountQuery                         ;24
+	.dl OSTOSDirectoryQueryAll                           ;25
+	.dl OSTOSFileQuery                                   ;26
+	.dl OSTOSFileTruncate                                ;27
+	.dl OSTOSFileSeek                                    ;28
+	.dl OSTOSFileRead                                    ;29
+	.dl OSTOSFileWrite                                   ;30
+	.dl OSTOSDirectoryUnlink                             ;31
+	.dl OSTOSDirectoryRead                               ;32
+	.dl OSTOSSwapFileCreate                              ;33
+	.dl OSTOSIOControl                                   ;34
+	.dl OSTOSGetBootDevicePath                           ;35
+	.dl OSTOSFilesystemMount                             ;36
+	.dl OSTOSFilesystemUnmount                           ;37
+	.dl OSTOSMountQueryAll                               ;38
+	.dl OSTOSMountCountQuery                             ;39
+	.dl OSTOSMountUpdateFlags                            ;40
+	.dl OSTOSMountGetFilesystemName                      ;41
+	.dl OSTOSSectionCreate                               ;42
+	.dl OSTOSSectionMapView                              ;43
+	.dl OSTOSUnmapView                                   ;44
+	.dl OSTOSRemapView                                   ;45
+	.dl OSTOSSetSwappiness                               ;46
+	.dl OSTOSMemoryQuery                                 ;47
+	.dl OSTOSProcessCreate                               ;48
+	.dl OSTOSProcessSignal                               ;49
+	.dl OSTOSProcessOpenByPID                            ;50
+	.dl OSTOSProcessQuery                                ;51
+	.dl OSTOSProcessQueryByPID                           ;52
+	.dl OSTOSProcessReadStatus                           ;53
+	.dl OSTOSProcessMaskSignal                           ;54
+	.dl OSTOSProcessUnmaskSignal                         ;55
+	.dl OSTOSProcessSetConsoleGroup                      ;56
+	.dl OSTOSProcessClearConsoleGroup                    ;57
+	.dl OSTOSProcessSignalActivation                     ;58
+	.dl OSTOSProcessWaitForActivation                    ;59
+	.dl OSTOSProcessExit                                 ;60
+	.dl OSTOSProcessCountQuery                           ;61
+	.dl OSTOSProcessQueryAll                             ;62
+	.dl OSTOSThreadSetFilePermissions                    ;63
+	.dl OSTOSThreadSleep                                 ;64
+	.dl OSTOSThreadCreate                                ;65
+	.dl OSTOSThreadTerminate                             ;66
+	.dl OSTOSThreadResume                                ;67
+	.dl OSTOSThreadReadStatus                            ;68
+	.dl OSTOSThreadQuery                                 ;69
+	.dl OSTOSSetSystemConsole                            ;70
 
 
 OSTOSConsolePutCharacter:
@@ -216,6 +218,20 @@ OSTOSContinue:
 
 	jal  OSContinue
 
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSQueryTime:
+.global OSTOSQueryTime
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSQueryTime
+
+	mov  long [s18 + 4], a0 ;t1
+	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

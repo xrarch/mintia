@@ -112,11 +112,11 @@ externptr MmPeakWorkingSetSize
 externptr MmCommitLimit
 externptr MmCommitUsage
 
-const MMMUSTSUCCEEDL2PAGES 12
-const MMMUSTSUCCEEDPAGES   25
+const MMMUSTSUCCEEDL2PAGES 10
+const MMMUSTSUCCEEDPAGES   18
 
-const MMDIREPAGES          30
-const MMLOWWATERMARK       60
+const MMDIREPAGES          15
+const MMLOWWATERMARK       40
 const MMHIGHWATERMARK      100
 
 const MMWORKINGSETDEFAULTMINIMUM 16

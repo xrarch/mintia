@@ -397,7 +397,7 @@ fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 	end
 end
 
-fn MmEvictSinglePage { canbeslow -- pfdbe ok }
+fn MmEvictSingleFastPage { -- pfdbe ok }
 	auto evictionfunc
 	auto evicted
 	auto dropped
@@ -419,7 +419,7 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 
 			if (DEBUGCHECKS)
 				if (dropped@)
-					"MmEvictSinglePage: fast page eviction dropped below IPLDPC\n" KeCrash
+					"MmEvictSingleFastPage: fast page eviction dropped below IPLDPC\n" KeCrash
 				end
 			end
 
@@ -433,7 +433,7 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 			if (DEBUGCHECKS)
 				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
 					pfdbe@ MmPageFrameEntryEvictable_References + @
-					"MmEvictSinglePage: attempt to evict a page with %d references\n" KeCrash
+					"MmEvictSingleFastPage: attempt to evict a page with %d references\n" KeCrash
 				end
 			end
 
@@ -448,67 +448,123 @@ fn MmEvictSinglePage { canbeslow -- pfdbe ok }
 
 		ipl@ KeIPLLower
 	end
+end
 
-	if (canbeslow@)
-		if (MmSwappiness@ ~~)
-			// swap can't be used, don't try slow list
-			return
-		end
-	
-		// can try the slow list
+fn MmEvictSingleSlowPage { -- pfdbe ok }
+	// can try the slow list
 
-		auto trycap
-		128 trycap!
+	auto evictionfunc
+	auto evicted
+	auto dropped
+	auto ipl
 
-		if (MmEvictablePageListHead@)
-			IPLDPC KeIPLRaise ipl!
+	STATUS_NO_MEMORY ok!
 
-			MmEvictablePageListHead@ pfdbe!
+	auto trycap
+	128 trycap!
 
-			while (pfdbe@)
-				if (trycap@ ~~)
-					ipl@ KeIPLLower
+	if (MmEvictablePageListHead@)
+		IPLDPC KeIPLRaise ipl!
 
-					return
-				end
+		MmEvictablePageListHead@ pfdbe!
 
-				pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
-				MmEvictableFunctions_EvictionFunc + @ evictionfunc!
-
-				pfdbe@ // pfdbe
-				evictionfunc@ MmEvictionFunction drop evicted! dropped!
-
-				if (evicted@ ~~)
-					if (dropped@)
-						1 trycap -=
-
-						MmEvictablePageListHead@ pfdbe!
-					end else
-						pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
-					end
-
-					continue
-				end
-
-				// evicted, yoink
-
-				if (DEBUGCHECKS)
-					if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
-						pfdbe@ MmPageFrameEntryEvictable_References + @
-						"MmEvictSinglePage: attempt to evict a page with %d references 2\n" KeCrash
-					end
-				end
-
-				pfdbe@ MmEvictablePageRemoveForDeletion
-
+		while (pfdbe@)
+			if (trycap@ ~~)
 				ipl@ KeIPLLower
-
-				0 ok!
 
 				return
 			end
 
+			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
+
+			pfdbe@ // pfdbe
+			evictionfunc@ MmEvictionFunction drop evicted! dropped!
+
+			if (evicted@ ~~)
+				if (dropped@)
+					1 trycap -=
+
+					MmEvictablePageListHead@ pfdbe!
+				end else
+					pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
+				end
+
+				continue
+			end
+
+			// evicted, yoink
+
+			if (DEBUGCHECKS)
+				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
+					pfdbe@ MmPageFrameEntryEvictable_References + @
+					"MmEvictSinglePage: attempt to evict a page with %d references 2\n" KeCrash
+				end
+			end
+
+			pfdbe@ MmEvictablePageRemoveForDeletion
+
 			ipl@ KeIPLLower
+
+			0 ok!
+
+			return
 		end
+
+		ipl@ KeIPLLower
+	end
+end
+
+var MmSynchronousEvictToggle 0
+
+fn MmEvictSinglePage { canbeslow -- pfdbe ok }
+	if (canbeslow@ ~~ MmSwappiness@ ~~ ||)
+		MmEvictSingleFastPage ok! pfdbe!
+		return
+	end
+
+	if (MmEvictableFastPageCount@ 200 >)
+		MmEvictSingleFastPage ok! pfdbe!
+
+		if (ok@ ~~)
+			return
+		end else
+			MmEvictSingleSlowPage ok! pfdbe!
+			return
+		end
+	end elseif (MmEvictableSlowPageCount@ 150 >)
+		MmEvictSingleSlowPage ok! pfdbe!
+
+		if (ok@ ~~)
+			return
+		end else
+			MmEvictSingleFastPage ok! pfdbe!
+			return
+		end
+	end
+
+	auto i
+	2 i!
+
+	while (i@)
+		if (MmSynchronousEvictToggle@)
+			MmEvictSingleSlowPage ok! pfdbe!
+
+			0 MmSynchronousEvictToggle!
+
+			if (ok@ ~~)
+				return
+			end
+		end else
+			MmEvictSingleFastPage ok! pfdbe!
+
+			1 MmSynchronousEvictToggle!
+
+			if (ok@ ~~)
+				return
+			end
+		end
+
+		1 i -=
 	end
 end

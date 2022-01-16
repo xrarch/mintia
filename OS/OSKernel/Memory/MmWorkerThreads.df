@@ -143,20 +143,68 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		// ensure we can progress by putting a minimum on these
 		if (MmSwappiness@)
-			slowcount@ 20 max slowcount!
+			slowcount@ 10 max slowcount!
 		end
-		fastcount@ 32 max fastcount!
+		fastcount@ 16 max fastcount!
+
+		fastcount@ slowcount@ + evictcount!
+
+		auto succeedcount
+		0 succeedcount!
+
+		auto done
+		0 done!
+
+		auto big
+		0 big!
+
+		if (MmEvictableFastPageCount@ evictcount@ 100 + >)
+			// there's enough fast pages to fulfill the eviction, with a
+			// margin of 100 pages. attempt the entire eviction through the
+			// fast list.
+
+			evictcount@ // trycount
+			1 // fast
+			MmEvictableFastPageListHead // listhead
+			MmEvictFromList ok! done! succeedcount!
+
+			if (ok@)
+				ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
+			end
+
+			1 big!
+		end elseif (MmEvictableSlowPageCount@ evictcount@ 50 + > MmSwappiness@ &&)
+			// there's enough slow pages to fulfill the eviction, with a
+			// margin of 50 pages.
+
+			evictcount@ // trycount
+			0 // fast
+			MmEvictablePageListHead // listhead
+			MmEvictFromList ok! done! succeedcount!
+
+			if (ok@)
+				ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
+			end
+
+			1 big!
+		end
+
+		if (big@)
+			if (done@ ~~)
+				1 failcount +=
+			end
+
+			continue
+		end
 
 		// attempt to collect enough pages in both lists to satisfy these
 		// targets
 
 		MmPageFreeCount@ MMDIREPAGES < forcedire@ || // dire
-		fastcount@ slowcount@ + // pagecount
+		evictcount@ // pagecount
 		MmPopulateLists
 
-		auto succeedcount
-
-		auto done
+		// try a combination
 
 		fastcount@ // trycount
 		1 // fast
@@ -167,12 +215,11 @@ fn MmEvictionWorker { context1 context2 -- }
 			ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
 		end
 
-		if (succeedcount@)
+		if (succeedcount@ fastcount@ >=)
 			0 failcount!
 		end
 
 		if (done@)
-			// free page count became sufficient while evicting
 			continue
 		end
 
@@ -185,7 +232,7 @@ fn MmEvictionWorker { context1 context2 -- }
 			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
 		end
 
-		if (succeedcount@)
+		if (succeedcount@ fastcount@ >=)
 			0 failcount!
 		end
 

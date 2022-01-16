@@ -54,6 +54,11 @@ extern OSIOControl { arg2 arg1 filehandle -- ret ok }
 
 extern OSGetBootDevicePath { buffer -- ok }
 
+extern OSFilesystemMount { flags handle fsname -- ok }
+extern OSFilesystemUnmount { handle -- ok }
+
+extern OSMountQueryAll { buffer maxquery -- count ok }
+extern OSMountCountQuery { -- count ok }
 extern OSMountUpdateFlags { newflags handle -- ok }
 extern OSMountGetFilesystemName { buffer handle -- ok }
 

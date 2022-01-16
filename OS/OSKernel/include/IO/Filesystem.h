@@ -61,6 +61,8 @@ extern IOMountUpdateFlagsObject { newflags fileobject -- ok }
 extern IOMountGetFilesystemName { buffer handle -- ok }
 extern IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 
+extern IOMountQueryAll { buffer maxquery -- count ok }
+
 extern IOMountGetFlags { mount -- flags }
 extern IOMountSetFlags { flags mount -- }
 extern IOMountSetContext { context mount -- }
@@ -71,3 +73,4 @@ extern IOMountGetRootFCB { mount -- fcb }
 extern IOFilesystemSyncAll { -- ok }
 
 externptr IOMountListMutex
+externptr IOMountCount

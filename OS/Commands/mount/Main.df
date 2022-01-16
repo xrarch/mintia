@@ -1,0 +1,177 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn private Usage { -- }
+	"usage: mount [-ru] device [fstype]\n" OSGetStdErr FPrintf
+end
+
+fn Main { ... -- ret }
+	0 ret!
+
+	if (argc@ 1 ==)
+		MountListPrint
+		return
+	end
+
+	auto i
+	1 i!
+
+	auto chk
+	2 chk!
+
+	auto flags
+	0 flags!
+
+	auto sw
+	[1]argv@ sw!
+
+	if (sw@ gb '-' ==)
+		2 i!
+		3 chk!
+
+		1 sw +=
+
+		while (sw@ gb)
+			if (sw@ gb 'r' ==)
+				OSMOUNT_READONLY flags |=
+			end elseif (sw@ gb 'u' ==)
+				OSMOUNT_NOUID flags |=
+			end else
+				Usage
+				-1 OSExit
+			end
+
+			1 sw +=
+		end
+	end
+
+	if (argc@ chk@ <)
+		Usage
+		1 ret!
+		return
+	end
+
+	if (argc@ chk@ 1 + >)
+		Usage
+		1 ret!
+		return
+	end
+
+	auto fst
+	0 fst!
+
+	if (argc@ chk@ 1 + ==)
+		[i@ 1 +]argv@ fst!
+	end
+
+	auto dev
+	[i@]argv@ dev!
+
+	auto access
+	ACCESS_READ access!
+
+	if (flags@ OSMOUNT_READONLY & ~~)
+		ACCESS_WRITE access |=
+	end
+
+	auto devhandle
+	0 // flags
+	access@ // access
+	dev@ // path
+	0 // ftype
+	OSFileOpen ret! devhandle!
+
+	if (ret@)
+		ret@ OSStatusGetName dev@ "mount: %s: %s\n" OSError
+	end
+
+	flags@ // flags
+	devhandle@ // handle
+	fst@ // fsname
+	OSFilesystemMount ret!
+
+	devhandle@ OSClose drop
+
+	if (ret@)
+		ret@ OSStatusGetName dev@ "mount: %s: %s\n" OSError
+	end
+end
+
+fn MountListPrint { -- }
+	auto ok
+
+	auto count
+	OSMountCountQuery ok! count!
+
+	if (ok@)
+		ok@ OSStatusGetName "mount: couldn't query mount count: %s\n" OSError
+	end
+
+	auto querybuffer
+	count@ OSMountInformation_SIZEOF * OSHeapAllocate ok! querybuffer!
+
+	if (ok@)
+		ok@ OSStatusGetName "mount: couldn't allocate buffer: %s\n" OSError
+	end
+
+	querybuffer@ // buffer
+	count@ // maxquery
+	OSMountQueryAll ok! count!
+
+	if (ok@)
+		querybuffer@ OSHeapFree
+
+		ok@ OSStatusGetName "mount: couldn't query mount list: %s\n" OSError
+	end
+
+	"OPTIONS"
+	"DEVICE"
+
+	"%12s %s\n" Printf
+
+	auto record
+	querybuffer@ record!
+
+	while (count@)
+		record@ OSMountInformation_VolumeName + "%12s " Printf
+
+		auto flags
+		record@ OSMountInformation_Flags + @ flags!
+
+		flags@ "%08x " Printf
+
+		auto didone
+		0 didone!
+
+		if (flags@ ~~)
+			"(none)\n" Printf
+		end else
+			"(" Printf
+
+			if (flags@ OSMOUNT_READONLY &)
+				"ro" Printf
+				1 didone!
+			end
+
+			if (flags@ OSMOUNT_NOUID &)
+				if (didone@)
+					"," Printf
+				end
+
+				"nouid" Printf
+
+				1 didone!
+			end
+
+			")" Printf
+
+			"\n" Printf
+		end
+
+		1 count -=
+		OSMountInformation_SIZEOF record +=
+	end
+
+	querybuffer@ OSHeapFree
+end

@@ -33,6 +33,9 @@ public IOFilesystemListHead
 var IOMountListHead 0
 public IOMountListHead
 
+var IOMountCount 0
+public IOMountCount
+
 fn IOFilesystemRegister { filesystem -- ok }
 	// assumes being run single-threaded (i.e. in a DriverInit routine)...
 
@@ -280,6 +283,8 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	h@ mount@ IOMount_Next + !
 	mount@ IOMountListHead!
 
+	1 IOMountCount +=
+
 	IOMountListUnlock
 
 	0 fcb@ IOFileControlBlock_Busy + !
@@ -391,6 +396,8 @@ fn IOUnmountObject { fileobject -- ok }
 	end else // no prev means we were the head
 		mount@ IOMount_Next + @ IOMountListHead!
 	end
+
+	1 IOMountCount -=
 
 	IOMountListUnlock
 
@@ -573,6 +580,46 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 	strncpy
 
 	ipl@ KeIPLLower
+end
+
+fn IOMountQueryAll { buffer maxquery -- count ok }
+	IOMountListLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto mount
+	IOMountListHead@ mount!
+
+	0 count!
+
+	while (mount@)
+		if (maxquery@ ~~)
+			break
+		end
+
+		auto name
+		mount@ IOMount_VolumeFile + @ IOFile_OpenedPath + @ name!
+
+		if (name@)
+			buffer@ OSMountInformation_VolumeName + // dest
+			name@ // src
+			OBNAMEMAX 1 - // max
+			strncpy
+		end else
+			0 buffer@ OSMountInformation_VolumeName + sb
+		end
+
+		mount@ IOMount_Flags + @ buffer@ OSMountInformation_Flags + !
+
+		1 count +=
+		1 maxquery -=
+		OSMountInformation_SIZEOF buffer +=
+		mount@ IOMount_Next + @ mount!
+	end
+
+	IOMountListUnlock
 end
 
 fn IOMountGetFlags { mount -- flags }

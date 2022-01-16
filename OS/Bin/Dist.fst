@@ -9,3 +9,5 @@ ps.exe ps.exe 493
 trunc.exe trunc.exe 493
 mkdir.exe mkdir.exe 493
 rm.exe rm.exe 493
+mount.exe mount.exe 493
+umount.exe umount.exe 493

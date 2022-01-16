@@ -57,5 +57,6 @@ const STATUS_COMMIT_EXCEEDED       -55
 const STATUS_NO_CONSOLE            -56
 const STATUS_HAS_CONSOLE           -57
 const STATUS_ILLEGAL_NAME          -58
+const STATUS_ALREADY_EXISTS        -59
 
 extern OSStatusGetName { status -- name }

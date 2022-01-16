@@ -49,6 +49,29 @@ var IOSwapFileObject 0
 
 buffer IOSwapBitmap ExBitmapHeader_SIZEOF
 
+buffer IOSwapFileCreationMutex KeMutex_SIZEOF
+
+fn IOSwapFileInit { -- }
+	"IOSwapFileCreationMutex" // name
+	KERNELMODE // mode
+	IOSwapFileCreationMutex // mutex
+	KeMutexInitialize
+end
+
+fn IOSwapFileCreateLock { -- }
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	IOSwapFileCreationMutex // object
+	KeThreadWaitForObject drop
+end
+
+fn IOSwapFileCreateUnlock { -- }
+	0 // abandon
+	IOSwapFileCreationMutex // mutex
+	KeMutexRelease drop
+end
+
 fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 	SeAmIAdmin ok!
 
@@ -58,16 +81,15 @@ fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 		return
 	end
 
+	IOSwapFileCreateLock
+
 	if (IOSwapFileObject@)
+		IOSwapFileCreateUnlock
+
 		STATUS_FORBIDDEN_OPERATION ok!
 
 		return
 	end
-
-	// XXX doesn't lock a mutex on the swap file information because it is
-	// currently assumed that this function will only be called once by
-	// SystemInit.exe, and it cannot be called again after that (assuming it
-	// successfully established the swap file).
 
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
@@ -79,6 +101,8 @@ fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 	end else
 		// bad
 
+		IOSwapFileCreateUnlock
+
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
@@ -88,6 +112,8 @@ fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 
 	if (sizeinpages@ 256 <)
 		// needs to be at least 256 pages (1MB with 4KB pages)
+
+		IOSwapFileCreateUnlock
 
 		STATUS_SWAP_TOO_SMALL ok!
 
@@ -101,6 +127,8 @@ fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 	MmAllocWithTag ok! bitmap!
 
 	if (ok@)
+		IOSwapFileCreateUnlock
+
 		return
 	end
 
@@ -114,12 +142,16 @@ fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 	// cache accesses to it.
 
 	if (ok@)
+		IOSwapFileCreateUnlock
+
 		bitmap@ MmFree
 
 		return
 	end
 
 	if (cacheblock@)
+		IOSwapFileCreateUnlock
+
 		bitmap@ MmFree
 
 		STATUS_IO_TRY_AGAIN_LATER ok!
@@ -146,6 +178,8 @@ fn IOSwapFileCreateObject { fileobject -- sizeinpages ok }
 
 	sizeinpages@ IOSwapPagesCount!
 	sizeinpages@ MmCommitLimit!
+
+	IOSwapFileCreateUnlock
 
 	0 ok!
 end

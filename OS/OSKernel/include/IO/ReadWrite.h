@@ -8,5 +8,6 @@ extern IOFileReadObject { timeout flags length buffer fileobject process -- byte
 extern IOFileWrite { flags length buffer filehandle -- byteswritten ok }
 extern IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok }
 
+extern IODirectoryUnlink { name filehandle -- ok }
 extern IODirectoryRead { dirent filehandle -- ok }
 extern IODirectoryReadObject { dirent fileobject -- ok }

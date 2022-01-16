@@ -120,6 +120,8 @@ extern AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
+extern AFSUnlink { name dirfcb -- ok }
+
 extern AFSTruncate { newsize zero fcb -- ok }
 extern AFSINodeUpdate { fcb -- }
 

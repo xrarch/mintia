@@ -7,6 +7,7 @@ all:
 	make -C ps
 	make -C trunc
 	make -C mkdir
+	make -C rm
 
 cleanup:
 	make -C Cmd cleanup
@@ -17,3 +18,4 @@ cleanup:
 	make -C ps cleanup
 	make -C trunc cleanup
 	make -C mkdir cleanup
+	make -C rm cleanup

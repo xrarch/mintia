@@ -8,3 +8,4 @@ ls.exe ls.exe 493
 ps.exe ps.exe 493
 trunc.exe trunc.exe 493
 mkdir.exe mkdir.exe 493
+rm.exe rm.exe 493

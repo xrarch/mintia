@@ -22,14 +22,14 @@ COMMANDS_DIR := $(OS_DIR)/Commands
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
-dist: $(DISTIMAGE) bootable sysfiles
+dist: bootable sysfiles
 
-bootable:
+bootable: $(DISTIMAGE)
 	make -C $(LOAD_DIR)
 	dd if=$(LOAD_DIR)/BootSector.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
 	dd if=$(LOAD_DIR)/Loader.a3x of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((4 + $(OFFSET))) 2>/dev/null
 
-sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll
+sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	make -C $(RTL_DIR)
 
 	../sdk/install.sh $(RTL_DIR)

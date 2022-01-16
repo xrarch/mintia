@@ -25,14 +25,117 @@
 
 #include "AisixFS.h"
 
+fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
+	// FCB is locked by caller
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+			// should have been caught by the IO system code
+			"AFSDirectoryAllocateEntry: not a directory\n" KeCrash
+		end
+	end
+
+	auto cacheblock
+	fcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ ~~)
+			"AFSDirectoryAllocateEntry: no cacheblock\n" KeCrash
+		end
+	end
+
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto byteoff
+	0 byteoff!
+
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
+
+	auto pageno
+	byteoff@ PAGESHIFT >> pageno!
+
+	auto curpageno
+	-1 curpageno!
+
+	0 pfdbe!
+
+	while (byteoff@ bytesize@ <)
+		if (pageno@ curpageno@ ~=)
+			// must read in a new page
+
+			if (pfdbe@)
+				pfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			0 // kflags
+			byteoff@ PAGENUMBERMASK & // offset
+			fcb@ // fcb
+			IOCachePageRead ok! pfdbe! dirent!
+
+			if (ok@)
+				return
+			end
+
+			byteoff@ PAGEOFFSETMASK & dirent +=
+
+			pageno@ curpageno!
+		end
+
+		if (dirent@ AFSDirEnt_INum + @ ~~)
+			// found a free dirent
+			0 ok!
+			return
+		end
+
+		AFSDirEnt_SIZEOF dirent +=
+		AFSDirEnt_SIZEOF byteoff +=
+		byteoff@ PAGESHIFT >> pageno!
+	end
+
+	if (pfdbe@)
+		pfdbe@ MmEvictablePageDereference drop
+	end
+
+	// no existing free entries -- try to allocate a new one.
+
+	bytesize@ AFSDirEnt_SIZEOF + // newsize
+	1 // zero
+	fcb@ // fcb
+	AFSTruncate ok!
+
+	if (ok@)
+		return
+	end
+
+	0 // flags
+	0 // kflags
+	bytesize@ PAGENUMBERMASK & // offset
+	fcb@ // fcb
+	IOCachePageRead ok! pfdbe! dirent!
+
+	if (ok@)
+		return
+	end
+
+	bytesize@ PAGEOFFSETMASK & dirent +=
+
+	if (DEBUGCHECKS)
+		if (dirent@ AFSDirEnt_INum + @)
+			"AFSDirectoryAllocateEntry: fresh dirent had inum\n" KeCrash
+		end
+	end
+end
+
 fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 	// FCB is locked by caller
 
 	if (DEBUGCHECKS)
 		if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 			// should have been caught by the IO system code
-
-			"AFSReadDirectory: not a directory\n" KeCrash
+			"AFSDirectoryGetEntry: not a directory\n" KeCrash
 		end
 	end
 

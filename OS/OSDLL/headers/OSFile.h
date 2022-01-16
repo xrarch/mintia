@@ -41,4 +41,10 @@ externptr OSStdIn
 externptr OSStdOut
 externptr OSStdErr
 
+extern OSSetUMask { umask -- }
+extern OSGetUMask { -- umask }
+
 extern OSFileOpen { flags access path ftype -- handle ok }
+
+extern OSDirectoryCreate { permissions flags access path -- handle ok }
+extern OSFileCreate { permissions flags access path -- handle ok }

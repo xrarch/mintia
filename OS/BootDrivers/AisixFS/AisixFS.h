@@ -37,6 +37,7 @@ struct AFSData
 	4 FreeBlockHint
 
 	KeMutex_SIZEOF FreeBlockBitmapMutex
+	KeMutex_SIZEOF INodeAllocationMutex
 
 	4 WritableFiles
 
@@ -83,10 +84,14 @@ const AFSSUPERBLOCKVERSION 0x6
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
+extern AFSINodeAllocate { mount -- inum inode pfdbe ok }
+extern AFSINodeFree { inum mount -- }
+
 extern AFSFCBRemove { fcb buckethead -- }
 extern AFSFCBInsert { fcb buckethead -- }
 
 extern AFSFCBReclaim { fcb -- reclaimed }
+extern AFSFCBDelete { fcb -- }
 
 extern AFSFCBCacheLockBucket { bucket mount -- ok }
 extern AFSFCBCacheUnlockBucket { bucket mount -- }
@@ -110,6 +115,8 @@ extern AFSParse { flags path initialfcb process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }
 extern AFSReadFile { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
 extern AFSWriteFile { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
+
+extern AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 

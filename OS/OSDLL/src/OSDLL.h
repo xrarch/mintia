@@ -18,6 +18,7 @@ struct OSPEBs
 	4 CurrentDirectory
 	4 DLLListHead
 	4 DLLListTail
+	4 UMask
 
 	(32 4 *) SignalActions
 endstruct

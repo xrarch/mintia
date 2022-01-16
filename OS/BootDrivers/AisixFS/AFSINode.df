@@ -53,6 +53,126 @@ fn AFSINodeRead { inum mount urgent -- ptr pfdbe ok }
 	off@ AFSBLOCKOFFMASK & ptr +=
 end
 
+fn AFSINodeAllocationLock { mount -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMountGetContext AFSData_INodeAllocationMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn AFSINodeAllocationUnlock { mount -- }
+	0 // abandon
+	mount@ IOMountGetContext AFSData_INodeAllocationMutex + // mutex
+	KeMutexRelease drop
+end
+
+fn AFSINodeFree { inum mount -- }
+	auto ok
+
+	auto pfdbe
+	auto inode
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	inum@ // inum
+	mount@ // mount
+	1 // urgent
+	AFSINodeRead ok! pfdbe! inode!
+
+	if (ok@)
+		ok@ "AFSINodeFree: couldn't read inode (%i)\n" KeCrash
+	end
+
+	0 inode@ AFSINode_type + !
+
+	pfdbe@ // pfdbe
+	mount@ // mount
+	FSVolumeBlockWrite ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "AFSINodeFree: couldn't modify block (%i)\n" KeCrash
+		end
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
+end
+
+fn AFSINodeAllocate { mount -- inum inode pfdbe ok }
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto inodes
+	afsdata@ AFSData_ICount + @ inodes!
+
+	auto inoblk
+	afsdata@ AFSData_IStart + @ inoblk!
+
+	mount@ AFSINodeAllocationLock ok!
+
+	if (ok@)
+		return
+	end
+
+	0 // flags
+	0 // kflags
+	inoblk@ AFSBLOCKSHIFT << // offset
+	mount@ // mount
+	FSVolumeBlockRead ok! pfdbe! inode!
+
+	if (ok@)
+		mount@ AFSINodeAllocationUnlock
+
+		return
+	end
+
+	// skip inode 0
+	1 inum!
+	AFSINode_SIZEOF inode +=
+
+	while (inum@ inodes@ <)
+		if (inum@ AFSINode_SIZEOF * AFSBLOCKOFFMASK & ~~)
+			pfdbe@ MmEvictablePageDereference drop
+
+			1 inoblk +=
+
+			0 // flags
+			0 // kflags
+			inoblk@ AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! pfdbe! inode!
+
+			if (ok@)
+				mount@ AFSINodeAllocationUnlock
+
+				return
+			end
+		end
+
+		if (inode@ AFSINode_type + @ 0 ==)
+			// found a free inode! reserve it and return
+			
+			-1 inode@ AFSINode_type + !
+
+			mount@ AFSINodeAllocationUnlock
+
+			return
+		end
+
+		AFSINode_SIZEOF inode +=
+		1 inum +=
+	end
+
+	STATUS_IO_END_OF_DISK ok!
+
+	pfdbe@ MmEvictablePageDereference drop
+
+	mount@ AFSINodeAllocationUnlock
+end
+
 fn AFSINodeUpdate { fcb -- }
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
@@ -341,6 +461,42 @@ fn (IODispatchReclaimFCBFunction) AFSFCBReclaim { fcb -- reclaimed }
 	AFSFCBCacheUnlockBucket
 
 	IPLDPC KeIPLRaise drop
+end
+
+fn AFSFCBDelete { fcb -- }
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto bucket
+	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+
+	auto buckethead
+	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	bucket@ // bucket
+	mount@ // mount
+	AFSFCBCacheLockBucket drop
+
+	fcb@ // fcb
+	buckethead@ // buckethead
+	AFSFCBRemove
+
+	bucket@ // bucket
+	mount@ // mount
+	AFSFCBCacheUnlockBucket
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	fcbdata@ MmFree
+	fcb@ MmFree
 end
 
 fn AFSFCBRead { inum mount -- fcb ok }

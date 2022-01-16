@@ -225,6 +225,8 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 									SeCheckAccessFilesystemX ok!
 
 									if (ok@ ~~)
+										process@ // process
+										fullpath@ // fullpath
 										flags@ // flags
 										pcomp@ // name
 										initialfcb@ // dirfcb
@@ -336,7 +338,7 @@ fn AFSCreateFileObject { fullpath flags permissions process fcb -- object ok }
 	IOFileCreateObject ok! object!
 
 	if (ok@)
-		fcb@ IOFileControlBlockGetContext // mount
+		fcb@ IOFileControlBlockGetMount // mount
 		AFSMountDereference drop
 
 		return
@@ -354,6 +356,8 @@ end
 fn AFSVerifyName { name -- ok }
 	0 ok!
 
+	// no need to check length, AFSParse did that already.
+
 	while (name@ gb)
 		if (name@ gb 0x20 < name@ gb 0x7F >= ||)
 			STATUS_ILLEGAL_NAME ok!
@@ -364,28 +368,129 @@ fn AFSVerifyName { name -- ok }
 	end
 end
 
-fn AFSCreateFile { flags name dirfcb -- object ok }
+fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 	name@ AFSVerifyName ok!
 
 	if (ok@)
 		return
 	end
 
+	auto mount
+	dirfcb@ IOFileControlBlockGetMount mount!
+
 	// allocate inode
 
+	auto dirpfdbe
+	auto ipfdbe
+
+	auto inode
+	auto inum
+
+	mount@ AFSINodeAllocate ok! ipfdbe! inode! inum!
+	
+	if (ok@)
+		return
+	end
+
 	// fill in fields
+
+	if (flags@ OSFILEFLAG_CREATEDIR &)
+		2 inode@ AFSINode_type + !
+	end else
+		1 inode@ AFSINode_type + !
+	end
+
+	KeThreadCurrent@ PsThreadGetFilePermissions ACCESS_ALL_ALL & inode@ AFSINode_permissions + !
+	KeProcessCurrent PsProcessGetUID inode@ AFSINode_uid + !
+	dirfcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ inode@ AFSINode_iparent + !
+
+	auto time
+	KeTime_SIZEOF alloc time!
+	time@ HALRTCQuery
+	time@ KeTime_SecPart + @ inode@ AFSINode_timestamp + !
+
+	0xFFFFFFFF inode@ AFSINode_startblock + !
+	0 inode@ AFSINode_bytesize + !
 
 	// allocate directory entry
 
+	auto dirent
+	dirfcb@ AFSDirectoryAllocateEntry ok! dirpfdbe! dirent!
+
+	if (ok@)
+		0 inode@ AFSINode_type + !
+
+		ipfdbe@ // pfdbe
+		mount@ // mount
+		FSVolumeBlockWrite drop
+
+		ipfdbe@ MmEvictablePageDereference drop
+
+		return
+	end
+
 	// fill in fields
+
+	inum@ dirent@ AFSDirEnt_INum + !
+
+	dirent@ AFSDirEnt_name + // dest
+	name@ // src
+	59 // max
+	strncpy
 
 	// grab FCB for inode
 
-	// failed to grab FCB, undo everything we just did
+	auto fcb
+	inum@ // inum
+	mount@ // mount
+	AFSFCBRead ok! fcb!
+
+	if (ok@)
+		// failed to grab FCB, undo everything we just did
+
+		0 inode@ AFSINode_type + !
+		0 dirent@ AFSDirEnt_INum + !
+
+		ipfdbe@ // pfdbe
+		mount@ // mount
+		FSVolumeBlockWrite drop
+
+		OSPAGESIZE // extent
+		dirpfdbe@ // pfdbe
+		IOCachePageModifyFunction drop
+
+		ipfdbe@ MmEvictablePageDereference drop
+		dirpfdbe@ MmEvictablePageDereference drop
+
+		return
+	end
 
 	// create object with FCB
 
-	name@ "AFSCreateFile: TODO %s\n" KeCrash
+	fullpath@ // fullpath
+	flags@ // flags
+	KeThreadCurrent@ PsThreadGetFilePermissions ACCESS_ALL_ALL & // permissions
+	process@ // process
+	fcb@ // fcb
+	AFSCreateFileObject ok! object!
+
+	if (ok@)
+		0 inode@ AFSINode_type + !
+		0 dirent@ AFSDirEnt_INum + !
+
+		fcb@ AFSFCBDelete
+	end
+
+	ipfdbe@ // pfdbe
+	mount@ // mount
+	FSVolumeBlockWrite drop
+
+	OSPAGESIZE // extent
+	dirpfdbe@ // pfdbe
+	IOCachePageModifyFunction drop
+
+	ipfdbe@ MmEvictablePageDereference drop
+	dirpfdbe@ MmEvictablePageDereference drop
 end
 
 fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }

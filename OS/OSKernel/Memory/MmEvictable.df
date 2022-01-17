@@ -397,6 +397,67 @@ fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
 	end
 end
 
+var MmSynchronousEvictToggle 0
+
+fn MmEvictSinglePage { canbeslow -- pfdbe ok }
+	if (canbeslow@ ~~ MmSwappiness@ ~~ ||)
+		MmEvictSingleFastPage ok! pfdbe!
+		return
+	end
+
+	// check if either list is overwhelmingly larger than the other.
+	// if it is, evict from that one specifically.
+
+	if (MmEvictableFastPageCount@ MmEvictableSlowPageCount@ 150 + >)
+		MmEvictSingleFastPage ok! pfdbe!
+
+		if (ok@ ~~)
+			return
+		end
+
+		MmEvictSingleSlowPage ok! pfdbe!
+		return
+	end elseif (MmEvictableSlowPageCount@ MmEvictableFastPageCount@ 100 + >)
+		MmEvictSingleSlowPage ok! pfdbe!
+
+		if (ok@ ~~)
+			return
+		end
+
+		MmEvictSingleFastPage ok! pfdbe!
+		return
+	end
+
+	// neither list was very much larger than the other.
+	// try to evict from fast list or slow list first, randomly, opposite to
+	// what the system's last synchronous eviction did.
+
+	auto i
+	2 i!
+
+	while (i@)
+		if (MmSynchronousEvictToggle@)
+			MmEvictSingleSlowPage ok! pfdbe!
+
+			0 MmSynchronousEvictToggle!
+
+			if (ok@ ~~)
+				return
+			end
+		end else
+			MmEvictSingleFastPage ok! pfdbe!
+
+			1 MmSynchronousEvictToggle!
+
+			if (ok@ ~~)
+				return
+			end
+		end
+
+		1 i -=
+	end
+end
+
 fn MmEvictSingleFastPage { -- pfdbe ok }
 	auto evictionfunc
 	auto evicted
@@ -512,59 +573,5 @@ fn MmEvictSingleSlowPage { -- pfdbe ok }
 		end
 
 		ipl@ KeIPLLower
-	end
-end
-
-var MmSynchronousEvictToggle 0
-
-fn MmEvictSinglePage { canbeslow -- pfdbe ok }
-	if (canbeslow@ ~~ MmSwappiness@ ~~ ||)
-		MmEvictSingleFastPage ok! pfdbe!
-		return
-	end
-
-	if (MmEvictableFastPageCount@ 200 >)
-		MmEvictSingleFastPage ok! pfdbe!
-
-		if (ok@ ~~)
-			return
-		end else
-			MmEvictSingleSlowPage ok! pfdbe!
-			return
-		end
-	end elseif (MmEvictableSlowPageCount@ 150 >)
-		MmEvictSingleSlowPage ok! pfdbe!
-
-		if (ok@ ~~)
-			return
-		end else
-			MmEvictSingleFastPage ok! pfdbe!
-			return
-		end
-	end
-
-	auto i
-	2 i!
-
-	while (i@)
-		if (MmSynchronousEvictToggle@)
-			MmEvictSingleSlowPage ok! pfdbe!
-
-			0 MmSynchronousEvictToggle!
-
-			if (ok@ ~~)
-				return
-			end
-		end else
-			MmEvictSingleFastPage ok! pfdbe!
-
-			1 MmSynchronousEvictToggle!
-
-			if (ok@ ~~)
-				return
-			end
-		end
-
-		1 i -=
 	end
 end

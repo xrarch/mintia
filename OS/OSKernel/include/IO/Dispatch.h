@@ -5,6 +5,7 @@ fnptr IODispatchReadFunction { timeout flags kflags length offset buffer fcb las
 fnptr IODispatchWriteFunction { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
+fnptr IODispatchDeleteFunction { fcb -- }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
@@ -22,7 +23,7 @@ struct IODispatchTable
 	4 Write
 	4 Unlink
 	4 Parse
-	4 Reserved2
+	4 Delete
 	4 Flush
 	4 DeleteObject
 	4 Reserved3

@@ -54,6 +54,8 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	0 fcb@ IOFileControlBlock_ReusableListPrev + !
 	0 fcb@ IOFileControlBlock_ReusableInserted + !
 
+	0 fcb@ IOFileControlBlock_DeleteLastReference + !
+
 	"FCBRwLock" // name
 	fcb@ IOFileControlBlock_RwLock + // rwlock
 	ExRwLockInitialize
@@ -113,7 +115,7 @@ fn IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
 
 				ipl@ KeIPLLower
 
-				1 // writeout
+				0 // writeout
 				fcb@ // fcb
 				IOFileControlBlockReclaim
 
@@ -170,6 +172,17 @@ fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 		HALCPUInterruptDisable rs!
 		1 IOFileControlBlockCount +=
 		rs@ HALCPUInterruptRestore
+	end
+end
+
+fn IOFileControlBlockFlush { fcb -- ok }
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	0 ok!
+
+	if (cacheblock@)
+		cacheblock@ IOCacheInfoBlockFlush ok!
 	end
 end
 
@@ -265,6 +278,14 @@ fn IOFileControlBlockUnlock { fcb -- }
 	fcb@ IOFileControlBlock_RwLock + ExRwLockRelease
 end
 
+fn IOFileControlBlockDeleteLastReference { fcb -- }
+	1 fcb@ IOFileControlBlock_DeleteLastReference + !
+end
+
+fn IOFileControlBlockRescue { fcb -- }
+	0 fcb@ IOFileControlBlock_DeleteLastReference + !
+end
+
 fn IOFileControlBlockReference { fcb -- oldcount }
 	// should be called by filesystem driver in its parse method.
 
@@ -302,7 +323,34 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 	oldcount@ 1 - fcb@ IOFileControlBlock_References + !
 
 	if (oldcount@ 1 ==)
-		if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
+		if (fcb@ IOFileControlBlock_DeleteLastReference + @)
+			ipl@ KeIPLLower
+
+			KeThreadCurrent@ KeThreadIgnoreKill drop
+
+			auto cacheblock
+			fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+			if (cacheblock@)
+				0 // writeout
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockDestroy drop
+
+				0 fcb@ IOFileControlBlock_CacheInfoBlock + !
+			end
+
+			fcb@ // fcb
+			fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Delete + @
+			IODispatchDeleteFunction
+
+			KeThreadCurrent@ KeThreadAcceptKill drop
+
+			0 // writeout
+			fcb@ // fcb
+			IOFileControlBlockDelete
+
+			return
+		end elseif (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
 			if (IOFileControlBlockCount@ IOFileControlBlockMaximum@ >=)
 				// above the maximum! attempt to free this FCB immediately.
 
@@ -318,7 +366,7 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 				if (reclaimed@)
 					ipl@ KeIPLLower
 
-					1 // writeout
+					0 // writeout
 					fcb@ // fcb
 					IOFileControlBlockDelete
 
@@ -588,4 +636,8 @@ end
 
 fn IOFileControlBlockGetSizeof { -- sizeof }
 	IOFileControlBlock_SIZEOF sizeof!
+end
+
+fn IOFileControlBlockIsDoomed { fcb -- doomed }
+	fcb@ IOFileControlBlock_DeleteLastReference + @ doomed!
 end

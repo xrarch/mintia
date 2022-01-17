@@ -90,6 +90,7 @@ extern AFSINodeFree { inum mount -- }
 extern AFSFCBRemove { fcb buckethead -- }
 extern AFSFCBInsert { fcb buckethead -- }
 
+extern AFSDelete { fcb -- }
 extern AFSFCBReclaim { fcb -- reclaimed }
 extern AFSFCBDelete { fcb -- }
 

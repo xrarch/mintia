@@ -50,6 +50,8 @@ struct IOFileControlBlock
 	4 ReusableListPrev
 	4 ReusableInserted
 
+	4 DeleteLastReference
+
 	ExRwLock_SIZEOF RwLock
 
 	KeTime_SIZEOF AccessTime
@@ -75,6 +77,8 @@ extern IOFileControlBlockGetAccessTime { fcb -- time }
 extern IOFileControlBlockGetModifyTime { fcb -- time }
 extern IOFileControlBlockGetChangeTime { fcb -- time }
 
+extern IOFileControlBlockIsDoomed { fcb -- doomed }
+
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
 extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
@@ -88,6 +92,11 @@ extern IOFileControlBlockLockShared { fcb -- ok }
 extern IOFileControlBlockTryLock { fcb -- ok }
 extern IOFileControlBlockTryLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
+
+extern IOFileControlBlockFlush { fcb -- ok }
+
+extern IOFileControlBlockDeleteLastReference { fcb -- }
+extern IOFileControlBlockRescue { fcb -- }
 
 extern IOFileControlBlockTruncate { newsize growing keeplocked zero fcb -- oldsize ok }
 

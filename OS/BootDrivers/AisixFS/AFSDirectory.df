@@ -258,5 +258,198 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		return
 	end
 
-	STATUS_NOT_IMPLEMENTED ok!
+	if (DEBUGCHECKS)
+		if (dirfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+			// should have been caught by the IO system code
+			"AFSUnlink: not a directory\n" KeCrash
+		end
+	end
+
+	auto cacheblock
+	dirfcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ ~~)
+			"AFSUnlink: no cacheblock\n" KeCrash
+		end
+	end
+
+	auto mount
+	dirfcb@ IOFileControlBlockGetMount mount!
+
+	auto byteoff
+	0 byteoff!
+
+	auto bytesize
+	dirfcb@ IOFileControlBlockGetSize bytesize!
+
+	auto pageno
+	byteoff@ PAGESHIFT >> pageno!
+
+	auto curpageno
+	-1 curpageno!
+
+	auto pfdbe
+	0 pfdbe!
+
+	auto dirent
+
+	while (byteoff@ bytesize@ <)
+		if (pageno@ curpageno@ ~=)
+			// must read in a new page
+
+			if (pfdbe@)
+				pfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			0 // kflags
+			byteoff@ PAGENUMBERMASK & // offset
+			dirfcb@ // fcb
+			IOCachePageRead ok! pfdbe! dirent!
+
+			if (ok@)
+				return
+			end
+
+			byteoff@ PAGEOFFSETMASK & dirent +=
+
+			pageno@ curpageno!
+		end
+
+		if (dirent@ AFSDirEnt_INum + @)
+			if (dirent@ AFSDirEnt_name + name@ strcmp)
+				// found it! deleto
+
+				dirent@ // dirent
+				mount@ // mount
+				pfdbe@ // pfdbe
+				AFSFinishUnlink ok!
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				return
+			end
+		end
+
+		AFSDirEnt_SIZEOF dirent +=
+		AFSDirEnt_SIZEOF byteoff +=
+		byteoff@ PAGESHIFT >> pageno!
+	end
+
+	if (pfdbe@)
+		pfdbe@ MmEvictablePageDereference drop
+	end
+
+	STATUS_NOT_FOUND ok!
+end
+
+fn AFSDirectoryEnsureEmpty { fcb -- ok }
+	// checks if a directory is empty.
+
+	auto byteoff
+	0 byteoff!
+
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
+
+	auto pageno
+	byteoff@ PAGESHIFT >> pageno!
+
+	auto curpageno
+	-1 curpageno!
+
+	auto pfdbe
+	0 pfdbe!
+
+	auto dirent
+
+	0 ok!
+
+	while (byteoff@ bytesize@ <)
+		if (pageno@ curpageno@ ~=)
+			// must read in a new page
+
+			if (pfdbe@)
+				pfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			0 // kflags
+			byteoff@ PAGENUMBERMASK & // offset
+			fcb@ // fcb
+			IOCachePageRead ok! pfdbe! dirent!
+
+			if (ok@)
+				return
+			end
+
+			byteoff@ PAGEOFFSETMASK & dirent +=
+
+			pageno@ curpageno!
+		end
+
+		if (dirent@ AFSDirEnt_INum + @)
+			pfdbe@ MmEvictablePageDereference drop
+
+			STATUS_IS_A_DIRECTORY ok!
+
+			return
+		end
+
+		AFSDirEnt_SIZEOF dirent +=
+		AFSDirEnt_SIZEOF byteoff +=
+		byteoff@ PAGESHIFT >> pageno!
+	end
+
+	if (pfdbe@)
+		pfdbe@ MmEvictablePageDereference drop
+	end
+end
+
+fn AFSFinishUnlink { dirent mount pfdbe -- ok }
+	auto fcb
+	dirent@ AFSDirEnt_INum + @  // inum
+	mount@ // mount
+	AFSFCBRead ok! fcb!
+
+	if (ok@)
+		return
+	end
+
+	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
+		if (fcb@ IOFileControlBlockGetReferences 1 >)
+			// unlinking directories is forbidden if anyone could possibly
+			// add new entries to it afterwards.
+
+			fcb@ IOFileControlBlockDereference drop
+
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			return
+		end
+
+		// we're unlinking a directory, ensure that it is empty first
+
+		fcb@ AFSDirectoryEnsureEmpty ok!
+
+		if (ok@)
+			fcb@ IOFileControlBlockDereference drop
+
+			return
+		end
+	end
+
+	// free the directory entry
+	0 dirent@ AFSDirEnt_INum + !
+
+	OSPAGESIZE // extent
+	pfdbe@ // pfdbe
+	IOCachePageModifyFunction drop
+
+	fcb@ IOFileControlBlockDeleteLastReference
+
+	fcb@ IOFileControlBlockDereference drop
+
+	0 ok!
 end

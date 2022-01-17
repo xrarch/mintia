@@ -71,11 +71,13 @@ extern IOCachePageInsert { pfdbe buckethead -- }
 extern IOCachePageRemoveModified { pfdbe -- }
 extern IOCachePageInsertModified { pfdbe -- }
 
-extern IOCachePageWriteModified { dontunbias pfdbe -- ok }
+extern IOCachePageWriteModified { pfdbe -- ok }
 
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 extern IOCachePageModifyFunction { extent pfdbe -- ok }
+
+extern IOCachePageModifiedCleanup { pfdbe -- extent }
 
 extern IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
 extern IOCachePageModifyQuotaUncharge { pfdbe -- }

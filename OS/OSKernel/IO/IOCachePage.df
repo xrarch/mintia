@@ -105,16 +105,7 @@ fn IOCachePageInsertModified { pfdbe -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
-	// XXX call with care: data loss could occur if thread can receive signals
-	// during this operation
-
-	if (DEBUGCHECKS)
-		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"IOCachePageWriteModified: could be killed\n" KeCrash
-		end
-	end
-
+fn IOCachePageModifiedCleanup { pfdbe -- extent }
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
@@ -126,7 +117,7 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 
 	if (DEBUGCHECKS)
 		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY & ~~)
-			pfdbe@ "IOCachePageWriteModified: page wasn't dirty (0x%08x)\n" KeCrash
+			pfdbe@ "IOCachePageModifiedCleanup: page wasn't dirty (0x%08x)\n" KeCrash
 		end
 	end
 
@@ -137,7 +128,7 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 
 	if (DEBUGCHECKS)
 		if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @ 0 ==)
-			"IOCachePageWriteModified: underflow\n" KeCrash
+			"IOCachePageModifiedCleanup: underflow\n" KeCrash
 		end
 	end
 
@@ -171,11 +162,27 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
 	end
 
-	auto extent
 	pfdbe@ IOPageFrameEntryCache_ModifiedExtent + @ extent!
 	0 pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
 
 	ipl@ KeIPLLower
+end
+
+fn IOCachePageWriteModified { pfdbe -- ok }
+	// XXX call with care: data loss could occur if thread can receive signals
+	// during this operation
+
+	if (DEBUGCHECKS)
+		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
+			"IOCachePageWriteModified: could be killed\n" KeCrash
+		end
+	end
+
+	auto fcb
+	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
+
+	auto extent
+	pfdbe@ IOCachePageModifiedCleanup extent!
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
@@ -202,16 +209,8 @@ fn IOCachePageWriteModified { dontunbias pfdbe -- ok }
 	KERNELMODE // lastmode
 	writefunc@ IODispatchWriteFunction ok! drop
 
-	if (dontunbias@ ~~)
-		// dontunbias will be 1 during something like truncation,
-		// where the page frame is freed immediately after being
-		// written out to disk. this avoids a redundant refcount bias,
-		// which would be bad because interrupts will get disabled
-		// for some cycles, twice, for no reason
-
-		// no longer dirty, unbias the refcount
-		pfdbe@ MmEvictablePageDereference drop
-	end
+	// no longer dirty, unbias the refcount
+	pfdbe@ MmEvictablePageDereference drop
 end
 
 fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }

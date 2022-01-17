@@ -60,8 +60,6 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 end
 
 const IOMODIFIEDWRITEINTERVALSEC 10 // how frequently should we flush?
-const IOMODIFIEDWRITEPAGEDELAY   6  // how many seconds must elapse before we
-                                    // can write the same page again?
 
 buffer IOModifiedPageEvent KeEvent_SIZEOF
 public IOModifiedPageEvent
@@ -95,6 +93,8 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		auto ok
 		auto waitok
 
+		"helo\n" Printf
+
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAITANY // waittype
@@ -117,8 +117,16 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		auto modcount
 		IOCachePagesModifiedCount@ modcount!
 
-		while (1)
-			if (writescore@ modcount@ 1 >> >=)
+		while (modcount@)
+			auto thresh
+
+			if (modcount@ 1 ==)
+				1 thresh!
+			end else
+				modcount@ 1 >> thresh!
+			end
+
+			if (writescore@ thresh@ >=)
 				// if we tried to unsuccessfully write modcount/2 times in a
 				// row, odds are we're stuck in an infinite loop and we need
 				// to let user threads run for a bit in order to successfully
@@ -145,71 +153,63 @@ fn IOModifiedPageWorker { context1 context2 -- }
 			auto none
 			0 none!
 
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
 			auto pfdbe
 			IOCacheModifiedPageListHead@ pfdbe!
 
 			if (pfdbe@)
-				auto ipl
-				IPLDPC KeIPLRaise ipl!
+				if (modcount@ ~~)
+					if (MmEventLowMemory KeDispatchIsSignaled ~~)
+						if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ <)
+							ipl@ KeIPLLower
 
-				IOCacheModifiedPageListHead@ pfdbe!
-
-				if (pfdbe@)
-					if (modcount@ ~~)
-						if (MmEventLowMemory KeDispatchIsSignaled ~~)
-							if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ <)
-								ipl@ KeIPLLower
-
-								break
-							end
+							break
 						end
 					end
+				end
 
-					auto cacheblock
-					pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+				auto cacheblock
+				pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-					cacheblock@ // cacheblock
-					IOCacheInfoBlockTryLockShared ok!
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockTryLockShared ok!
 
-					if (ok@)
-						// locked successfully
+				if (ok@)
+					// locked successfully
 
-						ipl@ KeIPLLower
-
-						// write out page
-
-						0 // dontunbias
-						pfdbe@ // pfdbe
-						IOCachePageWriteModified drop
-
-						cacheblock@ // cacheblock
-						IOCacheInfoBlockUnlock
-
-						if (modcount@)
-							1 modcount -=
-						end
-
-						0 writescore!
-					end else
-						// lock failed, move this page to the tail so that we
-						// don't try it infinitely
-
-						if (pfdbe@ IOCacheModifiedPageListTail@ ~=)
-							pfdbe@ IOCachePageRemoveModified
-
-							pfdbe@ IOCachePageInsertModified
-						end
-
-						ipl@ KeIPLLower
-
-						1 writescore +=
-					end
-				end else
 					ipl@ KeIPLLower
 
-					1 none!
+					// write out page
+
+					pfdbe@ IOCachePageWriteModified drop
+
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockUnlock
+
+					if (modcount@)
+						1 modcount -=
+					end
+
+					0 writescore!
+				end else
+					// lock failed, move this page to the tail so that we
+					// don't try it infinitely
+
+					if (pfdbe@ IOCacheModifiedPageListTail@ ~=)
+						pfdbe@ IOCachePageRemoveModified
+
+						pfdbe@ IOCachePageInsertModified
+					end
+
+					ipl@ KeIPLLower
+
+					1 writescore +=
 				end
 			end else
+				ipl@ KeIPLLower
+
 				1 none!
 			end
 

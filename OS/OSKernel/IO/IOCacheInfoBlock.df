@@ -233,9 +233,7 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 
 		while (pfdbe@)
 			if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-				0 // dontunbias
-				pfdbe@ // pfdbe
-				IOCachePageWriteModified drop
+				pfdbe@ IOCachePageWriteModified drop
 			end
 
 			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
@@ -353,13 +351,7 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						// writeout==0, which means the caller says its fine
 						// to ignore and throw them out.
 
-						1 // dontunbias
-						pfdbe@ // pfdbe
-						IOCachePageWriteModified drop
-
-						HALCPUInterruptDisable rs!
-						1 cacheblock@ IOCacheInfoBlock_PageReferences + -=
-						rs@ HALCPUInterruptRestore
+						pfdbe@ IOCachePageWriteModified drop
 					end else
 						// this is a modified page and the caller doesn't want
 						// us to write it to disk, so we need to clean it up
@@ -367,20 +359,21 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						// modified page count and removing it from the
 						// modified list.
 
-						HALCPUInterruptDisable rs!
-						1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
-						1 cacheblock@ IOCacheInfoBlock_PageReferences + -=
-						rs@ HALCPUInterruptRestore
+						pfdbe@ IOCachePageModifiedCleanup drop
 
-						pfdbe@ IOCachePageRemoveModified
+						pfdbe@ MmEvictablePageDereference drop
 					end
-				end else
-					// unmodified, remove from evictable list
-
-					HALCPUInterruptDisable rs!
-					pfdbe@ MmEvictablePageRemoveForDeletion
-					rs@ HALCPUInterruptRestore
 				end
+
+				if (DEBUGCHECKS)
+					if (pfdbe@ IOPageFrameEntryCache_References + @)
+						"IOCacheInfoBlockTruncate: page acquired references\n" KeCrash
+					end
+				end
+
+				HALCPUInterruptDisable rs!
+				pfdbe@ MmEvictablePageRemoveForDeletion
+				rs@ HALCPUInterruptRestore
 
 				if (maxpage@)
 					// we are slightly more sophisticated in our hash list

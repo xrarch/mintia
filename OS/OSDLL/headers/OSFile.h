@@ -21,6 +21,9 @@ const OSSEEK_END             3
 const OSMOUNT_READONLY       1
 const OSMOUNT_NOUID          2
 
+const OSDEFAULTFILEPERMISSIONS 438
+const OSDEFAULTDIRPERMISSIONS  511
+
 struct OSDirectoryEntry
 	256 Name
 	32  Reserved

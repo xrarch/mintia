@@ -143,7 +143,7 @@ extern KeThreadInitialize { context1 context2 startfunc process kstack name thre
 extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
-extern KeThreadException { signal thread -- }
+extern KeThreadException { signal thread -- ok }
 extern KeThreadTerminate { status thread -- }
 extern KeThreadResume { thread -- }
 extern KeThreadWakeForSignal { sig thread -- }

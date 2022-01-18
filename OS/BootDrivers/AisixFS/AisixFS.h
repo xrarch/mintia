@@ -120,6 +120,7 @@ extern AFSWriteFile { flags kflags length offset buffer fcb lastmode -- byteswri
 extern AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
+extern AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 
 extern AFSVerifyName { name -- ok }
 

@@ -41,9 +41,6 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 	auto pcomp
 	60 alloc pcomp!
 
-	auto afsdirent
-	AFSDirEnt_SIZEOF alloc afsdirent!
-
 	auto mount
 	initialfcb@ IOFileControlBlockGetMount mount!
 
@@ -201,106 +198,96 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				continue
 			end
 
-			auto seek
-			0 seek!
+			auto pfdbe
+			auto dirent
 
-			while (1)
-				seek@ // seek
-				afsdirent@ // afsdirent
-				initialfcb@ // fcb
-				AFSDirectoryGetEntry ok! seek!
+			pcomp@ // name
+			initialfcb@ // dirfcb
+			AFSDirectoryFindEntry ok! pfdbe! dirent!
 
-				if (ok@)
-					if (ok@ STATUS_IO_END_OF_FILE ==)
-						if (path@ gb ~~)
-							if (flags@ OSFILEFLAG_CREATE &)
-								if (mount@ IOMountGetFlags OSMOUNT_READONLY &)
-									STATUS_READONLY_FILESYSTEM ok!
-								end else
-									ACCESS_WRITE // access
-									fcbdata@ AFSFCBData_Permissions + @ // permbits
-									fcbdata@ AFSFCBData_UID + @ // owninguid
-									fcbdata@ AFSFCBData_GID + @ // owninggid 
-									KeProcessCurrent // process
-									SeCheckAccessFilesystemX ok!
+			if (ok@)
+				if (ok@ STATUS_NOT_FOUND ==)
+					if (path@ gb ~~)
+						if (flags@ OSFILEFLAG_CREATE &)
+							if (mount@ IOMountGetFlags OSMOUNT_READONLY &)
+								STATUS_READONLY_FILESYSTEM ok!
+							end else
+								ACCESS_WRITE // access
+								fcbdata@ AFSFCBData_Permissions + @ // permbits
+								fcbdata@ AFSFCBData_UID + @ // owninguid
+								fcbdata@ AFSFCBData_GID + @ // owninggid 
+								KeProcessCurrent // process
+								SeCheckAccessFilesystemX ok!
 
-									if (ok@ ~~)
-										process@ // process
-										fullpath@ // fullpath
-										flags@ // flags
-										pcomp@ // name
-										initialfcb@ // dirfcb
-										AFSCreateFile ok! object!
-									end
+								if (ok@ ~~)
+									process@ // process
+									fullpath@ // fullpath
+									flags@ // flags
+									pcomp@ // name
+									initialfcb@ // dirfcb
+									AFSCreateFile ok! object!
 								end
 							end
 						end
 					end
+				end
 
-					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ IOFileControlBlockDereference drop
+				initialfcb@ IOFileControlBlockUnlock
+				initialfcb@ IOFileControlBlockDereference drop
 
-					if (ok@ STATUS_IO_END_OF_FILE ==)
-						STATUS_NOT_FOUND ok!
-					end
+				return
+			end
+
+			// found the entry!
+
+			dirent@ AFSDirEnt_INum + @ // inum
+			initialfcb@ IOFileControlBlockGetMount // mount
+			AFSFCBRead ok! nextfcb!
+
+			pfdbe@ MmEvictablePageDereference drop
+
+			initialfcb@ IOFileControlBlockUnlock
+			initialfcb@ IOFileControlBlockDereference drop
+
+			if (ok@)
+				return
+			end
+
+			if (path@ gb)
+				if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+					nextfcb@ IOFileControlBlockDereference drop
+
+					STATUS_NOT_A_DIRECTORY ok!
 
 					return
 				end
+			end
 
-				if (afsdirent@ AFSDirEnt_name + pcomp@ strcmp)
-					// found the entry!
-
-					afsdirent@ AFSDirEnt_INum + @ // inum
-					initialfcb@ IOFileControlBlockGetMount // mount
-					AFSFCBRead ok! nextfcb!
-
-					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ IOFileControlBlockDereference drop
+			if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
+				if (nextfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+					1 // wantcaching
+					nextfcb@ // fcb
+					IOFileControlBlockCacheCheck ok! drop
 
 					if (ok@)
+						nextfcb@ IOFileControlBlockDereference drop
 						return
 					end
+				end
 
-					if (path@ gb)
-						if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
-							nextfcb@ IOFileControlBlockDereference drop
+				if (flags@ OSFILEFLAG_CREATE &)
+					nextfcb@ IOFileControlBlockLock ok!
+				end else
+					nextfcb@ IOFileControlBlockLockShared ok!
+				end
 
-							STATUS_NOT_A_DIRECTORY ok!
-
-							return
-						end
-					end
-
-					if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
-						if (nextfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
-							1 // wantcaching
-							nextfcb@ // fcb
-							IOFileControlBlockCacheCheck ok! drop
-
-							if (ok@)
-								nextfcb@ IOFileControlBlockDereference drop
-
-								return
-							end
-						end
-
-						if (flags@ OSFILEFLAG_CREATE &)
-							nextfcb@ IOFileControlBlockLock ok!
-						end else
-							nextfcb@ IOFileControlBlockLockShared ok!
-						end
-
-						if (ok@)
-							nextfcb@ IOFileControlBlockDereference drop
-							return
-						end
-					end
-
-					nextfcb@ initialfcb!
-
-					break
+				if (ok@)
+					nextfcb@ IOFileControlBlockDereference drop
+					return
 				end
 			end
+
+			nextfcb@ initialfcb!
 
 			if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 				break

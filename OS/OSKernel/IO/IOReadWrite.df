@@ -162,7 +162,7 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 	dispatchtable@ IODispatchTable_Read + @ readfunc!
 
 	if (readfunc@ ~~)
-		STATUS_IO_NOT_SUPPORTED ok!
+		STATUS_NOT_SUPPORTED ok!
 
 		return
 	end
@@ -371,7 +371,7 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 	dispatchtable@ IODispatchTable_Write + @ writefunc!
 
 	if (writefunc@ ~~)
-		STATUS_IO_NOT_SUPPORTED ok!
+		STATUS_NOT_SUPPORTED ok!
 
 		return
 	end
@@ -523,6 +523,156 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 	rs@ HALCPUInterruptRestore
 end
 
+fn IODirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
+	auto access
+	auto srcfileobject
+
+	IOFileTypeObject@ // type
+	srcfilehandle@ // handle
+	ObObjectReferenceByHandle ok! srcfileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE ACCESS_EXEC | SeCheckAccess ok!
+
+	if (ok@)
+		srcfileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto destfileobject
+
+	if (srcfilehandle@ destfilehandle@ ==)
+		// small optimization, don't ref a second time if they're the same.
+		srcfileobject@ destfileobject!
+	end else
+		IOFileTypeObject@ // type
+		destfilehandle@ // handle
+		ObObjectReferenceByHandle ok! destfileobject! access!
+
+		if (ok@)
+			srcfileobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+
+		access@ ACCESS_WRITE ACCESS_EXEC | SeCheckAccess ok!
+
+		if (ok@)
+			destfileobject@ ObObjectDereferenceByPointer drop
+			srcfileobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+	end
+
+	srcname@ // srcname
+	srcfileobject@ // srcfileobject
+	destname@ // destname
+	destfileobject@ // destfileobject
+	IODirectoryRenameObject ok!
+
+	if (srcfilehandle@ destfilehandle@ ~=)
+		destfileobject@ ObObjectDereferenceByPointer drop
+	end
+
+	srcfileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok }
+	auto srcfcb
+	auto destfcb
+	auto dispatchtable
+
+	destfileobject@ IOFile_FileControlBlock + @ destfcb!
+
+	srcfileobject@ IOFile_FileControlBlock + @ srcfcb!
+
+	srcfcb@ IOFileControlBlock_DispatchTable + @ dispatchtable!
+
+	if (destfcb@ IOFileControlBlock_DispatchTable + @ dispatchtable@ ~=)
+		STATUS_CROSS_VOLUME ok!
+
+		return
+	end
+
+	auto renamefunc
+	dispatchtable@ IODispatchTable_Rename + @ renamefunc!
+
+	if (renamefunc@ ~~)
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	if (srcfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+		STATUS_NOT_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (destfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
+		STATUS_NOT_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (srcfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		// make sure the directory fcb has a cacheblock
+
+		1 // wantcaching
+		srcfcb@ // fcb
+		IOFileControlBlockCacheCheck ok! drop
+
+		if (ok@)
+			return
+		end
+	end
+
+	if (destfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		// make sure the directory fcb has a cacheblock
+
+		1 // wantcaching
+		destfcb@ // fcb
+		IOFileControlBlockCacheCheck ok! drop
+
+		if (ok@)
+			return
+		end
+	end
+
+	srcfcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	if (srcfcb@ destfcb@ ~=)
+		destfcb@ IOFileControlBlockLock ok!
+
+		if (ok@)
+			srcfcb@ IOFileControlBlockUnlock
+
+			return
+		end
+	end
+
+	srcname@ // srcname
+	srcfcb@ // srcfcb
+	destname@ // destname
+	destfcb@ // destfcb
+	renamefunc@ IODispatchRenameFunction ok!
+
+	if (srcfcb@ destfcb@ ~=)
+		destfcb@ IOFileControlBlockUnlock
+	end
+
+	srcfcb@ IOFileControlBlockUnlock
+end
+
 fn IODirectoryUnlink { name filehandle -- ok }
 	auto access
 	auto fileobject
@@ -574,7 +724,7 @@ fn IODirectoryUnlinkObject { name fileobject -- ok }
 	dispatchtable@ IODispatchTable_Unlink + @ unlinkfunc!
 
 	if (unlinkfunc@ ~~)
-		STATUS_IO_NOT_SUPPORTED ok!
+		STATUS_NOT_SUPPORTED ok!
 
 		return
 	end
@@ -586,6 +736,8 @@ fn IODirectoryUnlinkObject { name fileobject -- ok }
 	end
 
 	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		// make sure the directory fcb has a cacheblock
+
 		1 // wantcaching
 		fcb@ // fcb
 		IOFileControlBlockCacheCheck ok! drop
@@ -659,7 +811,7 @@ fn IODirectoryReadObject { dirent fileobject -- ok }
 	dispatchtable@ IODispatchTable_ReadDirectory + @ readfunc!
 
 	if (readfunc@ ~~)
-		STATUS_IO_NOT_SUPPORTED ok!
+		STATUS_NOT_SUPPORTED ok!
 
 		return
 	end

@@ -125,8 +125,9 @@ extern AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 extern AFSVerifyName { name -- ok }
 
 extern AFSUnlink { name dirfcb -- ok }
-
 extern AFSTruncate { newsize zero fcb -- ok }
+extern AFSRename { srcname srcfcb destname destfcb -- ok }
+
 extern AFSINodeUpdate { fcb -- }
 
 externptr DriverAFSDispatch

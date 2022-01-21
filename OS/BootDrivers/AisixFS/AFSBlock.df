@@ -25,9 +25,17 @@
 
 #include "AisixFS.h"
 
-buffer ZeroBlock AFSBLOCKSIZE
+buffer ZeroBlock (AFSBLOCKSIZE 2 *) // twice the blocksize to ensure it can
+                                    // be internally aligned to the blocksize
+                                    // in case the disk driver doesn't like
+                                    // unaligned buffers.
 
 fn AFSBlockBitmapReadFAT { mount -- ok }
+	// read the entire FAT page-by-page to construct an in-memory bitmap of
+	// free blocks. assumes disks will be a reasonable size (100-500MB) or
+	// else this bitmap will be too large to fit in kernel pool and mounting
+	// the volume will fail. could probably be made more flexible.
+
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
 
@@ -281,7 +289,7 @@ fn AFSBlockZeroChain { blkno mount -- }
 
 		AFSBLOCKSIZE // length
 		blkno@ AFSBLOCKSHIFT << // offset
-		ZeroBlock // buf
+		ZeroBlock AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & // buf
 		KERNELMODE // lastmode
 		mount@ // mount
 		FSVolumeWrite ok! drop
@@ -426,6 +434,9 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 
 		blkno@ afsdata@ AFSData_FreeBlockHint + !
 
+		// don't need to keep the bitmap locked since we don't need to use it
+		// now that we already found a big run.
+
 		mount@ AFSBlockBitmapUnlock
 
 		1 run!
@@ -511,7 +522,7 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 					AFSBlockDeallocateChain
 				end
 
-				STATUS_IO_END_OF_DISK ok!
+				STATUS_END_OF_DISK ok!
 
 				return
 			end
@@ -529,7 +540,7 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 
 			AFSBLOCKSIZE // length
 			blkno@ AFSBLOCKSHIFT << // offset
-			ZeroBlock // buf
+			ZeroBlock AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & // buf
 			KERNELMODE // lastmode
 			mount@ // mount
 			FSVolumeWrite ok! drop

@@ -1,3 +1,3 @@
-CMDNAME = ps
+CMDNAME = mv
 
 include ../Command.mk

@@ -11,6 +11,7 @@ all:
 	make -C mount
 	make -C umount
 	make -C dhrystone
+	make -C mv
 
 cleanup:
 	make -C Cmd cleanup
@@ -25,3 +26,4 @@ cleanup:
 	make -C mount cleanup
 	make -C umount cleanup
 	make -C dhrystone cleanup
+	make -C mv cleanup

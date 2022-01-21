@@ -12,3 +12,4 @@ rm.exe rm.exe 493
 mount.exe mount.exe 493
 umount.exe umount.exe 493
 dhrystone.exe dhrystone.exe 493
+mv.exe mv.exe 493

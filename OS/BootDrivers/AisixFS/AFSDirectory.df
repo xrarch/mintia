@@ -25,7 +25,7 @@
 
 #include "AisixFS.h"
 
-fn AFSDirectoryAllocateEntry { checkname fcb -- dirent pfdbe ok }
+fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 	// FCB is locked by caller
 
 	if (DEBUGCHECKS)
@@ -59,6 +59,8 @@ fn AFSDirectoryAllocateEntry { checkname fcb -- dirent pfdbe ok }
 	auto curpageno
 	-1 curpageno!
 
+	auto found
+
 	0 pfdbe!
 
 	while (byteoff@ bytesize@ <)
@@ -88,14 +90,6 @@ fn AFSDirectoryAllocateEntry { checkname fcb -- dirent pfdbe ok }
 			// found a free dirent
 			0 ok!
 			return
-		end elseif (checkname@)
-			if (dirent@ AFSDirEnt_name + checkname@ strcmp)
-				pfdbe@ MmEvictablePageDereference drop
-
-				STATUS_ALREADY_EXISTS ok!
-
-				return
-			end
 		end
 
 		AFSDirEnt_SIZEOF dirent +=
@@ -517,6 +511,29 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		return
 	end
 
+	auto destpfdbe
+	auto destdirent
+
+	// check to make sure the desired name isn't present in the destination
+	// directory. the upper-level IO system code takes care of the case that
+	// the names are identical (in which case there's nothing to do).
+
+	destname@ // destname
+	destfcb@ // dirfcb
+	AFSDirectoryFindEntry ok! destpfdbe! destdirent!
+
+	if (ok@ STATUS_NOT_FOUND ~=)
+		srcpfdbe@ MmEvictablePageDereference drop
+
+		if (ok@ ~~)
+			destpfdbe@ MmEvictablePageDereference drop
+
+			STATUS_ALREADY_EXISTS ok!
+		end
+
+		return
+	end
+
 	auto filefcb
 	srcdirent@ AFSDirEnt_INum + @  // inum
 	mount@ // mount
@@ -567,12 +584,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 			1 renamelocked!
 		end
 
-		auto destpfdbe
-		auto destdirent
-
-		destname@ // checkname
-		destfcb@ // fcb
-		AFSDirectoryAllocateEntry ok! destpfdbe! destdirent!
+		destfcb@ AFSDirectoryAllocateEntry ok! destpfdbe! destdirent!
 
 		if (ok@)
 			if (renamelocked@)

@@ -14,5 +14,6 @@
 #include "<ll>/OSDLL/OSMemory.h"
 #include "<ll>/OSDLL/OSMount.h"
 #include "<ll>/OSDLL/OSFastMutex.h"
+#include "<ll>/OSDLL/OSTime.h"
 
 #include "<ll>/OSDLL/OSContext.h"

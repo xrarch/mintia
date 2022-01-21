@@ -59,6 +59,9 @@ struct IOFileControlBlock
 	KeTime_SIZEOF ChangeTime
 endstruct
 
+const IOPOKE_WRITE 1
+const IOPOKE_READ  2
+
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }
 extern IOFileControlBlockSetContext { context fcb -- }

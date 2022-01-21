@@ -85,6 +85,9 @@ const AFSSUPERBLOCKVERSION 0x6
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
+extern AFSPoke { poketype fcb -- }
+extern AFSINodeUpdateModificationTime { fcb -- }
+
 extern AFSINodeAllocate { mount -- inum inode pfdbe ok }
 extern AFSINodeFree { inum mount -- }
 
@@ -118,7 +121,7 @@ extern AFSDeleteObject { object -- ok }
 extern AFSReadFile { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
 extern AFSWriteFile { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 
-extern AFSDirectoryAllocateEntry { checkname fcb -- dirent pfdbe ok }
+extern AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 extern AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }

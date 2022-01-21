@@ -1,0 +1,119 @@
+//
+// Implements standard time helper functions.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSModule.h"
+#include "<inc>/OSAlloc.h"
+#include "<inc>/OSWait.h"
+#include "<inc>/OSFastMutex.h"
+#include "<inc>/OSTime.h"
+
+#include "OSDLL.h"
+
+table DLLMonthNames
+	"Jan" "Feb"
+	"Mar" "Apr"
+	"May" "Jun"
+	"Jul" "Aug"
+	"Sep" "Oct"
+	"Nov" "Dec"
+endtable
+
+const SECSPERMIN      60
+const SECSPERHOUR     (SECSPERMIN 60 *)
+const SECSPERDAY      (SECSPERHOUR 24 *)
+const SECSPERYEAR     (SECSPERDAY 365 *)
+const SECSPERLEAPYEAR (SECSPERYEAR SECSPERDAY +)
+
+table DLLMonthDays
+	31 28 31 30 31 30 31 31 30 31 30 31
+endtable
+
+fn OSTimeUTCGet { ostime ms sec -- }
+	ms@ ostime@ OSTime_Milliseconds + !
+
+	sec@ SECSPERDAY / 4 + 7 % ostime@ OSTime_DayOfWeek + !
+
+	auto year
+	1970 year!
+
+	while (sec@ SECSPERYEAR >=)
+		// very inefficient. O(n) where n is the number of years since 1970.
+		// i don't care.
+
+		if (year@ 3 & ~~)
+			if (sec@ SECSPERLEAPYEAR <)
+				break
+			end else
+				SECSPERLEAPYEAR sec -=
+			end
+		end else
+			SECSPERYEAR sec -=
+		end
+
+		1 year +=
+	end	
+
+	year@ ostime@ OSTime_Year + !
+
+	auto mday
+	sec@ SECSPERDAY / mday!
+
+	mday@ ostime@ OSTime_DayOfYear + !
+
+	auto i
+	0 i!
+
+	while (1)
+		auto cmp
+		[i@]DLLMonthDays@ cmp!
+
+		if (i@ 1 ==)
+			if (year@ 3 & ~~)
+				29 cmp!
+			end
+		end
+
+		if (mday@ cmp@ <)
+			break
+		end
+
+		cmp@ mday -=
+
+		1 i +=
+	end
+
+	i@ ostime@ OSTime_Month + !
+
+	mday@ 1 + ostime@ OSTime_DayOfMonth + !
+	SECSPERDAY sec %=
+	sec@ SECSPERHOUR / ostime@ OSTime_Hour + !
+	SECSPERHOUR sec %=
+	sec@ SECSPERMIN / ostime@ OSTime_Minute + !
+	sec@ SECSPERMIN % ostime@ OSTime_Second + !
+
+	0 ostime@ OSTime_IsDST + !
+end
+
+fn OSTimePrint { ostime showyear -- }
+	ostime@ OSTime_DayOfMonth + @
+	[ostime@ OSTime_Month + @]DLLMonthNames@
+	"%s %-2d " Printf
+
+	if (showyear@)
+		ostime@ OSTime_Year + @ " %-d " Printf
+	end else
+		ostime@ OSTime_Minute + @
+		ostime@ OSTime_Hour + @
+		"%02d:%02d " Printf
+	end
+end

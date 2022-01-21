@@ -53,6 +53,20 @@ fn IOFileTruncate { newsize growing handle -- oldsize ok }
 	fileobject@ IOFile_FileControlBlock + @ // fcb
 	IOFileControlBlockTruncate ok! oldsize!
 
+	if (ok@ ~~)
+		auto pokefunc
+		fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Poke + @ pokefunc!
+
+		if (pokefunc@)
+			// notify driver that the FCB was truncated so it can update
+			// timestamps etc.
+
+			IOPOKE_WRITE // poketype
+			fileobject@ IOFile_FileControlBlock + @ // fcb
+			pokefunc@ IODispatchPoke
+		end
+	end
+
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
@@ -311,6 +325,18 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 	HALCPUInterruptDisable rs!
 	bytesread@ fileobject@ IOFile_Offset + +=
 	rs@ HALCPUInterruptRestore
+
+	auto pokefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Poke + @ pokefunc!
+
+	if (pokefunc@)
+		// notify driver that the FCB was read so it can update timestamps
+		// etc.
+
+		IOPOKE_READ // poketype
+		fcb@ // fcb
+		pokefunc@ IODispatchPoke
+	end
 end
 
 fn IOFileWrite { flags length buffer filehandle -- byteswritten ok }
@@ -521,6 +547,18 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 	HALCPUInterruptDisable rs!
 	byteswritten@ fileobject@ IOFile_Offset + +=
 	rs@ HALCPUInterruptRestore
+
+	auto pokefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Poke + @ pokefunc!
+
+	if (pokefunc@)
+		// notify driver that the FCB was modified so it can update timestamps
+		// etc.
+
+		IOPOKE_WRITE // poketype
+		fcb@ // fcb
+		pokefunc@ IODispatchPoke
+	end
 end
 
 fn IODirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
@@ -679,6 +717,24 @@ fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok
 	end
 
 	srcfcb@ IOFileControlBlockUnlock
+
+	if (ok@ ~~)
+		auto pokefunc
+		dispatchtable@ IODispatchTable_Poke + @ pokefunc!
+
+		if (pokefunc@)
+			// notify driver that the FCBs were messed with so it can update
+			// timestamps etc.
+
+			IOPOKE_WRITE // poketype
+			srcfcb@ // fcb
+			pokefunc@ IODispatchPoke
+
+			IOPOKE_WRITE // poketype
+			destfcb@ // fcb
+			pokefunc@ IODispatchPoke
+		end
+	end
 end
 
 fn IODirectoryUnlink { name filehandle -- ok }
@@ -766,6 +822,20 @@ fn IODirectoryUnlinkObject { name fileobject -- ok }
 	unlinkfunc@ IODispatchUnlinkFunction ok!
 
 	fcb@ IOFileControlBlockUnlock
+
+	if (ok@ ~~)
+		auto pokefunc
+		dispatchtable@ IODispatchTable_Poke + @ pokefunc!
+
+		if (pokefunc@)
+			// notify driver that the FCBs were messed with so it can update
+			// timestamps etc.
+
+			IOPOKE_WRITE // poketype
+			fcb@ // fcb
+			pokefunc@ IODispatchPoke
+		end
+	end
 end
 
 fn IODirectoryRead { dirent filehandle -- ok }
@@ -852,4 +922,18 @@ fn IODirectoryReadObject { dirent fileobject -- ok }
 	readfunc@ IODispatchReadDirectoryFunction ok! fileobject@ IOFile_Offset + !
 
 	fcb@ IOFileControlBlockUnlock
+
+	if (ok@ ~~)
+		auto pokefunc
+		dispatchtable@ IODispatchTable_Poke + @ pokefunc!
+
+		if (pokefunc@)
+			// notify driver that the FCBs were messed with so it can update
+			// timestamps etc.
+
+			IOPOKE_READ // poketype
+			fcb@ // fcb
+			pokefunc@ IODispatchPoke
+		end
+	end
 end

@@ -25,7 +25,7 @@
 
 #include "AisixFS.h"
 
-fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
+fn AFSDirectoryAllocateEntry { checkname fcb -- dirent pfdbe ok }
 	// FCB is locked by caller
 
 	if (DEBUGCHECKS)
@@ -88,6 +88,14 @@ fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 			// found a free dirent
 			0 ok!
 			return
+		end elseif (checkname@)
+			if (dirent@ AFSDirEnt_name + checkname@ strcmp)
+				pfdbe@ MmEvictablePageDereference drop
+
+				STATUS_ALREADY_EXISTS ok!
+
+				return
+			end
 		end
 
 		AFSDirEnt_SIZEOF dirent +=
@@ -340,6 +348,62 @@ fn AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 	STATUS_NOT_FOUND ok!
 end
 
+fn AFSRenameLock { mount -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMountGetContext AFSData_RenameMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn AFSRenameUnlock { mount -- }
+	0 // abandon
+	mount@ IOMountGetContext AFSData_RenameMutex + // mutex
+	KeMutexRelease drop
+end
+
+fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
+	auto iparent
+
+	auto fcbdata
+	searchfcb@ IOFileControlBlockGetContext fcbdata!
+
+	0 iparent!
+
+	searchfcb@ IOFileControlBlockReference drop
+
+	0 ok!
+
+	while (searchfcb@ testfcb@ ~=)
+		if (fcbdata@ AFSFCBData_IParent + @ iparent@ ==)
+			// found the root directory. no cycles.
+			searchfcb@ IOFileControlBlockDereference drop
+
+			return
+		end
+
+		fcbdata@ AFSFCBData_IParent + @ iparent!
+
+		auto nextfcb
+		iparent@  // inum
+		mount@ // mount
+		AFSFCBRead ok! nextfcb!
+
+		searchfcb@ IOFileControlBlockDereference drop
+
+		if (ok@)
+			return
+		end
+
+		nextfcb@ IOFileControlBlockGetContext fcbdata!
+		nextfcb@ searchfcb!
+	end
+
+	searchfcb@ IOFileControlBlockDereference drop
+
+	STATUS_FORBIDDEN_OPERATION ok!
+end
+
 fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	name@ AFSVerifyName ok!
 
@@ -422,5 +486,141 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 end
 
 fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok }
-	STATUS_NOT_IMPLEMENTED ok!
+	auto mount
+	srcfcb@ IOFileControlBlockGetMount mount!
+
+	if (destfcb@ IOFileControlBlockGetMount mount@ ~=)
+		STATUS_CROSS_VOLUME ok!
+		return
+	end
+
+	srcname@ AFSVerifyName ok!
+
+	if (ok@)
+		return
+	end
+
+	destname@ AFSVerifyName ok!
+
+	if (ok@)
+		return
+	end
+
+	auto srcpfdbe
+	auto srcdirent
+
+	srcname@ // name
+	srcfcb@ // dirfcb
+	AFSDirectoryFindEntry ok! srcpfdbe! srcdirent!
+
+	if (ok@)
+		return
+	end
+
+	auto filefcb
+	srcdirent@ AFSDirEnt_INum + @  // inum
+	mount@ // mount
+	AFSFCBRead ok! filefcb!
+
+	if (ok@)
+		srcpfdbe@ MmEvictablePageDereference drop
+
+		return
+	end
+
+	auto renamelocked
+	0 renamelocked!
+
+	if (srcfcb@ destfcb@ ~=)
+		auto filetype
+		filefcb@ IOFileControlBlockGetType filetype!
+
+		if (filetype@ OSFILETYPE_DIRECTORY ==)
+			// make sure it won't create a cycle by walking from the
+			// destination directory up to the root directory, and seeing if
+			// the source appears along the way. if it does, this operation
+			// would create a cycle.
+
+			mount@ AFSRenameLock ok!
+
+			if (ok@)
+				srcpfdbe@ MmEvictablePageDereference drop
+				filefcb@ IOFileControlBlockDereference drop
+
+				return
+			end
+
+			filefcb@ // testfcb
+			destfcb@ // searchfcb
+			mount@ // mount
+			AFSDirectoryCheckForCycle ok!
+
+			if (ok@)
+				mount@ AFSRenameUnlock
+
+				srcpfdbe@ MmEvictablePageDereference drop
+				filefcb@ IOFileControlBlockDereference drop
+
+				return
+			end
+
+			1 renamelocked!
+		end
+
+		auto destpfdbe
+		auto destdirent
+
+		destname@ // checkname
+		destfcb@ // fcb
+		AFSDirectoryAllocateEntry ok! destpfdbe! destdirent!
+
+		if (ok@)
+			if (renamelocked@)
+				mount@ AFSRenameUnlock
+			end
+
+			srcpfdbe@ MmEvictablePageDereference drop
+			filefcb@ IOFileControlBlockDereference drop
+
+			return
+		end
+
+		// move the directory entry over by invalidating the old one and updating
+		// the new one.
+
+		srcdirent@ AFSDirEnt_INum + @ destdirent@ AFSDirEnt_INum + !
+		0 srcdirent@ AFSDirEnt_INum + !
+	end else
+		srcdirent@ destdirent!
+	end
+
+	destdirent@ AFSDirEnt_name + // dest
+	destname@ // src
+	strcpy
+
+	OSPAGESIZE // extent
+	srcpfdbe@ // pfdbe
+	IOCachePageModifyFunction drop
+
+	if (srcfcb@ destfcb@ ~=)
+		OSPAGESIZE // extent
+		destpfdbe@ // pfdbe
+		IOCachePageModifyFunction drop
+
+		destpfdbe@ MmEvictablePageDereference drop
+	end
+
+	if (renamelocked@)
+		auto fcbdata
+		filefcb@ IOFileControlBlockGetContext fcbdata!
+
+		destfcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ fcbdata@ AFSFCBData_IParent + !
+
+		filefcb@ AFSINodeUpdate
+
+		mount@ AFSRenameUnlock
+	end
+
+	srcpfdbe@ MmEvictablePageDereference drop
+	filefcb@ IOFileControlBlockDereference drop
 end

@@ -38,6 +38,7 @@ struct AFSData
 
 	KeMutex_SIZEOF FreeBlockBitmapMutex
 	KeMutex_SIZEOF INodeAllocationMutex
+	KeMutex_SIZEOF RenameMutex
 
 	4 WritableFiles
 
@@ -117,7 +118,7 @@ extern AFSDeleteObject { object -- ok }
 extern AFSReadFile { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
 extern AFSWriteFile { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 
-extern AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
+extern AFSDirectoryAllocateEntry { checkname fcb -- dirent pfdbe ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 extern AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }

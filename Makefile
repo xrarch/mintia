@@ -1,5 +1,5 @@
 DISTIMAGE  := ./build/mintia-dist.img
-DISTIMGSZ  := 16384
+DISTIMGSZ  := 204800
 FST        := ../sdk/fstool.sh
 OBJTOOL    := ../sdk/link.sh
 SYSTOOL    := ../sdk/gensyscalls.sh

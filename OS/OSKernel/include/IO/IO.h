@@ -111,4 +111,6 @@ extern IOFileGetFileControlBlock { fileobject -- fcb }
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }
 
+extern IOFlushModifiedPages { -- }
+
 externptr IOBootDevice

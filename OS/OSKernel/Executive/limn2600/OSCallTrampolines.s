@@ -45,6 +45,7 @@
 .extern OSMountCountQuery
 .extern OSMountUpdateFlags
 .extern OSMountGetFilesystemName
+.extern OSFlushModifiedPages
 .extern OSSectionCreate
 .extern OSSectionMapView
 .extern OSUnmapView
@@ -78,7 +79,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 73
+	.dl 74
 
 OSCallTable:
 .global OSCallTable
@@ -126,36 +127,37 @@ OSCallTable:
 	.dl OSTOSMountCountQuery                             ;41
 	.dl OSTOSMountUpdateFlags                            ;42
 	.dl OSTOSMountGetFilesystemName                      ;43
-	.dl OSTOSSectionCreate                               ;44
-	.dl OSTOSSectionMapView                              ;45
-	.dl OSTOSUnmapView                                   ;46
-	.dl OSTOSRemapView                                   ;47
-	.dl OSTOSSetSwappiness                               ;48
-	.dl OSTOSMemoryQuery                                 ;49
-	.dl OSTOSProcessCreate                               ;50
-	.dl OSTOSProcessSignal                               ;51
-	.dl OSTOSProcessOpenByPID                            ;52
-	.dl OSTOSProcessQuery                                ;53
-	.dl OSTOSProcessQueryByPID                           ;54
-	.dl OSTOSProcessReadStatus                           ;55
-	.dl OSTOSProcessMaskSignal                           ;56
-	.dl OSTOSProcessUnmaskSignal                         ;57
-	.dl OSTOSProcessSetConsoleGroup                      ;58
-	.dl OSTOSProcessClearConsoleGroup                    ;59
-	.dl OSTOSProcessSignalActivation                     ;60
-	.dl OSTOSProcessWaitForActivation                    ;61
-	.dl OSTOSProcessExit                                 ;62
-	.dl OSTOSProcessCountQuery                           ;63
-	.dl OSTOSProcessQueryAll                             ;64
-	.dl OSTOSThreadException                             ;65
-	.dl OSTOSThreadSetFilePermissions                    ;66
-	.dl OSTOSThreadSleep                                 ;67
-	.dl OSTOSThreadCreate                                ;68
-	.dl OSTOSThreadTerminate                             ;69
-	.dl OSTOSThreadResume                                ;70
-	.dl OSTOSThreadReadStatus                            ;71
-	.dl OSTOSThreadQuery                                 ;72
-	.dl OSTOSSetSystemConsole                            ;73
+	.dl OSTOSFlushModifiedPages                          ;44
+	.dl OSTOSSectionCreate                               ;45
+	.dl OSTOSSectionMapView                              ;46
+	.dl OSTOSUnmapView                                   ;47
+	.dl OSTOSRemapView                                   ;48
+	.dl OSTOSSetSwappiness                               ;49
+	.dl OSTOSMemoryQuery                                 ;50
+	.dl OSTOSProcessCreate                               ;51
+	.dl OSTOSProcessSignal                               ;52
+	.dl OSTOSProcessOpenByPID                            ;53
+	.dl OSTOSProcessQuery                                ;54
+	.dl OSTOSProcessQueryByPID                           ;55
+	.dl OSTOSProcessReadStatus                           ;56
+	.dl OSTOSProcessMaskSignal                           ;57
+	.dl OSTOSProcessUnmaskSignal                         ;58
+	.dl OSTOSProcessSetConsoleGroup                      ;59
+	.dl OSTOSProcessClearConsoleGroup                    ;60
+	.dl OSTOSProcessSignalActivation                     ;61
+	.dl OSTOSProcessWaitForActivation                    ;62
+	.dl OSTOSProcessExit                                 ;63
+	.dl OSTOSProcessCountQuery                           ;64
+	.dl OSTOSProcessQueryAll                             ;65
+	.dl OSTOSThreadException                             ;66
+	.dl OSTOSThreadSetFilePermissions                    ;67
+	.dl OSTOSThreadSleep                                 ;68
+	.dl OSTOSThreadCreate                                ;69
+	.dl OSTOSThreadTerminate                             ;70
+	.dl OSTOSThreadResume                                ;71
+	.dl OSTOSThreadReadStatus                            ;72
+	.dl OSTOSThreadQuery                                 ;73
+	.dl OSTOSSetSystemConsole                            ;74
 
 
 OSTOSConsolePutCharacter:
@@ -825,6 +827,19 @@ OSTOSMountGetFilesystemName:
 	mov  a1, long [s18 + 8] ;t2
 
 	jal  OSMountGetFilesystemName
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSFlushModifiedPages:
+.global OSTOSFlushModifiedPages
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSFlushModifiedPages
 
 	mov  long [s18 + 4], a0 ;t1
 

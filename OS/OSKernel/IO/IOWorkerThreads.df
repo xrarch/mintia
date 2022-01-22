@@ -115,7 +115,36 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		auto modcount
 		IOCachePagesModifiedCount@ modcount!
 
-		while (modcount@)
+		while (1)
+			if (modcount@ ~~)
+				if (waitok@ 0 ==)
+					// low memory event woke us. sleep for 100ms or until the
+					// maximum threshold of modified pages is crossed, to make
+					// sure we don't infinite loop here since there aren't any
+					// more modified pages.
+
+					KERNELMODE // waitmode
+					0 // alertable
+					100 // timeout
+					IOModifiedPageEvent // object
+					KeThreadWaitForObject ok!
+
+					if (ok@ STATUS_WAIT_TIMEOUT ~=)
+						if (DEBUGCHECKS)
+							if (ok@ 0 ~=)
+								ok@ "IOModifiedPageWorker: failed to wait (%i)\n" KeCrash
+							end
+						end
+
+						IOCachePagesModifiedCount@ modcount!
+
+						continue
+					end
+				end
+
+				break
+			end
+
 			auto thresh
 
 			if (modcount@ 1 ==)
@@ -147,9 +176,6 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 				0 ok!
 			end
-
-			auto none
-			0 none!
 
 			auto ipl
 			IPLDPC KeIPLRaise ipl!
@@ -207,37 +233,6 @@ fn IOModifiedPageWorker { context1 context2 -- }
 				end
 			end else
 				ipl@ KeIPLLower
-
-				1 none!
-			end
-
-			if (none@)
-				if (waitok@ 0 ==)
-					// low memory event woke us. sleep for 100ms or until the
-					// maximum threshold of modified pages is crossed, to make
-					// sure we don't infinite loop here since there aren't any
-					// more modified pages.
-
-					KERNELMODE // waitmode
-					0 // alertable
-					100 // timeout
-					IOModifiedPageEvent // object
-					KeThreadWaitForObject ok!
-
-					if (ok@ STATUS_WAIT_TIMEOUT ~=)
-						if (DEBUGCHECKS)
-							if (ok@ 0 ~=)
-								ok@ "IOModifiedPageWorker: failed to wait (%i)\n" KeCrash
-							end
-						end
-
-						IOCachePagesModifiedCount@ modcount!
-
-						continue
-					end
-				end
-
-				break
 			end
 		end
 	end

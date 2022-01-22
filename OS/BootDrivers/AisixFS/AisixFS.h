@@ -86,6 +86,8 @@ extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
 extern AFSPoke { poketype fcb -- }
+extern AFSSetSecurity { uid gid permissions object -- ok }
+
 extern AFSINodeUpdateModificationTime { fcb -- }
 
 extern AFSINodeAllocate { mount -- inum inode pfdbe ok }

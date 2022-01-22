@@ -40,6 +40,8 @@ extern OSHandleDuplicate { handle access srcprocesshandle destprocesshandle -- n
 extern OSDirectoryCountQuery { directoryhandle -- count ok }
 extern OSDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
 
+extern OSSetSecurity { uid gid permissions handle -- ok }
+
 // IO
 extern OSFileQuery { filehandle query -- ok }
 extern OSFileTruncate { newsize growing handle -- oldsize ok }

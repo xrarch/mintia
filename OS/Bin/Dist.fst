@@ -13,3 +13,6 @@ mount.exe mount.exe 493
 umount.exe umount.exe 493
 dhrystone.exe dhrystone.exe 493
 mv.exe mv.exe 493
+chown.exe chown.exe 493
+chmod.exe chmod.exe 493
+chgrp.exe chgrp.exe 493

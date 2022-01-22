@@ -577,3 +577,101 @@ end
 fn ObObjectSetGID { gid object -- }
 	gid@ object@ ObHeader_SIZEOF - ObHeader_GID + !
 end
+
+fn ObSetSecurityObject { uid gid permissions object -- ok }
+	auto obh
+	object@ ObHeader_SIZEOF - obh!
+
+	auto typeobj
+	obh@ ObHeader_TypeObject + @ typeobj!
+
+	if (typeobj@ ObType_SetSecurityFunction + @)
+		uid@ // uid
+		gid@ // gid
+		permissions@ // permissions
+		object@ // object
+		typeobj@ ObType_SetSecurityFunction + @ ObTypeSetSecurityFunction ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	if (uid@ -1 ~=)
+		uid@ obh@ ObHeader_UID + !
+	end
+
+	if (gid@ -1 ~=)
+		gid@ obh@ ObHeader_GID + !
+	end
+
+	if (permissions@ -1 ~=)
+		permissions@ obh@ ObHeader_Permissions + !
+	end
+
+	0 ok!
+end
+
+fn ObSetSecurity { uid gid permissions handle -- ok }
+	if (permissions@ -1 ~=)
+		ACCESS_ALL_ALL permissions &=
+	end
+
+	auto notadmin
+	SeAmIAdmin notadmin!
+
+	if (notadmin@)
+		// not an admin
+
+		auto process
+		KeProcessCurrent process!
+
+		if (uid@ -1 ~=)
+			// changing UID
+			if (process@ PsProcess_UID + @ uid@ ~=)
+				// not setting to the same UID, forbidden
+				STATUS_FORBIDDEN_OPERATION ok!
+				return
+			end
+		end
+
+		if (gid@ -1 ~=)
+			// changing GID
+			if (process@ PsProcess_GID + @ gid@ ~=)
+				// not setting to the same GID, forbidden
+				STATUS_FORBIDDEN_OPERATION ok!
+				return
+			end
+		end
+	end
+
+	auto object
+
+	0 // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! object! drop
+
+	if (ok@)
+		return
+	end
+
+	if (notadmin@)
+		if (object@ ObHeader_SIZEOF - ObHeader_UID + @ process@ PsProcess_UID + @ ~=)
+			// not the owner of the object, forbidden
+			
+			object@ ObObjectDereferenceByPointer drop
+
+			STATUS_PERMISSION_DENIED ok!
+
+			return
+		end
+	end
+
+	uid@ // uid
+	gid@ // gid
+	permissions@ // permissions
+	object@ // object
+	ObSetSecurityObject ok!
+
+	object@ ObObjectDereferenceByPointer drop
+end

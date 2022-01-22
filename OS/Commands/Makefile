@@ -12,6 +12,9 @@ all:
 	make -C umount
 	make -C dhrystone
 	make -C mv
+	make -C chown
+	make -C chmod
+	make -C chgrp
 
 cleanup:
 	make -C Cmd cleanup
@@ -27,3 +30,6 @@ cleanup:
 	make -C umount cleanup
 	make -C dhrystone cleanup
 	make -C mv cleanup
+	make -C chown cleanup
+	make -C chmod cleanup
+	make -C chgrp cleanup

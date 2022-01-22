@@ -7,7 +7,8 @@ fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
 fnptr IODispatchDeleteFunction { fcb -- }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
-fnptr IODispatchPoke { poketype fcb -- }
+fnptr IODispatchPokeFunction { poketype fcb -- }
+fnptr IODispatchSetSecurityFunction { uid gid permissions object -- ok }
 fnptr IODispatchRenameFunction { srcname srcfcb destname destfcb -- ok }
 fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
@@ -29,7 +30,7 @@ struct IODispatchTable
 	4 Flush
 	4 DeleteObject
 	4 Poke
-	4 Reserved4
+	4 SetSecurity
 	4 Rename
 	4 ReadBlock
 	4 WriteBlock

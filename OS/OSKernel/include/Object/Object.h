@@ -35,6 +35,7 @@ struct ObType
 	4 CloseFunction
 	4 DeleteFunction
 	4 ParseFunction
+	4 SetSecurityFunction
 
 	4 WaitOffset
 endstruct
@@ -48,6 +49,8 @@ struct ObTypeInitializer
 	4 CloseFunction
 	4 DeleteFunction
 	4 ParseFunction
+	4 SetSecurityFunction
+
 	4 WaitOffset
 endstruct
 
@@ -66,6 +69,7 @@ fnptr ObTypeOpenFunction { access object process -- ok }
 fnptr ObTypeCloseFunction { access object process -- }
 fnptr ObTypeDeleteFunction { object -- }
 fnptr ObTypeParseFunction { flags path initialobject process -- reparsepath object ok }
+fnptr ObTypeSetSecurityFunction { uid gid permissions object -- ok }
 
 const OBFLAGS_PERMANENT 1
 
@@ -114,3 +118,5 @@ extern ObHandleDuplicate { handle access srcprocesshandle destprocesshandle -- n
 
 extern ObObjectSetUID { uid object -- }
 extern ObObjectSetGID { gid object -- }
+
+extern ObSetSecurity { uid gid permissions handle -- ok }

@@ -22,6 +22,7 @@ extern IOFileCreateObject { openedpath flags permissions fcb -- fileobject ok }
 extern IOFileOpenObject { access object process -- ok }
 extern IOFileCloseObject { access object process -- }
 extern IOFileDeleteObject { object -- }
+extern IOFileSetSecurityObject { uid gid permissions object -- ok }
 
 struct IOFile
 	4 FileControlBlock

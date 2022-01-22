@@ -17,3 +17,5 @@ chown.exe chown.exe 493
 chmod.exe chmod.exe 493
 chgrp.exe chgrp.exe 493
 sync.exe sync.exe 493
+echo.exe echo.exe 493
+pwd.exe pwd.exe 493

@@ -16,6 +16,8 @@ all:
 	make -C chmod
 	make -C chgrp
 	make -C sync
+	make -C echo
+	make -C pwd
 
 cleanup:
 	make -C Cmd cleanup
@@ -35,3 +37,5 @@ cleanup:
 	make -C chmod cleanup
 	make -C chgrp cleanup
 	make -C sync cleanup
+	make -C echo cleanup
+	make -C pwd cleanup

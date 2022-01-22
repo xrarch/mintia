@@ -60,5 +60,6 @@ const STATUS_ILLEGAL_NAME          -58
 const STATUS_ALREADY_EXISTS        -59
 const STATUS_FAULT_WHILE_STARTING  -60
 const STATUS_CROSS_VOLUME          -61
+const STATUS_NOT_A_SIGNAL          -62
 
 extern OSStatusGetName { status -- name }

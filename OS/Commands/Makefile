@@ -18,6 +18,9 @@ all:
 	make -C sync
 	make -C echo
 	make -C pwd
+	make -C ver
+	make -C kill
+	make -C killall
 
 cleanup:
 	make -C Cmd cleanup
@@ -39,3 +42,6 @@ cleanup:
 	make -C sync cleanup
 	make -C echo cleanup
 	make -C pwd cleanup
+	make -C ver cleanup
+	make -C kill cleanup
+	make -C killall cleanup

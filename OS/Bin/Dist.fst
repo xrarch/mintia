@@ -19,3 +19,6 @@ chgrp.exe chgrp.exe 493
 sync.exe sync.exe 493
 echo.exe echo.exe 493
 pwd.exe pwd.exe 493
+ver.exe ver.exe 493
+kill.exe kill.exe 493
+killall.exe killall.exe 493

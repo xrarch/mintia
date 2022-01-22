@@ -8,6 +8,7 @@
 .extern OSGetBootFlags
 .extern OSContinue
 .extern OSQueryTime
+.extern OSVersion
 .extern OSEventCreate
 .extern OSEventReset
 .extern OSEventSignal
@@ -76,10 +77,11 @@
 .extern OSThreadReadStatus
 .extern OSThreadQuery
 .extern OSSetSystemConsole
+.extern OSAmIAdmin
 
 OSCallCount:
 .global OSCallCount
-	.dl 74
+	.dl 76
 
 OSCallTable:
 .global OSCallTable
@@ -90,74 +92,76 @@ OSCallTable:
 	.dl OSTOSGetBootFlags                                ;4
 	.dl OSTOSContinue                                    ;5
 	.dl OSTOSQueryTime                                   ;6
-	.dl OSTOSEventCreate                                 ;7
-	.dl OSTOSEventReset                                  ;8
-	.dl OSTOSEventSignal                                 ;9
-	.dl OSTOSEventPulse                                  ;10
-	.dl OSTOSEventReadState                              ;11
-	.dl OSTOSSemaphoreCreate                             ;12
-	.dl OSTOSSemaphoreRelease                            ;13
-	.dl OSTOSSemaphoreReadState                          ;14
-	.dl OSTOSMutexCreate                                 ;15
-	.dl OSTOSMutexRelease                                ;16
-	.dl OSTOSMutexReadState                              ;17
-	.dl OSTOSObjectOpen                                  ;18
-	.dl OSTOSQuery                                       ;19
-	.dl OSTOSClose                                       ;20
-	.dl OSTOSWaitForMultipleObjects                      ;21
-	.dl OSTOSWaitForObject                               ;22
-	.dl OSTOSHandleDuplicate                             ;23
-	.dl OSTOSDirectoryCountQuery                         ;24
-	.dl OSTOSDirectoryQueryAll                           ;25
-	.dl OSTOSSetSecurity                                 ;26
-	.dl OSTOSFileQuery                                   ;27
-	.dl OSTOSFileTruncate                                ;28
-	.dl OSTOSFileSeek                                    ;29
-	.dl OSTOSFileRead                                    ;30
-	.dl OSTOSFileWrite                                   ;31
-	.dl OSTOSDirectoryRename                             ;32
-	.dl OSTOSDirectoryUnlink                             ;33
-	.dl OSTOSDirectoryRead                               ;34
-	.dl OSTOSSwapFileCreate                              ;35
-	.dl OSTOSIOControl                                   ;36
-	.dl OSTOSGetBootDevicePath                           ;37
-	.dl OSTOSFilesystemMount                             ;38
-	.dl OSTOSFilesystemUnmount                           ;39
-	.dl OSTOSMountQueryAll                               ;40
-	.dl OSTOSMountCountQuery                             ;41
-	.dl OSTOSMountUpdateFlags                            ;42
-	.dl OSTOSMountGetFilesystemName                      ;43
-	.dl OSTOSFlushModifiedPages                          ;44
-	.dl OSTOSSectionCreate                               ;45
-	.dl OSTOSSectionMapView                              ;46
-	.dl OSTOSUnmapView                                   ;47
-	.dl OSTOSRemapView                                   ;48
-	.dl OSTOSSetSwappiness                               ;49
-	.dl OSTOSMemoryQuery                                 ;50
-	.dl OSTOSProcessCreate                               ;51
-	.dl OSTOSProcessSignal                               ;52
-	.dl OSTOSProcessOpenByPID                            ;53
-	.dl OSTOSProcessQuery                                ;54
-	.dl OSTOSProcessQueryByPID                           ;55
-	.dl OSTOSProcessReadStatus                           ;56
-	.dl OSTOSProcessMaskSignal                           ;57
-	.dl OSTOSProcessUnmaskSignal                         ;58
-	.dl OSTOSProcessSetConsoleGroup                      ;59
-	.dl OSTOSProcessClearConsoleGroup                    ;60
-	.dl OSTOSProcessSignalActivation                     ;61
-	.dl OSTOSProcessWaitForActivation                    ;62
-	.dl OSTOSProcessExit                                 ;63
-	.dl OSTOSProcessCountQuery                           ;64
-	.dl OSTOSProcessQueryAll                             ;65
-	.dl OSTOSThreadException                             ;66
-	.dl OSTOSThreadSetFilePermissions                    ;67
-	.dl OSTOSThreadSleep                                 ;68
-	.dl OSTOSThreadCreate                                ;69
-	.dl OSTOSThreadTerminate                             ;70
-	.dl OSTOSThreadResume                                ;71
-	.dl OSTOSThreadReadStatus                            ;72
-	.dl OSTOSThreadQuery                                 ;73
-	.dl OSTOSSetSystemConsole                            ;74
+	.dl OSTOSVersion                                     ;7
+	.dl OSTOSEventCreate                                 ;8
+	.dl OSTOSEventReset                                  ;9
+	.dl OSTOSEventSignal                                 ;10
+	.dl OSTOSEventPulse                                  ;11
+	.dl OSTOSEventReadState                              ;12
+	.dl OSTOSSemaphoreCreate                             ;13
+	.dl OSTOSSemaphoreRelease                            ;14
+	.dl OSTOSSemaphoreReadState                          ;15
+	.dl OSTOSMutexCreate                                 ;16
+	.dl OSTOSMutexRelease                                ;17
+	.dl OSTOSMutexReadState                              ;18
+	.dl OSTOSObjectOpen                                  ;19
+	.dl OSTOSQuery                                       ;20
+	.dl OSTOSClose                                       ;21
+	.dl OSTOSWaitForMultipleObjects                      ;22
+	.dl OSTOSWaitForObject                               ;23
+	.dl OSTOSHandleDuplicate                             ;24
+	.dl OSTOSDirectoryCountQuery                         ;25
+	.dl OSTOSDirectoryQueryAll                           ;26
+	.dl OSTOSSetSecurity                                 ;27
+	.dl OSTOSFileQuery                                   ;28
+	.dl OSTOSFileTruncate                                ;29
+	.dl OSTOSFileSeek                                    ;30
+	.dl OSTOSFileRead                                    ;31
+	.dl OSTOSFileWrite                                   ;32
+	.dl OSTOSDirectoryRename                             ;33
+	.dl OSTOSDirectoryUnlink                             ;34
+	.dl OSTOSDirectoryRead                               ;35
+	.dl OSTOSSwapFileCreate                              ;36
+	.dl OSTOSIOControl                                   ;37
+	.dl OSTOSGetBootDevicePath                           ;38
+	.dl OSTOSFilesystemMount                             ;39
+	.dl OSTOSFilesystemUnmount                           ;40
+	.dl OSTOSMountQueryAll                               ;41
+	.dl OSTOSMountCountQuery                             ;42
+	.dl OSTOSMountUpdateFlags                            ;43
+	.dl OSTOSMountGetFilesystemName                      ;44
+	.dl OSTOSFlushModifiedPages                          ;45
+	.dl OSTOSSectionCreate                               ;46
+	.dl OSTOSSectionMapView                              ;47
+	.dl OSTOSUnmapView                                   ;48
+	.dl OSTOSRemapView                                   ;49
+	.dl OSTOSSetSwappiness                               ;50
+	.dl OSTOSMemoryQuery                                 ;51
+	.dl OSTOSProcessCreate                               ;52
+	.dl OSTOSProcessSignal                               ;53
+	.dl OSTOSProcessOpenByPID                            ;54
+	.dl OSTOSProcessQuery                                ;55
+	.dl OSTOSProcessQueryByPID                           ;56
+	.dl OSTOSProcessReadStatus                           ;57
+	.dl OSTOSProcessMaskSignal                           ;58
+	.dl OSTOSProcessUnmaskSignal                         ;59
+	.dl OSTOSProcessSetConsoleGroup                      ;60
+	.dl OSTOSProcessClearConsoleGroup                    ;61
+	.dl OSTOSProcessSignalActivation                     ;62
+	.dl OSTOSProcessWaitForActivation                    ;63
+	.dl OSTOSProcessExit                                 ;64
+	.dl OSTOSProcessCountQuery                           ;65
+	.dl OSTOSProcessQueryAll                             ;66
+	.dl OSTOSThreadException                             ;67
+	.dl OSTOSThreadSetFilePermissions                    ;68
+	.dl OSTOSThreadSleep                                 ;69
+	.dl OSTOSThreadCreate                                ;70
+	.dl OSTOSThreadTerminate                             ;71
+	.dl OSTOSThreadResume                                ;72
+	.dl OSTOSThreadReadStatus                            ;73
+	.dl OSTOSThreadQuery                                 ;74
+	.dl OSTOSSetSystemConsole                            ;75
+	.dl OSTOSAmIAdmin                                    ;76
 
 
 OSTOSConsolePutCharacter:
@@ -240,6 +244,20 @@ OSTOSQueryTime:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSVersion:
+.global OSTOSVersion
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSVersion
+
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1314,6 +1332,19 @@ OSTOSSetSystemConsole:
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSSetSystemConsole
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSAmIAdmin:
+.global OSTOSAmIAdmin
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSAmIAdmin
 
 	mov  long [s18 + 4], a0 ;t1
 

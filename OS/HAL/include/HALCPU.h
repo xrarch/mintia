@@ -19,3 +19,6 @@ extern HALCPUAtomicDecrement { dec ptr -- oldvalue }
 extern HALCPUASIDRegister { asid -- }
 extern HALCPUASIDUnregister { asid -- }
 extern HALCPUAddressSpaceSwitch { asid pdir -- }
+
+externptr HALCPUModel
+externptr HALPlatformModel

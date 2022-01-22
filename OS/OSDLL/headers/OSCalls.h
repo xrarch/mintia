@@ -12,6 +12,8 @@ extern OSContinue { context -- }
 
 extern OSQueryTime { -- sec ms }
 
+extern OSVersion { query -- ok }
+
 extern OSEventCreate { signaled type permissions name -- eventhandle ok }
 extern OSEventReset { eventhandle -- signaled ok }
 extern OSEventSignal { eventhandle -- ok }
@@ -110,3 +112,6 @@ extern OSThreadQuery { threadhandle query -- ok }
 
 // Co
 extern OSSetSystemConsole { filehandle -- ok }
+
+// Se
+extern OSAmIAdmin { -- ok }

@@ -1,0 +1,118 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn Usage { -- }
+	"usage: killall [-sig] name
+sig may either be a number or a unix-like symbolic name.\n" OSGetStdErr FPrintf
+end
+
+fn Main { ... -- ret }
+	0 ret!
+
+	if (argc@ 2 < argc@ 3 > ||)
+		Usage
+		-1 OSExit
+	end
+
+	auto signal
+	OSSIGNAL_TERM signal!
+
+	auto name
+
+	if (argc@ 3 ==)
+		auto signame
+		[1]argv@ signame!
+
+		if (signame@ gb '-' ~=)
+			Usage
+			-1 OSExit
+		end
+
+		1 signame +=
+
+		if (signame@ gb '0' >= signame@ gb '9' <= &&)
+			// its a number
+			signame@ atoi signal!
+		end else
+			// its a symbolic name
+			signame@ OSSignalGetNumber ret! signal!
+
+			if (ret@)
+				ret@ OSStatusGetName "killall: %s\n" OSError
+			end
+		end
+
+		[2]argv@ name!
+	end else
+		[1]argv@ name!
+	end
+
+	auto count
+	OSProcessCountQuery ret! count!
+
+	if (ret@)
+		ret@ OSStatusGetName "killall: couldn't query process count: %s\n" OSError
+	end
+
+	auto querybuffer
+	count@ OSProcessInformation_SIZEOF * OSHeapAllocate ret! querybuffer!
+
+	if (ret@)
+		ret@ OSStatusGetName "killall: couldn't allocate buffer: %s\n" OSError
+	end
+
+	querybuffer@ // buffer
+	count@ // maxquery
+	OSProcessQueryAll ret! count!
+
+	if (ret@)
+		querybuffer@ OSHeapFree
+
+		ret@ OSStatusGetName "killall: couldn't query process list: %s\n" OSError
+	end
+
+	auto none
+	1 none!
+
+	auto record
+	querybuffer@ record!
+
+	while (count@)
+		if (record@ OSProcessInformation_Name + name@ strcmp)
+			auto phandle
+			ACCESS_EXEC // access
+			record@ OSProcessInformation_PID + @ // pid
+			OSProcessOpenByPID ret! phandle!
+
+			if (ret@)
+				1 count -=
+				OSProcessInformation_SIZEOF record +=
+				continue
+			end
+
+			signal@ // signal
+			phandle@ // processhandle
+			OSProcessSignal ret!
+
+			if (ret@)
+				ret@ OSStatusGetName
+				record@ OSProcessInformation_PID + @
+				"killall: couldn't signal %d: %s\n" OSGetStdErr FPrintf
+			end
+
+			0 none!
+
+			phandle@ OSClose drop
+		end
+
+		1 count -=
+		OSProcessInformation_SIZEOF record +=
+	end
+
+	querybuffer@ OSHeapFree
+
+	if (none@)
+		"killall: No matching processes belonging to you were found\n" OSError
+	end
+end

@@ -11,3 +11,6 @@ extern OSFastMutexDelete { fastmutex -- }
 
 extern OSFastMutexAcquire { fastmutex -- }
 extern OSFastMutexRelease { fastmutex -- }
+
+extern OSInterlockedIncrement { inc ptr -- oldcount }
+extern OSInterlockedDecrement { dec ptr -- oldcount }

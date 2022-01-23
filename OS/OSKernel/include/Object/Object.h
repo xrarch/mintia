@@ -119,4 +119,5 @@ extern ObHandleDuplicate { handle access srcprocesshandle destprocesshandle -- n
 extern ObObjectSetUID { uid object -- }
 extern ObObjectSetGID { gid object -- }
 
+extern ObSetSecurityObject { uid gid permissions object -- ok }
 extern ObSetSecurity { uid gid permissions handle -- ok }

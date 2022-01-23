@@ -25,6 +25,9 @@ all:
 	make -C shutdown
 	make -C reboot
 
+	make -C launchtty
+	make -C login
+
 cleanup:
 	make -C Cmd cleanup
 	make -C mem cleanup
@@ -51,3 +54,6 @@ cleanup:
 	make -C cp cleanup
 	make -C shutdown cleanup
 	make -C reboot cleanup
+
+	make -C launchtty cleanup
+	make -C login cleanup

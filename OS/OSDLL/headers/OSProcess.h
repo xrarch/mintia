@@ -40,7 +40,7 @@ struct OSThreadInformation
 endstruct
 
 struct OSCreationParams
-	// handles to use as the process's stdio if OSPROCESS_NOINHERIT is
+	// handles to use as the process's stdio if OSPROCESS_NOINHERITH is
 	// specified.
 	4 StdIn
 	4 StdOut

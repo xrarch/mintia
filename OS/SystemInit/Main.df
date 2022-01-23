@@ -333,28 +333,141 @@ fn Main { ... -- ret }
 
 	'\n' Putc
 
+	auto config
+	"/mintia/SystemInit.cfg" // path
+	0 // create
+	OSConfigFileLoad ret! config!
+
+	if (ret@)
+		ret@ OSStatusGetName "Couldn't open /mintia/SystemInit.cfg: %s\n" OSError
+	end
+
+	config@ StartLines
+
+	config@ OSConfigFileFree
+
 	while (1)
-		auto processhandle
-		auto threadhandle
-
-		"/mintia/bin/cmd.exe" // path
-		0 // creationflags
-		0 // creationparams
-		ACCESS_OWNER_ALL // permissions
-		0 // name
-		OSSpawn ret! processhandle! threadhandle!
-
-		if (ret@)
-			ret@ OSStatusGetName "Failed to execute /mintia/bin/cmd.exe: %s\n" OSAbort
+		if (LineCount@ ~~)
+			"hm\n" Printf
 		end
 
-		threadhandle@ OSClose drop
+		1000 OSThreadSleep drop
+	end
+end
 
-		0 // alertable
+struct Line
+	OSFILEPATHMAX Manager
+	OSFILEPATHMAX TTYName
+endstruct
+
+var LineCount 0
+
+fn StartLines { config -- }
+	auto ok
+
+	auto iterator
+	"" // sectionname
+	config@ // config
+	OSConfigGetKeyIterator ok! iterator!
+
+	if (ok@)
+		ok@ OSStatusGetName "bad config: %s\n" OSError
+	end
+
+	while (iterator@)
+		auto manager
+		auto ttyname
+		iterator@ // iterator
+		config@ // config
+		OSConfigNextKey ok! iterator! manager! ttyname!
+
+		if (ok@)
+			ok@ OSStatusGetName "bad config: %s\n" OSError
+		end
+
+		auto line
+		Line_SIZEOF OSHeapAllocate ok! line!
+
+		if (ok@)
+			ok@ OSStatusGetName "%s\n" OSAbort
+		end
+
+		line@ Line_Manager + // dest
+		manager@ // src
+		strcpy
+
+		line@ Line_TTYName + // dest
+		ttyname@ // src
+		strcpy
+
+		auto handle
+		line@ // context
+		pointerof ManageLineThread // startfunc
+		0 // creationflags
+		ACCESS_OWNER_ALL // permissions
+		ttyname@ // name
+		OSCURRENTPROCESS // processhandle
+		OSThreadCreate ok! handle!
+
+		if (ok@)
+			ok@ OSStatusGetName "failed to create thread: %s\n" OSError
+		end
+
+		handle@ OSClose drop
+
+		1 // inc
+		LineCount // ptr
+		OSInterlockedIncrement drop
+	end
+end
+
+fn ManageLineThread { context -- ret }
+	while (1)
+		auto phandle
+		auto thandle
+
+		context@ Line_TTYName + // arg
+		context@ Line_Manager + // path
+		OSPROCESS_DETACHCONSOLE OSPROCESS_NOINHERITH | // creationflags
+		0 // creationparams
+		ACCESS_OWNER_ALL // permissions
+		context@ Line_Manager + OSLastComponent // name
+		OSSpawn ret! phandle! thandle!
+
+		if (ret@)
+			ret@ OSStatusGetName
+			context@ Line_Manager +
+			context@ Line_TTYName +
+			"%s: %s failed to start: %s\n" Printf
+
+			break
+		end
+
+		thandle@ OSClose drop
+
+		1 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
-		processhandle@ // objecthandle
+		phandle@ // objecthandle
 		OSWaitForObject ret!
 
-		processhandle@ OSClose drop
+		auto status
+		phandle@ OSProcessReadStatus drop status!
+
+		phandle@ OSClose drop
+
+		if (status@)
+			status@ OSStatusGetName
+			context@ Line_Manager +
+			context@ Line_TTYName +
+			"%s: %s died with status: %s\n" Printf
+
+			break
+		end
 	end
+
+	1 // dec
+	LineCount
+	OSInterlockedDecrement drop
+
+	context@ OSHeapFree
 end

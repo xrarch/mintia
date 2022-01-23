@@ -37,6 +37,7 @@ sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	make -C $(HAL_DIR)
 	$(FSTOOL) u /mintia/BootResources.txt $(OS_DIR)/BootResources.txt
 	$(FSTOOL) u /mintia/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
+	$(FSTOOL) u /mintia/SystemInit.cfg $(OS_DIR)/SystemInit.cfg
 
 	make -C $(KERN_DIR)
 	make -C $(DBG_DIR)

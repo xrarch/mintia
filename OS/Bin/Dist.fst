@@ -23,3 +23,5 @@ ver.exe ver.exe 493
 kill.exe kill.exe 493
 killall.exe killall.exe 493
 cp.exe cp.exe 493
+shutdown.exe shutdown.exe 493
+reboot.exe reboot.exe 493

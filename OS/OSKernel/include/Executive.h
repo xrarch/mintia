@@ -7,6 +7,7 @@
 #include "<inc>/Executive/Event.h"
 #include "<inc>/Executive/Semaphore.h"
 #include "<inc>/Executive/Mutex.h"
+#include "<inc>/Executive/Shutdown.h"
 
 extern ExInitPhase0 { -- }
 extern ExInitPhase1 { context1 context2 -- }

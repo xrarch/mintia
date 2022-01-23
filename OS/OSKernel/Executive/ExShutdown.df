@@ -1,0 +1,136 @@
+//
+// Implements system shutdown.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALConsole.h"
+#include "<inc>/HALExit.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+var ExShuttingDown 0
+
+fn ExShutdownSystem { mode -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (ExShuttingDown@)
+		// there's already a shutdown thread.
+		rs@ HALCPUInterruptRestore
+		return
+	end
+
+	1 ExShuttingDown!
+
+	rs@ HALCPUInterruptRestore
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	"\n" Printf
+
+	if (mode@ OSSHUTDOWN_HALT ==)
+		"MINTIA -- SHUTTING DOWN\n" Printf
+	end else
+		"MINTIA -- REBOOTING\n" Printf
+	end
+
+	// raise own priority to HIGHREALTIME
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+	PRIORITY_HIGHREALTIME // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+	ipl@ KeIPLLower
+
+	"Killing all processes...\n" Printf
+
+	// send OSSIGNAL_TERM to all processes
+
+	PsProcessListLock drop
+
+	auto process
+	PsProcessListHead@ process!
+
+	while (process@)
+		if (process@ PsSystemProcess@ ~=)
+			OSSIGNAL_TERM // signal
+			process@ // process
+			KeProcessSignal drop
+		end
+
+		process@ PsProcess_GlobalListNext + @ process!
+	end
+
+	PsProcessListUnlock
+
+	// give all the processes 2.5 seconds to get their affairs in order.
+	2500 // ms
+	KERNELMODE // waitmode
+	0 // alertable
+	KeThreadSleep drop
+
+	// send OSSIGNAL_KILL to all processes
+
+	PsProcessListLock drop
+
+	PsProcessListHead@ process!
+
+	while (process@)
+		if (process@ PsSystemProcess@ ~=)
+			OSSIGNAL_KILL // signal
+			process@ // process
+			KeProcessSignal drop
+		end
+
+		process@ PsProcess_GlobalListNext + @ process!
+	end
+
+	PsProcessListUnlock
+
+	// give all the processes 500ms to die.
+	500 // ms
+	KERNELMODE // waitmode
+	0 // alertable
+	KeThreadSleep drop
+
+	"Flushing modified pages to disk...\n" Printf
+
+	while (1)
+		if (IOCachePagesModifiedCount@ ~~)
+			// complete flush
+			break
+		end
+
+		IOFlushModifiedPages
+		100 OSThreadSleep drop
+	end
+
+	"Exiting.\n" Printf
+
+	0 // ret
+	mode@ // mode
+	HALExit
+
+	"HALExit returned\n" KeCrash
+end

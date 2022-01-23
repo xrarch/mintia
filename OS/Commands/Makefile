@@ -22,6 +22,8 @@ all:
 	make -C kill
 	make -C killall
 	make -C cp
+	make -C shutdown
+	make -C reboot
 
 cleanup:
 	make -C Cmd cleanup
@@ -47,3 +49,5 @@ cleanup:
 	make -C kill cleanup
 	make -C killall cleanup
 	make -C cp cleanup
+	make -C shutdown cleanup
+	make -C reboot cleanup

@@ -12,6 +12,8 @@ extern OSContinue { context -- }
 
 extern OSQueryTime { -- sec ms }
 
+extern OSShutdownSystem { mode -- ok }
+
 extern OSVersion { query -- ok }
 
 extern OSEventCreate { signaled type permissions name -- eventhandle ok }

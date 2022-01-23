@@ -217,8 +217,11 @@ end
 
 extern LotsOfTests { -- }
 
+var DeadSystemEvent 0
+
 fn Main { ... -- ret }
 	18 OSSetUMask
+
 	OSSignalSetDefaults
 
 	"/" OSChangeCWD drop
@@ -333,26 +336,74 @@ fn Main { ... -- ret }
 
 	'\n' Putc
 
-	auto config
-	"/mintia/SystemInit.cfg" // path
-	0 // create
-	OSConfigFileLoad ret! config!
+	0 // signaled
+	OSEVENT_SYNCH // type
+	ACCESS_OWNER_ALL // permissions
+	"DeadSystemEvent" // name
+	OSEventCreate ret! DeadSystemEvent!
 
 	if (ret@)
-		ret@ OSStatusGetName "Couldn't open /mintia/SystemInit.cfg: %s\n" OSError
+		ret@ OSStatusGetName "Couldn't create DeadSystemEvent\n" OSError
 	end
-
-	config@ StartLines
-
-	config@ OSConfigFileFree
 
 	while (1)
-		if (LineCount@ ~~)
-			"hm\n" Printf
+		auto config
+		"/mintia/SystemInit.cfg" // path
+		1 // create
+		OSConfigFileLoad ret! config!
+
+		if (ret@ ~~)
+			config@ StartLines
+
+			config@ OSConfigFileFree
+		end else
+			ret@ OSStatusGetName "Couldn't open /mintia/SystemInit.cfg: %s\n" Printf
 		end
 
-		1000 OSThreadSleep drop
+		if (LineCount@)
+			1 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			DeadSystemEvent@ // objecthandle
+			OSWaitForObject drop
+		end
+
+		"No managed lines, or all failed\n\n" Printf
+
+		SingleUserMode ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "Single-user mode failed: %s\n" Printf
+
+			OSSHUTDOWN_HALT OSShutdownSystem drop
+		end
 	end
+end
+
+fn SingleUserMode { -- ok }
+	"Strike ^D to start multi-user mode.\n" Printf
+
+	auto phandle
+	auto thandle
+
+	"/mintia/bin/cmd.exe" // path
+	0 // creationflags
+	0 // creationparams
+	ACCESS_OWNER_ALL // permissions
+	"cmd.exe" // name
+	OSSpawn ok! phandle! thandle!
+
+	if (ok@)
+		return
+	end
+
+	thandle@ OSClose drop
+
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	phandle@ // objecthandle
+	OSWaitForObject drop
+
+	phandle@ OSClose drop
 end
 
 struct Line
@@ -456,18 +507,18 @@ fn ManageLineThread { context -- ret }
 		phandle@ OSClose drop
 
 		if (status@)
-			status@ OSStatusGetName
-			context@ Line_Manager +
-			context@ Line_TTYName +
-			"%s: %s died with status: %s\n" Printf
-
 			break
 		end
 	end
 
+	auto oldcount
 	1 // dec
 	LineCount
-	OSInterlockedDecrement drop
+	OSInterlockedDecrement oldcount!
 
 	context@ OSHeapFree
+
+	if (oldcount@ 1 ==)
+		DeadSystemEvent@ OSEventSignal drop
+	end
 end

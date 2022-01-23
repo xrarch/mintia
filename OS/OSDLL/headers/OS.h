@@ -17,5 +17,6 @@
 #include "<ll>/OSDLL/OSTime.h"
 #include "<ll>/OSDLL/OSVersion.h"
 #include "<ll>/OSDLL/OSShutdown.h"
+#include "<ll>/OSDLL/OSConfiguration.h"
 
 #include "<ll>/OSDLL/OSContext.h"

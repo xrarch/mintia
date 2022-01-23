@@ -1,0 +1,874 @@
+//
+// Implements support for configuration files.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSEnvironment.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSAlloc.h"
+#include "<inc>/OSWait.h"
+#include "<inc>/OSConfiguration.h"
+
+#include "OSDLL.h"
+
+const DLLCONFIGNAMEMAX 64
+
+struct DLLConfigFile
+	4 Handle
+
+	4 SectionListHead
+	4 SectionListTail
+endstruct
+
+struct DLLConfigSection
+	4 Next
+	4 Prev
+
+	DLLCONFIGNAMEMAX Name
+
+	4 KeyListHead
+	4 KeyListTail
+endstruct
+
+struct DLLConfigKey
+	4 Next
+	4 Prev
+
+	DLLCONFIGNAMEMAX Name
+	4 Value
+endstruct
+
+fn OSConfigFileLoad { path create -- config ok }
+	auto handle
+
+	if (create@)
+		OSDEFAULTFILEPERMISSIONS // permissions
+		0 // flags
+		ACCESS_READ ACCESS_WRITE | // access
+		path@ // path
+		OSFileCreate ok! handle!
+	end else
+		0 // flags
+		ACCESS_READ ACCESS_WRITE | // access
+		path@ // path
+		0 // ftype
+		OSFileOpen ok! handle!
+	end
+
+	if (ok@)
+		return
+	end
+
+	DLLConfigFile_SIZEOF OSHeapAllocate ok! config!
+
+	if (ok@)
+		handle@ OSClose drop
+		return
+	end
+
+	handle@ config@ DLLConfigFile_Handle + !
+
+	0 config@ DLLConfigFile_SectionListHead + !
+	0 config@ DLLConfigFile_SectionListTail + !
+
+	config@ DLLConfigFileParse ok!
+
+	if (ok@)
+		config@ OSConfigFileFree
+	end
+end
+
+fn OSConfigFileWrite { config -- ok }
+	auto handle
+	config@ DLLConfigFile_Handle + @ handle!
+
+	0 // offset
+	handle@ // handle
+	OSSEEK_SET // mode
+	OSFileSeek ok! drop
+
+	if (ok@)
+		return
+	end
+
+	0 // newsize
+	0 // growing
+	handle@ // handle
+	OSFileTruncate ok! drop
+
+	if (ok@)
+		return
+	end
+
+	auto first
+	2 first!
+
+	auto section
+	config@ DLLConfigFile_SectionListHead + @ section!
+
+	while (section@)
+		if (first@ ~~)
+			0 // flags
+			1 // length
+			"\n" // buffer
+			handle@ // filehandle
+			OSFileWrite ok! drop
+
+			if (ok@)
+				return
+			end
+		end
+
+		section@ // section
+		handle@ // handle
+		DLLConfigSectionSerialize ok!
+
+		if (ok@)
+			return
+		end
+
+		if (first@)
+			1 first -=
+		end
+
+		section@ DLLConfigSection_Next + @ section!
+	end
+
+	0 // flags
+	1 // length
+	"\n" // buffer
+	handle@ // filehandle
+	OSFileWrite ok! drop
+end
+
+fn OSConfigFileFree { config -- }
+	auto section
+	config@ DLLConfigFile_SectionListHead + @ section!
+
+	while (section@)
+		section@ config@ DLLConfigFreeSection
+
+		section@ DLLConfigSection_Next + @ section!
+	end
+
+	config@ DLLConfigFile_Handle + @ OSClose drop
+
+	config@ OSHeapFree
+end
+
+
+fn OSConfigGetKey { keyname sectionname config -- valueptr ok }
+	auto section
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+
+	if (ok@)
+		return
+	end
+
+	auto key
+	keyname@ // keyname
+	section@ // section
+	DLLConfigFindKeyByName ok! key!
+
+	if (ok@)
+		return
+	end
+
+	key@ DLLConfigKey_Value + @ valueptr!
+end
+
+fn OSConfigSetKey { valueptr keyname sectionname config -- ok }
+	auto section
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+
+	if (ok@)
+		return
+	end
+
+	auto key
+	keyname@ // keyname
+	section@ // section
+	DLLConfigFindKeyByName ok! key!
+
+	if (ok@)
+		keyname@ // name
+		valueptr@ // value
+		section@ // section
+		DLLConfigAllocateKey ok!
+
+		return
+	end
+
+	if (key@ DLLConfigKey_Value + @)
+		key@ DLLConfigKey_Value + @ OSHeapFree
+	end
+
+	auto vl
+	valueptr@ strlen vl!
+
+	auto value
+	vl@ 1 + OSHeapAllocate ok! value!
+
+	if (ok@)
+		return
+	end
+
+	value@ // dest
+	valueptr@ // src
+	strcpy
+
+	value@ key@ DLLConfigKey_Value + !
+end
+
+fn OSConfigDeleteKey { keyname sectionname config -- ok }
+	auto section
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+
+	if (ok@)
+		return
+	end
+
+	auto key
+	keyname@ // keyname
+	section@ // section
+	DLLConfigFindKeyByName ok! key!
+
+	if (ok@)
+		0 ok!
+		return
+	end
+
+	key@ section@ DLLConfigFreeKey
+end
+
+
+fn OSConfigCreateSection { sectionname config -- ok }
+	auto section
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+
+	if (ok@ ~~)
+		return
+	end
+
+	sectionname@ // name
+	config@ // config
+	DLLConfigAllocateSection ok! drop
+end
+
+fn OSConfigDeleteSection { sectionname config -- ok }
+	auto section
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+
+	if (ok@)
+		0 ok!
+		return
+	end
+
+	section@ config@ DLLConfigFreeSection
+end
+
+
+fn OSConfigGetKeyIterator { sectionname config -- iterator ok }
+	auto section
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+
+	if (ok@)
+		return
+	end
+
+	section@ DLLConfigSection_KeyListHead + @ iterator!
+end
+
+fn OSConfigGetSectionIterator { config -- iterator ok }
+	0 ok!
+	config@ DLLConfigFile_SectionListHead + @ iterator!
+end
+
+
+fn OSConfigNextKey { iterator config -- keyname valueptr nextiterator ok }
+	if (iterator@ ~~)
+		-1 ok!
+		return
+	end
+
+	iterator@ DLLConfigKey_Name + keyname!
+	iterator@ DLLConfigKey_Value + @ valueptr!
+	iterator@ DLLConfigKey_Next + @ nextiterator!
+
+	0 ok!
+end
+
+fn OSConfigNextSection { iterator config -- sectionname nextiterator ok }
+	if (iterator@ ~~)
+		-1 ok!
+		return
+	end
+
+	iterator@ DLLConfigSection_Name + sectionname!
+	iterator@ DLLConfigSection_Next + @ nextiterator!
+
+	0 ok!
+end
+
+// internal functions
+
+fn DLLConfigSectionSerialize { section handle -- ok }
+	if (section@ DLLConfigSection_Name + gb)
+		0 // flags
+		1 // length
+		"@" // buffer
+		handle@ // filehandle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+
+		0 // flags
+		section@ DLLConfigSection_Name + strlen // length
+		section@ DLLConfigSection_Name + // buffer
+		handle@ // filehandle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+
+		0 // flags
+		1 // length
+		"\n" // buffer
+		handle@ // filehandle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 ok!
+
+	auto key
+	section@ DLLConfigSection_KeyListHead + @ key!
+
+	while (key@)
+		key@ // key
+		handle@ // handle
+		DLLConfigKeySerialize ok!
+
+		if (ok@)
+			return
+		end
+
+		key@ DLLConfigKey_Next + @ key!
+	end
+end
+
+fn DLLConfigKeySerialize { key handle -- ok }
+	0 // flags
+	key@ DLLConfigKey_Name + strlen // length
+	key@ DLLConfigKey_Name + // buffer
+	handle@ // filehandle
+	OSFileWrite ok! drop
+
+	if (ok@)
+		return
+	end
+
+	if (key@ DLLConfigKey_Value + @)
+		0 // flags
+		2 // length
+		"='" // buffer
+		handle@ // filehandle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+
+		0 // flags
+		key@ DLLConfigKey_Value + @ strlen // length
+		key@ DLLConfigKey_Value + @ // buffer
+		handle@ // filehandle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+
+		0 // flags
+		1 // length
+		"'" // buffer
+		handle@ // filehandle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 // flags
+	1 // length
+	"\n" // buffer
+	handle@ // filehandle
+	OSFileWrite ok! drop
+
+	if (ok@)
+		return
+	end
+end
+
+fn DLLConfigFindSectionByName { sectionname config -- section ok }
+	-1 ok!
+
+	config@ DLLConfigFile_SectionListHead + @ section!
+
+	while (section@)
+		if (section@ DLLConfigSection_Name + sectionname@ strcmp)
+			0 ok!
+			return
+		end
+
+		section@ DLLConfigSection_Next + @ section!
+	end
+end
+
+fn DLLConfigFindKeyByName { keyname section -- key ok }
+	-1 ok!
+
+	section@ DLLConfigSection_KeyListHead + @ key!
+
+	while (key@)
+		if (key@ DLLConfigKey_Name + keyname@ strcmp)
+			0 ok!
+			return
+		end
+
+		key@ DLLConfigKey_Next + @ key!
+	end
+end
+
+struct DLLParse
+	4 Buffer
+	4 Offset
+	4 ValidBytes
+	4 Handle
+endstruct
+
+const DLLCONFIGPARSEBUFFERSIZE 4096
+const DLLCONFIGLINEBUFFERSIZE  256
+
+fn DLLConfigFileParse { config -- ok }
+	auto buffer
+	DLLCONFIGPARSEBUFFERSIZE OSHeapAllocate ok! buffer!
+
+	if (ok@)
+		return
+	end
+
+	auto parse
+	DLLParse_SIZEOF alloc parse!
+
+	config@ DLLConfigFile_Handle + @ parse@ DLLParse_Handle + !
+	buffer@ parse@ DLLParse_Buffer + !
+	0 parse@ DLLParse_ValidBytes + !
+	0 parse@ DLLParse_Offset + !
+
+	parse@ // parse
+	config@ // config
+	DLLConfigFileParseFile ok!
+
+	buffer@ OSHeapFree
+end
+
+fn DLLConfigFileGetNextCharacter { parse -- c done ok }
+	0 done!
+	0 ok!
+
+	if (parse@ DLLParse_Offset + @ parse@ DLLParse_ValidBytes + @ ==)
+		// read in the next chunk
+
+		auto bytesread
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		DLLCONFIGPARSEBUFFERSIZE // length
+		parse@ DLLParse_Buffer + @ // buffer
+		parse@ DLLParse_Handle + @ // filehandle
+		OSFileRead ok! bytesread!
+
+		if (ok@)
+			return
+		end
+
+		if (bytesread@ ~~)
+			1 done!
+			return
+		end
+
+		bytesread@ parse@ DLLParse_ValidBytes + !
+		0 parse@ DLLParse_Offset + !
+	end
+
+	parse@ DLLParse_Buffer + @ parse@ DLLParse_Offset + @ + gb c!
+	1 parse@ DLLParse_Offset + +=
+end
+
+fn DLLConfigIsWhitespace { c -- iswhitespace }
+	0 iswhitespace!
+
+	if (c@ ' ' ==)
+		1 iswhitespace!
+	end elseif (c@ '\t' ==)
+		1 iswhitespace!
+	end elseif (c@ '=' ==)
+		1 iswhitespace!
+	end
+end
+
+fn DLLConfigFileGetNextLine { buffer parse -- done ok }
+	// get the next line from the config file.
+	// all extra whitespace should be trimmed, and comments removed.
+	// =, space, and tab count as whitespace. this function normalizes them
+	// all to the space character.
+
+	auto ptr
+	buffer@ ptr!
+
+	auto inwhitespace
+	0 inwhitespace!
+
+	auto instring
+	0 instring!
+
+	auto inescape
+	0 inescape!
+
+	auto incomment
+	0 incomment!
+
+	auto start
+	1 start!
+
+	while (1)
+		auto c
+		parse@ DLLConfigFileGetNextCharacter ok! done! c!
+
+		if (ok@)
+			return
+		end
+
+		if (done@)
+			break
+		end
+
+		if (c@ '\n' ==)
+			break
+		end
+
+		if (incomment@)
+			continue
+		end
+
+		if (inescape@)
+			c@ ptr@ sb
+			1 ptr +=
+
+			0 inescape!
+		end elseif (c@ '\\' ==)
+			1 inescape!
+			0 inwhitespace!
+			0 start!
+		end elseif (instring@)
+			if (c@ 39 ==) // singlequote
+				0 instring!
+			end else
+				c@ ptr@ sb
+				1 ptr +=
+			end
+		end elseif (c@ 39 ==) // singlequote
+			1 instring!
+			0 inwhitespace!
+			0 start!
+		end elseif (c@ '#' ==)
+			1 incomment!
+		end elseif (c@ DLLConfigIsWhitespace)
+			if (inwhitespace@ ~~)
+				if (start@ ~~)
+					1 inwhitespace!
+					' ' ptr@ sb
+					1 ptr +=
+				end
+			end
+		end else
+			0 inwhitespace!
+			0 start!
+			c@ ptr@ sb
+			1 ptr +=
+		end
+	end
+
+	if (inwhitespace@)
+		// remove extra space
+		1 ptr -=
+	end
+
+	0 ptr@ sb
+end
+
+fn DLLConfigFileParseFile { parse config -- ok }
+	0 // offset
+	parse@ DLLParse_Handle + @ // handle
+	OSSEEK_SET // mode
+	OSFileSeek ok! drop
+
+	if (ok@)
+		return
+	end
+
+	auto currentsection
+	0 // name
+	config@ // config
+	DLLConfigAllocateSection ok! currentsection!
+
+	if (ok@)
+		return
+	end
+
+	auto linebuffer
+	DLLCONFIGLINEBUFFERSIZE alloc linebuffer!
+
+	auto keyname
+	DLLCONFIGNAMEMAX alloc keyname!
+
+	while (1)
+		auto done
+		linebuffer@ // buffer
+		parse@ // parse
+		DLLConfigFileGetNextLine ok! done!
+
+		if (ok@ done@ ||)
+			return
+		end
+
+		if (linebuffer@ gb ~~)
+			continue
+		end
+
+		if (linebuffer@ gb '@' ==)
+			// new section
+
+			"new section\n" Printf
+
+			if (linebuffer@ 1 + gb ~~)
+				STATUS_INVALID_CONFIG_FILE ok!
+				return
+			end
+
+			linebuffer@ 1 + // name
+			config@ // config
+			DLLConfigAllocateSection ok! currentsection!
+
+			if (ok@)
+				return
+			end
+		end else
+			// new key
+
+			auto ptr
+			linebuffer@ ptr!
+
+			auto valueptr
+
+			while (ptr@ gb)
+				if (ptr@ gb ' ' ==)
+					ptr@ 1 + valueptr!
+					0 ptr@ sb
+					break
+				end
+
+				1 ptr +=
+				ptr@ valueptr!
+			end
+
+			linebuffer@ // name
+			valueptr@ // value
+			currentsection@ // section
+			DLLConfigAllocateKey ok!
+
+			if (ok@)
+				return
+			end
+		end
+	end
+end
+
+fn DLLConfigFreeSection { section config -- }
+	auto key
+	section@ DLLConfigSection_KeyListHead + @ key!
+
+	while (key@)
+		key@ section@ DLLConfigFreeKey
+
+		key@ DLLConfigKey_Next + @ key!
+	end
+
+	// remove from the section list
+
+	auto ls
+	section@ DLLConfigSection_Prev + @ ls!
+
+	auto ns
+	section@ DLLConfigSection_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ DLLConfigSection_Next + !
+	end else
+		ns@ config@ DLLConfigFile_SectionListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ DLLConfigSection_Prev + !
+	end else
+		ls@ config@ DLLConfigFile_SectionListTail + !
+	end
+
+	section@ OSHeapFree
+end
+
+fn DLLConfigFreeKey { key section -- }
+	if (key@ DLLConfigKey_Value + @)
+		key@ DLLConfigKey_Value + @ OSHeapFree
+	end
+
+	// remove from the key list
+
+	auto ls
+	key@ DLLConfigKey_Prev + @ ls!
+
+	auto ns
+	key@ DLLConfigKey_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ DLLConfigKey_Next + !
+	end else
+		ns@ section@ DLLConfigSection_KeyListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ DLLConfigKey_Prev + !
+	end else
+		ls@ section@ DLLConfigSection_KeyListTail + !
+	end
+
+	key@ OSHeapFree
+end
+
+fn DLLConfigAllocateSection { name config -- section ok }
+	DLLConfigSection_SIZEOF OSHeapAllocate ok! section!
+
+	if (ok@)
+		return
+	end
+
+	if (name@)
+		section@ DLLConfigSection_Name + // dest
+		name@ // src
+		DLLCONFIGNAMEMAX 1 - // max
+		strncpy
+	end else
+		0 section@ DLLConfigSection_Name + sb
+	end
+
+	0 section@ DLLConfigSection_KeyListHead + !
+	0 section@ DLLConfigSection_KeyListTail + !
+
+	// insert in the config file's list of sections
+
+	auto t
+	config@ DLLConfigFile_SectionListTail + @ t!
+
+	if (t@ ~~)
+		0 section@ DLLConfigSection_Next + !
+		0 section@ DLLConfigSection_Prev + !
+
+		section@ config@ DLLConfigFile_SectionListHead + !
+		section@ config@ DLLConfigFile_SectionListTail + !
+	end else
+		0 section@ DLLConfigSection_Next + !
+
+		t@ section@ DLLConfigSection_Prev + !
+		section@ t@ DLLConfigSection_Next + !
+		section@ config@ DLLConfigFile_SectionListTail + !
+	end
+end
+
+fn DLLConfigAllocateKey { name value section -- ok }
+	auto key
+	DLLConfigKey_SIZEOF OSHeapAllocate ok! key!
+
+	if (ok@)
+		return
+	end
+
+	key@ DLLConfigKey_Name + // dest
+	name@ // src
+	DLLCONFIGNAMEMAX 1 - // max
+	strncpy
+
+	if (value@ gb)
+		auto vl
+		value@ strlen vl!
+
+		auto valueptr
+		vl@ 1 + OSHeapAllocate ok! valueptr!
+
+		if (ok@)
+			key@ OSHeapFree
+			return
+		end
+
+		valueptr@ // dest
+		value@ // src
+		strcpy
+
+		valueptr@ key@ DLLConfigKey_Value + !
+	end else
+		0 key@ DLLConfigKey_Value + !
+	end
+
+	// insert in the section's list of keys
+
+	auto t
+	section@ DLLConfigSection_KeyListTail + @ t!
+
+	if (t@ ~~)
+		0 key@ DLLConfigKey_Next + !
+		0 key@ DLLConfigKey_Prev + !
+
+		key@ section@ DLLConfigSection_KeyListHead + !
+		key@ section@ DLLConfigSection_KeyListTail + !
+	end else
+		0 key@ DLLConfigKey_Next + !
+
+		t@ key@ DLLConfigKey_Prev + !
+		key@ t@ DLLConfigKey_Next + !
+		key@ section@ DLLConfigSection_KeyListTail + !
+	end
+end

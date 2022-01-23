@@ -32,6 +32,8 @@ struct DLLConfigSection
 
 	DLLCONFIGNAMEMAX Name
 
+	4 Config
+
 	4 KeyListHead
 	4 KeyListTail
 endstruct
@@ -41,6 +43,9 @@ struct DLLConfigKey
 	4 Prev
 
 	DLLCONFIGNAMEMAX Name
+
+	4 Section
+
 	4 Value
 endstruct
 
@@ -146,7 +151,7 @@ fn OSConfigFileFree { config -- }
 	config@ DLLConfigFile_SectionListHead + @ section!
 
 	while (section@)
-		section@ config@ DLLConfigFreeSection
+		section@ DLLConfigFreeSection
 
 		section@ DLLConfigSection_Next + @ section!
 	end
@@ -157,54 +162,24 @@ fn OSConfigFileFree { config -- }
 end
 
 
-fn OSConfigGetKey { keyname sectionname config -- valueptr ok }
-	auto section
-	sectionname@ // sectionname
-	config@ // config
-	DLLConfigFindSectionByName ok! section!
-
-	if (ok@)
-		return
-	end
-
-	auto key
+fn OSConfigGetKey { keyname section -- key ok }
 	keyname@ // keyname
 	section@ // section
 	DLLConfigFindKeyByName ok! key!
+end
 
-	if (ok@)
-		return
-	end
-
+fn OSConfigGetKeyValue { key -- valueptr }
 	key@ DLLConfigKey_Value + @ valueptr!
 end
 
-fn OSConfigSetKey { valueptr keyname sectionname config -- ok }
-	auto section
-	sectionname@ // sectionname
-	config@ // config
-	DLLConfigFindSectionByName ok! section!
-
-	if (ok@)
-		return
-	end
-
-	auto key
-	keyname@ // keyname
-	section@ // section
-	DLLConfigFindKeyByName ok! key!
-
-	if (ok@)
-		keyname@ // name
-		valueptr@ // value
-		section@ // section
-		DLLConfigAllocateKey ok!
-
-		return
-	end
-
+fn OSConfigSetKey { valueptr key -- ok }
 	if (key@ DLLConfigKey_Value + @)
 		key@ DLLConfigKey_Value + @ OSHeapFree
+	end
+
+	if (valueptr@ ~~)
+		0 key@ DLLConfigKey_Value + !
+		return
 	end
 
 	auto vl
@@ -224,32 +199,33 @@ fn OSConfigSetKey { valueptr keyname sectionname config -- ok }
 	value@ key@ DLLConfigKey_Value + !
 end
 
-fn OSConfigDeleteKey { keyname sectionname config -- ok }
-	auto section
-	sectionname@ // sectionname
-	config@ // config
-	DLLConfigFindSectionByName ok! section!
-
-	if (ok@)
-		return
-	end
-
-	auto key
+fn OSConfigCreateKey { valueptr keyname section -- key ok }
 	keyname@ // keyname
 	section@ // section
 	DLLConfigFindKeyByName ok! key!
 
-	if (ok@)
-		0 ok!
+	if (ok@ ~~)
 		return
 	end
 
-	key@ section@ DLLConfigFreeKey
+	keyname@ // name
+	valueptr@ // value
+	section@ // section
+	DLLConfigAllocateKey ok! key!
+end
+
+fn OSConfigDeleteKey { key -- }
+	key@ DLLConfigFreeKey
 end
 
 
-fn OSConfigCreateSection { sectionname config -- ok }
-	auto section
+fn OSConfigGetSection { sectionname config -- section ok }
+	sectionname@ // sectionname
+	config@ // config
+	DLLConfigFindSectionByName ok! section!
+end
+
+fn OSConfigCreateSection { sectionname config -- section ok }
 	sectionname@ // sectionname
 	config@ // config
 	DLLConfigFindSectionByName ok! section!
@@ -260,21 +236,11 @@ fn OSConfigCreateSection { sectionname config -- ok }
 
 	sectionname@ // name
 	config@ // config
-	DLLConfigAllocateSection ok! drop
+	DLLConfigAllocateSection ok! section!
 end
 
-fn OSConfigDeleteSection { sectionname config -- ok }
-	auto section
-	sectionname@ // sectionname
-	config@ // config
-	DLLConfigFindSectionByName ok! section!
-
-	if (ok@)
-		0 ok!
-		return
-	end
-
-	section@ config@ DLLConfigFreeSection
+fn OSConfigDeleteSection { section -- }
+	section@ DLLConfigFreeSection
 end
 
 
@@ -702,7 +668,7 @@ fn DLLConfigFileParseFile { parse config -- ok }
 			linebuffer@ // name
 			valueptr@ // value
 			currentsection@ // section
-			DLLConfigAllocateKey ok!
+			DLLConfigAllocateKey ok! drop
 
 			if (ok@)
 				return
@@ -711,12 +677,15 @@ fn DLLConfigFileParseFile { parse config -- ok }
 	end
 end
 
-fn DLLConfigFreeSection { section config -- }
+fn DLLConfigFreeSection { section -- }
+	auto config
+	section@ DLLConfigSection_Config + @ config!
+
 	auto key
 	section@ DLLConfigSection_KeyListHead + @ key!
 
 	while (key@)
-		key@ section@ DLLConfigFreeKey
+		key@ DLLConfigFreeKey
 
 		key@ DLLConfigKey_Next + @ key!
 	end
@@ -744,7 +713,10 @@ fn DLLConfigFreeSection { section config -- }
 	section@ OSHeapFree
 end
 
-fn DLLConfigFreeKey { key section -- }
+fn DLLConfigFreeKey { key -- }
+	auto section
+	key@ DLLConfigKey_Section + @ section!
+
 	if (key@ DLLConfigKey_Value + @)
 		key@ DLLConfigKey_Value + @ OSHeapFree
 	end
@@ -779,6 +751,8 @@ fn DLLConfigAllocateSection { name config -- section ok }
 		return
 	end
 
+	config@ section@ DLLConfigSection_Config + !
+
 	if (name@)
 		section@ DLLConfigSection_Name + // dest
 		name@ // src
@@ -811,13 +785,14 @@ fn DLLConfigAllocateSection { name config -- section ok }
 	end
 end
 
-fn DLLConfigAllocateKey { name value section -- ok }
-	auto key
+fn DLLConfigAllocateKey { name value section -- key ok }
 	DLLConfigKey_SIZEOF OSHeapAllocate ok! key!
 
 	if (ok@)
 		return
 	end
+
+	section@ key@ DLLConfigKey_Section + !
 
 	key@ DLLConfigKey_Name + // dest
 	name@ // src

@@ -2,12 +2,15 @@ extern OSConfigFileLoad { path create -- config ok }
 extern OSConfigFileWrite { config -- ok }
 extern OSConfigFileFree { config -- }
 
-extern OSConfigGetKey { keyname sectionname config -- valueptr ok }
-extern OSConfigSetKey { valueptr keyname sectionname config -- ok }
-extern OSConfigDeleteKey { keyname sectionname config -- ok }
+extern OSConfigGetKey { keyname section -- key ok }
+extern OSConfigGetKeyValue { key -- valueptr }
+extern OSConfigSetKey { valueptr key -- ok }
+extern OSConfigCreateKey { valueptr keyname section -- key ok }
+extern OSConfigDeleteKey { key -- }
 
-extern OSConfigCreateSection { sectionname config -- ok }
-extern OSConfigDeleteSection { sectionname config -- ok }
+extern OSConfigGetSection { sectionname config -- section ok }
+extern OSConfigCreateSection { sectionname config -- section ok }
+extern OSConfigDeleteSection { section -- }
 
 extern OSConfigGetKeyIterator { sectionname config -- iterator ok }
 extern OSConfigGetSectionIterator { config -- iterator ok }

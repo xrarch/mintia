@@ -21,6 +21,7 @@ all:
 	make -C ver
 	make -C kill
 	make -C killall
+	make -C cp
 
 cleanup:
 	make -C Cmd cleanup
@@ -45,3 +46,4 @@ cleanup:
 	make -C ver cleanup
 	make -C kill cleanup
 	make -C killall cleanup
+	make -C cp cleanup

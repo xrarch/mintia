@@ -22,3 +22,4 @@ pwd.exe pwd.exe 493
 ver.exe ver.exe 493
 kill.exe kill.exe 493
 killall.exe killall.exe 493
+cp.exe cp.exe 493

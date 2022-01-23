@@ -1,0 +1,325 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+var RecursiveFlag 0
+
+fn Usage { -- }
+	"usage: cp [-r] source target\n" OSGetStdErr FPrintf
+end
+
+buffer FileInformation OSFileInformation_SIZEOF
+buffer ObjectQuery OSObjectQuery_SIZEOF
+
+fn Main { ... -- ret }
+	0 ret!
+
+	if (argc@ 3 < argc@ 4 > ||)
+		Usage
+		-1 OSExit
+	end
+
+	auto i
+	1 i!
+
+	if (argc@ 4 ==)
+		if ([1]argv@ gb '-' ==)
+			auto fl
+			[1]argv@ 1 + fl!
+
+			while (fl@ gb)
+				if (fl@ gb 'r' ==)
+					1 RecursiveFlag!
+				end else
+					Usage
+					-1 OSExit
+				end
+
+				1 fl +=
+			end
+
+			2 i!
+		end else
+			Usage
+			-1 OSExit
+		end
+	end
+
+	auto srchandle
+	0 // flags
+	ACCESS_READ // access
+	[i@]argv@ // path
+	0 // ftype
+	OSFileOpen ret! srchandle!
+
+	if (ret@)
+		ret@ OSStatusGetName [i@]argv@ "cp: %s: %s\n" OSError
+	end
+
+	srchandle@ // handle
+	ObjectQuery // query
+	OSQuery ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "cp: couldn't query object: %s\n" OSError
+	end
+
+	auto desthandle
+	0 // flags
+	0 // access
+	[i@ 1 +]argv@ // path
+	0 // ftype
+	OSFileOpen ret! desthandle!
+
+	auto destpath
+	OSFILEPATHMAX alloc destpath!
+
+	destpath@ // dest
+	[i@ 1 +]argv@ // src
+	strcpy
+
+	if (ret@ ~~)
+		desthandle@ // filehandle
+		FileInformation // query
+		OSFileQuery ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "cp: couldn't query: %s\n" OSError
+		end
+
+		desthandle@ OSClose drop
+
+		if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
+			// turns out the destination is a directory. we really want to copy
+			// the file INTO the directory.
+
+			auto dlen
+			destpath@ strlen dlen!
+
+			if (destpath@ dlen@ + 1 - gb '/' ~=)
+				'/' destpath@ dlen@ + sb
+				1 dlen +=
+			end
+
+			destpath@ dlen@ + // dest
+			[i@]argv@ OSLastComponent // src
+			strcpy
+		end
+	end
+
+	srchandle@ // filehandle
+	FileInformation // query
+	OSFileQuery ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "cp: couldn't query: %s\n" OSError
+	end
+
+	if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
+		if (RecursiveFlag@ ~~)
+			STATUS_IS_A_DIRECTORY OSStatusGetName [i@]argv@ "cp: %s: %s\n" OSError
+		end
+
+		OSDEFAULTDIRPERMISSIONS // permissions
+		0 // flags
+		ACCESS_WRITE ACCESS_EXEC | // access
+		destpath@ // path
+		OSDirectoryCreate ret! desthandle!
+
+		if (ret@)
+			ret@ OSStatusGetName destpath@ "cp: couldn't create %s: %s\n" OSError
+		end
+
+		srchandle@ // source
+		desthandle@ // target
+		[i@]argv@ // srcname
+		destpath@ // destname
+		CopyDirectory
+	end else
+		ObjectQuery OSObjectQuery_Permissions + @ // permissions
+		0 // flags
+		ACCESS_WRITE // access
+		destpath@ // path
+		OSFileCreate ret! desthandle!
+
+		if (ret@)
+			ret@ OSStatusGetName destpath@ "cp: couldn't create %s: %s\n" OSError
+		end
+
+		srchandle@ // source
+		desthandle@ // target
+		[i@]argv@ // srcname
+		destpath@ // destname
+		CopyFile
+	end
+end
+
+fn CopyDirectory { srchandle desthandle srcname destname -- }
+	// copy the contents of the directory represented by srchandle to the
+	// directory represented by desthandle.
+
+	auto dirent
+	OSDirectoryEntry_SIZEOF alloc dirent!
+
+	auto dfpath
+	OSFILEPATHMAX alloc dfpath!
+
+	while (1)
+		auto ok
+		dirent@ // dirent
+		srchandle@ // filehandle
+		OSDirectoryRead ok!
+
+		if (ok@ STATUS_END_OF_FILE ==)
+			break
+		end elseif (ok@)
+			ok@ OSStatusGetName srcname@ "cp: couldn't read %s: %s\n" OSError
+		end
+
+		auto fname
+		dirent@ OSDirectoryEntry_Name + fname!
+
+		auto shandle
+		0 // flags
+		ACCESS_READ // access
+		srchandle@ // initialobjecthandle
+		fname@ // path
+		OSObjectOpen ok! shandle!
+
+		if (ok@)
+			ok@ OSStatusGetName fname@ "cp: %s: %s\n" OSError
+		end
+
+		shandle@ // filehandle
+		FileInformation // query
+		OSFileQuery ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "cp: couldn't query: %s\n" OSError
+		end
+
+		shandle@ // handle
+		ObjectQuery // query
+		OSQuery ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "cp: couldn't query object: %s\n" OSError
+		end
+
+		dfpath@ // dest
+		destname@ // src
+		strcpy
+
+		auto dlen
+		dfpath@ strlen dlen!
+
+		if (dfpath@ dlen@ + 1 - gb '/' ~=)
+			'/' dfpath@ dlen@ + sb
+			1 dlen +=
+		end
+
+		dfpath@ dlen@ + // dest
+		fname@ // src
+		strcpy
+
+		auto dfhandle
+
+		if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
+			OSDEFAULTDIRPERMISSIONS // permissions
+			0 // flags
+			ACCESS_WRITE ACCESS_EXEC | // access
+			dfpath@ // path
+			OSDirectoryCreate ok! dfhandle!
+
+			if (ok@)
+				ok@ OSStatusGetName dfpath@ "cp: couldn't create %s: %s\n" OSError
+			end
+
+			shandle@ // source
+			dfhandle@ // target
+			fname@ // srcname
+			dfpath@ // destname
+			CopyDirectory
+
+			dfhandle@ OSClose drop
+		end else
+			ObjectQuery OSObjectQuery_Permissions + @ // permissions
+			0 // flags
+			ACCESS_WRITE // access
+			dfpath@ // path
+			OSFileCreate ok! dfhandle!
+
+			if (ok@)
+				ok@ OSStatusGetName dfpath@ "cp: couldn't create %s: %s\n" OSError
+			end
+
+			shandle@ // source
+			dfhandle@ // target
+			fname@ // srcname
+			dfpath@ // destname
+			CopyFile
+
+			dfhandle@ OSClose drop
+		end
+
+		shandle@ OSClose drop
+	end
+end
+
+const CATUNIT 16384
+buffer CatBuffer CATUNIT
+
+fn CopyFile { srchandle desthandle srcname destname -- }
+	auto bytes
+	auto ok
+
+	0 // newsize
+	0 // growing
+	desthandle@ // handle
+	OSFileTruncate ok! drop
+
+	if (ok@)
+		ok@ OSStatusGetName destname@ "cp: couldn't truncate %s: %s\n" OSError
+	end
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	CATUNIT // length
+	CatBuffer // buffer
+	srchandle@ // filehandle
+	OSFileRead ok! bytes!
+
+	if (ok@)
+		ok@ OSStatusGetName srcname@ "cp: couldn't read %s: %s\n" OSGetStdErr FPrintf
+		return
+	end
+
+	while (bytes@)
+		auto byteswritten
+		0 // flags
+		bytes@ // length
+		CatBuffer // buffer
+		desthandle@ // filehandle
+		OSFileWrite ok! byteswritten!
+
+		if (ok@)
+			ok@ OSStatusGetName destname@ "cp: couldn't write %s: %s\n" OSError
+		end
+
+		byteswritten@ bytes -=
+
+		if (bytes@ ~~)
+			OSWAIT_TIMEOUTINFINITE // timeout
+			0 // flags
+			CATUNIT // length
+			CatBuffer // buffer
+			srchandle@ // filehandle
+			OSFileRead ok! bytes!
+
+			if (ok@)
+				ok@ OSStatusGetName srcname@ "cp: couldn't read %s: %s\n" OSGetStdErr FPrintf
+				return
+			end
+		end
+	end
+end

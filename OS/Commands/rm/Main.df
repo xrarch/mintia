@@ -2,11 +2,38 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+var RecursiveFlag 0
+var FFlag 0
+
+fn Usage { -- }
+	"usage: rm [-fr] file\n" Printf
+end
+
 fn Main { ... -- ret }
 	0 ret!
 
 	auto i
 	1 i!
+
+	if ([1]argv@ gb '-' ==)
+		auto fl
+		[1]argv@ 1 + fl!
+
+		while (fl@ gb)
+			if (fl@ gb 'r' ==)
+				1 RecursiveFlag!
+			end elseif (fl@ gb 'f' ==)
+				1 FFlag!
+			end else
+				Usage
+				-1 OSExit
+			end
+
+			1 fl +=
+		end
+
+		2 i!
+	end
 
 	while (i@ argc@ <)
 		[i@]argv@ Rm
@@ -16,10 +43,25 @@ fn Main { ... -- ret }
 end
 
 fn Rm { path -- }
+	auto ok
+
+	if (RecursiveFlag@)
+		auto dhandle
+		0 // flags
+		ACCESS_READ ACCESS_WRITE | ACCESS_EXEC | // access
+		path@  // path
+		OSFILETYPE_DIRECTORY // ftype
+		OSFileOpen ok! dhandle!
+
+		if (ok@ ~~)
+			dhandle@ path@ RmRecursive
+
+			dhandle@ OSClose drop
+		end
+	end
+
 	auto dirname
 	OSFILEPATHMAX alloc dirname!
-
-	auto ok
 
 	path@ // path
 	dirname@ // dirname
@@ -33,7 +75,7 @@ fn Rm { path -- }
 	auto dirhandle
 	0 // flags
 	ACCESS_WRITE ACCESS_EXEC | // access
-	dirname@ // dirname
+	dirname@ // path
 	0 // ftype
 	OSFileOpen ok! dirhandle!
 
@@ -70,4 +112,78 @@ fn Rm { path -- }
 	end
 
 	dirhandle@ OSClose drop
+end
+
+buffer FileInformation OSFileInformation_SIZEOF
+
+fn RmRecursive { handle name -- }
+	auto dirent
+	OSDirectoryEntry_SIZEOF alloc dirent!
+
+	while (1)
+		auto ok
+		dirent@ // dirent
+		handle@ // filehandle
+		OSDirectoryRead ok!
+
+		if (ok@ STATUS_END_OF_FILE ==)
+			break
+		end elseif (ok@)
+			ok@ OSStatusGetName name@ "rm: couldn't read %s: %s\n" OSError
+		end
+
+		auto fname
+		dirent@ OSDirectoryEntry_Name + fname!
+
+		auto dhandle
+		0 // flags
+		0 // access
+		handle@ // initialobjecthandle
+		fname@ // path
+		OSObjectOpen ok! dhandle!
+
+		if (ok@)
+			ok@ OSStatusGetName fname@ "rm: %s: %s\n" OSError
+		end
+
+		dhandle@ // filehandle
+		FileInformation // query
+		OSFileQuery ok!
+
+		if (ok@)
+			ok@ OSStatusGetName fname@ "rm: %s: %s\n" OSError
+		end
+
+		if (FileInformation OSFileInformation_Type + @ OSFILETYPE_DIRECTORY ==)
+			dhandle@ OSClose drop
+
+			// reopen with RWX to allow reading and deleting entries
+
+			0 // flags
+			ACCESS_READ ACCESS_WRITE | ACCESS_EXEC | // access
+			handle@ // initialobjecthandle
+			fname@ // path
+			OSObjectOpen ok! dhandle!
+
+			if (ok@)
+				ok@ OSStatusGetName fname@ "rm: %s: %s\n" OSError
+			end
+
+			dhandle@ fname@ RmRecursive
+		end
+
+		dhandle@ OSClose drop
+
+		fname@ // name
+		handle@ // filehandle
+		OSDirectoryUnlink ok!
+
+		if (ok@)
+			ok@ OSStatusGetName fname@ "rm: %s: %s\n" OSGetStdErr FPrintf
+
+			if (FFlag@ ~~)
+				-1 OSExit
+			end
+		end
+	end
 end

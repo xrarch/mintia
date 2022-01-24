@@ -1,0 +1,1 @@
+extern OSSimpleCrypt { str salt hash -- }

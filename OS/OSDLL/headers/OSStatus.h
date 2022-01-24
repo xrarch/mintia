@@ -62,5 +62,6 @@ const STATUS_FAULT_WHILE_STARTING  -60
 const STATUS_CROSS_VOLUME          -61
 const STATUS_NOT_A_SIGNAL          -62
 const STATUS_INVALID_CONFIG_FILE   -63
+const STATUS_NO_SUCH_GROUP         -64
 
 extern OSStatusGetName { status -- name }

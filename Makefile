@@ -38,6 +38,11 @@ sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	$(FSTOOL) u /mintia/BootResources.txt $(OS_DIR)/BootResources.txt
 	$(FSTOOL) u /mintia/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
 	$(FSTOOL) u /mintia/SystemInit.cfg $(OS_DIR)/SystemInit.cfg
+	$(FSTOOL) u /mintia/users.cfg $(OS_DIR)/users.cfg
+	$(FSTOOL) u /mintia/groups.cfg $(OS_DIR)/groups.cfg
+
+	$(FSTOOL) u /mintia/login.cfg $(OS_DIR)/login.cfg
+	$(FSTOOL) chmod /mintia/login.cfg 416
 
 	make -C $(KERN_DIR)
 	make -C $(DBG_DIR)

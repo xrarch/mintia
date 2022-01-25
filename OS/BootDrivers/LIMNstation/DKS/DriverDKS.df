@@ -115,6 +115,33 @@ buffer DKSDPC KeDPC_SIZEOF
 
 externptr HALLIMNstationDKSBuffer
 
+fn private CreateDisk { name blocks type id offset -- dev }
+	auto sizeinbytes
+	blocks@ 512 * sizeinbytes!
+
+	auto ok
+	name@ // name
+	sizeinbytes@ // sizeinbytes
+	DriverDKS // driver
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
+	end
+
+	512 dev@ IODeviceSetBlockSize
+
+	auto disk
+	dev@ IODeviceGetExtension disk!
+
+	type@ disk@ Disk_Type + !
+	id@ disk@ Disk_DKSID + !
+	offset@ disk@ Disk_BlockOffset + !
+	blocks@ disk@ Disk_Blocks + !
+	512 disk@ Disk_BlockSize + !
+end
+
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
 		pointerof DriverDKSDPCFunction // function
@@ -141,7 +168,6 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		DKSCMDINTR DKSPORTCMD HALLIMNstationCitronCommand
 
 		auto dev
-		auto disk
 
 		while (diskid@ DKSMAXDISKID <=)
 			auto present
@@ -169,29 +195,14 @@ fn (FDriverInit) DriverInit { stage -- ok }
 					blocks@ 512 * sizeinbytes!
 
 					namebuf@ // name
-					sizeinbytes@ // sizeinbytes
-					DriverDKS // driver
-					ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-					IODeviceCreate ok! dev!
-
-					if (ok@)
-						ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
-					end
-
-					512 dev@ IODeviceSetBlockSize
-
-					dev@ IODeviceGetExtension disk!
-
-					DKS_REALDISK disk@ Disk_Type + !
-					diskid@ disk@ Disk_DKSID + !
-					0 disk@ Disk_BlockOffset + !
-					blocks@ disk@ Disk_Blocks + !
-					512 disk@ Disk_BlockSize + !
+					blocks@ // blocks
+					DKS_REALDISK // type
+					diskid@ // id
+					0 // offset
+					CreateDisk dev!
 
 					auto partitiontable
-
-					dev@ // devobject
-					IOPartitionTableRead ok! partitiontable!
+					dev@ IOPartitionTableRead ok! partitiontable!
 
 					if (ok@ 0 ==)
 						auto pcount
@@ -211,27 +222,12 @@ fn (FDriverInit) DriverInit { stage -- ok }
 
 							pte@ IOPartitionEntry_SizeInBlocks + @ blocks!
 
-							blocks@ 512 * sizeinbytes!
-
 							namebuf@ // name
-							sizeinbytes@ // sizeinbytes
-							DriverDKS // driver
-							ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-							IODeviceCreate ok! dev!
-
-							if (ok@)
-								ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
-							end
-
-							512 dev@ IODeviceSetBlockSize
-
-							dev@ IODeviceGetExtension disk!
-
-							DKS_PARTITION disk@ Disk_Type + !
-							diskid@ disk@ Disk_DKSID + !
-							pte@ IOPartitionEntry_BlockOffset + @ disk@ Disk_BlockOffset + !
-							blocks@ disk@ Disk_Blocks + !
-							512 disk@ Disk_BlockSize + !
+							blocks@ // blocks
+							DKS_PARTITION // type
+							diskid@ // id
+							pte@ IOPartitionEntry_BlockOffset + @ // offset
+							CreateDisk dev!
 
 							IOPartitionEntry_SIZEOF pte +=
 							1 pcount -=

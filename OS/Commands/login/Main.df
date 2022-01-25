@@ -2,22 +2,321 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "<ll>/OSDLL/OSConsoleControl.h"
+
+#include "<ll>/OSDLL/OSCrypt.h"
+
+var UserInfo 0
+
+var PasswordConfig 0
+
+buffer MemoryInformation OSMemoryInformation_SIZEOF
+
+fn GetPasswordForUser { username -- password ok }
+	auto iterator
+	PasswordConfig@ OSConfigGetSectionIterator ok! iterator!
+
+	while (iterator@)
+		auto userptr
+		iterator@ // iterator
+		PasswordConfig@ // config
+		OSConfigNextSection ok! iterator! userptr!
+
+		if (ok@)
+			return
+		end
+
+		if (userptr@ OSConfigGetSectionName username@ strcmp)
+			"password" // keyname
+			userptr@ // section
+			OSConfigGetKey ok! password!
+
+			if (ok@)
+				return
+			end
+
+			password@ OSConfigGetKeyValue password!
+
+			if (password@ ~~)
+				-1 ok!
+				return
+			end
+
+			return
+		end
+	end
+
+	STATUS_NO_SUCH_USER ok!
+end
+
+buffer UsernameBuffer 128
+buffer PasswordBuffer 128
+
+fn Login { -- user loggedin }
+	0 loggedin!
+
+	"username: " Printf
+
+	if (UsernameBuffer 127 OSReadline)
+		'\n' Putc
+		return
+	end
+
+	auto buf
+	UsernameBuffer buf!
+
+	while (buf@ gb ' ' ==)
+		1 buf +=
+	end
+
+	if (buf@ strlen 0 ==)
+		return
+	end
+
+	OSCONSOLEMODE_NOECHO // arg2
+	OSCONSOLEIOCONTROL_SETMODE // arg1
+	OSGetStdIn // filehandle
+	OSIOControl drop drop
+
+	"password: " Printf
+	PasswordBuffer 127 Gets
+
+	0 // arg2
+	OSCONSOLEIOCONTROL_RESETMODE // arg1
+	OSGetStdIn // filehandle
+	OSIOControl drop drop
+
+	'\n' Putc
+
+	auto ok
+	UsernameBuffer // username
+	UserInfo@ // userinfo
+	OSUserInfoUserGetByName ok! user!
+
+	if (ok@)
+		if (ok@ STATUS_NO_SUCH_USER ==)
+			"Incorrect login\n" Printf
+		end else
+			"Badly formatted user record -- contact your system administrator\n" Printf
+		end
+
+		return
+	end
+
+	auto password
+	UsernameBuffer // username
+	GetPasswordForUser ok! password!
+
+	if (ok@)
+		"Badly formatted login record -- contact your system administrator\n" Printf
+		return
+	end
+
+	if (password@ "none" strcmp)
+		"Incorrect login\n" Printf
+		return
+	end elseif (password@ "any" strcmp)
+		1 loggedin!
+		return
+	end
+
+	auto hash
+	16 alloc hash!
+
+	PasswordBuffer // string
+	password@ gi // salt
+	hash@ // hash
+	OSSimpleCrypt
+
+	if (hash@ password@ strcmp)
+		1 loggedin!
+	end else
+		"Incorrect login\n" Printf
+	end
+end
+
+buffer FileBuf 128
+
+fn PrintFile { path -- ok }
+	auto handle
+	0 // flags
+	ACCESS_READ // access
+	path@ // path
+	OSFILETYPE_FILE // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@)
+		0 ok!
+		return
+	end
+
+	auto bytes
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	128 // length
+	FileBuf // buffer
+	handle@ // handle
+	OSFileRead ok! bytes!
+
+	if (ok@)
+		return
+	end
+
+	auto r
+
+	while (bytes@)
+		0 // flags
+		bytes@ // length
+		FileBuf // buffer
+		OSGetStdOut // filehandle
+		OSFileWrite drop drop
+
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		128 // length
+		FileBuf // buffer
+		handle@ // filehandle
+		OSFileRead ok! bytes!
+
+		if (ok@)
+			return
+		end
+	end
+end
+
 fn Main { ... -- ret }
 	0 ret!
+
+	OSUserInfoOpen ret! UserInfo!
+
+	if (ret@)
+		ret@ OSStatusGetName "login: couldn't open userinfo: %s\n" OSError
+	end
+
+	"/mintia/login.cfg" // path
+	0 // create
+	0 // write
+	OSConfigFileLoad ret! PasswordConfig!
+
+	if (ret@)
+		ret@ OSStatusGetName "login: couldn't open login.cfg: %s\n" OSError
+	end
+
+	"\n" Printf
+
+	auto uid
+	auto gid
+
+	auto home
+	auto shell
+
+	while (1)
+		auto loggedin
+		auto user
+		Login loggedin! user!
+
+		if (loggedin@)
+			"uid" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! uid!
+
+			if (ret@ uid@ ~~ ||)
+				"no uid -- contact your system administrator\n" Printf
+				continue
+			end
+
+			uid@ atoi uid!
+
+			"gid" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! gid!
+
+			if (ret@ gid@ ~~ ||)
+				"no gid -- contact your system administrator\n" Printf
+				continue
+			end
+
+			gid@ atoi gid!
+
+			"home" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! home!
+
+			if (ret@ home@ ~~ ||)
+				"no home -- contact your system administrator\n" Printf
+				continue
+			end
+
+			"shell" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! shell!
+
+			if (ret@ shell@ ~~ ||)
+				"no shell -- contact your system administrator\n" Printf
+				continue
+			end
+
+			break
+		end
+	end
+
+	UserInfo@ OSUserInfoClose
+	PasswordConfig@ OSConfigFileFree
+
+	"/mintia/motd.txt" PrintFile ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "couldn't read motd: %s\n" Printf
+	end
+
+	MemoryInformation OSMemoryQuery ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "couldn't query system memory usage: %s\n" Printf
+	end else
+		MemoryInformation OSMemoryInformationDump
+	end
+
+	'\n' Putc
+
+	// give the console to the new user
+
+	uid@ // uid
+	-1 // gid
+	-1 // permissions
+	OSGetStdIn // handle
+	OSSetSecurity drop
+
+	// change to the users home directory
+
+	home@ OSChangeCWD ret!
+
+	if (ret@)
+		ret@ OSStatusGetName home@ "couldn't cd %s: %s\n" Printf
+	end
 
 	auto phandle
 	auto thandle
 
-	"/mintia/bin/cmd.exe" // path
-	0 // creationflags
+	shell@ // path
+	OSPROCESS_SUSPENDED // creationflags
 	0 // creationparams
 	ACCESS_OWNER_ALL // permissions
-	"cmd.exe" // name
+	shell@ OSLastComponent // name
 	OSSpawn ret! phandle! thandle!
 
 	if (ret@)
 		return
 	end
+
+	uid@ // uid
+	gid@ // gid
+	-1 // permissions
+	phandle@ // handle
+	OSSetSecurity drop
+
+	thandle@ OSThreadResume drop
 
 	thandle@ OSClose drop
 
@@ -25,6 +324,13 @@ fn Main { ... -- ret }
 	OSWAIT_TIMEOUTINFINITE // timeout
 	phandle@ // objecthandle
 	OSWaitForObject ret!
+
+	if (ret@)
+		return
+	end
+
+	phandle@ // processhandle
+	OSProcessReadStatus drop ret!
 
 	phandle@ OSClose drop
 

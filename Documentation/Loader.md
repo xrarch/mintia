@@ -34,3 +34,4 @@ Where there's a filename, it will interpret it as a path relative to the `/minti
 | DBG=[filename] | Debugger     | Specifies a kernel mode debugger to load. |
 | -relink        | Force Relink | Forces Loader to relink all modules, even if they were successfully loaded at their preferred address. This can help diagnose strange boot DLL version issues. |
 | BOOT=[dev]     | Boot Device  | Explicitly specifies the name of the boot device. Default is determined by the bootloader. |
+| -s             | Single User Mode | Causes SystemInit.exe to boot into single user mode. |

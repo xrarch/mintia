@@ -44,6 +44,12 @@ sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	$(FSTOOL) u /mintia/login.cfg $(OS_DIR)/login.cfg
 	$(FSTOOL) chmod /mintia/login.cfg 416
 
+	$(FSTOOL) u /mintia/motd.txt $(OS_DIR)/motd.txt
+
+	$(FSTOOL) u /home/guest/README $(OS_DIR)/README
+	$(FSTOOL) chown /home/guest 100
+	$(FSTOOL) chown /home/guest/README 100
+
 	make -C $(KERN_DIR)
 	make -C $(DBG_DIR)
 	make -C $(DRIVER_DIR)

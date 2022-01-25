@@ -20,6 +20,9 @@ struct CoConsole
 	4 Context
 
 	4 ProcessListHead
+
+	4 Width
+	4 Height
 endstruct
 
 externptr CoDispatch

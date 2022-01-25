@@ -25,6 +25,7 @@ all:
 	make -C shutdown
 	make -C reboot
 	make -C crypt
+	make -C whoami
 
 	make -C launchtty
 	make -C login
@@ -56,6 +57,7 @@ cleanup:
 	make -C shutdown cleanup
 	make -C reboot cleanup
 	make -C crypt cleanup
+	make -C whoami cleanup
 
 	make -C launchtty cleanup
 	make -C login cleanup

@@ -26,3 +26,4 @@ cp.exe cp.exe 493
 shutdown.exe shutdown.exe 493
 reboot.exe reboot.exe 493
 crypt.exe crypt.exe 493
+whoami.exe whoami.exe 493

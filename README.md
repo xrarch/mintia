@@ -9,6 +9,27 @@ relegated to proof-of-concept status.
 
 WIP: MINTIA is not currently in an even minimally usable state.
 
+## Building
+
+As with all LIMNstation projects, the [sdk](http://github.com/limnarch/sdk) should be in a directory `../sdk` relative to this repository.
+
+Running `make` in this repository should then place an MINTIA distribution image at `build/mintia-dist.img`. Windows users should use WSL as Cygwin seems to have problems with the SDK.
+
+## Testing
+
+With the LIMNstation emulator (`./limnemu/`) and MINTIA repository (`./mintia/`) in your current directory, run this command:
+
+`./limnemu/graphical.sh -dks ./mintia/build/mintia-dist.img`
+
+If it doesn't boot automatically, type this command at the firmware prompt:
+
+`boot /disks/0/a`
+
+MINTIA should boot to the `username:` prompt.
+
+Logging in as `guest` works with any password, and the default password for `root` is `mintia`.
+
+
 ## Implemented features
 
 1. Dynamically-linked kernel modules.

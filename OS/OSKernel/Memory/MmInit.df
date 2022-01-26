@@ -271,8 +271,8 @@ fn MmResourceJettison { -- }
 	HALResourceListHead@ rsrc!
 
 	auto sz
-
 	auto start
+	auto ok
 
 	auto rs
 
@@ -299,9 +299,11 @@ fn MmResourceJettison { -- }
 		rsrc@ BootResource_Next + @ rsrc!
 	end
 
+	auto dll
+	HALLoaderInfo@ LoaderInfo_DLLListHead + @ dll!
+
 	if (HALResourceKeepHeaders@ ~~)
-		auto dll
-		HALLoaderInfo@ LoaderInfo_DLLListHead + @ dll!
+		// free all the DLL information
 
 		while (dll@)
 			dll@ DLL_LOFF + LOFFLoaded_HeaderSize + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
@@ -320,6 +322,72 @@ fn MmResourceJettison { -- }
 			end
 
 			dll@ DLL_Next + @ dll!
+		end
+	end else
+		// rebuild the DLL list on our own heap so we can reclaim the firmware
+
+		auto newlisthead
+		0 newlisthead!
+
+		auto prevdll
+
+		while (dll@)
+			auto newdll
+
+			DLL_SIZEOF // bytes
+			'nDLL' // tag
+			MmAllocWithTag ok! newdll!
+
+			if (ok@)
+				"MmResourceJettison: couldn't relocate DLL list. try unloading the debugger.\n" KeCrash
+			end
+
+			if (newlisthead@ ~~)
+				newdll@ newlisthead!
+			end else
+				newdll@ prevdll@ DLL_Next + !
+			end
+
+			newdll@ prevdll!
+
+			newdll@ // dest
+			dll@ // src
+			DLL_SIZEOF // size
+			memcpy
+
+			0 newdll@ DLL_Next + !
+
+			dll@ DLL_Next + @ dll!
+		end
+
+		newlisthead@ HALLoaderInfo@ LoaderInfo_DLLListHead + !
+	end
+
+	0 HALResourceListHead!
+
+	// reclaim bootloader and firmware
+
+	// XXX this is LIMNstation specific and will be replaced by a
+	// platform-independent memory map in the future.
+
+	HALLoaderInfo@ LoaderInfo_TopOfReclaimable + @ PAGESHIFT >> sz!
+	
+	if (sz@)
+		1 start!
+		1 sz -=
+
+		sz@ "%d\n" Printf
+
+		while (sz@)
+			start@ MmPageFree
+
+			HALCPUInterruptDisable rs!
+			// the page is now un-wired
+			1 MmPageTotal +=
+			rs@ HALCPUInterruptRestore
+
+			1 start +=
+			1 sz -=
 		end
 	end
 end

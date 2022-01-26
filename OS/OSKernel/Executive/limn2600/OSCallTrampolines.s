@@ -54,6 +54,7 @@
 .extern OSRemapView
 .extern OSSetSwappiness
 .extern OSMemoryQuery
+.extern OSWorkingSetPurge
 .extern OSProcessCreate
 .extern OSProcessSignal
 .extern OSProcessOpenByPID
@@ -78,11 +79,12 @@
 .extern OSThreadReadStatus
 .extern OSThreadQuery
 .extern OSSetSystemConsole
+.extern OSConsoleSignal
 .extern OSAmIAdmin
 
 OSCallCount:
 .global OSCallCount
-	.dl 77
+	.dl 79
 
 OSCallTable:
 .global OSCallTable
@@ -139,31 +141,33 @@ OSCallTable:
 	.dl OSTOSRemapView                                   ;50
 	.dl OSTOSSetSwappiness                               ;51
 	.dl OSTOSMemoryQuery                                 ;52
-	.dl OSTOSProcessCreate                               ;53
-	.dl OSTOSProcessSignal                               ;54
-	.dl OSTOSProcessOpenByPID                            ;55
-	.dl OSTOSProcessQuery                                ;56
-	.dl OSTOSProcessQueryByPID                           ;57
-	.dl OSTOSProcessReadStatus                           ;58
-	.dl OSTOSProcessMaskSignal                           ;59
-	.dl OSTOSProcessUnmaskSignal                         ;60
-	.dl OSTOSProcessSetConsoleGroup                      ;61
-	.dl OSTOSProcessClearConsoleGroup                    ;62
-	.dl OSTOSProcessSignalActivation                     ;63
-	.dl OSTOSProcessWaitForActivation                    ;64
-	.dl OSTOSProcessExit                                 ;65
-	.dl OSTOSProcessCountQuery                           ;66
-	.dl OSTOSProcessQueryAll                             ;67
-	.dl OSTOSThreadException                             ;68
-	.dl OSTOSThreadSetFilePermissions                    ;69
-	.dl OSTOSThreadSleep                                 ;70
-	.dl OSTOSThreadCreate                                ;71
-	.dl OSTOSThreadTerminate                             ;72
-	.dl OSTOSThreadResume                                ;73
-	.dl OSTOSThreadReadStatus                            ;74
-	.dl OSTOSThreadQuery                                 ;75
-	.dl OSTOSSetSystemConsole                            ;76
-	.dl OSTOSAmIAdmin                                    ;77
+	.dl OSTOSWorkingSetPurge                             ;53
+	.dl OSTOSProcessCreate                               ;54
+	.dl OSTOSProcessSignal                               ;55
+	.dl OSTOSProcessOpenByPID                            ;56
+	.dl OSTOSProcessQuery                                ;57
+	.dl OSTOSProcessQueryByPID                           ;58
+	.dl OSTOSProcessReadStatus                           ;59
+	.dl OSTOSProcessMaskSignal                           ;60
+	.dl OSTOSProcessUnmaskSignal                         ;61
+	.dl OSTOSProcessSetConsoleGroup                      ;62
+	.dl OSTOSProcessClearConsoleGroup                    ;63
+	.dl OSTOSProcessSignalActivation                     ;64
+	.dl OSTOSProcessWaitForActivation                    ;65
+	.dl OSTOSProcessExit                                 ;66
+	.dl OSTOSProcessCountQuery                           ;67
+	.dl OSTOSProcessQueryAll                             ;68
+	.dl OSTOSThreadException                             ;69
+	.dl OSTOSThreadSetFilePermissions                    ;70
+	.dl OSTOSThreadSleep                                 ;71
+	.dl OSTOSThreadCreate                                ;72
+	.dl OSTOSThreadTerminate                             ;73
+	.dl OSTOSThreadResume                                ;74
+	.dl OSTOSThreadReadStatus                            ;75
+	.dl OSTOSThreadQuery                                 ;76
+	.dl OSTOSSetSystemConsole                            ;77
+	.dl OSTOSConsoleSignal                               ;78
+	.dl OSTOSAmIAdmin                                    ;79
 
 
 OSTOSConsolePutCharacter:
@@ -990,6 +994,19 @@ OSTOSMemoryQuery:
 	addi sp, sp, 4
 	ret
 
+OSTOSWorkingSetPurge:
+.global OSTOSWorkingSetPurge
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSWorkingSetPurge
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
 OSTOSProcessCreate:
 .global OSTOSProcessCreate
 	subi sp, sp, 4
@@ -1348,6 +1365,21 @@ OSTOSSetSystemConsole:
 	mov  a0, long [s18 + 4] ;t1
 
 	jal  OSSetSystemConsole
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSConsoleSignal:
+.global OSTOSConsoleSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSConsoleSignal
 
 	mov  long [s18 + 4], a0 ;t1
 

@@ -57,6 +57,9 @@ fn Login { -- user loggedin }
 
 	"username: " Printf
 
+	// obliterate my own working set since I will be sleeping indefinitely
+	OSWorkingSetPurge drop
+
 	if (UsernameBuffer 127 OSReadline)
 		'\n' Putc
 		return
@@ -296,6 +299,34 @@ fn Main { ... -- ret }
 		ret@ OSStatusGetName home@ "couldn't cd %s: %s\n" Printf
 	end
 
+	uid@ // uid
+	gid@ // gid
+	shell@ // shell
+	SpawnShell ret!
+
+	if (ret@)
+		ret@ OSStatusGetName shell@ "couldn't spawn %s: %s\n" Printf
+
+		if (shell@ OSLastComponent "cmd.exe" strcmp ~~)
+			"trying cmd.exe\n" Printf
+
+			uid@ // uid
+			gid@ // gid
+			"/mintia/bin/cmd.exe" // shell
+			SpawnShell ret!
+
+			if (ret@)
+				ret@ OSStatusGetName "couldn't spawn cmd.exe: %s\n" Printf
+			end
+		end
+
+		0 ret!
+	end
+
+	return
+end
+
+fn SpawnShell { uid gid shell -- ok }
 	auto phandle
 	auto thandle
 
@@ -304,11 +335,15 @@ fn Main { ... -- ret }
 	0 // creationparams
 	ACCESS_OWNER_ALL // permissions
 	shell@ OSLastComponent // name
-	OSSpawn ret! phandle! thandle!
+	OSSpawn ok! phandle! thandle!
 
-	if (ret@)
+	if (ok@)
 		return
 	end
+
+	OSGetStdIn // filehandle
+	phandle@ // processhandle
+	OSProcessSetConsoleGroup drop
 
 	uid@ // uid
 	gid@ // gid
@@ -320,19 +355,23 @@ fn Main { ... -- ret }
 
 	thandle@ OSClose drop
 
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	phandle@ // objecthandle
-	OSWaitForObject ret!
+	10000 // timeout
+	phandle@ // processhandle
+	OSProcessWaitForActivation drop ok!
 
-	if (ret@)
+	if (ok@)
+		phandle@ OSClose drop
+
 		return
 	end
 
-	phandle@ // processhandle
-	OSProcessReadStatus drop ret!
+	// obliterate my own working set since I will be sleeping indefinitely
+	OSWorkingSetPurge drop
+
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	phandle@ // objecthandle
+	OSWaitForObject drop
 
 	phandle@ OSClose drop
-
-	return
 end

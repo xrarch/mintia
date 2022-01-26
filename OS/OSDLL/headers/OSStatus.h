@@ -63,5 +63,6 @@ const STATUS_CROSS_VOLUME          -61
 const STATUS_NOT_A_SIGNAL          -62
 const STATUS_INVALID_CONFIG_FILE   -63
 const STATUS_NO_SUCH_GROUP         -64
+const STATUS_NOT_A_CONSOLE         -65
 
 extern OSStatusGetName { status -- name }

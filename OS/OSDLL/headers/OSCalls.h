@@ -83,6 +83,8 @@ extern OSSetSwappiness { swappiness -- ok }
 
 extern OSMemoryQuery { query -- ok }
 
+extern OSWorkingSetPurge { -- ok }
+
 // Ps
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 extern OSProcessSignal { signal processhandle -- ok }
@@ -114,6 +116,8 @@ extern OSThreadQuery { threadhandle query -- ok }
 
 // Co
 extern OSSetSystemConsole { filehandle -- ok }
+
+extern OSConsoleSignal { signal filehandle -- ok }
 
 // Se
 extern OSAmIAdmin { -- ok }

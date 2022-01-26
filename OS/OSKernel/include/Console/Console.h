@@ -30,7 +30,7 @@ externptr CoDriver
 
 fnptr CoOutputFunction { echo console -- ok }
 
-extern CoConsoleByFileHandle { permissions filehandle -- consoleobject ok }
+extern CoConsoleByFileHandle { requiredaccess filehandle -- consoleobject ok }
 
 extern CoConsoleOutputBufferGet { console -- outputbuffer }
 extern CoConsoleRawBufferGet { console -- rawbuffer }

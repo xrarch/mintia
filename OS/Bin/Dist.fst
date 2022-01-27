@@ -27,3 +27,4 @@ shutdown.exe shutdown.exe 493
 reboot.exe reboot.exe 493
 crypt.exe crypt.exe 493
 whoami.exe whoami.exe 493
+quota.exe quota.exe 493

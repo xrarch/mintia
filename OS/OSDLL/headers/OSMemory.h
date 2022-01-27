@@ -33,4 +33,29 @@ struct OSMemoryInformation
 	48 Reserved
 endstruct
 
+struct OSQuotaInformation
+	4 HeapUsed
+	4 HeapMaximum
+
+	4 VirtualMemoryUsed
+	4 VirtualMemoryMaximum
+
+	4 WorkingSetUsed
+	4 WorkingSetMaximum
+
+	4 ModifiedPagesUsed
+	4 ModifiedPagesMaximum
+
+	48 Reserved
+endstruct
+
+struct OSQuota
+	4 Heap
+	4 VirtualMemory
+	4 WorkingSet
+	4 ModifiedPages
+
+	48 Reserved
+endstruct
+
 extern OSMemoryInformationDump { query -- }

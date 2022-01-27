@@ -105,6 +105,9 @@ extern OSProcessExit { status -- }
 extern OSProcessCountQuery { -- count ok }
 extern OSProcessQueryAll { buffer maxquery -- count ok }
 
+extern OSSetQuota { quota processhandle -- ok }
+extern OSQuotaQuery { query processhandle -- ok }
+
 extern OSThreadException { signal -- ok }
 extern OSThreadSetFilePermissions { filepermissions -- ok }
 extern OSThreadSleep { ms -- ok }

@@ -32,4 +32,7 @@ extern MmQuotaBlockChargeModifiedPages { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeModifiedPages { charge quotablock -- }
 extern MmQuotaBlockPrint { quotablock -- }
 
+extern MmSetQuota { quota quotablock -- }
+extern MmQuotaQuery { query quotablock -- }
+
 externptr MmQuotaSystem

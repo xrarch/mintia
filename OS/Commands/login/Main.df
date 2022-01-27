@@ -10,6 +10,7 @@ var UserInfo 0
 
 var PasswordConfig 0
 
+buffer Quota OSQuota_SIZEOF
 buffer MemoryInformation OSMemoryInformation_SIZEOF
 
 fn GetPasswordForUser { username -- password ok }
@@ -220,6 +221,13 @@ fn Main { ... -- ret }
 		Login loggedin! user!
 
 		if (loggedin@)
+			MemoryInformation OSMemoryQuery ret!
+
+			if (ret@)
+				ret@ OSStatusGetName "couldn't query system memory usage: %s\n" Printf
+				continue
+			end
+
 			"uid" // property
 			user@ // userptr
 			OSUserInfoUserGetProperty ret! uid!
@@ -260,6 +268,70 @@ fn Main { ... -- ret }
 				continue
 			end
 
+			auto quota
+
+			"heapquota" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! quota!
+
+			if (ret@ quota@ ~~ ||)
+				"no heapquota -- contact your system administrator\n" Printf
+				continue
+			end elseif (quota@ "default" strcmp)
+				// a sixteenth of non-wired RAM with a minimum of 32KB
+
+				MemoryInformation OSMemoryInformation_PageTotalNonWiredCount + @ OSPAGESHIFT << 4 >>
+				32768 max Quota OSQuota_Heap + !
+			end else
+				quota@ atoi Quota OSQuota_Heap + !
+			end
+
+			"vmquota" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! quota!
+
+			if (ret@ quota@ ~~ ||)
+				"no vmquota -- contact your system administrator\n" Printf
+				continue
+			end elseif (quota@ "default" strcmp)
+				// half the size of the swapfile with a minimum of 2MB
+
+				MemoryInformation OSMemoryInformation_SwapPageTotalCount + @ OSPAGESHIFT << 1 >>
+				0x200000 max Quota OSQuota_VirtualMemory + !
+			end else
+				quota@ atoi Quota OSQuota_VirtualMemory + !
+			end
+
+			"wsquota" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! quota!
+
+			if (ret@ quota@ ~~ ||)
+				"no wsquota -- contact your system administrator\n" Printf
+				continue
+			end elseif (quota@ "default" strcmp)
+				// infinite working set
+
+				-1 Quota OSQuota_WorkingSet + !
+			end else
+				quota@ atoi Quota OSQuota_WorkingSet + !
+			end
+
+			"modquota" // property
+			user@ // userptr
+			OSUserInfoUserGetProperty ret! quota!
+
+			if (ret@ quota@ ~~ ||)
+				"no modquota -- contact your system administrator\n" Printf
+				continue
+			end elseif (quota@ "default" strcmp)
+				// 50 modified pages
+
+				50 Quota OSQuota_ModifiedPages + !
+			end else
+				quota@ atoi Quota OSQuota_ModifiedPages + !
+			end
+
 			break
 		end
 	end
@@ -273,13 +345,7 @@ fn Main { ... -- ret }
 		ret@ OSStatusGetName "couldn't read motd: %s\n" Printf
 	end
 
-	MemoryInformation OSMemoryQuery ret!
-
-	if (ret@)
-		ret@ OSStatusGetName "couldn't query system memory usage: %s\n" Printf
-	end else
-		MemoryInformation OSMemoryInformationDump
-	end
+	MemoryInformation OSMemoryInformationDump
 
 	'\n' Putc
 
@@ -331,7 +397,7 @@ fn SpawnShell { uid gid shell -- ok }
 	auto thandle
 
 	shell@ // path
-	OSPROCESS_SUSPENDED // creationflags
+	OSPROCESS_SUSPENDED OSPROCESS_FORKQUOTA | // creationflags
 	0 // creationparams
 	ACCESS_OWNER_ALL // permissions
 	shell@ OSLastComponent // name
@@ -351,13 +417,26 @@ fn SpawnShell { uid gid shell -- ok }
 	phandle@ // handle
 	OSSetSecurity drop
 
+	Quota // quota
+	phandle@ // processhandle
+	OSSetQuota drop
+
 	thandle@ OSThreadResume drop
 
 	thandle@ OSClose drop
 
+	auto actok
 	10000 // timeout
 	phandle@ // processhandle
-	OSProcessWaitForActivation drop ok!
+	OSProcessWaitForActivation actok! ok!
+
+	if (actok@)
+		phandle@ OSClose drop
+
+		actok@ ok!
+
+		return
+	end
 
 	if (ok@)
 		phandle@ OSClose drop

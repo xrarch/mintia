@@ -70,6 +70,8 @@
 .extern OSProcessExit
 .extern OSProcessCountQuery
 .extern OSProcessQueryAll
+.extern OSSetQuota
+.extern OSQuotaQuery
 .extern OSThreadException
 .extern OSThreadSetFilePermissions
 .extern OSThreadSleep
@@ -84,7 +86,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 79
+	.dl 81
 
 OSCallTable:
 .global OSCallTable
@@ -157,17 +159,19 @@ OSCallTable:
 	.dl OSTOSProcessExit                                 ;66
 	.dl OSTOSProcessCountQuery                           ;67
 	.dl OSTOSProcessQueryAll                             ;68
-	.dl OSTOSThreadException                             ;69
-	.dl OSTOSThreadSetFilePermissions                    ;70
-	.dl OSTOSThreadSleep                                 ;71
-	.dl OSTOSThreadCreate                                ;72
-	.dl OSTOSThreadTerminate                             ;73
-	.dl OSTOSThreadResume                                ;74
-	.dl OSTOSThreadReadStatus                            ;75
-	.dl OSTOSThreadQuery                                 ;76
-	.dl OSTOSSetSystemConsole                            ;77
-	.dl OSTOSConsoleSignal                               ;78
-	.dl OSTOSAmIAdmin                                    ;79
+	.dl OSTOSSetQuota                                    ;69
+	.dl OSTOSQuotaQuery                                  ;70
+	.dl OSTOSThreadException                             ;71
+	.dl OSTOSThreadSetFilePermissions                    ;72
+	.dl OSTOSThreadSleep                                 ;73
+	.dl OSTOSThreadCreate                                ;74
+	.dl OSTOSThreadTerminate                             ;75
+	.dl OSTOSThreadResume                                ;76
+	.dl OSTOSThreadReadStatus                            ;77
+	.dl OSTOSThreadQuery                                 ;78
+	.dl OSTOSSetSystemConsole                            ;79
+	.dl OSTOSConsoleSignal                               ;80
+	.dl OSTOSAmIAdmin                                    ;81
 
 
 OSTOSConsolePutCharacter:
@@ -1228,6 +1232,36 @@ OSTOSProcessQueryAll:
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSSetQuota:
+.global OSTOSSetQuota
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSSetQuota
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSQuotaQuery:
+.global OSTOSQuotaQuery
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+
+	jal  OSQuotaQuery
+
+	mov  long [s18 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

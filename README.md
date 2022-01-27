@@ -1,7 +1,7 @@
 # MINTIA
 
 MINTIA is an overengineered operating system written in a custom programming
-language. It implements a robust virtual memory system, inspired by that of
+language. It implements a neat virtual memory system, inspired by that of
 Windows NT and OpenVMS.
 
 It is an attempt at a better-designed sibling of the [AISIX](http://github.com/limnarch/aisix) project, which has been

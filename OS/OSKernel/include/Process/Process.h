@@ -1,4 +1,4 @@
-const WORKINGSETLISTCOUNT 8
+const WORKINGSETLISTCOUNT 64
 
 struct PsProcess
 	KeProcess_SIZEOF PCB

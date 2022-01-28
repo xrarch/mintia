@@ -37,7 +37,7 @@ fn MmEvictionWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
-	// the eviction/swap thread
+	// the swap thread
 
 	auto sleptonce
 	0 sleptonce!
@@ -57,19 +57,21 @@ fn MmEvictionWorker { context1 context2 -- }
 
 		KERNELMODE // waitmode
 		0 // alertable
-		OSWAIT_TIMEOUTINFINITE // timeout
+		2000 // timeout
 		MmEventLowMemory // object
 		KeThreadWaitForObject reason!
 
 		if (DEBUGCHECKS)
 			if (reason@)
-				reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+				end
 			end
 		end
 
 		IPLDPC KeIPLRaise ipl!
 
-		if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
+		if (MmPageFreeCount@ MmEvictableFastPageCount@ + MmPageFreeCountSufficient@ >=)
 			MmEventLowMemory // event
 			KeEventReset drop
 
@@ -81,7 +83,7 @@ fn MmEvictionWorker { context1 context2 -- }
 
 			continue
 		end else
-			MmPageFreeCountSufficient@ MmPageFreeCount@ - evictcount!
+			MmPageFreeCountSufficient@ MmEvictableFastPageCount@ + MmPageFreeCount@ - evictcount!
 		end
 
 		ipl@ KeIPLLower
@@ -108,19 +110,10 @@ fn MmEvictionWorker { context1 context2 -- }
 			continue
 		end
 
-		auto slowcount
-
-		// in normal person speak this is
-		// swapcount = evictcount * (MmSwappiness/128)
-		evictcount@ 7 << MmSwappiness@ * 14 >> slowcount!
-
-		auto fastcount
-		evictcount@ slowcount@ - fastcount!
-
 		if (sleptonce@ ~~)
 			if (IOCachePagesDirtyCount@ IOCachePagesDirtyMaximum@ 3 / >=)
 				// there's IOCachePagesDirtyMaximum/3 or more dirty page
-				//frames.
+				// frames.
 				// go to sleep for 50ms with the hope that the writebehind
 				// worker will have freed some up by
 				// the time we wake up.
@@ -143,89 +136,13 @@ fn MmEvictionWorker { context1 context2 -- }
 			end
 		end
 
-		// ensure we can progress by putting a minimum on these
-		if (MmSwappiness@)
-			slowcount@ 10 max slowcount!
-		end
-		fastcount@ 16 max fastcount!
-
-		fastcount@ slowcount@ + evictcount!
-
 		auto succeedcount
 		0 succeedcount!
 
 		auto done
 		0 done!
 
-		auto big
-		0 big!
-
-		if (MmEvictableFastPageCount@ evictcount@ 100 + >)
-			// there's enough fast pages to fulfill the eviction, with a
-			// margin of 100 pages. attempt the entire eviction through the
-			// fast list.
-
-			evictcount@ // trycount
-			1 // fast
-			MmEvictableFastPageListHead // listhead
-			MmEvictFromList ok! done! succeedcount!
-
-			if (ok@)
-				ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
-			end
-
-			1 big!
-		end elseif (MmEvictableSlowPageCount@ evictcount@ 50 + > MmSwappiness@ &&)
-			// there's enough slow pages to fulfill the eviction, with a
-			// margin of 50 pages.
-
-			evictcount@ // trycount
-			0 // fast
-			MmEvictablePageListHead // listhead
-			MmEvictFromList ok! done! succeedcount!
-
-			if (ok@)
-				ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
-			end
-
-			1 big!
-		end
-
-		if (big@)
-			if (done@ ~~)
-				1 failcount +=
-			end
-
-			continue
-		end
-
-		// attempt to collect enough pages in both lists to satisfy these
-		// targets
-
-		MmPageFreeCount@ MMDIREPAGES < forcedire@ || // dire
-		evictcount@ // pagecount
-		MmPopulateLists
-
-		// try a combination
-
-		fastcount@ // trycount
-		1 // fast
-		MmEvictableFastPageListHead // listhead
-		MmEvictFromList ok! done! succeedcount!
-
-		if (ok@)
-			ok@ "MmEvictionWorker: fast page evict (%i)\n" KeCrash
-		end
-
-		if (succeedcount@ fastcount@ >=)
-			0 failcount!
-		end
-
-		if (done@)
-			continue
-		end
-
-		slowcount@ // trycount
+		evictcount@ // trycount
 		0 // fast
 		MmEvictablePageListHead // listhead
 		MmEvictFromList ok! done! succeedcount!
@@ -234,7 +151,7 @@ fn MmEvictionWorker { context1 context2 -- }
 			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
 		end
 
-		if (succeedcount@ fastcount@ >=)
+		if (succeedcount@ evictcount@ >=)
 			0 failcount!
 		end
 
@@ -255,13 +172,13 @@ fn MmPopulateLists { dire pagecount -- }
 	// check if we need to populate the lists at all judging by their current
 	// sizes and the given pagecount.
 
-	if (MmEvictableFastPageCount@ MmEvictableSlowPageCount@ + pagecount@ >=)
+	if (MmEvictablePageCount@ pagecount@ >=)
 		ipl@ KeIPLLower
 
 		return
 	end
 
-	MmEvictableFastPageCount@ MmEvictableSlowPageCount@ + pagecount -=
+	MmEvictablePageCount@ pagecount -=
 
 	ipl@ KeIPLLower
 
@@ -317,6 +234,74 @@ fn MmPopulateLists { dire pagecount -- }
 	end
 
 	PsProcessListUnlock
+end
+
+fn MmBalanceSetManager { -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+	PRIORITY_LOWREALTIME 2 + // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+	ipl@ KeIPLLower
+
+	// responsible for:
+	// - kernel thread stack swapping
+	// - process swapping (page table swapping & working set purging)
+	// - random thread priority boosting
+	// - working set trimming
+
+	// this little idiot is the only reason we will fit snugly in 4MB RAM.
+
+	auto rs
+
+	while (1)
+		auto ok
+		auto reason
+
+		KERNELMODE // waitmode
+		0 // alertable
+		1000 // timeout
+		MmEventLowMemory // object
+		KeThreadWaitForObject reason!
+
+		if (DEBUGCHECKS)
+			if (reason@)
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+				end
+			end
+		end
+
+		if (reason@ 0 ==)
+			HALCPUInterruptDisable rs!
+
+			if (MmPageFreeCount@ MmPageFreeCountSufficient@ <)
+				auto needed
+				MmPageFreeCountSufficient@ MmPageFreeCount@ - needed!
+
+				if (MmEvictablePageCount@ needed@ <)
+					MmEvictablePageCount@ needed -=
+
+					rs@ HALCPUInterruptRestore
+
+					MmPageFreeCount@ MMDIREPAGES < // dire
+					needed@ // pagecount
+					MmPopulateLists
+				end else
+					rs@ HALCPUInterruptRestore
+				end
+			end else
+				rs@ HALCPUInterruptRestore
+			end
+
+			// wait 100ms before trying again
+
+			100 // interval
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+		end
+	end
 end
 
 fn MmZeroPageWorker { -- }

@@ -24,23 +24,28 @@ fn MmPageGet { priority threshold -- pfdbe pfn ok }
 		end
 	end
 
-	0xFF priority &=
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	auto rs
+	auto check
 
-	if (priority@ FREEFIRST ==)
+	if (priority@ CANBLOCK &)
+		MmPageFreeCount@ MmEvictablePageCount@ + check!
+	end else
+		MmPageFreeCount@ MmEvictableFastPageCount@ + check!
+	end
+
+	if (check@ threshold@ <=)
+		ipl@ KeIPLLower
+
+		STATUS_NO_MEMORY ok!
+
+		return
+	end
+
+	if (priority@ 0xFF & FREEFIRST ==)
 		// attempt to get a page from the free list first.
 		// if its empty, try to get one from the zero list.
-
-		HALCPUInterruptDisable rs!
-
-		if (MmPageFreeCount@ threshold@ <=)
-			rs@ HALCPUInterruptRestore
-
-			STATUS_NO_MEMORY ok!
-
-			return
-		end
 
 		MmPageFreeListHead@ pfdbe!
 
@@ -50,6 +55,9 @@ fn MmPageGet { priority threshold -- pfdbe pfn ok }
 			0 pfdbe@ MmPageFrameEntryFree_Next + !
 
 			1 MmPageFreeCount -=
+
+			ipl@ KeIPLLower
+			return
 		end else
 			// resort to a zero page
 
@@ -61,27 +69,14 @@ fn MmPageGet { priority threshold -- pfdbe pfn ok }
 				0 pfdbe@ MmPageFrameEntryFree_Next + !
 
 				1 MmPageFreeCount -=
-			end else
-				STATUS_NO_MEMORY ok!
+
+				ipl@ KeIPLLower
+				return
 			end
 		end
-
-		rs@ HALCPUInterruptRestore
-
-		return
-	end elseif (priority@ ZEROMUST ==)
+	end elseif (priority@ 0xFF & ZEROMUST ==)
 		// attempt to get one from the zero list first.
 		// if its empty, get one from the free list, and zero it out.
-
-		HALCPUInterruptDisable rs!
-
-		if (MmPageFreeCount@ threshold@ <=)
-			rs@ HALCPUInterruptRestore
-
-			STATUS_NO_MEMORY ok!
-
-			return
-		end
 
 		MmPageZeroListHead@ pfdbe!
 
@@ -92,8 +87,7 @@ fn MmPageGet { priority threshold -- pfdbe pfn ok }
 
 			1 MmPageFreeCount -=
 
-			rs@ HALCPUInterruptRestore
-
+			ipl@ KeIPLLower
 			return
 		end else
 			// resort to a free page
@@ -107,7 +101,7 @@ fn MmPageGet { priority threshold -- pfdbe pfn ok }
 
 				1 MmPageFreeCount -=
 
-				rs@ HALCPUInterruptRestore
+				ipl@ KeIPLLower
 
 				// zero the free page out
 
@@ -117,20 +111,28 @@ fn MmPageGet { priority threshold -- pfdbe pfn ok }
 				memset
 
 				return
-			end else
-				rs@ HALCPUInterruptRestore
-
-				STATUS_NO_MEMORY ok!
-
-				return
 			end
 		end
-
-		if (DEBUGCHECKS)
-			"MmPageGet: unreachable\n" KeCrash
-		end
-	end else
+	end elseif (DEBUGCHECKS)
 		priority@ "MmPageGet: unknown priority %d\n" KeCrash
+	end
+
+	// none in free or zero list, get one from standby list
+
+	priority@ CANBLOCK & // canbeslow
+	MmEvictSinglePage ok! pfdbe!
+
+	ipl@ KeIPLLower
+
+	if (ok@ ~~)
+		pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+
+		if (priority@ 0xFF & ZEROMUST ==)
+			pfn@ PAGESHIFT << IDENTITYSPACE |
+			PAGESIZE
+			0
+			memset
+		end
 	end
 end
 
@@ -144,7 +146,6 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 	end
 
 	auto blockon
-	auto syncevict
 	auto alertable
 	auto tries
 
@@ -153,12 +154,10 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		// is also specified:
 
 		0 blockon! // can dip into MUSTSUCCEED page pool
-		0 syncevict!
 		0 alertable! // wait can't be interrupted
 		-1 tries! // try forever for a page
 	end elseif (priority@ MUSTSUCCEEDL2 &)
 		MMMUSTSUCCEEDL2PAGES blockon! // can dip into MUSTSUCCEEDL2 page pool
-		MMMUSTSUCCEEDL2PAGES syncevict!
 		0 alertable! // wait can't be interrupted
 		-1 tries! // try forever for a page
 	end else
@@ -166,10 +165,8 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 
 		if (priority@ CACHEALLOC &)
 			MmPageFreeCountLow@ blockon! // don't go below low watermark
-			MMMUSTSUCCEEDPAGES syncevict!
 		end else
 			MMMUSTSUCCEEDPAGES blockon! // don't dip into MUSTSUCCEED page pool
-			MMMUSTSUCCEEDPAGES syncevict!
 		end
 
 		1 alertable! // wait can be interrupted
@@ -195,13 +192,13 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		auto ipl
 
 		if (ok@ ~~)
-			if (MmPageFreeCount@ MmPageFreeCountLow@ <)
+			if (MmPageFreeCount@ MmEvictableFastPageCount@ + MmPageFreeCountLow@ <)
 				IPLDPC KeIPLRaise ipl!
 
 				// recheck at IPLDPC -- this seemingly redundant check
 				// minimizes overhead in the more common case
 
-				if (MmPageFreeCount@ MmPageFreeCountLow@ <)
+				if (MmPageFreeCount@ MmEvictableFastPageCount@ + MmPageFreeCountLow@ <)
 					0 // priboost
 					MmEventLowMemory // event
 					KeEventSignal
@@ -219,61 +216,27 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 			end
 		end
 
-		if (priority@ CANBLOCK &)
-			if (MmPageFreeCount@ syncevict@ >=)
-				1 // canbeslow
-				MmEvictSinglePage ok! pfdbe!
+		if (priority@ CANBLOCK & ~~)
+			return
+		end
 
-				if (ok@ ~~)
-					pfdbe@ MmPageFrameEntry_PFN + @ pfn!
+		KERNELMODE // waitmode
+		alertable@ // alertable
+		250 // timeout
+		MmEventPageAvailable // object
+		KeThreadWaitForObject ok!
 
-					if (priority@ 0xFF & ZEROMUST ==)
-						pfn@ PAGESHIFT << IDENTITYSPACE |
-						PAGESIZE
-						0
-						memset
-					end
+		if (ok@ STATUS_WAIT_TIMEOUT ==)
+			if (tries@ -1 ~=)
+				1 tries -=
+
+				if (tries@ ~~)
+					STATUS_NO_MEMORY ok!
 
 					return
 				end
 			end
-
-			KERNELMODE // waitmode
-			alertable@ // alertable
-			250 // timeout
-			MmEventPageAvailable // object
-			KeThreadWaitForObject ok!
-
-			if (ok@ STATUS_WAIT_TIMEOUT ==)
-				if (tries@ -1 ~=)
-					1 tries -=
-
-					if (tries@ ~~)
-						STATUS_NO_MEMORY ok!
-
-						return
-					end
-				end
-			end elseif (ok@)
-				return
-			end
-		end else
-			if (MmPageFreeCount@ syncevict@ >=)
-				0 // canbeslow
-				MmEvictSinglePage ok! pfdbe!
-
-				if (ok@ ~~)
-					pfdbe@ MmPageFrameEntry_PFN + @ pfn!
-
-					if (priority@ 0xFF & ZEROMUST ==)
-						pfn@ PAGESHIFT << IDENTITYSPACE |
-						PAGESIZE
-						0
-						memset
-					end
-				end
-			end
-
+		end elseif (ok@)
 			return
 		end
 	end

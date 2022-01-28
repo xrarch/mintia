@@ -86,6 +86,8 @@ extern MmKernelStackFree { kstack -- }
 extern MmPageDirectoryAlloc { -- pdir ok }
 extern MmPageDirectoryFree { pdir -- }
 
+extern MmBalanceSetManager { -- }
+
 extern MmZeroPageWorker { -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }

@@ -31,40 +31,40 @@ table IOCacheEvictableFunctions
 	pointerof IOCachePageEvictionFunction // EvictionFunc
 	pointerof IOCachePageReferenceFunction // ReferenceFunc
 	pointerof IOCachePageDereferenceFunction // DereferenceFunc
-	0 // ModifyFunc
+	0 // DirtyFunc
 	0 // Reserved2
 	0 // Reserved3
 	0 // Reserved4
 	0 // Reserved5
 endtable
 
-var IOCacheModifiedPageListHead 0
-public IOCacheModifiedPageListHead
+var IOCacheDirtyPageListHead 0
+public IOCacheDirtyPageListHead
 
-var IOCacheModifiedPageListTail 0
-public IOCacheModifiedPageListTail
+var IOCacheDirtyPageListTail 0
+public IOCacheDirtyPageListTail
 
 var IOCachePagesUsed 0
 public IOCachePagesUsed
 
-var IOCachePagesModifiedMaximum 0
-public IOCachePagesModifiedMaximum
+var IOCachePagesDirtyMaximum 0
+public IOCachePagesDirtyMaximum
 
-var IOCachePagesModifiedCount 0
-public IOCachePagesModifiedCount
+var IOCachePagesDirtyCount 0
+public IOCachePagesDirtyCount
 
-fn IOCachePageRemoveModified { pfdbe -- }
+fn IOCachePageRemoveDirty { pfdbe -- }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	// remove from modified list
+	// remove from dirty list
 	auto n
 	pfdbe@ MmPageFrameEntryEvictable_Next + @ n!
 
 	if (n@)
 		pfdbe@ MmPageFrameEntryEvictable_Prev + @ n@ MmPageFrameEntryEvictable_Prev + !
 	end else // no next means we were the tail
-		pfdbe@ MmPageFrameEntryEvictable_Prev + @ IOCacheModifiedPageListTail!
+		pfdbe@ MmPageFrameEntryEvictable_Prev + @ IOCacheDirtyPageListTail!
 	end
 
 	auto p
@@ -73,39 +73,39 @@ fn IOCachePageRemoveModified { pfdbe -- }
 	if (p@)
 		pfdbe@ MmPageFrameEntryEvictable_Next + @ p@ MmPageFrameEntryEvictable_Next + !
 	end else // no prev means we were the head
-		pfdbe@ MmPageFrameEntryEvictable_Next + @ IOCacheModifiedPageListHead!
+		pfdbe@ MmPageFrameEntryEvictable_Next + @ IOCacheDirtyPageListHead!
 	end
 
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOCachePageInsertModified { pfdbe -- }
+fn IOCachePageInsertDirty { pfdbe -- }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	// use the evict LRU links to insert the page on the back of the modified list
+	// use the evict LRU links to insert the page on the back of the dirty list
 
 	auto t
-	IOCacheModifiedPageListTail@ t!
+	IOCacheDirtyPageListTail@ t!
 
 	if (t@ ~~)
 		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
 
-		pfdbe@ IOCacheModifiedPageListHead!
-		pfdbe@ IOCacheModifiedPageListTail!
+		pfdbe@ IOCacheDirtyPageListHead!
+		pfdbe@ IOCacheDirtyPageListTail!
 	end else
 		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 
 		t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
 		pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-		pfdbe@ IOCacheModifiedPageListTail!
+		pfdbe@ IOCacheDirtyPageListTail!
 	end
 
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOCachePageModifiedCleanup { pfdbe -- extent }
+fn IOCachePageDirtyCleanup { pfdbe -- extent }
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
@@ -117,64 +117,64 @@ fn IOCachePageModifiedCleanup { pfdbe -- extent }
 
 	if (DEBUGCHECKS)
 		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY & ~~)
-			pfdbe@ "IOCachePageModifiedCleanup: page wasn't dirty (0x%08x)\n" KeCrash
+			pfdbe@ "IOCachePageDirtyCleanup: page wasn't dirty (0x%08x)\n" KeCrash
 		end
 	end
 
 	// clear dirty flag
 	IOCACHEPAGEFLAG_DIRTY ~ pfdbe@ IOPageFrameEntryCache_Flags + &=
 
-	// decrement modified page count
+	// decrement dirty page count
 
 	if (DEBUGCHECKS)
-		if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @ 0 ==)
-			"IOCachePageModifiedCleanup: underflow\n" KeCrash
+		if (cacheblock@ IOCacheInfoBlock_DirtyPages + @ 0 ==)
+			"IOCachePageDirtyCleanup: underflow\n" KeCrash
 		end
 	end
 
-	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + -=
-	1 IOCachePagesModifiedCount -=
+	1 cacheblock@ IOCacheInfoBlock_DirtyPages + -=
+	1 IOCachePagesDirtyCount -=
 
-	// remove from modified list
-	pfdbe@ IOCachePageRemoveModified
+	// remove from dirty list
+	pfdbe@ IOCachePageRemoveDirty
 
-	// if there's a modified PTE somewhere, clear the writable bit so that
+	// if there's a dirty PTE somewhere, clear the writable bit so that
 	// the next time the process writes to it, this page gets properly
 	// marked as dirty again
 
-	if (pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @)
-		pfdbe@ IOPageFrameEntryCache_ModifiedPTE + @ MmPTEUnmodify
-		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+	if (pfdbe@ IOPageFrameEntryCache_DirtyPTE + @)
+		pfdbe@ IOPageFrameEntryCache_DirtyPTE + @ MmPTEUndirty
+		0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
 	end
 
 	auto quotablock
-	pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @ quotablock!
+	pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + @ quotablock!
 
 	if (quotablock@)
-		// someone was charged quota for this modified page
+		// someone was charged quota for this dirty page
 
 		1 // charge
 		quotablock@ // quotablock
-		MmQuotaBlockUnchargeModifiedPages
+		MmQuotaBlockUnchargeDirtyPages
 
 		quotablock@ MmQuotaBlockDereference
 
-		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
+		0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
 	end
 
-	pfdbe@ IOPageFrameEntryCache_ModifiedExtent + @ extent!
-	0 pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
+	pfdbe@ IOPageFrameEntryCache_DirtyExtent + @ extent!
+	0 pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
 
 	ipl@ KeIPLLower
 end
 
-fn IOCachePageWriteModified { pfdbe -- ok }
+fn IOCachePageWriteDirty { pfdbe -- ok }
 	// XXX call with care: data loss could occur if thread can receive signals
 	// during this operation
 
 	if (DEBUGCHECKS)
 		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"IOCachePageWriteModified: could be killed\n" KeCrash
+			"IOCachePageWriteDirty: could be killed\n" KeCrash
 		end
 	end
 
@@ -182,7 +182,7 @@ fn IOCachePageWriteModified { pfdbe -- ok }
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
 	auto extent
-	pfdbe@ IOCachePageModifiedCleanup extent!
+	pfdbe@ IOCachePageDirtyCleanup extent!
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
@@ -194,7 +194,7 @@ fn IOCachePageWriteModified { pfdbe -- ok }
 		if (off@ extent@ + fcb@ IOFileControlBlock_SizeInBytes + @ >)
 			fcb@ IOFileControlBlock_SizeInBytes + @
 			off@ extent@ +
-			"IOCachePageWriteModified: modified page extent (%d) beyond end of file (%d)\n" KeCrash
+			"IOCachePageWriteDirty: dirty page extent (%d) beyond end of file (%d)\n" KeCrash
 		end
 	end
 
@@ -366,9 +366,9 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		0 pfdbe@ IOPageFrameEntryCache_Flags + !
 		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
-		0 pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
-		0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
-		0 pfdbe@ IOPageFrameEntryCache_ModifiedPTE + !
+		0 pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
+		0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
+		0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
 		0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
 		0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
 
@@ -548,8 +548,8 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- dropped evicted o
 	end
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @)
-			"IOCachePageEvictionFunction: cache page had modified quota block\n" KeCrash
+		if (pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + @)
+			"IOCachePageEvictionFunction: cache page had dirty quota block\n" KeCrash
 		end
 	end
 
@@ -573,13 +573,13 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- dropped evicted o
 	cacheblock@ IOCacheInfoBlockUnlock
 end
 
-fn IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
-	// attempts to charge modified page quota for the pfdbe.
+fn IOCachePageDirtyQuotaCharge { quotablock pfdbe -- charged }
+	// attempts to charge dirty page quota for the pfdbe.
 	// not 100% foolproof but "good enough".
 
 	// keep in mind that once called, if you become aware that the page may
-	// not be marked modified after all, ensure that you call
-	// IOCachePageModifyQuotaUncharge on it BEFORE dereferencing it.
+	// not be marked dirty after all, ensure that you call
+	// IOCachePageDirtyQuotaUncharge on it BEFORE dereferencing it.
 
 	// disable interrupts instead of raising IPL since raising IPL would
 	// probably actually be slower.
@@ -594,7 +594,7 @@ fn IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
 	while (1)
 		0 charged!
 
-		if (pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @)
+		if (pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + @)
 			// page already accounted for.
 			rs@ HALCPUInterruptRestore
 			return
@@ -604,12 +604,12 @@ fn IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
 
 		1 charged!
 
-		if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ >=)
+		if (IOCachePagesDirtyCount@ IOCachePagesDirtyMaximum@ >=)
 			STATUS_VM_QUOTA_EXCEEDED ok!
 		end else
 			1 // charge
 			quotablock@ // quotablock
-			MmQuotaBlockChargeModifiedPages ok!
+			MmQuotaBlockChargeDirtyPages ok!
 		end
 
 		if (ok@)
@@ -625,34 +625,34 @@ fn IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
 		end else
 			// charged successfully.
 			quotablock@ MmQuotaBlockReference
-			quotablock@ pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
+			quotablock@ pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
 			rs@ HALCPUInterruptRestore
 			return
 		end
 	end
 end
 
-fn IOCachePageModifyQuotaUncharge { pfdbe -- }
+fn IOCachePageDirtyQuotaUncharge { pfdbe -- }
 	auto quotablock
-	pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + @ quotablock!
+	pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + @ quotablock!
 
 	if (DEBUGCHECKS)
 		if (quotablock@ ~~)
-			"IOCachePageModifyQuotaUncharge: no quotablock\n" KeCrash
+			"IOCachePageDirtyQuotaUncharge: no quotablock\n" KeCrash
 		end
 	end
 
-	0 pfdbe@ IOPageFrameEntryCache_ModifiedQuotaBlock + !
+	0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
 
 	1 // charge
 	quotablock@ // quotablock
-	MmQuotaBlockUnchargeModifiedPages
+	MmQuotaBlockUnchargeDirtyPages
 
 	quotablock@ MmQuotaBlockDereference
 end
 
-fn IOCachePageModifyFunction { extent pfdbe -- ok }
-	// mark a page modified and insert it on the modified page list if
+fn IOCachePageDirtyFunction { extent pfdbe -- ok }
+	// mark a page dirty and insert it on the dirty page list if
 	// necessary.
 
 	0 ok!
@@ -665,19 +665,19 @@ fn IOCachePageModifyFunction { extent pfdbe -- ok }
 
 	if (DEBUGCHECKS)
 		if (cacheblock@ ~~)
-			"IOCachePageModify: no cacheblock on FCB\n" KeCrash
+			"IOCachePageDirty: no cacheblock on FCB\n" KeCrash
 		end
 	end
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (extent@ pfdbe@ IOPageFrameEntryCache_ModifiedExtent + @ >)
+	if (extent@ pfdbe@ IOPageFrameEntryCache_DirtyExtent + @ >)
 		fcb@ IOFileControlBlock_SizeInBytes + @ pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ -
 		extent@
 		min extent!
 
-		extent@ pfdbe@ IOPageFrameEntryCache_ModifiedExtent + !
+		extent@ pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
 	end
 
 	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
@@ -691,22 +691,22 @@ fn IOCachePageModifyFunction { extent pfdbe -- ok }
 
 	pfdbe@ MmEvictablePageReference drop
 
-	pfdbe@ IOCachePageInsertModified
+	pfdbe@ IOCachePageInsertDirty
 
 	IOCACHEPAGEFLAG_DIRTY pfdbe@ IOPageFrameEntryCache_Flags + |=
 
 	// mark valid: the page must either already be valid, and only be
-	// partially modified, or be invalid and fully overwritten (in which case,
+	// partially dirty, or be invalid and fully overwritten (in which case,
 	// it is now valid). caller guarantees this.
 	IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
 
 	// will be decremented when written out
-	1 cacheblock@ IOCacheInfoBlock_ModifiedPages + +=
-	1 IOCachePagesModifiedCount +=
+	1 cacheblock@ IOCacheInfoBlock_DirtyPages + +=
+	1 IOCachePagesDirtyCount +=
 
-	if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ >=)
+	if (IOCachePagesDirtyCount@ IOCachePagesDirtyMaximum@ >=)
 		0 // priboost
-		IOModifiedPageEvent // event
+		IODirtyPageEvent // event
 		KeEventSignal
 	end
 

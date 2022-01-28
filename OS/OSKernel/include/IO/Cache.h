@@ -6,7 +6,7 @@ struct IOCacheInfoBlock
 	ExRwLock_SIZEOF RwLock
 
 	4 PageReferences
-	4 ModifiedPages
+	4 DirtyPages
 	4 Flags
 
 	(IOCACHEPAGEBUCKETS KeMutex_SIZEOF *) PageBucketMutexes
@@ -25,9 +25,9 @@ struct IOPageFrameEntryCache
 	4 References
 	4 WorkingSetIndexHint
 	4 Context3
-	4 ModifiedExtent
-	4 ModifiedQuotaBlock
-	4 ModifiedPTE
+	4 DirtyExtent
+	4 DirtyQuotaBlock
+	4 DirtyPTE
 	4 FCB
 	4 Flags
 	4 OffsetInFile
@@ -38,7 +38,7 @@ endstruct
 const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?
 const IOCACHEPAGEFLAG_DIRTY 2 // is the page dirty (does it need to be written out)?
 
-extern IOModifiedPageWorker { context1 context2 -- }
+extern IOWritebehindWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
 
 extern IOCacheDumpInfo { cacheblock -- }
@@ -68,32 +68,32 @@ extern IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
 extern IOCachePageRemove { pfdbe buckethead -- }
 extern IOCachePageInsert { pfdbe buckethead -- }
 
-extern IOCachePageRemoveModified { pfdbe -- }
-extern IOCachePageInsertModified { pfdbe -- }
+extern IOCachePageRemoveDirty { pfdbe -- }
+extern IOCachePageInsertDirty { pfdbe -- }
 
-extern IOCachePageWriteModified { pfdbe -- ok }
+extern IOCachePageWriteDirty { pfdbe -- ok }
 
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
-extern IOCachePageModifyFunction { extent pfdbe -- ok }
+extern IOCachePageDirtyFunction { extent pfdbe -- ok }
 
-extern IOCachePageModifiedCleanup { pfdbe -- extent }
+extern IOCachePageDirtyCleanup { pfdbe -- extent }
 
-extern IOCachePageModifyQuotaCharge { quotablock pfdbe -- charged }
-extern IOCachePageModifyQuotaUncharge { pfdbe -- }
+extern IOCachePageDirtyQuotaCharge { quotablock pfdbe -- charged }
+extern IOCachePageDirtyQuotaUncharge { pfdbe -- }
 
 extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
 
-externptr IOCacheModifiedPageListHead
-externptr IOCacheModifiedPageListTail
+externptr IOCacheDirtyPageListHead
+externptr IOCacheDirtyPageListTail
 
-externptr IOCachePagesModifiedCount
+externptr IOCachePagesDirtyCount
 
 externptr IOCachePagesUsed
 
-externptr IOCachePagesModifiedMaximum
+externptr IOCachePagesDirtyMaximum
 
-externptr IOModifiedPageEvent
+externptr IODirtyPageEvent

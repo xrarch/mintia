@@ -7,7 +7,7 @@ struct OSMemoryInformation
 	4 FileCachePageCount
 	4 AnonymousPageCount
 
-	4 ModifiedPageCount
+	4 DirtyPageCount
 
 	4 SwapPageTotalCount
 	4 SwapPageUsedCount
@@ -43,8 +43,8 @@ struct OSQuotaInformation
 	4 WorkingSetUsed
 	4 WorkingSetMaximum
 
-	4 ModifiedPagesUsed
-	4 ModifiedPagesMaximum
+	4 DirtyPagesUsed
+	4 DirtyPagesMaximum
 
 	48 Reserved
 endstruct
@@ -53,7 +53,7 @@ struct OSQuota
 	4 Heap
 	4 VirtualMemory
 	4 WorkingSet
-	4 ModifiedPages
+	4 DirtyPages
 
 	48 Reserved
 endstruct

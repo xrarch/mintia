@@ -565,8 +565,8 @@ OSMountGetFilesystemName:
 
 	ret
 
-OSFlushModifiedPages:
-.global OSFlushModifiedPages
+OSFlushDirtyPages:
+.global OSFlushDirtyPages
 
 	li   t0, 46
 	sys  0

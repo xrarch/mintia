@@ -22,3 +22,4 @@ extern HALCPUAddressSpaceSwitch { asid pdir -- }
 
 externptr HALCPUModel
 externptr HALPlatformModel
+externptr HALBusModel

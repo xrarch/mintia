@@ -39,7 +39,7 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	end
 
 	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
-	0 cacheblock@ IOCacheInfoBlock_ModifiedPages + !
+	0 cacheblock@ IOCacheInfoBlock_DirtyPages + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
 
 	"IOCacheInfoBlockRwLock" // name
@@ -201,7 +201,7 @@ fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
 end
 
 fn IOCacheInfoBlockFlush { cacheblock -- ok }
-	// flush all of the cacheblock's modified pages.
+	// flush all of the cacheblock's dirty pages.
 
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockLock ok!
@@ -211,7 +211,7 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	end
 
 	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
-	// for each bucket, iterate all pages. if a page if modified, write it
+	// for each bucket, iterate all pages. if a page if dirty, write it
 	// out to disk.
 
 	// ensure thread can't receive signals while writing out dirty pages
@@ -233,7 +233,7 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 
 		while (pfdbe@)
 			if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-				pfdbe@ IOCachePageWriteModified drop
+				pfdbe@ IOCachePageWriteDirty drop
 			end
 
 			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
@@ -252,7 +252,7 @@ end
 fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	// attempt to evict all of the cacheblock's page frames beyond newsize.
 	// also evicts the page that contains newsize, to prevent a weird
-	// interaction with the modified page writer.
+	// interaction with the dirty page writer.
 
 	auto maxpage
 	newsize@ PAGENUMBERMASK & maxpage!
@@ -267,13 +267,13 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (cacheblock@ IOCacheInfoBlock_ModifiedPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + @ ~=)
+	if (cacheblock@ IOCacheInfoBlock_DirtyPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + @ ~=)
 		// one or more page frames in this cache is currently in use.
 		// don't allow truncation for now.
 
 		if (DEBUGCHECKS)
-			if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ <)
-				"IOCacheInfoBlockTruncate: page references < modified page count\n" KeCrash
+			if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_DirtyPages + @ <)
+				"IOCacheInfoBlockTruncate: page references < dirty page count\n" KeCrash
 			end
 		end
 
@@ -291,18 +291,18 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	rs@ HALCPUInterruptRestore
 
 	if (DEBUGCHECKS)
-		if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_ModifiedPages + @ ~=)
-			// they should both either be zero (all modified pages written out and zero other references),
-			// or both be equal (only modified pages, and writeout==0)
+		if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_DirtyPages + @ ~=)
+			// they should both either be zero (all dirty pages written out and zero other references),
+			// or both be equal (only dirty pages, and writeout==0)
 
-			cacheblock@ IOCacheInfoBlock_ModifiedPages + @
+			cacheblock@ IOCacheInfoBlock_DirtyPages + @
 			cacheblock@ IOCacheInfoBlock_PageReferences + @
-			"IOCacheInfoBlockTruncate: page references (%d) != modified page count (%d)\n" KeCrash
+			"IOCacheInfoBlockTruncate: page references (%d) != dirty page count (%d)\n" KeCrash
 		end
 	end
 
 	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
-	// for each bucket, free all cached pages. if a page is modified,
+	// for each bucket, free all cached pages. if a page is dirty,
 	// and caller wanted us to write out dirty pages (writeout==1),
 	// write the page out first.
 
@@ -346,20 +346,20 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
 				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
 					if (writeout@)
-						// this is a modified page, and caller wants us to
+						// this is a dirty page, and caller wants us to
 						// write them out to disk. the alternative is
 						// writeout==0, which means the caller says its fine
 						// to ignore and throw them out.
 
-						pfdbe@ IOCachePageWriteModified drop
+						pfdbe@ IOCachePageWriteDirty drop
 					end else
-						// this is a modified page and the caller doesn't want
+						// this is a dirty page and the caller doesn't want
 						// us to write it to disk, so we need to clean it up
 						// ourselves by decrementing this cacheblock's
-						// modified page count and removing it from the
-						// modified list.
+						// dirty page count and removing it from the
+						// dirty list.
 
-						pfdbe@ IOCachePageModifiedCleanup drop
+						pfdbe@ IOCachePageDirtyCleanup drop
 
 						pfdbe@ MmEvictablePageDereference drop
 					end
@@ -445,11 +445,11 @@ fn IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
 
 	fcb@ IOFileControlBlock_SizeInBytes + @ // extent
 	pfdbe@ // pfdbe
-	IOCachePageModifyFunction ok!
+	IOCachePageDirtyFunction ok!
 
 	if (DEBUGCHECKS)
 		if (ok@)
-			ok@ "IOCacheInfoBlockZeroEnd: failed to modify page (%i)\n" KeCrash
+			ok@ "IOCacheInfoBlockZeroEnd: failed to dirty page (%i)\n" KeCrash
 		end
 	end
 

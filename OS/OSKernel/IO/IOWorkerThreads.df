@@ -61,10 +61,10 @@ end
 
 const IOMODIFIEDWRITEINTERVALSEC 10 // how frequently should we flush?
 
-buffer IOModifiedPageEvent KeEvent_SIZEOF
-public IOModifiedPageEvent
+buffer IODirtyPageEvent KeEvent_SIZEOF
+public IODirtyPageEvent
 
-fn IOModifiedPageWorker { context1 context2 -- }
+fn IOWritebehindWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
@@ -75,15 +75,15 @@ fn IOModifiedPageWorker { context1 context2 -- }
 	8 alloc objecttable!
 
 	MmEventLowMemory objecttable@!
-	IOModifiedPageEvent objecttable@ 4 + !
+	IODirtyPageEvent objecttable@ 4 + !
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
-	// the modified page writer
+	// the writebehind worker
 
 	while (1)
-		// write out all modified pages every 10 seconds, whenever the system
-		// is low on memory, and whenever the number of modified pages crosses
+		// write out all dirty pages every 10 seconds, whenever the system
+		// is low on memory, and whenever the number of dirty pages crosses
 		// the maximum.
 
 		// XXX we don't do this currently, but it's possible that it would be
@@ -104,7 +104,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		if (DEBUGCHECKS)
 			if (waitok@ 0 s<)
 				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
-					waitok@ "IOModifiedPageWorker: failed to wait on low memory event (%i)\n" KeCrash
+					waitok@ "IOWritebehindWorker: failed to wait on low memory event (%i)\n" KeCrash
 				end
 			end
 		end
@@ -113,30 +113,30 @@ fn IOModifiedPageWorker { context1 context2 -- }
 		0 writescore!
 
 		auto modcount
-		IOCachePagesModifiedCount@ modcount!
+		IOCachePagesDirtyCount@ modcount!
 
 		while (1)
 			if (modcount@ ~~)
 				if (waitok@ 0 ==)
 					// low memory event woke us. sleep for 100ms or until the
-					// maximum threshold of modified pages is crossed, to make
+					// maximum threshold of dirty pages is crossed, to make
 					// sure we don't infinite loop here since there aren't any
-					// more modified pages.
+					// more dirty pages.
 
 					KERNELMODE // waitmode
 					0 // alertable
 					100 // timeout
-					IOModifiedPageEvent // object
+					IODirtyPageEvent // object
 					KeThreadWaitForObject ok!
 
 					if (ok@ STATUS_WAIT_TIMEOUT ~=)
 						if (DEBUGCHECKS)
 							if (ok@ 0 ~=)
-								ok@ "IOModifiedPageWorker: failed to wait (%i)\n" KeCrash
+								ok@ "IOWritebehindWorker: failed to wait (%i)\n" KeCrash
 							end
 						end
 
-						IOCachePagesModifiedCount@ modcount!
+						IOCachePagesDirtyCount@ modcount!
 
 						continue
 					end
@@ -168,11 +168,11 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 				if (DEBUGCHECKS)
 					if (ok@ STATUS_WAIT_TIMEOUT ~=)
-						ok@ "IOModifiedPageWorker: wait failed (%i)\n" KeCrash
+						ok@ "IOWritebehindWorker: wait failed (%i)\n" KeCrash
 					end
 				end
 
-				IOCachePagesModifiedCount@ modcount!
+				IOCachePagesDirtyCount@ modcount!
 
 				0 ok!
 			end
@@ -181,12 +181,12 @@ fn IOModifiedPageWorker { context1 context2 -- }
 			IPLDPC KeIPLRaise ipl!
 
 			auto pfdbe
-			IOCacheModifiedPageListHead@ pfdbe!
+			IOCacheDirtyPageListHead@ pfdbe!
 
 			if (pfdbe@)
 				if (modcount@ ~~)
 					if (MmEventLowMemory KeDispatchIsSignaled ~~)
-						if (IOCachePagesModifiedCount@ IOCachePagesModifiedMaximum@ <)
+						if (IOCachePagesDirtyCount@ IOCachePagesDirtyMaximum@ <)
 							ipl@ KeIPLLower
 
 							break
@@ -207,7 +207,7 @@ fn IOModifiedPageWorker { context1 context2 -- }
 
 					// write out page
 
-					pfdbe@ IOCachePageWriteModified drop
+					pfdbe@ IOCachePageWriteDirty drop
 
 					cacheblock@ // cacheblock
 					IOCacheInfoBlockUnlock
@@ -221,10 +221,10 @@ fn IOModifiedPageWorker { context1 context2 -- }
 					// lock failed, move this page to the tail so that we
 					// don't try it infinitely
 
-					if (pfdbe@ IOCacheModifiedPageListTail@ ~=)
-						pfdbe@ IOCachePageRemoveModified
+					if (pfdbe@ IOCacheDirtyPageListTail@ ~=)
+						pfdbe@ IOCachePageRemoveDirty
 
-						pfdbe@ IOCachePageInsertModified
+						pfdbe@ IOCachePageInsertDirty
 					end
 
 					ipl@ KeIPLLower
@@ -238,12 +238,12 @@ fn IOModifiedPageWorker { context1 context2 -- }
 	end
 end
 
-fn IOFlushModifiedPages { -- }
-	// artifically signal the modified page event to sweep all the modified
+fn IOFlushDirtyPages { -- }
+	// artifically signal the dirty page event to sweep all the dirty
 	// pages to disk. returns asynchronously, up to the caller to query the
-	// modified page count and figure out when they've all been written.
+	// dirty page count and figure out when they've all been written.
 
 	0 // priboost
-	IOModifiedPageEvent // event
+	IODirtyPageEvent // event
 	KeEventSignal
 end

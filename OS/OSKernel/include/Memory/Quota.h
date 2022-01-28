@@ -10,8 +10,8 @@ struct MmQuotaBlock
 	4 WorkingSetUsed
 	4 WorkingSetMax
 
-	4 ModifiedPagesUsed
-	4 ModifiedPagesMax
+	4 DirtyPagesUsed
+	4 DirtyPagesMax
 endstruct
 
 const MMQUOTAINFINITE -1
@@ -28,8 +28,8 @@ extern MmQuotaBlockChargeVM { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeVM { charge quotablock -- }
 extern MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
-extern MmQuotaBlockChargeModifiedPages { charge quotablock -- ok }
-extern MmQuotaBlockUnchargeModifiedPages { charge quotablock -- }
+extern MmQuotaBlockChargeDirtyPages { charge quotablock -- ok }
+extern MmQuotaBlockUnchargeDirtyPages { charge quotablock -- }
 extern MmQuotaBlockPrint { quotablock -- }
 
 extern MmSetQuota { quota quotablock -- }

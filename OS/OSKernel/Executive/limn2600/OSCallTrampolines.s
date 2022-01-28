@@ -47,7 +47,7 @@
 .extern OSMountCountQuery
 .extern OSMountUpdateFlags
 .extern OSMountGetFilesystemName
-.extern OSFlushModifiedPages
+.extern OSFlushDirtyPages
 .extern OSSectionCreate
 .extern OSSectionMapView
 .extern OSUnmapView
@@ -136,7 +136,7 @@ OSCallTable:
 	.dl OSTOSMountCountQuery                             ;43
 	.dl OSTOSMountUpdateFlags                            ;44
 	.dl OSTOSMountGetFilesystemName                      ;45
-	.dl OSTOSFlushModifiedPages                          ;46
+	.dl OSTOSFlushDirtyPages                             ;46
 	.dl OSTOSSectionCreate                               ;47
 	.dl OSTOSSectionMapView                              ;48
 	.dl OSTOSUnmapView                                   ;49
@@ -876,12 +876,12 @@ OSTOSMountGetFilesystemName:
 	addi sp, sp, 4
 	ret
 
-OSTOSFlushModifiedPages:
-.global OSTOSFlushModifiedPages
+OSTOSFlushDirtyPages:
+.global OSTOSFlushDirtyPages
 	subi sp, sp, 4
 	mov  long [sp], lr
 
-	jal  OSFlushModifiedPages
+	jal  OSFlushDirtyPages
 
 	mov  long [s18 + 4], a0 ;t1
 

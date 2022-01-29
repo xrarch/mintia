@@ -59,7 +59,7 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	end
 end
 
-const IOMODIFIEDWRITEINTERVALSEC 10 // how frequently should we flush?
+const IODIRTYWRITEINTERVALSEC 10 // how frequently should we flush?
 
 buffer IODirtyPageEvent KeEvent_SIZEOF
 public IODirtyPageEvent
@@ -96,7 +96,7 @@ fn IOWritebehindWorker { context1 context2 -- }
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAITANY // waittype
-		IOMODIFIEDWRITEINTERVALSEC 1000 * // timeout
+		IODIRTYWRITEINTERVALSEC 1000 * // timeout
 		2 // objectcount
 		objecttable@ // objecttable
 		KeThreadWaitForMultipleObjects waitok!
@@ -143,6 +143,13 @@ fn IOWritebehindWorker { context1 context2 -- }
 				end
 
 				break
+			end elseif (waitok@ 0 ==)
+				if (MmEventLowMemory KeDispatchIsSignaled ~~)
+					// don't need to write any more, finish the rest after the
+					// timeout expires
+
+					break
+				end
 			end
 
 			auto thresh
@@ -232,6 +239,8 @@ fn IOWritebehindWorker { context1 context2 -- }
 					1 writescore +=
 				end
 			end else
+				0 modcount!
+
 				ipl@ KeIPLLower
 			end
 		end

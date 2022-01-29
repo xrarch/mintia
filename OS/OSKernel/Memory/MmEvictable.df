@@ -22,20 +22,17 @@ public MmEvictablePageListHead
 var MmEvictablePageListTail 0
 public MmEvictablePageListTail
 
-var MmEvictableFastPageListHead 0
-public MmEvictableFastPageListHead
-
-var MmEvictableFastPageListTail 0
-public MmEvictableFastPageListTail
-
 var MmEvictablePageCount 0
 public MmEvictablePageCount
 
-var MmEvictableFastPageCount 0
-public MmEvictableFastPageCount
+var MmEvictableModifiedPageListHead 0
+public MmEvictableModifiedPageListHead
 
-var MmEvictableSlowPageCount 0
-public MmEvictableSlowPageCount
+var MmEvictableModifiedPageListTail 0
+public MmEvictableModifiedPageListTail
+
+var MmEvictableModifiedPageCount 0
+public MmEvictableModifiedPageCount
 
 var MmTotalWorkingSetSize 0
 public MmTotalWorkingSetSize
@@ -86,30 +83,28 @@ fn MmEvictablePageInsert { pfdbe -- }
 		1 MmTotalWorkingSetSize -=
 	end
 
-	1 MmEvictablePageCount +=
-
 	auto t
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
-		1 MmEvictableFastPageCount +=
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+		1 MmEvictableModifiedPageCount +=
 
-		MmEvictableFastPageListTail@ t!
+		MmEvictableModifiedPageListTail@ t!
 
 		if (t@ ~~)
 			0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 			0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
 
-			pfdbe@ MmEvictableFastPageListHead!
-			pfdbe@ MmEvictableFastPageListTail!
+			pfdbe@ MmEvictableModifiedPageListHead!
+			pfdbe@ MmEvictableModifiedPageListTail!
 		end else
 			0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 
 			t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
 			pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-			pfdbe@ MmEvictableFastPageListTail!
+			pfdbe@ MmEvictableModifiedPageListTail!
 		end
 	end else
-		1 MmEvictableSlowPageCount +=
+		1 MmEvictablePageCount +=
 
 		MmEvictablePageListTail@ t!
 
@@ -168,6 +163,20 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	end
 
 	rs@ HALCPUInterruptRestore
+
+	if (oldcount@ 1 ==)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+			if (MmEvictableModifiedPageCount@ MmModifiedPageMaximum@ >=)
+				0 // priboost
+				MmModifiedPageEvent // event
+				KeEventSignal
+			end
+		end else
+			0 // priboost
+			MmEventPageAvailable // event
+			KeEventSignal
+		end
+	end
 end
 
 fn MmEvictablePageRemoveForDeletion { pfdbe -- }
@@ -192,12 +201,10 @@ fn MmEvictablePageRemove { pfdbe -- }
 		end
 	end
 
-	1 MmEvictablePageCount -=
-
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
-		1 MmEvictableFastPageCount -=
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+		1 MmEvictableModifiedPageCount -=
 	end else
-		1 MmEvictableSlowPageCount -=
+		1 MmEvictablePageCount -=
 	end
 
 	auto ls
@@ -209,8 +216,8 @@ fn MmEvictablePageRemove { pfdbe -- }
 	if (ls@)
 		ns@ ls@ MmPageFrameEntryEvictable_Next + !
 	end else
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
-			ns@ MmEvictableFastPageListHead!
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+			ns@ MmEvictableModifiedPageListHead!
 		end else
 			ns@ MmEvictablePageListHead!
 		end
@@ -219,8 +226,8 @@ fn MmEvictablePageRemove { pfdbe -- }
 	if (ns@)
 		ls@ ns@ MmPageFrameEntryEvictable_Prev + !
 	end else
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_FAST &)
-			ls@ MmEvictableFastPageListTail!
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+			ls@ MmEvictableModifiedPageListTail!
 		end else
 			ls@ MmEvictablePageListTail!
 		end
@@ -265,222 +272,21 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 	end
 end
 
-// some assumptions:
-// fast pages will never drop below IPLDPC while evicting.
-// slow pages will never have dropped below IPLDPC if eviction failed.
-
-fn MmEvictFromList { trycount fast listhead -- succeedcount done ok }
-	0 done!
-	0 ok!
-	0 succeedcount!
-
-	auto i
-	0 i!
-
-	auto pfdbe
-	listhead@@ pfdbe!
-
-	auto ipl
-
-	if (pfdbe@)
-		IPLDPC KeIPLRaise ipl!
-
-		auto count
-
-		if (fast@)
-			MmEvictableFastPageCount@ count!
-		end else
-			MmEvictableSlowPageCount@ count!
-		end
-
-		listhead@@ pfdbe!
-
-		while (count@ trycount@ &&)
-			// check each page if the low memory situation is resolved
-
-			if (pfdbe@ ~~)
-				break
-			end
-
-			if (MmPageFreeCount@ MmPageFreeCountSufficient@ >=)
-				MmEventLowMemory // event
-				KeEventReset drop
-
-				ipl@ KeIPLLower
-
-				1 done!
-
-				return
-			end
-
-			// we will call an MmEvictionFunction defined by the PFDBE.
-			// this function's primary job is to perform whatever actions
-			// are necessary to evict the page frame, such as writing it
-			// out to the swapfile.
-
-			// another equally important job of the MmEvictionFunction is
-			// to perform whatever synchronization is needed between any
-			// other parts of the system that make use of this page frame,
-			// and its eviction. if this synchronization is not possible
-			// for any reason, the function returns 0 in the 'evicted'
-			// return value. if the function had to drop below IPLDPC to
-			// accomplish its work, it returns 1 in the 'dropped' return
-			// value.
-
-			auto evictionfuncs
-			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
-
-			auto evictionfunc
-			evictionfuncs@ MmEvictableFunctions_EvictionFunc + @ evictionfunc!
-
-			if (DEBUGCHECKS)
-				if (evictionfunc@ ~~)
-					"MmEvictFromList: no eviction func for page\n" KeCrash
-				end
-			end
-
-			auto evicted
-			auto dropped
-
-			pfdbe@ // pfdbe
-			evictionfunc@ MmEvictionFunction drop evicted! dropped!
-
-			auto npfdbe
-
-			pfdbe@ MmPageFrameEntryEvictable_Next + @ npfdbe!
-
-			if (evicted@)
-				// evicted, free the page
-
-				if (DEBUGCHECKS)
-					if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
-						pfdbe@ MmPageFrameEntryEvictable_References + @
-						"MmEvictFromList: attempt to evict a page with %d references\n" KeCrash
-					end
-				end
-
-				1 succeedcount +=
-				1 trycount -=
-
-				pfdbe@ MmEvictablePageRemoveForDeletion
-
-				pfdbe@ MmPageFrameEntryEvictable_PFN + @ // pfn
-				MmPageFree
-			end else
-				// failed to evict, put on MRU end so that we don't try it
-				// again for a while.
-
-				if (npfdbe@)
-					pfdbe@ MmEvictablePageRemove
-					pfdbe@ MmEvictablePageInsert
-				end
-			end
-
-			if (dropped@)
-				if (DEBUGCHECKS)
-					if (fast@)
-						"MmEvictFromList: fast page eviction dropped below IPLDPC\n" KeCrash
-					end
-				end
-
-				// dropped, anything could have happened to the LRU so reset these
-
-				listhead@@ npfdbe!
-			end
-
-			npfdbe@ pfdbe!
-			1 i +=
-			1 count -=
-		end
-
-		ipl@ KeIPLLower
-	end
-end
-
-var MmSynchronousEvictToggle 0
-
-fn MmEvictSinglePage { canbeslow -- pfdbe ok }
-	if (canbeslow@ ~~ MmSwappiness@ ~~ ||)
-		MmEvictSingleFastPage ok! pfdbe!
-		return
-	end
-
-	// check if either list is overwhelmingly larger than the other.
-	// if it is, evict from that one specifically.
-
-	if (MmEvictableFastPageCount@ MmEvictableSlowPageCount@ 150 + >)
-		MmEvictSingleFastPage ok! pfdbe!
-
-		if (ok@ ~~)
-			return
-		end
-
-		MmEvictSingleSlowPage ok! pfdbe!
-		return
-	end elseif (MmEvictableSlowPageCount@ MmEvictableFastPageCount@ 100 + >)
-		MmEvictSingleSlowPage ok! pfdbe!
-
-		if (ok@ ~~)
-			return
-		end
-
-		MmEvictSingleFastPage ok! pfdbe!
-		return
-	end
-
-	// neither list was very much larger than the other.
-	// try to evict from fast list or slow list first, randomly, opposite to
-	// what the system's last synchronous eviction did.
-
-	auto i
-	2 i!
-
-	while (i@)
-		if (MmSynchronousEvictToggle@)
-			MmEvictSingleSlowPage ok! pfdbe!
-
-			0 MmSynchronousEvictToggle!
-
-			if (ok@ ~~)
-				return
-			end
-		end else
-			MmEvictSingleFastPage ok! pfdbe!
-
-			1 MmSynchronousEvictToggle!
-
-			if (ok@ ~~)
-				return
-			end
-		end
-
-		1 i -=
-	end
-end
-
-fn MmEvictSingleFastPage { -- pfdbe ok }
+fn MmEvictSinglePage { -- pfdbe ok }
 	auto evictionfunc
 	auto evicted
-	auto dropped
-	auto ipl
 
 	STATUS_NO_MEMORY ok!
 
-	if (MmEvictableFastPageListHead@)
-		MmEvictableFastPageListHead@ pfdbe!
+	if (MmEvictablePageListHead@)
+		MmEvictablePageListHead@ pfdbe!
 
 		while (pfdbe@)
 			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
 			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
 
 			pfdbe@ // pfdbe
-			evictionfunc@ MmEvictionFunction drop evicted! dropped!
-
-			if (DEBUGCHECKS)
-				if (dropped@)
-					"MmEvictSingleFastPage: fast page eviction dropped below IPLDPC\n" KeCrash
-				end
-			end
+			evictionfunc@ MmEvictionFunction drop evicted!
 
 			if (evicted@ ~~)
 				pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
@@ -493,63 +299,6 @@ fn MmEvictSingleFastPage { -- pfdbe ok }
 				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
 					pfdbe@ MmPageFrameEntryEvictable_References + @
 					"MmEvictSingleFastPage: attempt to evict a page with %d references\n" KeCrash
-				end
-			end
-
-			pfdbe@ MmEvictablePageRemoveForDeletion
-
-			0 ok!
-
-			return
-		end
-	end
-end
-
-fn MmEvictSingleSlowPage { -- pfdbe ok }
-	// can try the slow list
-
-	auto evictionfunc
-	auto evicted
-	auto dropped
-	auto ipl
-
-	STATUS_NO_MEMORY ok!
-
-	auto trycap
-	128 trycap!
-
-	if (MmEvictablePageListHead@)
-		MmEvictablePageListHead@ pfdbe!
-
-		while (pfdbe@)
-			if (trycap@ ~~)
-				return
-			end
-
-			pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
-			MmEvictableFunctions_EvictionFunc + @ evictionfunc!
-
-			pfdbe@ // pfdbe
-			evictionfunc@ MmEvictionFunction drop evicted! dropped!
-
-			if (evicted@ ~~)
-				if (dropped@)
-					1 trycap -=
-
-					MmEvictablePageListHead@ pfdbe!
-				end else
-					pfdbe@ MmPageFrameEntryFree_Next + @ pfdbe!
-				end
-
-				continue
-			end
-
-			// evicted, yoink
-
-			if (DEBUGCHECKS)
-				if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
-					pfdbe@ MmPageFrameEntryEvictable_References + @
-					"MmEvictSinglePage: attempt to evict a page with %d references 2\n" KeCrash
 				end
 			end
 

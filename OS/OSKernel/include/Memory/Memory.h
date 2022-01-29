@@ -70,6 +70,8 @@ extern MmResourceJettison { -- }
 
 extern MmPoolInit { -- }
 
+extern MmIsMemoryLow { threshold freethresh -- ok }
+
 extern MmPageAlloc { priority -- pfdbe pfn ok }
 extern MmPageFree { pfn -- }
 extern MmHeapCheck { -- }
@@ -86,8 +88,9 @@ extern MmKernelStackFree { kstack -- }
 extern MmPageDirectoryAlloc { -- pdir ok }
 extern MmPageDirectoryFree { pdir -- }
 
+extern MmModifiedPageWriter { context1 context2 -- }
+extern MmAsyncEvictWorker { context1 context2 -- }
 extern MmBalanceSetManager { -- }
-
 extern MmZeroPageWorker { -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }
@@ -103,6 +106,8 @@ externptr MmPageFreeCount
 externptr MmInited
 externptr MmEventPageAvailable
 externptr MmEventLowMemory
+externptr MmModifiedPageEvent
+externptr MmAsyncEvictEvent
 externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
@@ -116,10 +121,7 @@ externptr MmCommitUsage
 
 const MMMUSTSUCCEEDL2PAGES 10
 const MMMUSTSUCCEEDPAGES   18
-
 const MMDIREPAGES          15
-const MMLOWWATERMARK       40
-const MMHIGHWATERMARK      100
 
 const MMWORKINGSETDEFAULTMINIMUM 16
 const MMWORKINGSETDEFAULTMAXIMUM 64

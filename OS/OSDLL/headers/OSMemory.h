@@ -8,6 +8,7 @@ struct OSMemoryInformation
 	4 AnonymousPageCount
 
 	4 DirtyPageCount
+	4 DirtyPageMaximum
 
 	4 SwapPageTotalCount
 	4 SwapPageUsedCount
@@ -19,8 +20,10 @@ struct OSMemoryInformation
 	4 PoolBytesUsedInternally
 	4 PoolBytesUsedExternally
 
-	4 EvictableFastPageCount
-	4 EvictableSlowPageCount
+	4 EvictablePageCount
+
+	4 ModifiedPageCount
+	4 ModifiedPageMaximum
 
 	4 WorkingSetPageTotalCount
 	4 WorkingSetPagePeakCount

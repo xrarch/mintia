@@ -126,6 +126,19 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	auto wsleptr
 	auto wsli
 
+	if (process@ PsProcess_ModifiedPages + @ 20 >)
+		while (MmEvictableModifiedPageCount@ MmModifiedPageMaximum@ >=)
+			// throttle the thread
+
+			50 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+
+			0 process@ PsProcess_ModifiedPages + !
+		end
+	end
+
 	vaddr@ // vaddr
 	process@ KeProcess_PageDirectory + @ // pagemap
 	MmVirtualtoPTEAddress ok! pteaddr!
@@ -234,7 +247,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 				PTE_V flags!
 
-				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ -1 ==)
+				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ==)
 					// no swap page, fine to map writable
 					if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
 						PTE_W flags |=
@@ -492,7 +505,7 @@ fn MmSatisfyAnonFault { section offset vad -- flags pfdbe phyaddr ok }
 
 	PTE_V flags!
 
-	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ -1 ==)
+	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ==)
 		// no swap page, it's okay to map writable since we're either already
 		// dirty or have never been written to swap.
 		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
@@ -568,7 +581,9 @@ fn MmWriteFault { vaddr process -- signal }
 			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
 				// dirtied an anonymous page, free its swap page
 
-				pfdbe@ MmAnonymousPageDirty
+				pfdbe@ // pfdbe
+				process@ // process
+				MmAnonymousPageModify
 
 				phyaddr@ // phyaddr
 				PTE_V PTE_W | // flags
@@ -595,9 +610,9 @@ fn MmWriteFault { vaddr process -- signal }
 					return
 				end
 
-				// starts at -2 which means demand-zero, which isn't true here
-				-1 cowpfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
-				MMEVICTFLAG_FAST ~ cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + &=
+				// starts at demand-zero, which isn't true here
+				MMSWAPPAGE_NONE cowpfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+				MMEVICTFLAG_MODIFIED cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
 
 				// we unlocked the working set mutex so we have to recheck
 				// everything...
@@ -636,7 +651,9 @@ fn MmWriteFault { vaddr process -- signal }
 			if (section@ MmSection_FileObject + @ ~~)
 				// dirtied an anonymous page, free its swap page
 
-				pfdbe@ MmAnonymousPageDirty
+				pfdbe@ // pfdbe
+				process@ // process
+				MmAnonymousPageModify
 
 				phyaddr@ // phyaddr
 				PTE_V PTE_W | // flags

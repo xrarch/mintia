@@ -1,4 +1,4 @@
-const WORKINGSETLISTCOUNT 64
+const WORKINGSETLISTCOUNT 8
 
 struct PsProcess
 	KeProcess_SIZEOF PCB
@@ -41,6 +41,8 @@ struct PsProcess
 	// virtual memory information
 
 	KeMutex_SIZEOF VADListMutex
+
+	4 ModifiedPages
 
 	4 VADListHead
 	4 VADListTail

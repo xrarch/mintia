@@ -43,6 +43,8 @@ fn KeDispatchWaitBlockInitialize { thread waitblock -- }
 	thread@ waitblock@ KeDispatchWaitBlock_Thread + !
 
 	0 waitblock@ KeDispatchWaitBlock_Object + !
+
+	0 waitblock@ KeDispatchWaitBlock_WaitIndex + !
 end
 
 fn KeDispatchWaitBlockDequeue { waitstatus waitblock -- }
@@ -87,7 +89,7 @@ end
 
 // adds a WaitBlock to the tail of a dispatch object's WaitBlockList
 
-fn KeDispatchWaitBlockEnqueue { waittype waitblock object -- }
+fn KeDispatchWaitBlockEnqueue { waitindex waittype waitblock object -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KeDispatchWaitBlockInsert: ipl != IPLDPC\n" KeCrash
@@ -109,10 +111,9 @@ fn KeDispatchWaitBlockEnqueue { waittype waitblock object -- }
 	end
 
 	waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
-
 	object@ waitblock@ KeDispatchWaitBlock_Object + !
-
 	waittype@ waitblock@ KeDispatchWaitBlock_WaitType + !
+	waitindex@ waitblock@ KeDispatchWaitBlock_WaitIndex + !
 end
 
 // satisfies a WaitBlock
@@ -135,7 +136,10 @@ fn KeDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- }
 	waitblock@ KeDispatchWaitBlock_WaitType + @ wt!
 
 	if (wt@ OSWAITANY ==)
-		waitstatus@ priboost@ thread@ KeThreadWakeup drop
+		waitblock@ KeDispatchWaitBlock_WaitIndex + @ // waitstatus
+		priboost@ // priboost
+		thread@ // thread
+		KeThreadWakeup drop
 	end elseif (wt@ OSWAITALL ==)
 		if (thread@ KeThread_WaitCount + @ 0 ==)
 			0 priboost@ thread@ KeThreadWakeup drop
@@ -302,6 +306,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		end
 
 		if (timeout@)
+			i@ // waitindex
 			waittype@ // waittype
 			waitblock@ // waitblock
 			object@ // object
@@ -358,6 +363,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 
 		current@ KeThread_TimeoutWaitBlock + waitblock!
 
+		STATUS_WAIT_TIMEOUT // waitindex
 		OSWAITANY // waittype
 		waitblock@ // waitblock
 		current@ KeThread_Timer + // object
@@ -468,6 +474,7 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 		return
 	end
 
+	0 // waitindex
 	OSWAITANY // waittype
 	current@ KeThread_WaitBlocks + // waitblock
 	object@ // object
@@ -481,6 +488,7 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 		current@ KeThread_Timer + // timer
 		KeTimerInitialize
 
+		STATUS_WAIT_TIMEOUT // waitindex
 		OSWAITANY // waittype
 		current@ KeThread_TimeoutWaitBlock + // waitblock
 		current@ KeThread_Timer + // object

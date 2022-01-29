@@ -66,11 +66,17 @@ public MmQuotaSystem
 buffer MmEventLowMemory KeEvent_SIZEOF
 public MmEventLowMemory
 
+buffer MmModifiedPageEvent KeEvent_SIZEOF
+public MmModifiedPageEvent
+
 var MmPageFreeCountLow 0
 public MmPageFreeCountLow
 
 var MmPageFreeCountSufficient 0
 public MmPageFreeCountSufficient
+
+var MmModifiedPageMaximum 0
+public MmModifiedPageMaximum
 
 var MmCommitLimit 0
 public MmCommitLimit
@@ -80,6 +86,9 @@ public MmCommitUsage
 
 buffer MmEventPageAvailable KeEvent_SIZEOF
 public MmEventPageAvailable
+
+buffer MmAsyncEvictEvent KeEvent_SIZEOF
+public MmAsyncEvictEvent
 
 // initializes physical memory allocation
 
@@ -193,6 +202,18 @@ fn MmInitPhase0 { -- }
 	IODirtyPageEvent // event
 	KeEventInitialize
 
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"MmModifiedPageEvent" // name
+	MmModifiedPageEvent // event
+	KeEventInitialize
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"MmAsyncEvictEvent" // name
+	MmAsyncEvictEvent // event
+	KeEventInitialize
+
 	MmPoolInit
 
 	MmReclaimFirmware
@@ -227,18 +248,44 @@ fn MmInitPhase1 { -- }
 
 	// initialize eviction/swap
 
-	if (MmPageFreeCount@ MMMUSTSUCCEEDPAGES 9 * <=)
-		// special case for very low remaining RAM (~1MB)
+	auto membytes
+	MmPageTotalTotal@ PAGESHIFT << membytes!
 
-		MMMUSTSUCCEEDPAGES 1 + MmPageFreeCountLow!
-		MmPageFreeCount@ 2 / MmPageFreeCountSufficient!
+	if (membytes@ 2 1024 * 1024 * <=)
+		// tiny system, 2MB
 
-		MmPageFreeCount@ 3 / IOCachePagesDirtyMaximum!
-	end else
-		MMLOWWATERMARK MmPageFreeCountLow!
-		MMHIGHWATERMARK MmPageFreeCountSufficient!
-		
+		25 MmPageFreeCountLow!
+		60 MmPageFreeCountSufficient!
+		50 IOCachePagesDirtyMaximum!
+		25 MmModifiedPageMaximum!
+	end elseif (membytes@ 4 1024 * 1024 * <=)
+		// small system, 4MB
+
+		60 MmPageFreeCountLow!
+		150 MmPageFreeCountSufficient!
 		100 IOCachePagesDirtyMaximum!
+		75 MmModifiedPageMaximum!
+	end elseif (membytes@ 8 1024 * 1024 * <=)
+		// medium system, 8MB
+
+		60 MmPageFreeCountLow!
+		200 MmPageFreeCountSufficient!
+		150 IOCachePagesDirtyMaximum!
+		130 MmModifiedPageMaximum!
+	end elseif (membytes@ 12 1024 * 1024 * <=)
+		// large system, 12MB
+
+		60 MmPageFreeCountLow!
+		250 MmPageFreeCountSufficient!
+		200 IOCachePagesDirtyMaximum!
+		180 MmModifiedPageMaximum!
+	end elseif (membytes@ 32 1024 * 1024 * >=)
+		// massive system, >=32MB
+
+		70 MmPageFreeCountLow!
+		300 MmPageFreeCountSufficient!
+		300 IOCachePagesDirtyMaximum!
+		200 MmModifiedPageMaximum!
 	end
 
 	// initialize the commit limit to the free page count plus 100 pages.
@@ -247,24 +294,27 @@ fn MmInitPhase1 { -- }
 
 	MmPageFreeCountSufficient@
 	MmPageFreeCountLow@
-	"eviction targets: %d pages -> %d pages\n" "MmInitPhase1" HALLog
+	"free page targets: %d pages -> %d pages\n" "MmInitPhase1" HALLog
 
 	IOCachePagesDirtyMaximum@ PAGESHIFT <<
 	IOCachePagesDirtyMaximum@ "dirty page maximum: %d pages (%d bytes)\n" "MmInitPhase1" HALLog
+
+	MmModifiedPageMaximum@ PAGESHIFT <<
+	MmModifiedPageMaximum@ "modified page maximum: %d pages (%d bytes)\n" "MmInitPhase1" HALLog
 
 	auto ok
 
 	0 // context1
 	0 // context2
-	pointerof MmEvictionWorker // startfunc
+	pointerof MmModifiedPageWriter // startfunc
 	0 // creationflags
 	ACCESS_OWNER_ALL // permissions
-	"Eviction" // name
+	"ModifiedPageWriter" // name
 	PsSystemProcess@ // processobject
 	PsThreadCreateObject ok! drop
 
 	if (ok@)
-		ok@ "MmInitPhase1: couldn't create 'Eviction' thread (%i)\n" KeCrash
+		ok@ "MmInitPhase1: couldn't create 'ModifiedPageWriter' thread (%i)\n" KeCrash
 	end
 end
 
@@ -454,6 +504,7 @@ fn MmQuery { query -- ok }
 	MmAnonymousPageCount@ query@ OSMemoryInformation_AnonymousPageCount + !
 
 	IOCachePagesDirtyCount@ query@ OSMemoryInformation_DirtyPageCount + !
+	IOCachePagesDirtyMaximum@ query@ OSMemoryInformation_DirtyPageMaximum + !
 
 	IOSwapPagesCount@ query@ OSMemoryInformation_SwapPageTotalCount + !
 	IOSwapPagesUsed@ query@ OSMemoryInformation_SwapPageUsedCount + !
@@ -468,8 +519,10 @@ fn MmQuery { query -- ok }
 	MmSlabBytesUsedExternally@ MmPoolBytesUsed@ +
 	query@ OSMemoryInformation_PoolBytesUsedExternally + !
 
-	MmEvictableFastPageCount@ query@ OSMemoryInformation_EvictableFastPageCount + !
-	MmEvictableSlowPageCount@ query@ OSMemoryInformation_EvictableSlowPageCount + !
+	MmEvictablePageCount@ query@ OSMemoryInformation_EvictablePageCount + !
+
+	MmEvictableModifiedPageCount@ query@ OSMemoryInformation_ModifiedPageCount + !
+	MmModifiedPageMaximum@ query@ OSMemoryInformation_ModifiedPageMaximum + !
 
 	MmTotalWorkingSetSize@ query@ OSMemoryInformation_WorkingSetPageTotalCount + !
 	MmPeakWorkingSetSize@ query@ OSMemoryInformation_WorkingSetPagePeakCount + !

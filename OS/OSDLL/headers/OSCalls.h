@@ -79,8 +79,6 @@ extern OSSectionMapView { length startva sectionoffset sectionhandle processhand
 extern OSUnmapView { length vaddr processhandle -- ok }
 extern OSRemapView { pageprotection length vaddr processhandle -- ok }
 
-extern OSSetSwappiness { swappiness -- ok }
-
 extern OSMemoryQuery { query -- ok }
 
 extern OSWorkingSetPurge { -- ok }

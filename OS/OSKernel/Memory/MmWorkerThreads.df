@@ -25,101 +25,67 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-// fraction over 128 of the number of evicted pages that should be written to
-// swap.
-var MmSwappiness 0
-public MmSwappiness
-
-fn MmEvictionWorker { context1 context2 -- }
+fn MmModifiedPageWriter { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
-	// the swap thread
-
-	auto sleptonce
-	0 sleptonce!
-
-	auto failcount
-	0 failcount!
-
-	auto forcedire
-	0 forcedire!
-
-	auto ipl
+	// the swap thread. writes out modified anon pages and slaps them on the
+	// evictable list.
 
 	while (1)
 		auto ok
-		auto reason
-		auto evictcount
+		auto waitok
 
 		KERNELMODE // waitmode
 		0 // alertable
-		2000 // timeout
-		MmEventLowMemory // object
-		KeThreadWaitForObject reason!
+		OSWAIT_TIMEOUTINFINITE // timeout
+		MmModifiedPageEvent // object
+		KeThreadWaitForObject waitok!
 
 		if (DEBUGCHECKS)
-			if (reason@)
-				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+			if (waitok@ 0 s<)
+				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
+					waitok@ "MmModifiedPageWriter: failed to wait on low memory event (%i)\n" KeCrash
 				end
 			end
 		end
 
-		IPLDPC KeIPLRaise ipl!
+		auto writescore
+		0 writescore!
 
-		if (MmPageFreeCount@ MmEvictableFastPageCount@ + MmPageFreeCountSufficient@ >=)
-			MmEventLowMemory // event
-			KeEventReset drop
+		auto modcount
+		MmEvictableModifiedPageCount@ modcount!
 
-			ipl@ KeIPLLower
-
-			0 sleptonce!
-			0 failcount!
-			0 forcedire!
-
-			continue
-		end else
-			MmPageFreeCountSufficient@ MmEvictableFastPageCount@ + MmPageFreeCount@ - evictcount!
-		end
-
-		ipl@ KeIPLLower
-
-		if (failcount@ 4 >=)
-			// we've been here a lot of times...
-			// giving up the processor for 50ms might untangle things and help
-			// us evict more pages...
-
-			50 // interval
-			KERNELMODE // waitmode
-			0 // alertable
-			KeThreadSleep ok!
-
-			if (DEBUGCHECKS)
-				if (ok@ STATUS_WAIT_TIMEOUT ~=)
-					ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+		while (1)
+			if (modcount@ ~~)
+				if (waitok@ 0 ==)
+					100 // interval
+					KERNELMODE // waitmode
+					0 // alertable
+					KeThreadSleep drop
 				end
+
+				break
 			end
 
-			1 forcedire!
-			0 failcount!
+			auto thresh
 
-			continue
-		end
+			if (modcount@ 1 ==)
+				1 thresh!
+			end else
+				modcount@ 1 >> thresh!
+			end
 
-		if (sleptonce@ ~~)
-			if (IOCachePagesDirtyCount@ IOCachePagesDirtyMaximum@ 3 / >=)
-				// there's IOCachePagesDirtyMaximum/3 or more dirty page
-				// frames.
-				// go to sleep for 50ms with the hope that the writebehind
-				// worker will have freed some up by
-				// the time we wake up.
+			if (writescore@ thresh@ >=)
+				// if we tried to unsuccessfully write modcount/2 times in a
+				// row, odds are we're stuck in an infinite loop and we need
+				// to let user threads run for a bit in order to successfully
+				// write out any more pages. go to sleep for 50ms.
 
-				// we may do this only once per eviction period.
-				1 sleptonce!
+				0 writescore!
 
 				50 // interval
 				KERNELMODE // waitmode
@@ -128,59 +94,56 @@ fn MmEvictionWorker { context1 context2 -- }
 
 				if (DEBUGCHECKS)
 					if (ok@ STATUS_WAIT_TIMEOUT ~=)
-						ok@ "MmEvictionWorker: wait failed (%i)\n" KeCrash
+						ok@ "MmModifiedPageWriter: wait failed (%i)\n" KeCrash
 					end
 				end
 
-				continue
+				MmEvictableModifiedPageCount@ modcount!
+
+				0 ok!
 			end
+
+			auto written
+			auto dropped
+
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			auto pfdbe
+			MmEvictableModifiedPageListHead@ pfdbe!
+
+			if (pfdbe@)
+				pfdbe@ MmEvictablePageReference drop
+
+				auto evictionfuncs
+				pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
+
+				pfdbe@ // pfdbe
+				evictionfuncs@ MmEvictableFunctions_WriteModifiedFunc + @
+				MmWriteModifiedFunction drop dropped! written!
+
+				if (written@ ~~)
+					1 writescore +=
+				end else
+					0 writescore!
+
+					if (modcount@)
+						1 modcount -=
+					end
+				end
+
+				pfdbe@ MmEvictablePageDereference drop
+			end else
+				0 modcount!
+			end
+
+			ipl@ KeIPLLower
 		end
-
-		auto succeedcount
-		0 succeedcount!
-
-		auto done
-		0 done!
-
-		evictcount@ // trycount
-		0 // fast
-		MmEvictablePageListHead // listhead
-		MmEvictFromList ok! done! succeedcount!
-
-		if (ok@)
-			ok@ "MmEvictionWorker: slow page evict (%i)\n" KeCrash
-		end
-
-		if (succeedcount@ evictcount@ >=)
-			0 failcount!
-		end
-
-		if (done@)
-			continue
-		end
-
-		1 failcount +=
 	end
 end
 
 fn MmPopulateLists { dire pagecount -- }
 	auto ok
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	// check if we need to populate the lists at all judging by their current
-	// sizes and the given pagecount.
-
-	if (MmEvictablePageCount@ pagecount@ >=)
-		ipl@ KeIPLLower
-
-		return
-	end
-
-	MmEvictablePageCount@ pagecount -=
-
-	ipl@ KeIPLLower
 
 	PsProcessListLock ok!
 
@@ -205,27 +168,25 @@ fn MmPopulateLists { dire pagecount -- }
 			process@ MmWorkingSetLockTimeout ok!
 
 			if (ok@ ~~)
+				auto trimmed
+
 				dire@ // dire
 				pagecount@ // pages
 				process@ // process
-				MmWorkingSetTrim pagecount -=
+				MmWorkingSetTrim trimmed!
 
 				process@ MmWorkingSetUnlock
-
-				if (DEBUGCHECKS)
-					if (pagecount@ 0 s<)
-						"MmPopulateLists: pagecount<0\n" KeCrash
-					end
-				end
 
 				if (process@ PsProcessListTail@ ~=)
 					process@ PsProcessRemove
 					process@ PsProcessInsert
 				end
 
-				if (pagecount@ ~~)
+				if (trimmed@ pagecount@ >=)
 					break
 				end
+
+				trimmed@ pagecount -=
 			end
 		end
 
@@ -239,7 +200,7 @@ end
 fn MmBalanceSetManager { -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
-	PRIORITY_LOWREALTIME 2 + // priority
+	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
 	ipl@ KeIPLLower
@@ -252,8 +213,6 @@ fn MmBalanceSetManager { -- }
 
 	// this little idiot is the only reason we will fit snugly in 4MB RAM.
 
-	auto rs
-
 	while (1)
 		auto ok
 		auto reason
@@ -265,34 +224,38 @@ fn MmBalanceSetManager { -- }
 		KeThreadWaitForObject reason!
 
 		if (DEBUGCHECKS)
-			if (reason@)
+			if (reason@ 0 s<)
 				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "MmEvictionWorker: failed to wait on low memory event (%i)\n" KeCrash
+					reason@ "MmBalanceSetManager: failed to wait on low memory event (%i)\n" KeCrash
 				end
 			end
 		end
 
+		auto needed
+		auto dire
+
 		if (reason@ 0 ==)
-			HALCPUInterruptDisable rs!
+			// low memory event
 
-			if (MmPageFreeCount@ MmPageFreeCountSufficient@ <)
-				auto needed
-				MmPageFreeCountSufficient@ MmPageFreeCount@ - needed!
+			IPLDPC KeIPLRaise ipl!
 
-				if (MmEvictablePageCount@ needed@ <)
-					MmEvictablePageCount@ needed -=
+			if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
+				MmEventLowMemory // event
+				KeEventReset drop
 
-					rs@ HALCPUInterruptRestore
+				ipl@ KeIPLLower
 
-					MmPageFreeCount@ MMDIREPAGES < // dire
-					needed@ // pagecount
-					MmPopulateLists
-				end else
-					rs@ HALCPUInterruptRestore
-				end
-			end else
-				rs@ HALCPUInterruptRestore
+				continue
 			end
+
+			MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - needed!
+			MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
+
+			ipl@ KeIPLLower
+
+			dire@ // dire
+			needed@ // pagecount
+			MmPopulateLists
 
 			// wait 100ms before trying again
 
@@ -339,8 +302,6 @@ fn MmZeroPageWorker { -- }
 
 			// account for the absence of this page frame from either list while we're zeroing it
 
-			1 MmPageFreeCount -=
-
 			rs@ HALCPUInterruptRestore
 
 			// zero out this page frame
@@ -356,8 +317,6 @@ fn MmZeroPageWorker { -- }
 
 			MmPageZeroListHead@ pfdbe@ MmPageFrameEntryFree_Next + !
 			pfdbe@ MmPageZeroListHead!
-
-			1 MmPageFreeCount +=
 
 			rs@ HALCPUInterruptRestore
 		end else

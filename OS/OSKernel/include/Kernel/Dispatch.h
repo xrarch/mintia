@@ -31,6 +31,8 @@ struct KeDispatchWaitBlock
 	4 WaitStatusReturn
 	4 WaitType
 
+	4 WaitIndex
+
 	4 Thread
 	4 Object
 endstruct

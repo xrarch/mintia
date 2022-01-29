@@ -1,4 +1,5 @@
-fnptr MmEvictionFunction { pfdbe -- dropped evicted ok }
+fnptr MmWriteModifiedFunction { pfdbe -- written dropped ok }
+fnptr MmEvictionFunction { pfdbe -- evicted ok }
 fnptr MmReferenceFunction { oldcount pfdbe -- }
 fnptr MmDereferenceFunction { oldcount pfdbe -- }
 
@@ -6,7 +7,7 @@ struct MmEvictableFunctions
 	4 EvictionFunc
 	4 ReferenceFunc
 	4 DereferenceFunc
-	4 Reserved1
+	4 WriteModifiedFunc
 	4 Reserved2
 	4 Reserved3
 	4 Reserved4
@@ -72,14 +73,13 @@ struct MmPageFrameEntryAnonymous
 	4 PrototypePTE
 endstruct
 
-const MMEVICTFLAG_FAST       1
+const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_COW        16
 
 const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
                                 // for working set accounting when inserted or
                                 // removed from an evictable list.
 
-extern MmEvictionWorker { context1 context2 -- }
 extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }
@@ -87,16 +87,17 @@ extern MmEvictablePageRemove { pfdbe -- }
 extern MmEvictablePageRemoveForDeletion { pfdbe -- }
 extern MmEvictablePageInsert { pfdbe -- }
 
-extern MmEvictFromList { trycount fast listhead -- succeedcount done ok }
-extern MmEvictSinglePage { canbeslow -- pfdbe ok }
+extern MmEvictSinglePage { -- pfdbe ok }
+
+externptr MmEvictableModifiedPageListHead
+externptr MmEvictableModifiedPageListTail
+
+externptr MmEvictableModifiedPageCount
 
 externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail
-externptr MmEvictableFastPageListHead
-externptr MmEvictableFastPageListTail
 
 externptr MmEvictablePageCount
-externptr MmEvictableFastPageCount
-externptr MmEvictableSlowPageCount
 
-externptr MmSwappiness
+externptr MmModifiedPageMaximum
+externptr MmModifiedPageMinimum

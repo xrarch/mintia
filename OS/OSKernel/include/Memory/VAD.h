@@ -20,6 +20,8 @@ struct MmVAD
 
 	4 QuotaBlock
 	4 ChargeVMQuota
+
+	4 COWCount
 endstruct
 
 extern MmVADCreate { startva endva prot offset processobject sectionobject quotablock -- vad ok }

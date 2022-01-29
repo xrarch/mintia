@@ -1,5 +1,5 @@
 fnptr MmWriteModifiedFunction { pfdbe -- written dropped ok }
-fnptr MmEvictionFunction { pfdbe -- evicted ok }
+fnptr MmEvictionFunction { pfdbe -- }
 fnptr MmReferenceFunction { oldcount pfdbe -- }
 fnptr MmDereferenceFunction { oldcount pfdbe -- }
 

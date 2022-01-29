@@ -1,5 +1,5 @@
-const IOCACHEPAGEBUCKETS 16 // must be a power of two
-const IOCACHEPAGESHIFT 4 // 1<<IOCACHEPAGESHIFT must equal IOCACHEPAGEBUCKETS
+const IOCACHEPAGEBUCKETS 32 // must be a power of two
+const IOCACHEPAGESHIFT 5 // 1<<IOCACHEPAGESHIFT must equal IOCACHEPAGEBUCKETS
 const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
 
 struct IOCacheInfoBlock
@@ -71,7 +71,7 @@ extern IOCachePageInsert { pfdbe buckethead -- }
 extern IOCachePageRemoveDirty { pfdbe -- }
 extern IOCachePageInsertDirty { pfdbe -- }
 
-extern IOCachePageWriteDirty { pfdbe -- ok }
+extern IOCachePageWriteDirty { dontderef pfdbe -- ok }
 
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }

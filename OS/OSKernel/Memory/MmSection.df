@@ -93,6 +93,8 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 		auto ppt
 		object@ MmSection_AnonPrototypePageTable + @ ppt!
 
+		auto ipl
+
 		if (ppt@)
 			auto ppte
 
@@ -119,6 +121,8 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 						// iterate bottom level table
 
 						while (j@)
+							IPLDPC KeIPLRaise ipl!
+
 							ppde@@ ppte!
 
 							if (ppte@ PTE_V &)
@@ -133,10 +137,10 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 									end
 								end
 
-								HALCPUInterruptDisable rs!
 								pfdbe@ MmEvictablePageRemoveForDeletion
 								1 MmAnonymousPageCount -=
-								rs@ HALCPUInterruptRestore
+
+								ipl@ KeIPLLower
 
 								if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
 									// free in swap
@@ -145,8 +149,12 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 								ppte@ PAGESHIFT >> MmPageFree
 							end elseif (ppte@ PTE_INSWAP &)
+								ipl@ KeIPLLower
+
 								// free in swap
 								ppte@ PAGESHIFT >> IOSwapPageFree
+							end else
+								ipl@ KeIPLLower
 							end
 
 							4 ppde +=
@@ -165,6 +173,8 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 				anonsize@ PAGESHIFT >> count!
 
 				while (count@)
+					IPLDPC KeIPLRaise ipl!
+
 					ppt@@ ppte!
 
 					if (ppte@ PTE_V &)
@@ -179,10 +189,10 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 							end
 						end
 
-						HALCPUInterruptDisable rs!
 						pfdbe@ MmEvictablePageRemoveForDeletion
 						1 MmAnonymousPageCount -=
-						rs@ HALCPUInterruptRestore
+
+						ipl@ KeIPLLower
 
 						if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
 							// free in swap
@@ -191,8 +201,12 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 
 						ppte@ PAGESHIFT >> MmPageFree
 					end elseif (ppte@ PTE_INSWAP &)
+						ipl@ KeIPLLower
+
 						// free in swap
 						ppte@ PAGESHIFT >> IOSwapPageFree
+					end else
+						ipl@ KeIPLLower
 					end
 
 					4 ppt +=
@@ -504,27 +518,9 @@ fn (MmWriteModifiedFunction) MmAnonymousWriteFunction { pfdbe -- written dropped
 	end
 end
 
-fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
-	0 evicted!
-	0 ok!
-
+fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 	auto sectionobject
 	pfdbe@ MmPageFrameEntryAnonymous_SectionObject + @ sectionobject!
-
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-		// COW page -- sectionobject is really a process object and we need to
-		// lock its VAD list to keep pagefaults out.
-
-		sectionobject@ MmVADListTryLock ok!
-	end else
-		sectionobject@ MmSectionPPTTryLock ok!
-	end
-
-	if (ok@ ~~)
-		// failed to lock
-
-		return
-	end
 
 	auto pno
 	pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ pno!
@@ -535,22 +531,15 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- evicted ok }
 		end
 	end
 
-	1 evicted!
-
 	auto ppte
 	pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ ppte!
 
 	if (pno@ MMSWAPPAGE_DEMANDZERO ==)
-		// was an undirtied demand-zero page
+		// was an undirtied demand-zero page.
+		// simply discard it.
 		0 ppte@!
 	end else
 		pno@ PAGESHIFT << PTE_INSWAP | ppte@!
-	end
-
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-		sectionobject@ MmVADListUnlock
-	end else
-		sectionobject@ MmSectionPPTUnlock
 	end
 
 	1 MmAnonymousPageCount -=
@@ -718,6 +707,9 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 	sectionobject@ MmSectionReferenceLock
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
 	auto ppte
 	ppt@@ ppte!
 
@@ -729,8 +721,12 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		pfdbe@ MmEvictablePageReference drop
 
+		ipl@ KeIPLLower
+
 		sectionobject@ MmSectionReferenceUnlock
 	end elseif (ppte@ ~~)
+		ipl@ KeIPLLower
+
 		sectionobject@ MmSectionReferenceUnlock
 
 		// non-existent, demand zero
@@ -749,6 +745,8 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		phyaddr@ PTE_V | ppt@!
 	end elseif (ppte@ PTE_INSWAP &)
+		ipl@ KeIPLLower
+
 		sectionobject@ MmSectionReferenceUnlock
 
 		// swapped out, bring back in

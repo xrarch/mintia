@@ -168,7 +168,7 @@ fn IOCachePageDirtyCleanup { pfdbe -- extent }
 	ipl@ KeIPLLower
 end
 
-fn IOCachePageWriteDirty { pfdbe -- ok }
+fn IOCachePageWriteDirty { dontderef pfdbe -- ok }
 	// XXX call with care: data loss could occur if thread can receive signals
 	// during this operation
 
@@ -209,8 +209,10 @@ fn IOCachePageWriteDirty { pfdbe -- ok }
 	KERNELMODE // lastmode
 	writefunc@ IODispatchWriteFunction ok! drop
 
-	// no longer dirty, unbias the refcount
-	pfdbe@ MmEvictablePageDereference drop
+	if (dontderef@ ~~)
+		// no longer dirty, unbias the refcount
+		pfdbe@ MmEvictablePageDereference drop
+	end
 end
 
 fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
@@ -263,142 +265,164 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	auto buckettail
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + 4 + buckettail!
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
 	buckethead@@ pfdbe!
 
 	while (pfdbe@)
 		if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset@ ==)
-			break
+			// found the page, it was in the cache already!
+
+			// ref it so it doesn't get evicted while caller is using it
+
+			pfdbe@ MmEvictablePageReference drop
+
+			// remove from hash list so that it can be reinserted on the recently-used end
+
+			if (pfdbe@ buckethead@@ ~=)
+				pfdbe@ // pfdbe
+				buckethead@ // buckethead
+				IOCachePageRemove
+
+				pfdbe@ // pfdbe
+				buckethead@ // buckethead
+				IOCachePageInsert
+			end
+
+			ipl@ KeIPLLower
+
+			if (locked@ ~~)
+				bucket@ // bucket
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockUnlockBucket
+
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockUnlock
+			end
+
+			pfdbe@ IOPageFrameEntryCache_PFN + @ PAGESHIFT << IDENTITYSPACE | pageframe!
+
+			return
 		end
 
 		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
 	end
 
-	if (pfdbe@ ~~)
+	ipl@ KeIPLLower
+
+	// not in the cache -- allocate a page for it.
+
+	if (filesize@ offset@ - PAGESIZE <)
+		// not a full page -- get zeroes because this might leak data
+
+		MMEVICTFLAG_WORKINGSET // flags
+		IOCacheEvictableFunctions // evictablefuncs
+		ZEROMUST CACHEALLOC | // priority
+		MmEvictablePageAlloc ok! drop pfdbe!
+	end else
+		// full page, get any random page that may or may not be zeroed
+
+		MMEVICTFLAG_WORKINGSET // flags
+		IOCacheEvictableFunctions // evictablefuncs
+		FREEFIRST CACHEALLOC | // priority
+		MmEvictablePageAlloc ok! drop pfdbe!
+	end
+
+	auto rs
+
+	if (ok@)
+		if (DEBUGCHECKS)
+			if (ok@ STATUS_NO_MEMORY ~=)
+				ok@ "IOCachePageGet: weird return value from MmEvictablePageAlloc (%i)\n" KeCrash
+			end
+		end
+
+		// weren't able to find a reusable page. try to allocate again,
+		// but this time we can block.
+
+		if (kflags@ IOKFLAG_SWAPOUT &)
+			// this IOCachePageGet is needed for a swap-out operation
+			// (i.e., the filesystem driver is using it to cache disk
+			// structures and needs whatever is going to be read into
+			// this page to know where to swap the page out to).
+
+			MUSTSUCCEED CANBLOCK | kflags!
+		end elseif (kflags@ IOKFLAG_URGENT &)
+			MUSTSUCCEEDL2 CANBLOCK | kflags!
+		end else
+			CANBLOCK kflags!
+		end
+
 		if (filesize@ offset@ - PAGESIZE <)
-			// not a full page -- get zeroes because this might leak data
+			// not a full page -- get zeroes because this might leak data otherwise
 
 			MMEVICTFLAG_WORKINGSET // flags
 			IOCacheEvictableFunctions // evictablefuncs
-			ZEROMUST CACHEALLOC | // priority
+			ZEROMUST kflags@ | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end else
 			// full page, get any random page that may or may not be zeroed
 
 			MMEVICTFLAG_WORKINGSET // flags
 			IOCacheEvictableFunctions // evictablefuncs
-			FREEFIRST CACHEALLOC | // priority
+			FREEFIRST kflags@ | // priority
 			MmEvictablePageAlloc ok! drop pfdbe!
 		end
 
-		auto rs
-
 		if (ok@)
-			if (DEBUGCHECKS)
-				if (ok@ STATUS_NO_MEMORY ~=)
-					ok@ "IOCachePageGet: weird return value from MmEvictablePageAlloc (%i)\n" KeCrash
-				end
+			if (kflags@ MUSTSUCCEED ==)
+				// we needed this page for a swapout, system detonates.
+				// this flag is also used for certain other situations
+				// where an IO operation must succeed.
+				"IOCachePageGet: failed to allocate page needed for swapout!\n" KeCrash
 			end
 
-			// weren't able to find a reusable page. try to allocate again,
-			// but this time we can block.
+			if (locked@ ~~)
+				bucket@ // bucket
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockUnlockBucket
 
-			if (kflags@ IOKFLAG_SWAPOUT &)
-				// this IOCachePageGet is needed for a swap-out operation
-				// (i.e., the filesystem driver is using it to cache disk
-				// structures and needs whatever is going to be read into
-				// this page to know where to swap the page out to).
-
-				MUSTSUCCEED CANBLOCK | kflags!
-			end elseif (kflags@ IOKFLAG_URGENT &)
-				MUSTSUCCEEDL2 CANBLOCK | kflags!
-			end else
-				CANBLOCK kflags!
+				cacheblock@ // cacheblock
+				IOCacheInfoBlockUnlock
 			end
 
-			if (filesize@ offset@ - PAGESIZE <)
-				// not a full page -- get zeroes because this might leak data otherwise
-
-				MMEVICTFLAG_WORKINGSET // flags
-				IOCacheEvictableFunctions // evictablefuncs
-				ZEROMUST kflags@ | // priority
-				MmEvictablePageAlloc ok! drop pfdbe!
-			end else
-				// full page, get any random page that may or may not be zeroed
-
-				MMEVICTFLAG_WORKINGSET // flags
-				IOCacheEvictableFunctions // evictablefuncs
-				FREEFIRST kflags@ | // priority
-				MmEvictablePageAlloc ok! drop pfdbe!
-			end
-
-			if (ok@)
-				if (kflags@ MUSTSUCCEED ==)
-					// we needed this page for a swapout, system detonates.
-					// this flag is also used for certain other situations
-					// where an IO operation must succeed.
-					"IOCachePageGet: failed to allocate page needed for swapout!\n" KeCrash
-				end
-
-				if (locked@ ~~)
-					bucket@ // bucket
-					cacheblock@ // cacheblock
-					IOCacheInfoBlockUnlockBucket
-
-					cacheblock@ // cacheblock
-					IOCacheInfoBlockUnlock
-				end
-
-				return
-			end else
-				HALCPUInterruptDisable rs!
-				1 IOCachePagesUsed +=
-				rs@ HALCPUInterruptRestore
-			end
+			return
 		end else
 			HALCPUInterruptDisable rs!
 			1 IOCachePagesUsed +=
 			rs@ HALCPUInterruptRestore
 		end
-
-		0 pfdbe@ IOPageFrameEntryCache_Flags + !
-		offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
-		fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
-		0 pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
-		0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
-		0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
-		0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
-		0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
-
-		pfdbe@ // pfdbe
-		buckethead@ // buckethead
-		IOCachePageInsert
-
-		// account for this new reference
-
-		0 // oldcount
-		pfdbe@ // pfdbe
-		IOCachePageReferenceFunction
-
-		// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 	end else
-		// found the page, it was in the cache already!
-
-		// remove from hash list so that it can be reinserted on the recently-used end
-
-		if (pfdbe@ buckethead@@ ~=)
-			pfdbe@ // pfdbe
-			buckethead@ // buckethead
-			IOCachePageRemove
-
-			pfdbe@ // pfdbe
-			buckethead@ // buckethead
-			IOCachePageInsert
-		end
-
-		// ref it so it doesn't get evicted while caller is using it
-
-		pfdbe@ MmEvictablePageReference drop
+		HALCPUInterruptDisable rs!
+		1 IOCachePagesUsed +=
+		rs@ HALCPUInterruptRestore
 	end
+
+	0 pfdbe@ IOPageFrameEntryCache_Flags + !
+	offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
+	fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
+	0 pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
+	0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
+	0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
+	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
+	0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
+
+	IPLDPC KeIPLRaise ipl!
+
+	pfdbe@ // pfdbe
+	buckethead@ // buckethead
+	IOCachePageInsert
+
+	ipl@ KeIPLLower
+
+	// account for this new reference
+
+	0 // oldcount
+	pfdbe@ // pfdbe
+	IOCachePageReferenceFunction
+
+	// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 
 	if (locked@ ~~)
 		bucket@ // bucket
@@ -439,7 +463,7 @@ end
 
 fn IOCachePageRemove { pfdbe buckethead -- }
 	// remove from hash list.
-	// assumes cache block is locked.
+	// assumes IPLDPC or equivalent.
 
 	auto n
 	pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
@@ -465,7 +489,7 @@ end
 
 fn IOCachePageInsert { pfdbe buckethead -- }
 	// insert into hash list on the recently-used end.
-	// assumes cache block is locked.
+	// assumes IPLDPC or equivalent.
 
 	auto n
 	buckethead@@ n!
@@ -502,45 +526,15 @@ fn (MmDereferenceFunction) IOCachePageDereferenceFunction { oldcount pfdbe -- }
 	IOCacheInfoBlockDereference drop
 end
 
-fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
+fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 	auto cacheblock
 	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	cacheblock@ IOCacheInfoBlockTryLockShared ok!
-
-	if (ok@ ~~)
-		// failed to lock -- don't wait.
-		// return so that the caller can
-		// immediately try the next page.
-
-		0 ok!
-		0 evicted!
-
-		return
-	end
 
 	auto offset
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
 
 	auto bucket
 	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
-
-	bucket@ // bucket
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockTryLockBucket ok!
-
-	if (ok@ ~~)
-		// failed to lock bucket -- don't wait.
-		// return so that the caller can
-		// immediately try the next page.
-
-		cacheblock@ IOCacheInfoBlockUnlock
-
-		0 ok!
-		0 evicted!
-
-		return
-	end
 
 	if (DEBUGCHECKS)
 		if (pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + @)
@@ -558,14 +552,6 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- evicted ok }
 	IOCachePageRemove
 
 	1 IOCachePagesUsed -=
-
-	1 evicted!
-
-	bucket@ // bucket
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockUnlockBucket
-
-	cacheblock@ IOCacheInfoBlockUnlock
 end
 
 fn IOCachePageDirtyQuotaCharge { quotablock pfdbe -- charged }

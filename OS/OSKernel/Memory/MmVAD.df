@@ -437,6 +437,9 @@ fn MmVADUnmap { vad processobject -- }
 		// character device.
 
 		while (vaddr@ max@ <=)
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
 			vaddr@ // vaddr
 			pdir@ // pagemap
 			MmVirtualtoPTEAddress ok! pteaddr!
@@ -461,6 +464,8 @@ fn MmVADUnmap { vad processobject -- }
 					if (pte@ PTE_INSWAP &)
 						// free COW page in swap
 
+						ipl@ KeIPLLower
+
 						pte@ PAGESHIFT >> IOSwapPageFree
 					end elseif (pte@ PTE_TRANSITION &)
 						// free COW page
@@ -468,9 +473,6 @@ fn MmVADUnmap { vad processobject -- }
 						pte@ PAGENUMBERMASK & phyaddr!
 
 						phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-						auto rs
-						HALCPUInterruptDisable rs!
 						
 						if (DEBUGCHECKS)
 							if (pfdbe@ MmPageFrameEntryEvictable_References + @)
@@ -481,14 +483,18 @@ fn MmVADUnmap { vad processobject -- }
 						pfdbe@ MmEvictablePageRemoveForDeletion
 						1 MmAnonymousPageCount -=
 
-						rs@ HALCPUInterruptRestore
+						ipl@ KeIPLLower
 
 						if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
 							pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
 						end
 
 						phyaddr@ PAGESHIFT >> MmPageFree
+					end else
+						ipl@ KeIPLLower
 					end
+				end else
+					ipl@ KeIPLLower
 				end
 
 				if (pte@)
@@ -499,6 +505,8 @@ fn MmVADUnmap { vad processobject -- }
 					pdir@ // pagemap
 					MmPTEDelete drop
 				end
+			end else
+				ipl@ KeIPLLower
 			end
 
 			PAGESIZE vaddr +=

@@ -226,6 +226,9 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 
 		auto pfdbe
 
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
 		// get the tail so that we can go backwards thru the bucket.
 		// reason for this is that LRU -> MRU is the most likely
 		// order to go "in order" on the disk surface
@@ -233,11 +236,19 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 
 		while (pfdbe@)
 			if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-				pfdbe@ IOCachePageWriteDirty drop
+				ipl@ KeIPLLower
+
+				1 pfdbe@ IOCachePageWriteDirty drop
+
+				IPLDPC KeIPLRaise ipl!
+
+				pfdbe@ MmEvictablePageDereference drop
 			end
 
 			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
 		end
+
+		ipl@ KeIPLLower
 
 		1 i +=
 	end
@@ -318,6 +329,9 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 		auto pfdbe
 
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
 		// get the tail so that we can go backwards thru the bucket.
 		// reason for this is that LRU -> MRU is the most likely
 		// order to go "in order" on the disk surface
@@ -351,7 +365,11 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						// writeout==0, which means the caller says its fine
 						// to ignore and throw them out.
 
-						pfdbe@ IOCachePageWriteDirty drop
+						ipl@ KeIPLLower
+
+						1 pfdbe@ IOCachePageWriteDirty drop
+
+						IPLDPC KeIPLRaise ipl!
 					end else
 						// this is a dirty page and the caller doesn't want
 						// us to write it to disk, so we need to clean it up
@@ -360,9 +378,9 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 						// dirty list.
 
 						pfdbe@ IOCachePageDirtyCleanup drop
-
-						pfdbe@ MmEvictablePageDereference drop
 					end
+
+					pfdbe@ MmEvictablePageDereference drop
 				end
 
 				if (DEBUGCHECKS)
@@ -371,38 +389,25 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 					end
 				end
 
-				HALCPUInterruptDisable rs!
 				pfdbe@ MmEvictablePageRemoveForDeletion
-				rs@ HALCPUInterruptRestore
 
-				if (maxpage@)
-					// we are slightly more sophisticated in our hash list
-					// management when maxpage ~= 0 since it may not be empty
-					// after this operation, whereas when its zero we are
-					// definitely removing every page. this is sort of a
-					// micro-optimization.
+				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
 
-					pfdbe@ // pfdbe
-					buckethead@ // buckethead
-					IOCachePageRemove
-				end
+				pfdbe@ // pfdbe
+				buckethead@ // buckethead
+				IOCachePageRemove
 
-				pfdbe@ IOPageFrameEntryCache_PFN + @ // pfn
-				MmPageFree
+				pfdbe@ IOPageFrameEntryCache_PFN + @ MmPageFree
 
-				HALCPUInterruptDisable rs!
+				npfdbe@ pfdbe!
+
 				1 IOCachePagesUsed -=
-				rs@ HALCPUInterruptRestore
+			end else
+				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
 			end
-
-			npfdbe@ pfdbe!
 		end
 
-		if (maxpage@ 0 ==)
-			// set buckethead and buckettail to null to reflect that it is now empty
-			0 buckethead@!
-			0 buckethead@ 4 + !
-		end
+		ipl@ KeIPLLower
 
 		1 i +=
 	end

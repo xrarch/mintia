@@ -139,6 +139,9 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 		end
 	end
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
 	vaddr@ // vaddr
 	process@ KeProcess_PageDirectory + @ // pagemap
 	MmVirtualtoPTEAddress ok! pteaddr!
@@ -148,6 +151,8 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 		MmPTEInterpret ok! flags! phyaddr!
 
 		if (ok@ ~~)
+			ipl@ KeIPLLower
+
 			// valid
 
 			if (flags@ PTE_W &)
@@ -177,29 +182,10 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 			if (flags@ PTE_TRANSITION PTE_INSWAP | &)
 				// COW page. we need to do work here
 
-				auto vad
-				vaddr@ // vaddr
-				process@ // process
-				MmFaultParameters drop vad! drop drop
-
 				flags@ PAGENUMBERMASK & phyaddr!
 
-				process@ MmWorkingSetLock drop // will NEVER fail
-
-				process@ // process
-				MmWorkingSetEntryReserve ok! wsleptr! wsli!
-
-				if (ok@)
-					process@ MmWorkingSetUnlock
-					process@ MmVADListUnlock
-
-					OSSIGNAL_KILL signal!
-
-					return
-				end
-
 				if (flags@ PTE_TRANSITION &)
-					// just soft-fault it in
+					// reference it now so we can drop IPL
 
 					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
@@ -210,8 +196,34 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 					end
 
 					pfdbe@ MmEvictablePageReference drop
-				end else
-					// must have PTE_INSWAP flag.
+				end
+
+				ipl@ KeIPLLower
+
+				auto vad
+				vaddr@ // vaddr
+				process@ // process
+				MmFaultParameters drop vad! drop drop
+
+				process@ MmWorkingSetLock drop // will NEVER fail
+
+				process@ // process
+				MmWorkingSetEntryReserve ok! wsleptr! wsli!
+
+				if (ok@)
+					if (flags@ PTE_TRANSITION &)
+						pfdbe@ MmEvictablePageDereference drop
+					end
+
+					process@ MmWorkingSetUnlock
+					process@ MmVADListUnlock
+
+					OSSIGNAL_KILL signal!
+
+					return
+				end
+
+				if (flags@ PTE_INSWAP &)
 					// swap it in. unlock and relock the working set to avoid
 					// deadlock.
 
@@ -271,8 +283,12 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 				process@ MmVADListUnlock
 
 				return
+			end else
+				ipl@ KeIPLLower
 			end
 		end
+	end else
+		ipl@ KeIPLLower
 	end
 
 	vaddr@ // vaddr

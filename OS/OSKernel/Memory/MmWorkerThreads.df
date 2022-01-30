@@ -200,6 +200,10 @@ fn MmPopulateLists { dire pagecount -- }
 	PsProcessListUnlock
 end
 
+buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
+
+const MMBALANCESETINTERVAL 1000
+
 fn MmBalanceSetManager { -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -216,15 +220,34 @@ fn MmBalanceSetManager { -- }
 
 	// this little idiot is the only reason we will fit snugly in 4MB RAM.
 
+	"MmBalanceSetManagerTimer" // name
+	0 // function
+	MmBalanceSetManagerTimer // timer
+	KeTimerInitialize
+
+	auto objecttable
+	8 alloc objecttable!
+
+	MmBalanceSetManagerTimer objecttable@!
+	MmEventLowMemory objecttable@ 4 + !
+
+	0 // context1
+	0 // context2
+	MMBALANCESETINTERVAL // interval
+	MmBalanceSetManagerTimer // timer
+	KeTimerEnqueue
+
 	while (1)
 		auto ok
 		auto reason
 
 		KERNELMODE // waitmode
 		0 // alertable
-		1000 // timeout
-		MmEventLowMemory // object
-		KeThreadWaitForObject reason!
+		OSWAITANY // waittype
+		OSWAIT_TIMEOUTINFINITE // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		KeThreadWaitForMultipleObjects reason!
 
 		if (DEBUGCHECKS)
 			if (reason@ 0 s<)
@@ -238,6 +261,14 @@ fn MmBalanceSetManager { -- }
 		auto dire
 
 		if (reason@ 0 ==)
+			// timer expired
+
+			0 // context1
+			0 // context2
+			MMBALANCESETINTERVAL // interval
+			MmBalanceSetManagerTimer // timer
+			KeTimerEnqueue
+		end elseif (reason@ 1 ==)
 			// low memory event
 
 			IPLDPC KeIPLRaise ipl!

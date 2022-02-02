@@ -154,7 +154,6 @@ extern KeThreadEnqueue { front thread -- }
 extern KeThreadDequeue { thread -- }
 extern KeThreadNextPick { -- thread }
 extern KeThreadSwitch { thread -- }
-extern KeThreadTransition { status thread -- }
 extern KeThreadReady { front thread -- }
 extern KeThreadYield { yieldstatus -- }
 extern KeThreadPriorityBoost { boost thread -- }

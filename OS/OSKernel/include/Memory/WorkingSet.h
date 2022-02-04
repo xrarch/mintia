@@ -1,5 +1,5 @@
 extern MmWorkingSetLock { processobject -- ok }
-extern MmWorkingSetLockTimeout { processobject -- ok }
+extern MmWorkingSetLockTimeout { timeout processobject -- ok }
 extern MmWorkingSetTryLock { processobject -- ok }
 extern MmWorkingSetUnlock { processobject -- }
 

@@ -145,16 +145,32 @@ fn MmModifiedPageWriter { context1 context2 -- }
 	end
 end
 
-fn MmPopulateLists { dire pagecount -- }
-	auto ok
+fn MmManageWorkingSets { -- success }
+	auto pagecount
+	auto dire
 
-	PsProcessListLock ok!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "MmPopulateLists: failed to lock process list\n" KeCrash
-		end
+	if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
+		MmEventLowMemory // event
+		KeEventReset drop
+
+		ipl@ KeIPLLower
+
+		1 success!
+
+		return
 	end
+
+	MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - pagecount!
+	MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
+
+	ipl@ KeIPLLower
+
+	0 success!
+
+	PsProcessListLock drop
 
 	auto process
 	PsProcessListHead@ process!
@@ -168,7 +184,11 @@ fn MmPopulateLists { dire pagecount -- }
 		process@ PsProcess_GlobalListNext + @ nprocess!
 
 		if (process@ PsProcess_WorkingSetSize + @)
-			process@ MmWorkingSetLockTimeout ok!
+			auto ok
+
+			10 // timeout
+			process@ // processobject
+			MmWorkingSetLockTimeout ok!
 
 			if (ok@ ~~)
 				auto trimmed
@@ -198,6 +218,10 @@ fn MmPopulateLists { dire pagecount -- }
 	end
 
 	PsProcessListUnlock
+
+	if (pagecount@ ~~)
+		1 success!
+	end
 end
 
 buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
@@ -263,6 +287,8 @@ fn MmBalanceSetManager { -- }
 		if (reason@ 0 ==)
 			// timer expired
 
+			MmManageWorkingSets drop
+
 			0 // context1
 			0 // context2
 			MMBALANCESETINTERVAL // interval
@@ -271,32 +297,14 @@ fn MmBalanceSetManager { -- }
 		end elseif (reason@ 1 ==)
 			// low memory event
 
-			IPLDPC KeIPLRaise ipl!
+			if (MmManageWorkingSets ~~)
+				// wait 50ms before trying again
 
-			if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
-				MmEventLowMemory // event
-				KeEventReset drop
-
-				ipl@ KeIPLLower
-
-				continue
+				50 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep drop
 			end
-
-			MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - needed!
-			MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
-
-			ipl@ KeIPLLower
-
-			dire@ // dire
-			needed@ // pagecount
-			MmPopulateLists
-
-			// wait 100ms before trying again
-
-			100 // interval
-			KERNELMODE // waitmode
-			0 // alertable
-			KeThreadSleep drop
 		end
 	end
 end

@@ -11,25 +11,180 @@
 
 #include "<inc>/Kernel.h"
 
+#include "<inc>/Executive.h"
+
 #include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
 
 fn MmKernelStackAlloc { -- kstack ok }
-	FREEFIRST CANBLOCK | // priority
-	MmPageAlloc ok! kstack! drop
+	// reserve enough pages in POOLSPACE for the size of our kernel stack and
+	// for a guard page.
+
+	auto offset
+	KETHREADSTACKSIZE PAGESHIFT >> 1 + // pagesneeded
+	MmPoolSpaceReserve ok! offset!
 
 	if (ok@)
 		return
 	end
 
-	PAGESHIFT kstack <<=
-	IDENTITYSPACE kstack |=
+	auto stackpagestab
+	KETHREADSTACKSIZE PAGESHIFT >> 2 << alloc stackpagestab!
+
+	auto i
+	0 i!
+
+	auto ptr
+	stackpagestab@ ptr!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		auto pfdbe
+		auto phyaddr
+
+		FREEFIRST CANBLOCK | // priority
+		MmPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			// failed, free the ones we just allocated
+
+			while (i@)
+				4 stackpagestab -=
+				1 i -=
+
+				stackpagestab@@ MmPageFree
+			end
+
+			KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
+			offset@ // offset
+			MmPoolSpaceRelease
+
+			return
+		end
+
+		phyaddr@ ptr@!
+
+		4 ptr +=
+		1 i +=
+	end
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto vaddr
+	POOLSPACE offset@ PAGESHIFT << + vaddr!
+
+	// map the guard page at the bottom
+
+	auto pteaddr
+	vaddr@ // vaddr
+	kdir@ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmKernelStackAlloc: failed to get guard page PTE (%i)\n" KeCrash
+		end
+	end
+
+	// set special guard page magic pte
+	MMGUARDPTE pteaddr@!
+
+	PAGESIZE vaddr +=
+
+	vaddr@ kstack!
+
+	stackpagestab@ ptr!
+
+	0 i!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		ptr@@ PAGESHIFT << // phyaddr
+		PTE_V PTE_W | PTE_K | PTE_G | // flags
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmKernelStackAlloc: failed to map (%i)\n" KeCrash
+			end
+		end
+
+		PAGESIZE vaddr +=
+		4 ptr +=
+		1 i +=
+	end
 end
 
 fn MmKernelStackFree { kstack -- }
-	IDENTITYSPACE ~ kstack &=
-	kstack@ PAGESHIFT >> MmPageFree
+	PAGESIZE kstack -=
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	// unmap guard page
+
+	auto pteaddr
+
+	kstack@ // vaddr
+	kdir@ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmKernelStackFree: failed to get guard page PTE (%i)\n" KeCrash
+		end
+
+		if (pteaddr@@ MMGUARDPTE ~=)
+			ok@ "MmKernelStackFree: not a kernel stack\n" KeCrash
+		end
+	end
+
+	// clear special guard page magic pte
+	0 pteaddr@!
+
+	auto offset
+	kstack@ POOLSPACE - PAGESHIFT >> offset!
+
+	PAGESIZE kstack +=
+
+	auto i
+	0 i!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		auto phyaddr
+		auto ok
+
+		0 // phyaddr
+		0 // flags
+		kstack@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop phyaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmKernelStackFree: failed to unmap\n" KeCrash
+			end
+		end
+
+		phyaddr@ PAGESHIFT >> MmPageFree
+
+		PAGESIZE kstack +=
+		1 i +=
+	end
+
+	KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
+	offset@ // offset
+	MmPoolSpaceRelease
 end
 
 fn MmPageDirectoryAlloc { -- pdir ok }

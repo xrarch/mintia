@@ -14,6 +14,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+var KeThreadWaitListHead 0
+public KeThreadWaitListHead
+
 // initializes a dispatch object's header
 
 fn KeDispatchInitialize { name type dobject -- }
@@ -527,18 +530,34 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 	auto status
 	thread@ KeThread_Status + @ status!
 
-	if (status@ THREADSTATUS_TERMINATED ==)
-		// XXX are there legitimate, normal situations where you might try to
-		// wake up a dead thread that has not yet been cleaned up?
-
-		"KeThreadWakeup: thread wa mou shindeiru\n" KeCrash
-	end
-
 	if (status@ THREADSTATUS_WAITINGALERTABLE ~= status@ THREADSTATUS_WAITINGUNALERTABLE ~= &&)
 		// thread isn't waiting
 
 		return
 	end
+
+	// remove from global wait list
+
+	auto n
+	thread@ KeThread_QueueNext + @ n!
+
+	if (n@)
+		thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+	end
+
+	auto p
+	thread@ KeThread_QueuePrev + @ p!
+
+	if (p@)
+		thread@ KeThread_QueueNext + @ p@ KeThread_QueueNext + !
+	end else // no prev means we were the head
+		thread@ KeThread_QueueNext + @ KeThreadWaitListHead!
+	end
+
+	0 thread@ KeThread_QueueNext + !
+	0 thread@ KeThread_QueuePrev + !
+
+	// wake up thread
 
 	thread@ KeThreadWaitBlocksDequeue
 
@@ -600,10 +619,31 @@ fn KeThreadWait { waitipl waitmode alertable -- ok }
 	auto current
 	KeThreadCurrent@ current!
 
+	// insert in global wait list
+
+	auto h
+	KeThreadWaitListHead@ h!
+
+	0 current@ KeThread_QueueNext + !
+	0 current@ KeThread_QueuePrev + !
+
+	if (h@)
+		current@ h@ KeThread_QueuePrev + !
+		h@ current@ KeThread_QueueNext + !
+	end
+
+	current@ KeThreadWaitListHead!
+
+	// go to sleep
+
+	auto waittime
+	KeTime_SIZEOF alloc waittime!
+
+	waittime@ HALUptimeQuery
+	waittime@ KeTime_SecPart + @ current@ KeThread_WaitOrReadyTimeSec + !
+
 	waitmode@ current@ KeThread_WaitMode + !
-
 	waitipl@ current@ KeThread_WaitIPL + !
-
 	0 current@ KeThread_WaitStatus + !
 
 	if (alertable@)

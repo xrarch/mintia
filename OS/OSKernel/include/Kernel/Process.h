@@ -103,6 +103,8 @@ struct KeThread
 
 	4 WaitCount
 
+	4 WaitOrReadyTimeSec
+
 	(THREADWAITBLOCKS KeDispatchWaitBlock_SIZEOF *) WaitBlocks
 
 	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock

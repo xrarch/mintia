@@ -25,6 +25,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+buffer MmSwapEvent KeEvent_SIZEOF
+
 buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
 
 const MMBALANCESETINTERVAL 1000
@@ -38,6 +40,28 @@ fn MmBalanceSetManager { -- }
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
 	ipl@ KeIPLLower
+
+	// create the swap thread in the context of the balance set manager cuz
+	// I like to be confusing.
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"MmSwapEvent" // name
+	MmSwapEvent // event
+	KeEventInitialize
+
+	0 // context1
+	0 // context2
+	pointerof MmSwapWorker // startfunc
+	0 // creationflags
+	ACCESS_OWNER_ALL // permissions
+	"SwapWorker" // name
+	PsSystemProcess@ // processobject
+	PsThreadCreateObject ok! drop
+
+	if (ok@)
+		ok@ "MmBalanceSetManager: couldn't create 'SwapWorker' thread (%i)\n" KeCrash
+	end
 
 	// responsible for:
 	// - kernel thread stack swapping
@@ -98,7 +122,9 @@ fn MmBalanceSetManager { -- }
 			1 stackperiod -=
 
 			if (stackperiod@ ~~)
-				
+				0 // priboost
+				MmSwapEvent // event
+				KeEventSignal
 
 				MMSTACKSCANPERIOD stackperiod!
 			end
@@ -118,6 +144,31 @@ fn MmBalanceSetManager { -- }
 				KERNELMODE // waitmode
 				0 // alertable
 				KeThreadSleep drop
+			end
+		end
+	end
+end
+
+fn MmSwapWorker { context1 context2 -- }
+	PRIORITY_HIGHREALTIME 1 - // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	while (1)
+		auto ok
+		auto waitok
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		MmSwapEvent // object
+		KeThreadWaitForObject waitok!
+
+		if (DEBUGCHECKS)
+			if (waitok@ 0 s<)
+				waitok@ "MmSwapWorker: failed to wait on swap event (%i)\n" KeCrash
 			end
 		end
 	end

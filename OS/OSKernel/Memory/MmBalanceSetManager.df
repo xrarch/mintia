@@ -1,0 +1,124 @@
+//
+// Implements the balance set manager thread.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
+
+const MMBALANCESETINTERVAL 1000
+
+const MMSTACKSCANPERIOD 10
+
+fn MmBalanceSetManager { -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+	PRIORITY_LOWREALTIME 1 + // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+	ipl@ KeIPLLower
+
+	// responsible for:
+	// - kernel thread stack swapping
+	// - process swapping (page table swapping & working set purging)
+	// - random thread priority boosting
+	// - working set trimming
+
+	// this little idiot is the only reason we will fit snugly in 4MB RAM.
+
+	"MmBalanceSetManagerTimer" // name
+	0 // function
+	MmBalanceSetManagerTimer // timer
+	KeTimerInitialize
+
+	auto objecttable
+	8 alloc objecttable!
+
+	auto stackperiod
+	MMSTACKSCANPERIOD stackperiod!
+
+	MmBalanceSetManagerTimer objecttable@!
+	MmEventLowMemory objecttable@ 4 + !
+
+	0 // context1
+	0 // context2
+	MMBALANCESETINTERVAL // interval
+	MmBalanceSetManagerTimer // timer
+	KeTimerEnqueue
+
+	while (1)
+		auto ok
+		auto reason
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAITANY // waittype
+		OSWAIT_TIMEOUTINFINITE // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		KeThreadWaitForMultipleObjects reason!
+
+		if (DEBUGCHECKS)
+			if (reason@ 0 s<)
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "MmBalanceSetManager: failed to wait on low memory event (%i)\n" KeCrash
+				end
+			end
+		end
+
+		auto needed
+		auto dire
+
+		if (reason@ 0 ==)
+			// timer expired
+
+			MmManageWorkingSets drop
+
+			1 stackperiod -=
+
+			if (stackperiod@ ~~)
+				
+
+				MMSTACKSCANPERIOD stackperiod!
+			end
+
+			0 // context1
+			0 // context2
+			MMBALANCESETINTERVAL // interval
+			MmBalanceSetManagerTimer // timer
+			KeTimerEnqueue
+		end elseif (reason@ 1 ==)
+			// low memory event
+
+			if (MmManageWorkingSets ~~)
+				// wait 50ms before trying again
+
+				50 // interval
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep drop
+			end
+		end
+	end
+end

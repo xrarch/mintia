@@ -962,3 +962,85 @@ fn MmWorkingSetEntryFree { wsli wsleptr process -- }
 	process@ PsProcess_WorkingSetFreeListHead + @ PAGESHIFT << wsleptr@!
 	wsli@ process@ PsProcess_WorkingSetFreeListHead + !
 end
+
+// this function is called by the balance set manager thread when free/standby
+// memory is low.
+
+fn MmManageWorkingSets { -- success }
+	auto pagecount
+	auto dire
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
+		MmEventLowMemory // event
+		KeEventReset drop
+
+		ipl@ KeIPLLower
+
+		1 success!
+
+		return
+	end
+
+	MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - pagecount!
+	MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
+
+	ipl@ KeIPLLower
+
+	0 success!
+
+	PsProcessListLock drop
+
+	auto process
+	PsProcessListHead@ process!
+
+	auto count
+	PsActiveProcessCount@ count!
+
+	auto nprocess
+
+	while (process@ count@ &&)
+		process@ PsProcess_GlobalListNext + @ nprocess!
+
+		if (process@ PsProcess_WorkingSetSize + @)
+			auto ok
+
+			10 // timeout
+			process@ // processobject
+			MmWorkingSetLockTimeout ok!
+
+			if (ok@ ~~)
+				auto trimmed
+
+				dire@ // dire
+				pagecount@ // pages
+				process@ // process
+				MmWorkingSetTrim trimmed!
+
+				process@ MmWorkingSetUnlock
+
+				if (process@ PsProcessListTail@ ~=)
+					process@ PsProcessRemove
+					process@ PsProcessInsert
+				end
+
+				if (trimmed@ pagecount@ >=)
+					break
+				end
+
+				trimmed@ pagecount -=
+			end
+		end
+
+		1 count -=
+		nprocess@ process!
+	end
+
+	PsProcessListUnlock
+
+	if (pagecount@ ~~)
+		1 success!
+	end
+end

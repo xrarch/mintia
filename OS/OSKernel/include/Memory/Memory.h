@@ -89,7 +89,6 @@ extern MmPageDirectoryAlloc { -- pdir ok }
 extern MmPageDirectoryFree { pdir -- }
 
 extern MmModifiedPageWriter { context1 context2 -- }
-extern MmAsyncEvictWorker { context1 context2 -- }
 extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 

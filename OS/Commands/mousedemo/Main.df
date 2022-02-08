@@ -1,0 +1,181 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/OSDLL/OSMouseControl.h"
+#include "<ll>/OSDLL/OSVideoControl.h"
+
+var XRes 0
+var YRes 0
+
+var FBAddress 0
+
+const BOXROWS 16
+const BOXCOLS 16
+
+buffer RowBuf (BOXROWS 2 *)
+
+fn InvertBox { x y -- }
+	auto i
+	0 i!
+
+	auto base
+	y@ XRes@ * 2 * x@ 2 * + FBAddress@ + base!
+
+	auto mod
+	XRes@ 2 * BOXCOLS 2 * - mod!
+
+	while (i@ BOXROWS <)
+		auto j
+		BOXCOLS 2 * j!
+
+		while (j@)
+			base@ gi ~ base@ si
+
+			2 base +=
+			2 j -=
+		end
+
+		mod@ base +=
+		1 i +=
+	end
+end
+
+fn Main { ... -- ret }
+	0 ret!
+
+	auto mousehandle
+	0 // flags
+	ACCESS_READ // access
+	":mouse2" // path
+	0 // ftype
+	OSFileOpen ret! mousehandle!
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: couldn't open :mouse2: %s\n" OSError
+	end
+
+	auto fbhandle
+	0 // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	":kinnowfb0" // path
+	0 // ftype
+	OSFileOpen ret! fbhandle!
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: couldn't open :kinnowfb0: %s\n" OSError
+	end
+
+	auto mousepacket
+	OSMousePacket_SIZEOF alloc mousepacket!
+
+	auto videoquery
+	OSVideoQuery_SIZEOF alloc videoquery!
+
+	videoquery@ // arg2
+	OSVIDEOIOCONTROL_QUERY // arg1
+	fbhandle@ // filehandle
+	OSIOControl ret! drop
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: failed to get video parameters: %s\n" OSError
+	end
+
+	videoquery@ OSVideoQuery_Height + @ YRes!
+	videoquery@ OSVideoQuery_Width + @ XRes!
+
+	auto sectionhandle
+	ACCESS_READ ACCESS_WRITE | // pageprotection
+	0 // anonsize
+	fbhandle@ // filehandle
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ret! sectionhandle!
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: failed to make section: %s\n" OSError
+	end
+
+	videoquery@ OSVideoQuery_Width + @ videoquery@ OSVideoQuery_Height + @ * 2 * // length
+	HEAPSTART // startva
+	0 // sectionoffset
+	sectionhandle@ // sectionhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | PAGEACCESS_NONCACHED | // pageprotection
+	0 // flags
+	OSSectionMapView ret! FBAddress!
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: failed to map framebuffer: %s\n" OSAbort
+	end
+
+	sectionhandle@ OSClose drop
+	fbhandle@ OSClose drop
+
+	FBAddress@ YRes@ XRes@ "framebuffer %dx%d mapped at 0x%08x\n" Printf
+
+	auto mouseX
+	20 mouseX!
+
+	auto mouseY
+	20 mouseY!
+
+	mouseX@ mouseY@ InvertBox
+
+	auto rcur
+	1 rcur!
+
+	while (1)
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		OSMousePacket_SIZEOF // length
+		mousepacket@ // buffer
+		mousehandle@ // handle
+		OSFileRead ret! drop
+
+		if (ret@)
+			ret@ OSStatusGetName "mousedemo: couldn't read mouse packet: %s\n" OSError
+		end
+
+		if (mousepacket@ OSMousePacket_EventType + @ OSMOUSEEVENT_MOVED ==)
+			if (rcur@)
+				mouseX@ mouseY@ InvertBox
+			end
+
+			auto dx
+			mousepacket@ OSMousePacket_Info + @ 16 >> dx!
+
+			auto dy
+			mousepacket@ OSMousePacket_Info + @ 0xFFFF & dy!
+
+			if (dx@ 0x8000 &)
+				0xFFFF0000 dx |=
+			end
+
+			if (dy@ 0x8000 &)
+				0xFFFF0000 dy |=
+			end
+
+			dy@ mouseY +=
+			dx@ mouseX +=
+
+			if (mouseX@ 0 s<)
+				0 mouseX!
+			end elseif (mouseX@ BOXCOLS + XRes@ s>=)
+				XRes@ BOXCOLS - mouseX!
+			end
+
+			if (mouseY@ 0 s<)
+				0 mouseY!
+			end elseif (mouseY@ BOXROWS + YRes@ s>=)
+				YRes@ BOXROWS - mouseY!
+			end
+
+			mouseX@ mouseY@ InvertBox
+		end elseif (mousepacket@ OSMousePacket_EventType + @ OSMOUSEEVENT_PRESSED ==)
+			0 rcur!
+		end elseif (mousepacket@ OSMousePacket_EventType + @ OSMOUSEEVENT_RELEASED ==)
+			1 rcur!
+		end
+	end
+end

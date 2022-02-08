@@ -1,0 +1,14 @@
+struct OSMousePacket
+	4 EventType
+	4 Info
+	4 Reserved1
+	4 Reserved2
+endstruct
+
+const OSMOUSEEVENT_PRESSED  1
+const OSMOUSEEVENT_RELEASED 2
+const OSMOUSEEVENT_MOVED    3
+
+const OSMOUSEBUTTON_PRIMARY   1
+const OSMOUSEBUTTON_SECONDARY 2
+const OSMOUSEBUTTON_MIDDLE    3

@@ -5,6 +5,7 @@ all:
 	make -C EBus
 	make -C KinnowFB
 	make -C Keyboard
+	make -C Mouse
 
 	make -C AnalogClockTest
 
@@ -28,4 +29,5 @@ cleanup:
 	make -C EBus cleanup
 	make -C KinnowFB cleanup
 	make -C Keyboard cleanup
+	make -C Mouse cleanup
 	make -C AnalogClockTest cleanup

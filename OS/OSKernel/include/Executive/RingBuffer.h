@@ -21,6 +21,8 @@ const EXRINGDONTWAIT 0
 const EXRINGWAIT     1
 const EXRINGWITUALRT 2
 
+const EXRINGSYNCH    0x8000
+
 extern ExRingBufferWakeReader { priboost ringbuffer -- }
 extern ExRingBufferWakeWriter { priboost ringbuffer -- }
 

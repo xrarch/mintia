@@ -69,7 +69,7 @@ struct MmPageFrameEntryAnonymous
 	4 Context7
 	4 Context8
 	4 SwapPageNumber
-	4 SectionObject
+	4 Context9
 	4 PrototypePTE
 endstruct
 

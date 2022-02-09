@@ -82,8 +82,6 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 			end
 		end
 
-		object@ MmSectionReferenceLock
-
 		// walk the prototype page tables and free all pages, in swap or in
 		// RAM. then free the prototype page tables.
 
@@ -132,7 +130,6 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 			end
 		end
 
-		object@ MmSectionReferenceUnlock
 		object@ MmSectionPPTUnlock
 	end
 end
@@ -202,30 +199,6 @@ end
 fn MmSectionPPTUnlock { sectionobject -- }
 	0 // abandon
 	sectionobject@ MmSection_PrototypePageTableMutex + // mutex
-	KeMutexRelease drop
-end
-
-fn MmSectionReferenceLock { sectionobject -- }
-	// can't fail because it would be annoying if it could
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	sectionobject@ MmSection_ReferenceMutex + // object
-	KeThreadWaitForObject drop
-end
-
-fn MmSectionReferenceTryLock { sectionobject -- ok }
-	KERNELMODE // waitmode
-	0 // alertable
-	0 // timeout
-	sectionobject@ MmSection_ReferenceMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmSectionReferenceUnlock { sectionobject -- }
-	0 // abandon
-	sectionobject@ MmSection_ReferenceMutex + // mutex
 	KeMutexRelease drop
 end
 
@@ -307,11 +280,6 @@ fn MmSectionObjectCreateObject { pageprotection anonsize fileobject permissions 
 	"MmSectionPrototypePageTableMutex" // name
 	KERNELMODE // mode
 	sectionobject@ MmSection_PrototypePageTableMutex + // mutex
-	KeMutexInitialize
-
-	"MmSectionReferenceMutex" // name
-	KERNELMODE // mode
-	sectionobject@ MmSection_ReferenceMutex + // mutex
 	KeMutexInitialize
 
 	if (fileobject@)
@@ -423,24 +391,6 @@ fn (MmWriteModifiedFunction) MmAnonymousWriteFunction { pfdbe -- written dropped
 	0 dropped!
 	0 ok!
 
-	auto sectionobject
-	pfdbe@ MmPageFrameEntryAnonymous_SectionObject + @ sectionobject!
-
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-		// COW page -- sectionobject is really a process object and we need to
-		// lock its working set to keep references out.
-
-		sectionobject@ MmWorkingSetTryLock ok!
-	end else
-		sectionobject@ MmSectionReferenceTryLock ok!
-	end
-
-	if (ok@ ~~)
-		// failed to lock
-
-		return
-	end
-
 	if (DEBUGCHECKS)
 		if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ~=)
 			"MmAnonymousWriteFunction: swap page exists\n" KeCrash
@@ -471,18 +421,9 @@ fn (MmWriteModifiedFunction) MmAnonymousWriteFunction { pfdbe -- written dropped
 			pno@ IOSwapPageFree
 		end
 	end
-
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
-		sectionobject@ MmWorkingSetUnlock
-	end else
-		sectionobject@ MmSectionReferenceUnlock
-	end
 end
 
 fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
-	auto sectionobject
-	pfdbe@ MmPageFrameEntryAnonymous_SectionObject + @ sectionobject!
-
 	auto pno
 	pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ pno!
 
@@ -528,7 +469,7 @@ fn MmAnonymousPageModify { pfdbe process -- }
 	pno@ IOSwapPageFree
 end
 
-fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
+fn MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 	// caller must set COW flag in pfdbe if applicable.
 
 	// caller must also set MMEVICTFLAG_MODIFIED and set SwapPageNumber to
@@ -544,7 +485,6 @@ fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
 	end
 
 	MMSWAPPAGE_DEMANDZERO pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
-	sectionobject@ pfdbe@ MmPageFrameEntryAnonymous_SectionObject + !
 	pte@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
 
 	auto rs
@@ -553,8 +493,7 @@ fn MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn MmAnonymousSwapIn { sectionobject pte pno -- pfdbe pfn ok }
-	sectionobject@ // sectionobject
+fn MmAnonymousSwapIn { pte pno -- pfdbe pfn ok }
 	pte@ // pte
 	FREEFIRST // pri
 	MmAnonymousPageAlloc ok! pfn! pfdbe!
@@ -666,8 +605,6 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		sectionoffset@ PAGESHIFT >> 2 << ppt +=
 	end
 
-	sectionobject@ MmSectionReferenceLock
-
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -683,16 +620,11 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		pfdbe@ MmEvictablePageReference drop
 
 		ipl@ KeIPLLower
-
-		sectionobject@ MmSectionReferenceUnlock
 	end elseif (ppte@ ~~)
 		ipl@ KeIPLLower
 
-		sectionobject@ MmSectionReferenceUnlock
-
 		// non-existent, demand zero
 
-		sectionobject@ // sectionobject
 		ppt@ // pte
 		ZEROMUST // pri
 		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
@@ -708,11 +640,8 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 	end elseif (ppte@ PTE_INSWAP &)
 		ipl@ KeIPLLower
 
-		sectionobject@ MmSectionReferenceUnlock
-
 		// swapped out, bring back in
 
-		sectionobject@ // sectionobject
 		ppt@ // pte
 		ppte@ PAGESHIFT >> // pno
 		MmAnonymousSwapIn ok! phyaddr! pfdbe!

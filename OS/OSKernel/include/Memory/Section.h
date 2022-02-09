@@ -13,7 +13,6 @@ struct MmSection
 	4 QuotaBlock
 
 	KeMutex_SIZEOF PrototypePageTableMutex
-	KeMutex_SIZEOF ReferenceMutex
 endstruct
 
 const MMSWAPPAGE_NONE       -1
@@ -37,9 +36,9 @@ extern MmRemapView { pageprotection length vaddr processhandle -- ok }
 
 extern MmAnonymousPageModify { pfdbe process -- }
 
-extern MmAnonymousSwapIn { sectionobject pte pno -- pfdbe pfn ok }
+extern MmAnonymousSwapIn { pte pno -- pfdbe pfn ok }
 
-extern MmAnonymousPageAlloc { sectionobject pte pri -- pfdbe pfn ok }
+extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 extern MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 externptr MmAnonymousPageCount

@@ -18,6 +18,10 @@ endstruct
 const MMSWAPPAGE_NONE       -1
 const MMSWAPPAGE_DEMANDZERO -2
 
+const MMWRITEMODE_NONE         0
+const MMWRITEMODE_INPROGRESS   1
+const MMWRITEMODE_DEFERREDFREE 2
+
 extern MmSectionPPTLock { sectionobject -- ok }
 extern MmSectionPPTUnlock { sectionobject -- }
 

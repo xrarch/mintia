@@ -476,22 +476,31 @@ fn MmVADUnmap { vad processobject -- }
 
 						phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 						
-						if (DEBUGCHECKS)
-							if (pfdbe@ MmPageFrameEntryEvictable_References + @)
-								"MmVADUnmap: COW page had references\n" KeCrash
+						if (pfdbe@ MmPageFrameEntryAnonymous_WriteMode + @)
+							// it is being written to swap, defer the freeing
+							// until the write is done.
+
+							MMWRITEMODE_DEFERREDFREE pfdbe@ MmPageFrameEntryAnonymous_WriteMode + !
+
+							ipl@ KeIPLLower
+						end else
+							if (DEBUGCHECKS)
+								if (pfdbe@ MmPageFrameEntryEvictable_References + @)
+									"MmVADUnmap: COW page had references\n" KeCrash
+								end
 							end
+
+							pfdbe@ MmEvictablePageRemoveForDeletion
+							1 MmAnonymousPageCount -=
+
+							ipl@ KeIPLLower
+
+							if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
+								pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
+							end
+
+							phyaddr@ PAGESHIFT >> MmPageFree
 						end
-
-						pfdbe@ MmEvictablePageRemoveForDeletion
-						1 MmAnonymousPageCount -=
-
-						ipl@ KeIPLLower
-
-						if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
-							pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
-						end
-
-						phyaddr@ PAGESHIFT >> MmPageFree
 					end else
 						ipl@ KeIPLLower
 					end

@@ -1,7 +1,7 @@
 // needs KeTimer.h
 // needs KeDispatch.h
 
-const KEPROCESSNAMELEN 128
+const KEPROCESSNAMELEN 64
 
 const PROCESSSTATUS_READY 1
 const PROCESSSTATUS_SUSPENDED 2
@@ -59,7 +59,7 @@ const THREADDEFAULTQUANTUM 30 // in milliseconds
 
 const QUANTUMUNITSPERTICK 3
 
-const KETHREADNAMELEN   128
+const KETHREADNAMELEN   64
 const KETHREADSTACKSIZE 4096
 
 struct KeThread

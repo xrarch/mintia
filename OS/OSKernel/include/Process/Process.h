@@ -40,6 +40,8 @@ struct PsProcess
 
 	// virtual memory information
 
+	4 SwapOutNext
+
 	KeMutex_SIZEOF VADListMutex
 
 	4 ModifiedPages

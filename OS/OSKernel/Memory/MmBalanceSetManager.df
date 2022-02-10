@@ -164,6 +164,8 @@ fn MmBalanceSetManager { -- }
 	end
 end
 
+var MmProcessSwapOutListHead 0
+
 fn MmSwapWorker { context1 context2 -- }
 	PRIORITY_HIGHREALTIME 1 - // priority
 	KeThreadCurrent@ // thread
@@ -200,6 +202,12 @@ fn MmSwapWorker { context1 context2 -- }
 				continue
 			end elseif (KeThreadSwapInListHead@)
 				MmSwapInStacks
+
+				ipl@ KeIPLLower
+
+				continue
+			end elseif (MmProcessSwapOutListHead@)
+				MmSwapOutProcesses
 
 				ipl@ KeIPLLower
 
@@ -252,9 +260,8 @@ fn MmSwapOutStacks { -- }
 					end
 
 					if (process@ KeProcess_ResidentStackCount + @ ~~)
-						// TODO add to a swapout list
-
-						// process@ MmProcessSwapOut
+						MmProcessSwapOutListHead@ process@ PsProcess_SwapOutNext + !
+						process@ MmProcessSwapOutListHead!
 					end
 				end
 			end
@@ -286,6 +293,27 @@ fn MmSwapInStacks { -- }
 
 		thread@ MmKernelStackSwapIn
 		QUEUEBACK thread@ KeThreadReady
+
+		IPLDPC KeIPLRaise drop
+	end
+end
+
+fn MmSwapOutProcesses { -- }
+	// called at IPLDPC
+
+	while (1)
+		auto process
+		MmProcessSwapOutListHead@ process!
+
+		if (process@ ~~)
+			break
+		end
+
+		process@ PsProcess_SwapOutNext + @ MmProcessSwapOutListHead!
+
+		IPLLOW KeIPLLower
+
+		process@ MmProcessSwapOut
 
 		IPLDPC KeIPLRaise drop
 	end

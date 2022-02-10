@@ -40,7 +40,7 @@ extern MmRemapView { pageprotection length vaddr processhandle -- ok }
 
 extern MmAnonymousPageModify { pfdbe process -- }
 
-extern MmAnonymousSwapIn { pte pno -- pfdbe pfn ok }
+extern MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 
 extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 extern MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }

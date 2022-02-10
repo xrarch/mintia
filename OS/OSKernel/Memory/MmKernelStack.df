@@ -1,0 +1,414 @@
+//
+// Implements kernel stack management.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+fn MmKernelStackAlloc { -- kstack ok }
+	// reserve enough pages in POOLSPACE for the size of our kernel stack and
+	// for a guard page.
+
+	auto offset
+	KETHREADSTACKSIZE PAGESHIFT >> 1 + // pagesneeded
+	MmPoolSpaceReserve ok! offset!
+
+	if (ok@)
+		return
+	end
+
+	auto vaddr
+	POOLSPACE offset@ PAGESHIFT << + PAGESIZE + vaddr!
+
+	// allocate all the page frames needed for our kernel stack.
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto stackpagestab
+	KETHREADSTACKSIZE PAGESHIFT >> 2 << alloc stackpagestab!
+
+	auto i
+	0 i!
+
+	auto ptr
+	stackpagestab@ ptr!
+
+	auto pteaddr
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		auto pfdbe
+		auto phyaddr
+
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		MmVirtualtoPTEAddress ok! pteaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmKernelStackAlloc: failed to get PTE (%i)\n" KeCrash
+			end
+		end
+
+		pteaddr@ // pte
+		FREEFIRST // pri
+		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			// failed, free the ones we just allocated
+
+			while (i@)
+				4 stackpagestab -=
+				1 i -=
+
+				stackpagestab@@ MmPageFree
+			end
+
+			KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
+			offset@ // offset
+			MmPoolSpaceRelease
+
+			return
+		end
+
+		MMEVICTFLAG_MODIFIED pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+		MMSWAPPAGE_NONE pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+
+		phyaddr@ ptr@!
+
+		PAGESIZE vaddr +=
+		4 ptr +=
+		1 i +=
+	end
+
+	// map the guard page at the bottom
+	POOLSPACE offset@ PAGESHIFT << + // vaddr
+	kdir@ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmKernelStackAlloc: failed to get guard page PTE (%i)\n" KeCrash
+		end
+	end
+
+	// set special guard page magic pte
+	MMGUARDPTE pteaddr@!
+
+	// as a separate step, map in the page frames for our kernel stack.
+
+	POOLSPACE offset@ PAGESHIFT << + PAGESIZE + vaddr!
+
+	vaddr@ kstack!
+
+	stackpagestab@ ptr!
+
+	0 i!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		ptr@@ PAGESHIFT << // phyaddr
+		PTE_V PTE_W | PTE_K | PTE_G | // flags
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmKernelStackAlloc: failed to map (%i)\n" KeCrash
+			end
+		end
+
+		PAGESIZE vaddr +=
+		4 ptr +=
+		1 i +=
+	end
+end
+
+fn MmKernelStackFree { kstack -- }
+	PAGESIZE kstack -=
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	// unmap guard page
+
+	auto pteaddr
+
+	kstack@ // vaddr
+	kdir@ // pagemap
+	MmVirtualtoPTEAddress ok! pteaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "MmKernelStackFree: failed to get guard page PTE (%i)\n" KeCrash
+		end
+
+		if (pteaddr@@ MMGUARDPTE ~=)
+			ok@ "MmKernelStackFree: not a kernel stack\n" KeCrash
+		end
+	end
+
+	// clear special guard page magic pte
+	0 pteaddr@!
+
+	auto offset
+	kstack@ POOLSPACE - PAGESHIFT >> offset!
+
+	// unmap and free all the kernel stack page frames.
+
+	PAGESIZE kstack +=
+
+	auto i
+	0 i!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		auto phyaddr
+		auto ok
+		auto flags
+
+		0 // phyaddr
+		0 // flags
+		kstack@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! flags! phyaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmKernelStackFree: failed to unmap\n" KeCrash
+			end
+
+			if (flags@ PTE_V & ~~)
+				"MmKernelStackFree: invalid stack page\n" KeCrash
+			end
+		end
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		auto pfdbe
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		if (pfdbe@ MmPageFrameEntryAnonymous_WriteMode + @)
+			// it is being written to swap, defer the freeing
+			// until the write is done.
+
+			MMWRITEMODE_DEFERREDFREE pfdbe@ MmPageFrameEntryAnonymous_WriteMode + !
+
+			ipl@ KeIPLLower
+		end else
+			pfdbe@ MmEvictablePageDereference drop
+			pfdbe@ MmEvictablePageRemoveForDeletion
+			1 MmAnonymousPageCount -=
+
+			ipl@ KeIPLLower
+
+			if (DEBUGCHECKS)
+				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
+					"MmKernelStackFree: had a swap page\n" KeCrash
+				end
+			end
+
+			phyaddr@ PAGESHIFT >> MmPageFree
+		end
+
+		PAGESIZE kstack +=
+		1 i +=
+	end
+
+	// release the POOLSPACE.
+
+	KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
+	offset@ // offset
+	MmPoolSpaceRelease
+end
+
+fn MmKernelStackSwapOut { thread -- }
+	// dereference the thread's kernel stack pages.
+
+	// called at IPLDPC.
+
+	0 thread@ KeThread_KernelStackResident + !
+
+	auto vaddr
+	thread@ KeThread_KernelStackBottom + @ vaddr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		auto ok
+		auto pteaddr
+
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		MmVirtualtoPTEAddress ok! pteaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmKernelStackSwapOut: no PTE\n" KeCrash
+			end
+		end
+
+		auto phyaddr
+		auto pfdbe
+		auto flags
+
+		pteaddr@ // pteaddr
+		MmPTEInterpret ok! flags! phyaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmKernelStackSwapOut: invalid PTE\n" KeCrash
+			end
+		end
+
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		// unmap
+
+		0 // phyaddr
+		0 // flags
+		vaddr@ // vaddr
+		pteaddr@ // pteaddr
+		0 // asid
+		MmPTEUpdate drop drop drop
+
+		phyaddr@ PTE_TRANSITION | pteaddr@!
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		PAGESIZE vaddr +=
+		1 i +=
+	end
+end
+
+fn MmKernelStackSwapIn { thread -- }
+	// bring in the thread's kernel stack pages.
+	// read from swap if necessary.
+
+	// called at IPLLOW.
+
+	auto vaddr
+	thread@ KeThread_KernelStackBottom + @ vaddr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto i
+	0 i!
+
+	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
+		auto ok
+		auto pteaddr
+
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		MmVirtualtoPTEAddress ok! pteaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmKernelStackSwapIn: no PTE\n" KeCrash
+			end
+		end
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		auto phyaddr
+		auto pfdbe
+		auto flags
+
+		if (DEBUGCHECKS)
+			pteaddr@ // pteaddr
+			MmPTEInterpret ok! flags! phyaddr!
+
+			if (ok@ ~~)
+				"MmKernelStackSwapIn: valid PTE\n" KeCrash
+			end
+		end
+
+		auto swapno
+
+		if (pteaddr@@ PTE_TRANSITION &)
+			// still in memory, job is easy
+
+			pteaddr@@ PAGENUMBERMASK & phyaddr!
+
+			phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+			pfdbe@ MmEvictablePageReference drop
+
+			ipl@ KeIPLLower
+
+			pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ swapno!
+		end else
+			if (DEBUGCHECKS)
+				if (pteaddr@@ PTE_INSWAP & ~~)
+					"MmKernelStackSwapIn: not transition but not in swap\n" KeCrash
+				end
+			end
+
+			ipl@ KeIPLLower
+
+			pteaddr@@ PAGESHIFT >> swapno!
+
+			MUSTSUCCEEDL2 // pri
+			pteaddr@ // pte
+			swapno@ // pno
+			MmAnonymousSwapIn ok! phyaddr! pfdbe!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					ok@ "MmKernelStackSwapIn: failed to swap in kernel stack (%i)\n" KeCrash
+				end
+			end
+
+			PAGESHIFT phyaddr <<=
+		end
+
+		MMSWAPPAGE_NONE pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+		MMEVICTFLAG_MODIFIED pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+
+		if (swapno@ 0 s>=)
+			// free in swap
+			swapno@ IOSwapPageFree
+		end
+
+		phyaddr@ // phyaddr
+		PTE_V PTE_W | PTE_K | PTE_G | // flags
+		vaddr@ // vaddr
+		pteaddr@ // pteaddr
+		0 // asid
+		MmPTEUpdate drop drop drop
+
+		PAGESIZE vaddr +=
+		1 i +=
+	end
+
+	1 thread@ KeThread_KernelStackResident + !
+end

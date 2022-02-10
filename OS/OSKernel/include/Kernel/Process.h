@@ -78,6 +78,9 @@ struct KeThread
 	4 QueueNext
 	4 QueuePrev
 
+	4 KernelStackResident
+	4 SwapInNext
+
 	4 Status
 
 	4 Enqueued
@@ -169,3 +172,5 @@ externptr KeThreadNextReason
 externptr KeThreadCurrent
 externptr KeThreadQuantumDPC
 externptr KeThreadPriorityQueueHeads
+externptr KeThreadSwapInListHead
+externptr KeThreadWaitListHead

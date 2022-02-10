@@ -84,6 +84,8 @@ extern MmBlockChargeGet { block -- charge }
 
 extern MmKernelStackAlloc { -- kstack ok }
 extern MmKernelStackFree { kstack -- }
+extern MmKernelStackSwapOut { thread -- }
+extern MmKernelStackSwapIn { thread -- }
 
 extern MmPageDirectoryAlloc { -- pdir ok }
 extern MmPageDirectoryFree { pdir -- }

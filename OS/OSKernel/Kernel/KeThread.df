@@ -33,6 +33,9 @@ public KeThreadNext
 var KeThreadNextReason 0
 public KeThreadNextReason
 
+var KeThreadSwapInListHead 0
+public KeThreadSwapInListHead
+
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
 
 externptr KeThreadTimerWake
@@ -52,7 +55,11 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	process@ KeProcess_BasePriority + @ thread@ KeThread_Priority + !
 	process@ KeProcess_BasePriority + @ thread@ KeThread_BasePriority + !
 
-	context1@ context2@ startfunc@ kstack@ KETHREADSTACKSIZE + HALCPUContextInit thread@ KeThread_Context + !
+	context1@ // context1
+	context2@ // context2
+	startfunc@ // startfunc
+	kstack@ KETHREADSTACKSIZE + // kstack
+	HALCPUContextInit thread@ KeThread_Context + !
 
 	kstack@ thread@ KeThread_KernelStackBottom + !
 	kstack@ KETHREADSTACKSIZE + thread@ KeThread_KernelStackTop + !
@@ -81,6 +88,9 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_QueueNext + !
 	0 thread@ KeThread_QueuePrev + !
+
+	1 thread@ KeThread_KernelStackResident + !
+	0 thread@ KeThread_SwapInNext + !
 
 	0 thread@ KeThread_Enqueued + !
 
@@ -563,6 +573,8 @@ fn KeThreadTransition { status thread front -- }
 	status@ thread@ KeThread_Status + !
 end
 
+externptr MmSwapEvent
+
 fn KeThreadReady { front thread -- }
 	auto readytime
 	KeTime_SIZEOF alloc readytime!
@@ -572,6 +584,19 @@ fn KeThreadReady { front thread -- }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	if (thread@ KeThread_KernelStackResident + @ ~~)
+		KeThreadSwapInListHead@ thread@ KeThread_SwapInNext + !
+		thread@ KeThreadSwapInListHead!
+
+		0 // priboost
+		MmSwapEvent // event
+		KeEventSignal
+
+		ipl@ KeIPLLower
+
+		return
+	end
 
 	THREADSTATUS_READY // status
 	thread@ // thread
@@ -702,8 +727,6 @@ fn KeThreadSwitch { thread -- }
 	KeThreadTransition
 
 	if (thread@ current@ ==)
-		"uh\n" KeCrash
-
 		return
 	end
 

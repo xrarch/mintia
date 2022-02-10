@@ -8,6 +8,7 @@
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALMap.h"
 #include "<inc>/HALDebug.h"
+#include "<inc>/HALRTC.h"
 
 #include "<inc>/Kernel.h"
 
@@ -26,12 +27,15 @@
 #include "<ll>/OSDLL/OS.h"
 
 buffer MmSwapEvent KeEvent_SIZEOF
+public MmSwapEvent
 
 buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
 
 const MMBALANCESETINTERVAL 1000
 
-const MMSTACKSCANPERIOD 10
+const MMSTACKSCANPERIOD 5
+
+var MmSwapOutStacksPlease 0
 
 fn MmBalanceSetManager { -- }
 	auto ipl
@@ -122,9 +126,19 @@ fn MmBalanceSetManager { -- }
 			1 stackperiod -=
 
 			if (stackperiod@ ~~)
-				0 // priboost
-				MmSwapEvent // event
-				KeEventSignal
+				auto rs
+				HALCPUInterruptDisable rs!
+
+				if (MmSwapOutStacksPlease@ ~~)
+					1 MmSwapOutStacksPlease!
+					rs@ HALCPUInterruptRestore
+
+					0 // priboost
+					MmSwapEvent // event
+					KeEventSignal
+				end else
+					rs@ HALCPUInterruptRestore
+				end
 
 				MMSTACKSCANPERIOD stackperiod!
 			end
@@ -171,5 +185,82 @@ fn MmSwapWorker { context1 context2 -- }
 				waitok@ "MmSwapWorker: failed to wait on swap event (%i)\n" KeCrash
 			end
 		end
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		while (1)
+			if (MmSwapOutStacksPlease@)
+				0 MmSwapOutStacksPlease!
+				MmSwapOutStacks
+
+				continue
+			end elseif (KeThreadSwapInListHead@)
+				MmSwapInStacks
+
+				continue
+			end
+
+			break
+		end
+
+		ipl@ KeIPLLower
+	end
+end
+
+fn MmSwapOutStacks { -- }
+	// scans the list of blocked threads and makes the kernel stacks of those
+	// that have been blocked longer than 10 seconds non-resident.
+
+	// called at IPLDPC.
+
+	auto uptime
+	KeTime_SIZEOF alloc uptime!
+
+	uptime@ HALUptimeQuery
+
+	auto uptimesec
+	uptime@ KeTime_SecPart + @ uptimesec!
+
+	auto thread
+	KeThreadWaitListHead@ thread!
+
+	auto count
+	0 count!
+
+	while (thread@)
+		if (thread@ KeThread_KernelStackResident + @)
+			if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - 10 >=)
+				if (thread@ KeThread_WaitMode + @ USERMODE ==)
+					// yeet it.
+					thread@ MmKernelStackSwapOut
+				end
+			end
+		end
+
+		thread@ KeThread_QueueNext + @ thread!
+	end
+end
+
+fn MmSwapInStacks { -- }
+	// called at IPLDPC
+
+	while (1)
+		auto thread
+		KeThreadSwapInListHead@ thread!
+
+		if (thread@ ~~)
+			break
+		end
+
+		thread@ KeThread_SwapInNext + @ KeThreadSwapInListHead!
+
+		IPLLOW KeIPLLower
+
+		thread@ MmKernelStackSwapIn
+
+		QUEUEBACK thread@ KeThreadReady
+
+		IPLDPC KeIPLRaise drop
 	end
 end

@@ -35,7 +35,13 @@ fn MmKernelStackAlloc { -- kstack ok }
 		return
 	end
 
+	auto vaddr
+	POOLSPACE offset@ PAGESHIFT << + PAGESIZE + vaddr!
+
 	// allocate all the page frames needed for our kernel stack.
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
 
 	auto stackpagestab
 	KETHREADSTACKSIZE PAGESHIFT >> 2 << alloc stackpagestab!
@@ -46,12 +52,25 @@ fn MmKernelStackAlloc { -- kstack ok }
 	auto ptr
 	stackpagestab@ ptr!
 
+	auto pteaddr
+
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
 		auto pfdbe
 		auto phyaddr
 
-		FREEFIRST CANBLOCK | // priority
-		MmPageAlloc ok! phyaddr! pfdbe!
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		MmVirtualtoPTEAddress ok! pteaddr!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmKernelStackAlloc: failed to get PTE (%i)\n" KeCrash
+			end
+		end
+
+		pteaddr@ // pte
+		FREEFIRST // pri
+		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
 
 		if (ok@)
 			// failed, free the ones we just allocated
@@ -70,22 +89,18 @@ fn MmKernelStackAlloc { -- kstack ok }
 			return
 		end
 
+		MMEVICTFLAG_MODIFIED pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+		MMSWAPPAGE_NONE pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+
 		phyaddr@ ptr@!
 
+		PAGESIZE vaddr +=
 		4 ptr +=
 		1 i +=
 	end
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
-	auto vaddr
-	POOLSPACE offset@ PAGESHIFT << + vaddr!
-
 	// map the guard page at the bottom
-
-	auto pteaddr
-	vaddr@ // vaddr
+	POOLSPACE offset@ PAGESHIFT << + // vaddr
 	kdir@ // pagemap
 	MmVirtualtoPTEAddress ok! pteaddr!
 
@@ -100,7 +115,7 @@ fn MmKernelStackAlloc { -- kstack ok }
 
 	// as a separate step, map in the page frames for our kernel stack.
 
-	PAGESIZE vaddr +=
+	POOLSPACE offset@ PAGESHIFT << + PAGESIZE + vaddr!
 
 	vaddr@ kstack!
 
@@ -168,17 +183,22 @@ fn MmKernelStackFree { kstack -- }
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
 		auto phyaddr
 		auto ok
+		auto flags
 
 		0 // phyaddr
 		0 // flags
 		kstack@ // vaddr
 		kdir@ // pagemap
 		0 // asid
-		MmPTEUpdateByVirtual ok! drop phyaddr!
+		MmPTEUpdateByVirtual ok! flags! phyaddr!
 
 		if (DEBUGCHECKS)
 			if (ok@)
 				"MmKernelStackFree: failed to unmap\n" KeCrash
+			end
+
+			if (flags@ PTE_V & ~~)
+				"MmKernelStackFree: invalid stack page\n" KeCrash
 			end
 		end
 

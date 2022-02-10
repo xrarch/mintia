@@ -12,4 +12,4 @@
 
 #include "<inc>/Kernel/Process.h"
 
-const DEBUGCHECKS 0
+const DEBUGCHECKS 1

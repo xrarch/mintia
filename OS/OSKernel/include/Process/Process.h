@@ -113,6 +113,9 @@ externptr PsOSDLLSectionObject
 externptr PsProcessCreationCount
 externptr PsProcessDeletionCount
 
+externptr PsReaperEvent
+extern PsReaperWorker { context1 context2 -- }
+
 extern PsProcessListLock { -- ok }
 extern PsProcessListTryLock { -- ok }
 extern PsProcessListIsLocked { -- locked }

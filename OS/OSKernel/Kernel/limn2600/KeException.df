@@ -39,6 +39,8 @@ externptr HALLIMNstationLSICClaimComplete
 externptr HALLimn2500SavedEV
 
 externptr KeThreadCurrentStackTop
+externptr KeThreadCurrentStackBottom
+externptr HALInterruptStackTop
 
 externptr OSCallCount
 externptr OSCallTable
@@ -67,6 +69,16 @@ KeLimn2600ExceptionVector:
 .waskernel:
 	subi sp, sp, OSContext_SIZEOF
 
+	la   t1, KeInterruptNested
+	mov  t1, long [t1]
+	bne  t1, .skipoverflowcheck
+
+	la   t1, KeThreadCurrentStackBottom
+	mov  t1, long [t1]
+	sub  t1, sp, t1
+	blt  t1, .overflow
+
+.skipoverflowcheck:
 	mfcr t1, k2
 	mov  long [sp + OSContext_sp],  t1
 	mov  long [sp + OSContext_ers], t0 ; ers was still in t0
@@ -123,9 +135,61 @@ KeLimn2600ExceptionVector:
 
 	addi sp, sp, 8
 
+	mov  t0, long [sp + OSContext_ers]
+	mtcr ers, t0
+
+	mov  t0, long [sp + OSContext_epc]
+	mtcr epc, t0
+
+	mov  t0,  long [sp + OSContext_t0]
+	mov  t1,  long [sp + OSContext_t1]
+	mov  t2,  long [sp + OSContext_t2]
+	mov  t3,  long [sp + OSContext_t3]
+	mov  t4,  long [sp + OSContext_t4]
+	mov  t5,  long [sp + OSContext_t5]
+	mov  a0,  long [sp + OSContext_a0]
+	mov  a1,  long [sp + OSContext_a1]
+	mov  a2,  long [sp + OSContext_a2]
+	mov  a3,  long [sp + OSContext_a3]
+	mov  s0,  long [sp + OSContext_s0]
+	mov  s1,  long [sp + OSContext_s1]
+	mov  s2,  long [sp + OSContext_s2]
+	mov  s3,  long [sp + OSContext_s3]
+	mov  s4,  long [sp + OSContext_s4]
+	mov  s5,  long [sp + OSContext_s5]
+	mov  s6,  long [sp + OSContext_s6]
+	mov  s7,  long [sp + OSContext_s7]
+	mov  s8,  long [sp + OSContext_s8]
+	mov  s9,  long [sp + OSContext_s9]
+	mov  s10, long [sp + OSContext_s10]
+	mov  s11, long [sp + OSContext_s11]
+	mov  s12, long [sp + OSContext_s12]
+	mov  s13, long [sp + OSContext_s13]
+	mov  s14, long [sp + OSContext_s14]
+	mov  s15, long [sp + OSContext_s15]
+	mov  s16, long [sp + OSContext_s16]
+	mov  s17, long [sp + OSContext_s17]
+	mov  s18, long [sp + OSContext_s18]
+
+	mov  lr, long [sp + OSContext_lr]
+	mov  sp, long [sp + OSContext_sp]
+
+	rfe
+
+.overflow:
+	la   sp, HALInterruptStackTop
+	mov  sp, long [sp]
+
+	subi sp, sp, 8
+	mfcr t0, epc
+	mov  long [sp + 4], t0
+	mfcr t0, k3
+	mov  long [sp], t0
+
+	j    KeStackOverflow
+
 LoadInitialContext:
 .global LoadInitialContext
-
 	mov  t0, long [sp + OSContext_ers]
 	mtcr ers, t0
 
@@ -255,6 +319,19 @@ table ExceptionNames
 endtable
 
 extern PsPrepareUsermode { trapframe -- }
+
+fn KeStackOverflow { -- }
+	auto current
+	KeThreadCurrent@ current!
+
+	if (current@)
+		current@ KeThread_Name +
+		current@ KeThread_Process + @ KeProcess_Name +
+		"process '%s' thread '%s' kernel stack overflow\n" KeCrash
+	end
+
+	"Kernel stack overflow\n" KeCrash
+end
 
 fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 	0 recheck!

@@ -39,6 +39,7 @@ struct KeProcess
 
 	4 PageDirectory
 	4 ASID
+	4 ResidentStackCount
 endstruct
 
 const THREADYIELD_PREEMPTED  1

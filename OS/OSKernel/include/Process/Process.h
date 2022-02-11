@@ -133,7 +133,8 @@ extern PsThreadGetFilePermissions { threadobject -- filepermissions }
 extern PsThreadReadStatusObject { threadobject -- status ok }
 extern PsThreadReadStatus { threadhandle -- status ok }
 
-extern PsThreadResumeObject { threadobject -- }
+extern PsThreadSuspend { threadhandle -- ok }
+
 extern PsThreadResume { threadhandle -- ok }
 
 extern PsThreadInformationQueryObject { threadobject query -- ok }

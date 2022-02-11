@@ -39,6 +39,7 @@ struct KeProcess
 
 	4 PageDirectory
 	4 ASID
+
 	4 ResidentStackCount
 endstruct
 
@@ -151,6 +152,7 @@ extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
 extern KeThreadException { signal thread -- ok }
 extern KeThreadTerminate { status thread -- }
+extern KeThreadSuspend { thread -- }
 extern KeThreadResume { thread -- }
 extern KeThreadWakeForSignal { sig thread -- }
 extern KeThreadRundown { thread -- }

@@ -111,6 +111,7 @@ extern OSThreadSetFilePermissions { filepermissions -- ok }
 extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }
+extern OSThreadSuspend { threadhandle -- ok }
 extern OSThreadResume { threadhandle -- ok }
 extern OSThreadReadStatus { threadhandle -- status ok }
 extern OSThreadQuery { threadhandle query -- ok }

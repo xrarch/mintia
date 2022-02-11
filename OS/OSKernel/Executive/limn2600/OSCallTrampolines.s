@@ -76,6 +76,7 @@
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
+.extern OSThreadSuspend
 .extern OSThreadResume
 .extern OSThreadReadStatus
 .extern OSThreadQuery
@@ -85,7 +86,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 80
+	.dl 81
 
 OSCallTable:
 .global OSCallTable
@@ -164,12 +165,13 @@ OSCallTable:
 	.dl OSTOSThreadSleep                                 ;72
 	.dl OSTOSThreadCreate                                ;73
 	.dl OSTOSThreadTerminate                             ;74
-	.dl OSTOSThreadResume                                ;75
-	.dl OSTOSThreadReadStatus                            ;76
-	.dl OSTOSThreadQuery                                 ;77
-	.dl OSTOSSetSystemConsole                            ;78
-	.dl OSTOSConsoleSignal                               ;79
-	.dl OSTOSAmIAdmin                                    ;80
+	.dl OSTOSThreadSuspend                               ;75
+	.dl OSTOSThreadResume                                ;76
+	.dl OSTOSThreadReadStatus                            ;77
+	.dl OSTOSThreadQuery                                 ;78
+	.dl OSTOSSetSystemConsole                            ;79
+	.dl OSTOSConsoleSignal                               ;80
+	.dl OSTOSAmIAdmin                                    ;81
 
 
 OSTOSConsolePutCharacter:
@@ -1325,6 +1327,20 @@ OSTOSThreadTerminate:
 	mov  a1, long [s18 + 8] ;t2
 
 	jal  OSThreadTerminate
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadSuspend:
+.global OSTOSThreadSuspend
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s18 + 4] ;t1
+
+	jal  OSThreadSuspend
 
 	mov  long [s18 + 4], a0 ;t1
 

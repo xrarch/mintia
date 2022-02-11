@@ -924,11 +924,22 @@ OSThreadTerminate:
 
 	ret
 
+OSThreadSuspend:
+.global OSThreadSuspend
+	mov  t1, a0
+
+	li   t0, 75
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSThreadResume:
 .global OSThreadResume
 	mov  t1, a0
 
-	li   t0, 75
+	li   t0, 76
 	sys  0
 
 	mov  a0, t1
@@ -939,7 +950,7 @@ OSThreadReadStatus:
 .global OSThreadReadStatus
 	mov  t1, a0
 
-	li   t0, 76
+	li   t0, 77
 	sys  0
 
 	mov  a1, t2
@@ -952,7 +963,7 @@ OSThreadQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 77
+	li   t0, 78
 	sys  0
 
 	mov  a0, t1
@@ -963,7 +974,7 @@ OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 78
+	li   t0, 79
 	sys  0
 
 	mov  a0, t1
@@ -975,7 +986,7 @@ OSConsoleSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 79
+	li   t0, 80
 	sys  0
 
 	mov  a0, t1
@@ -985,7 +996,7 @@ OSConsoleSignal:
 OSAmIAdmin:
 .global OSAmIAdmin
 
-	li   t0, 80
+	li   t0, 81
 	sys  0
 
 	mov  a0, t1

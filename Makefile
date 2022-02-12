@@ -28,6 +28,7 @@ bootable: $(DISTIMAGE)
 	make -C $(LOAD_DIR)
 	dd if=$(LOAD_DIR)/LIMNstation/a3xBootDescriptor.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
 	dd if=$(LOAD_DIR)/LIMNstation/AisixFSBoot.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((3 + $(OFFSET))) 2>/dev/null
+	$(FSTOOL) u /OSLoader.a3x $(LOAD_DIR)/OSLoader.a3x
 
 sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	make -C $(RTL_DIR)

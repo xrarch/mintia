@@ -2,10 +2,7 @@
 ;descriptor to be the start of the boot program.
 ;
 ;it is very dumb and only understands how to load /OSLoader.a3x from an
-;AisixFS volume. it also makes no pretensions about returning to the firmware,
-;due to size constraints (fits in 1 block).
-;
-;assumes OSLoader.a3x is inode number 2.
+;AisixFS volume. assumes OSLoader.a3x is inode number 2.
 ;=========== BOOT PROGRAM ============
 
 .section text
@@ -92,6 +89,16 @@ VarArea:
 ;arguments: api devnode args
 ;registers:  a2      a1   a0
 AisixFSBoot:
+	subi sp, sp, 32
+	mov  long [sp], lr
+	mov  long [sp + 4], s0
+	mov  long [sp + 8], s1
+	mov  long [sp + 12], s2
+	mov  long [sp + 16], s3
+	mov  long [sp + 20], s4
+	mov  long [sp + 24], s5
+	mov  long [sp + 28], s6
+
 	la   s0, VarArea
 	mov  long [s0 + Vars_Args], a0
 	mov  long [s0 + Vars_DeviceNode], a1
@@ -164,10 +171,9 @@ AisixFSBoot:
 	mov  t0, long [t0 + 4]
 	jalr lr, t0, 0
 
-.invalid:
-	li   t0, _a3xCIC_ConsoleUserOut
-	fwc  0
+	b    .out
 
+.invalid:
 	la   a0, loadername
 	li   t0, _a3xCIC_Puts
 	fwc  0
@@ -175,12 +181,10 @@ AisixFSBoot:
 	la   a0, invalidmessage
 	li   t0, _a3xCIC_Puts
 	fwc  0
-	b .hang
+
+	b    .errout
 
 .notfound:
-	li   t0, _a3xCIC_ConsoleUserOut
-	fwc  0
-
 	la   a0, loadername
 	li   t0, _a3xCIC_Puts
 	fwc  0
@@ -188,10 +192,22 @@ AisixFSBoot:
 	la   a0, notfoundmessage
 	li   t0, _a3xCIC_Puts
 	fwc  0
-	b .hang
 
-.hang:
-	b .hang
+.errout:
+	subi a0, zero, 1
+
+.out:
+
+	mov  lr, long [sp], lr
+	mov  s0, long [sp + 4]
+	mov  s1, long [sp + 8]
+	mov  s2, long [sp + 12]
+	mov  s3, long [sp + 16]
+	mov  s4, long [sp + 20]
+	mov  s5, long [sp + 24]
+	mov  s6, long [sp + 28]
+	addi sp, sp, 32
+	ret
 
 ;a0 - blockno
 ;a1 - buffer

@@ -8,7 +8,7 @@ DISKLABEL  := ./build/defaultdisklabel
 OFFSET     := 4
 
 OS_DIR     := ./OS
-LOAD_DIR   := $(OS_DIR)/Loader/LIMNstation
+LOAD_DIR   := $(OS_DIR)/OSLoader
 KERN_DIR   := $(OS_DIR)/OSKernel
 SYSBIN_DIR := $(OS_DIR)/SystemBin
 HAL_DIR    := $(OS_DIR)/HAL
@@ -26,8 +26,8 @@ dist: bootable sysfiles
 
 bootable: $(DISTIMAGE)
 	make -C $(LOAD_DIR)
-	dd if=$(LOAD_DIR)/BootSector.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
-	dd if=$(LOAD_DIR)/Loader.a3x of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((4 + $(OFFSET))) 2>/dev/null
+	dd if=$(LOAD_DIR)/LIMNstation/a3xBootDescriptor.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
+	dd if=$(LOAD_DIR)/LIMNstation/AisixFSBoot.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((3 + $(OFFSET))) 2>/dev/null
 
 sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	make -C $(RTL_DIR)

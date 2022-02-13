@@ -16,7 +16,7 @@ OSLoader.a3x: $(OBJ)
 	$(OBJTOOL) binary -nobss OSLoader.a3x
 
 %.o: %.df *.h
-	$(DC) $< $@
+	$(DC) $< $@ incdir=./
 
 cleanup:
 	make -C LIMNstation cleanup

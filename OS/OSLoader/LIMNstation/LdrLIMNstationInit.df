@@ -1,0 +1,143 @@
+//
+// Implements the LIMNstation-specific part of bootloader initialization.
+//
+
+#include "<df>/dragonfruit.h"
+#include "<ll>/rta3x/a3x.h"
+
+#include "../OSLoader.h"
+
+buffer ArgsBuffer 256
+public ArgsBuffer
+
+fn ArgsInit { argp -- }
+	auto p
+	ArgsBuffer p!
+
+	auto l
+	0 l!
+
+	auto esc
+	0 esc!
+
+	if (argp@ ~~)
+		return
+	end
+
+	while (argp@ gb)
+		if (l@ 255 >=)
+			1 p -=
+
+			while (p@ gb)
+				0 p@ sb
+				1 p -=
+			end
+
+			return
+		end
+
+		if (esc@)
+			0 esc!
+			argp@ gb p@ sb
+			1 p +=
+			1 l +=
+		end elseif (argp@ gb ' ' ==)
+			0 p@ sb
+			1 p +=
+			1 l +=
+		end elseif (argp@ gb '\\' ==)
+			1 esc!
+		end else
+			argp@ gb p@ sb
+			1 p +=
+			1 l +=
+		end
+
+		1 argp +=
+	end
+
+	0 p@ sb
+end
+
+fn Main { args -- ret }
+	// a3x entrypoint
+
+	// convert arguments to HAL-preferred format
+
+	args@ ArgsInit
+
+	// call generic bootloader entrypoint
+
+	ArgsBuffer LdrMain ret!
+end
+
+fn LdrLIMNstationBuildDescriptors { -- }
+	// use the bad a3x memory descriptors to make good OSLoader descriptors.
+
+	// we need to extend the first descriptor to reach the end of our bss
+	// section and add that to our list as reclaimable memory. similarly we
+	// have to contract the second descriptor (which should be free memory) by
+	// the same amount. everything after that we just copy over 1:1.
+
+	"/memory" a3xDeviceSelect
+
+	auto desc
+	-1 "nextDescriptor" a3xDCallMethod drop drop drop desc!
+
+	if (desc@ ~~)
+		"LdrLIMNstationBuildDescriptors: no first descriptor\n" LdrPanic
+	end
+
+	auto restype
+	auto ressize
+	auto resaddr
+
+	desc@ "getDescriptorInfo" a3xDCallMethod drop restype! ressize! resaddr!
+
+	if (restype@ MEMORYRESERVED ~=)
+		"LdrLIMNstationBuildDescriptors: unexpected first descriptor type\n" LdrPanic
+	end
+
+	if (resaddr@ 0x1000 ~=)
+		"LdrLIMNstationBuildDescriptors: unexpected first descriptor address\n" LdrPanic
+	end
+
+	if (ressize@ resaddr@ + 0x40000 >)
+		"LdrLIMNstationBuildDescriptors: unexpected first descriptor size\n" LdrPanic
+	end
+
+
+
+	auto freedesc
+	0 freedesc!
+
+	auto warned
+	0 warned!
+
+	while (desc@)
+		auto dtype
+		auto dsize
+		auto daddr
+
+		desc@ "getDescriptorInfo" a3xDCallMethod drop dtype! dsize! daddr!
+
+		dtype@ dsize@ "%d %d\n" Printf
+
+		desc@ "nextDescriptor" a3xDCallMethod drop drop drop desc!
+	end
+
+	a3xDeviceExit
+end
+
+fn LdrPlatformMemoryInit { -- }
+	// build memory descriptors
+
+	LdrLIMNstationBuildDescriptors
+
+	// create identity mappings of RAM at 0 and IDENTITYSPACE and enable
+	// paging
+end
+
+fn LdrPlatformExit { ret -- }
+	ret@ a3xReturn
+end

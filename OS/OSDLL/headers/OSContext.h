@@ -1,3 +1,5 @@
+// obviously limn2600-specific. will be switched by ifdefs some day.
+
 // if you modify below, update the matching name table in OSDLL debug dumper
 struct OSContext
 	4 t0    4 t1

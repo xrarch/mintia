@@ -1,26 +1,17 @@
 //
-// Faster bitmap management routines.
+// Faster bitmap management routines. Stolen from MINTIA executive for
+// OSLoader.
 //
 
 #include "<df>/dragonfruit.h"
 
-#include "<inc>/HALLog.h"
-#include "<inc>/HALCPU.h"
-#include "<inc>/HALDebug.h"
-
-#include "<inc>/Kernel.h"
-
-#include "<inc>/Executive.h"
-
-#include "<inc>/Memory.h"
-
-#include "<ll>/OSDLL/OS.h"
+#include "OSLoader.h"
 
 // XXX these tables each take up 1024 bytes because dragonfruit is ridiculous 
 // so that is a memory consumption issue to keep in mind...
 
 // table of largest # of contiguous zero bits in a byte
-table ExBitmapContiguousZeroes
+table LdrBitmapContiguousZeroes
 	8 7 6 6 5 5 5 5 4 4 4 4 4 4 4 4
 	4 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3
 	5 4 3 3 2 2 2 2 3 2 2 2 2 2 2 2
@@ -40,7 +31,7 @@ table ExBitmapContiguousZeroes
 endtable
 
 // table of contiguous low zero bits in a byte
-table ExBitmapLowZeroes
+table LdrBitmapLowZeroes
 	8 0 1 0 2 0 1 0 3 0 1 0 2 0 1 0
 	4 0 1 0 2 0 1 0 3 0 1 0 2 0 1 0
 	5 0 1 0 2 0 1 0 3 0 1 0 2 0 1 0
@@ -60,7 +51,7 @@ table ExBitmapLowZeroes
 endtable
 
 // table of contiguous high zero bits in a byte
-table ExBitmapHighZeroes
+table LdrBitmapHighZeroes
 	8 7 6 6 5 5 5 5 4 4 4 4 4 4 4 4
 	3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3
 	2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2
@@ -80,7 +71,7 @@ table ExBitmapHighZeroes
 endtable
 
 // table of total number of clear bits in a byte
-table ExBitmapTotalZeroes
+table LdrBitmapTotalZeroes
 	8 7 7 6 7 6 6 5 7 6 6 5 6 5 5 4
 	7 6 6 5 6 5 5 4 6 5 5 4 5 4 4 3
 	7 6 6 5 6 5 5 4 6 5 5 4 5 4 4 3
@@ -99,55 +90,31 @@ table ExBitmapTotalZeroes
 	4 3 3 2 3 2 2 1 3 2 2 1 2 1 1 0
 endtable
 
-table ExBitmapFillMasks
+table LdrBitmapFillMasks
 	0   1   3   7   15  31  63  127 255
 endtable
 
-table ExBitmapZeroMasks
+table LdrBitmapZeroMasks
 	255 254 252 248 240 224 192 128 0
 endtable
 
-fn ExBitmapInitialize { sizeinbits data header -- }
-	data@ header@ ExBitmapHeader_Data + !
-	sizeinbits@ header@ ExBitmapHeader_SizeInBits + !
+fn LdrBitmapInitialize { sizeinbits data header -- }
+	data@ header@ LdrBitmapHeader_Data + !
+	sizeinbits@ header@ LdrBitmapHeader_SizeInBits + !
 
 	auto sizeinbytes
 	sizeinbits@ 7 + 3 >> sizeinbytes!
 
 	if (sizeinbits@ 7 &)
-		[sizeinbits@ 7 &]ExBitmapZeroMasks@ data@ sizeinbytes@ 1 - + sb
+		[sizeinbits@ 7 &]LdrBitmapZeroMasks@ data@ sizeinbytes@ 1 - + sb
 	end
 end
 
-fn ExBitmapGetData { header -- data }
-	header@ ExBitmapHeader_Data + @ data!
-end
-
-fn ExBitmapClear { header -- }
-	auto sizeinbits
-	header@ ExBitmapHeader_SizeInBits + @ sizeinbits!
-
-	auto sizeinbytes
-	sizeinbits@ 7 + 3 >> sizeinbytes!
-
-	auto data
-	header@ ExBitmapHeader_Data + @ data!
-
-	data@ // ptr
-	sizeinbytes@ // size
-	0 // word
-	memset
-
-	if (sizeinbits@ 7 &)
-		[sizeinbits@ 7 &]ExBitmapZeroMasks@ data@ sizeinbytes@ 1 - + sb
-	end
-end
-
-fn ExBitmapFindRun { hint runlength header -- offset ok }
+fn LdrBitmapFindRun { hint runlength header -- offset ok }
 	0 ok!
 
 	auto sizeinbits
-	header@ ExBitmapHeader_SizeInBits + @ sizeinbits!
+	header@ LdrBitmapHeader_SizeInBits + @ sizeinbits!
 
 	auto sizeinbytes
 	sizeinbits@ 7 + 3 >> sizeinbytes!
@@ -194,7 +161,7 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 		auto theotherbyte
 		auto bitmaskorstartindex
 
-		header@ ExBitmapHeader_Data + @ startindex@ + currentposition!
+		header@ LdrBitmapHeader_Data + @ startindex@ + currentposition!
 
 		if (runlength@ 10 <)
 			0xFF prevbyte!
@@ -206,10 +173,10 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 				currentposition@ gb curbyte!
 				1 currentposition +=
 
-				if ([curbyte@]ExBitmapContiguousZeroes@ runlength@ >=)
+				if ([curbyte@]LdrBitmapContiguousZeroes@ runlength@ >=)
 					// we can satisfy this with this single byte
 
-					[runlength@]ExBitmapFillMasks@ bitmaskorstartindex!
+					[runlength@]LdrBitmapFillMasks@ bitmaskorstartindex!
 
 					while (curbyte@ bitmaskorstartindex@ &)
 						1 bitmaskorstartindex <<=
@@ -217,11 +184,11 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 					end
 
 					return
-				end elseif ([prevbyte@]ExBitmapHighZeroes@
-					[curbyte@]ExBitmapLowZeroes@ + runlength@ >=)
+				end elseif ([prevbyte@]LdrBitmapHighZeroes@
+					[curbyte@]LdrBitmapLowZeroes@ + runlength@ >=)
 					// this and the last byte work
 
-					offset@ [prevbyte@]ExBitmapHighZeroes@ - bitmaskorstartindex!
+					offset@ [prevbyte@]LdrBitmapHighZeroes@ - bitmaskorstartindex!
 
 					if (bitmaskorstartindex@ runlength@ + sizeinbits@ <=)
 						bitmaskorstartindex@ offset!
@@ -244,11 +211,11 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 				currentposition@ gb curbyte!
 				1 currentposition +=
 
-				if ([prevbyte@]ExBitmapHighZeroes@
-					[curbyte@]ExBitmapLowZeroes@ + runlength@ >=)
+				if ([prevbyte@]LdrBitmapHighZeroes@
+					[curbyte@]LdrBitmapLowZeroes@ + runlength@ >=)
 					// fits in this byte and the last byte
 
-					offset@ [prevbyte@]ExBitmapHighZeroes@ - bitmaskorstartindex!
+					offset@ [prevbyte@]LdrBitmapHighZeroes@ - bitmaskorstartindex!
 
 					if (bitmaskorstartindex@ runlength@ + sizeinbits@ <=)
 						bitmaskorstartindex@ offset!
@@ -258,11 +225,11 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 				end
 
 				if (prevbyte@ 0 ==)
-					if ([theotherbyte@]ExBitmapHighZeroes@
-						[curbyte@]ExBitmapLowZeroes@ 8 + + runlength@ >=)
+					if ([theotherbyte@]LdrBitmapHighZeroes@
+						[curbyte@]LdrBitmapLowZeroes@ 8 + + runlength@ >=)
 						// fits in this byte, the last byte, and the other byte
 
-						offset@ 8 - [theotherbyte@]ExBitmapHighZeroes@ - bitmaskorstartindex!
+						offset@ 8 - [theotherbyte@]LdrBitmapHighZeroes@ - bitmaskorstartindex!
 
 						if (bitmaskorstartindex@ runlength@ + sizeinbits@ <=)
 							bitmaskorstartindex@ offset!
@@ -299,12 +266,12 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 				1 currentposition +=
 
 				if (zerobytesrun@ zeroneeded@ >=)
-					if ([hint@]ExBitmapHighZeroes@
+					if ([hint@]LdrBitmapHighZeroes@
 						zerobytesrun@ 3 << +
-						[curbyte@]ExBitmapLowZeroes@ + runlength@ >=)
+						[curbyte@]LdrBitmapLowZeroes@ + runlength@ >=)
 
 						bitmaskorstartindex@ 3 <<
-						8 [hint@]ExBitmapHighZeroes@ - + bitmaskorstartindex!
+						8 [hint@]LdrBitmapHighZeroes@ - + bitmaskorstartindex!
 
 						if (bitmaskorstartindex@ runlength@ + sizeinbits@ <=)
 							bitmaskorstartindex@ offset!
@@ -332,10 +299,10 @@ fn ExBitmapFindRun { hint runlength header -- offset ok }
 	-1 ok!
 end
 
-fn ExBitmapSetBits { runlength index header -- }
+fn LdrBitmapSetBits { runlength index header -- }
 	if (DEBUGCHECKS)
-		if (runlength@ index@ + header@ ExBitmapHeader_SizeInBits + @ >)
-			"ExBitmapSetBits: attempt to set beyond the end of the bitmap\n" KeCrash
+		if (runlength@ index@ + header@ LdrBitmapHeader_SizeInBits + @ >)
+			"LdrBitmapSetBits: attempt to set beyond the end of the bitmap\n" LdrCrash
 		end
 	end
 
@@ -347,7 +314,7 @@ fn ExBitmapSetBits { runlength index header -- }
 	index@ 31 & bitoffset!
 
 	auto curlongptr
-	header@ ExBitmapHeader_Data + @ index@ 5 >> 2 << + curlongptr!
+	header@ LdrBitmapHeader_Data + @ index@ 5 >> 2 << + curlongptr!
 
 	if (bitoffset@ runlength@ + 32 <=)
 		// you are expected to understand this
@@ -374,10 +341,10 @@ fn ExBitmapSetBits { runlength index header -- }
 	end
 end
 
-fn ExBitmapClearBits { runlength index header -- }
+fn LdrBitmapClearBits { runlength index header -- }
 	if (DEBUGCHECKS)
-		if (runlength@ index@ + header@ ExBitmapHeader_SizeInBits + @ >)
-			"ExBitmapClearBits: attempt to clear beyond the end of the bitmap\n" KeCrash
+		if (runlength@ index@ + header@ LdrBitmapHeader_SizeInBits + @ >)
+			"LdrBitmapClearBits: attempt to clear beyond the end of the bitmap\n" LdrCrash
 		end
 	end
 
@@ -389,7 +356,7 @@ fn ExBitmapClearBits { runlength index header -- }
 	index@ 31 & bitoffset!
 
 	auto curlongptr
-	header@ ExBitmapHeader_Data + @ index@ 5 >> 2 << + curlongptr!
+	header@ LdrBitmapHeader_Data + @ index@ 5 >> 2 << + curlongptr!
 
 	if (bitoffset@ runlength@ + 32 <=)
 		// you are expected to understand this
@@ -416,30 +383,14 @@ fn ExBitmapClearBits { runlength index header -- }
 	end
 end
 
-fn ExBitmapBitGet { index header -- value }
-	if (DEBUGCHECKS)
-		if (index@ header@ ExBitmapHeader_SizeInBits + @ >)
-			"ExBitmapBitGet: attempt to get bit beyond end of bitmap\n" KeCrash
-		end
-	end
-
-	auto bitnum
-	index@ 3 >> bitnum!
-
-	auto bitoffset
-	index@ 7 & bitoffset!
-
-	header@ ExBitmapHeader_Data + @ bitnum@ + gb bitoffset@ >> 1 & value!
-end
-
-fn ExBitmapCheckClearBits { runlength index header -- isclear }
+fn LdrBitmapCheckClearBits { runlength index header -- isclear }
 	if (DEBUGCHECKS)
 		if (runlength@ ~~)
-			"ExBitmapCheckClearBits: runlength=0\n" KeCrash
+			"LdrBitmapCheckClearBits: runlength=0\n" LdrCrash
 		end
 	end
 
-	if (runlength@ index@ + header@ ExBitmapHeader_SizeInBits + @ >)
+	if (runlength@ index@ + header@ LdrBitmapHeader_SizeInBits + @ >)
 		0 isclear!
 		return
 	end
@@ -460,22 +411,22 @@ fn ExBitmapCheckClearBits { runlength index header -- isclear }
 	endindex@ 7 & endbitoffset!
 
 	auto currentposition
-	header@ ExBitmapHeader_Data + @ startbyteoffset@ + currentposition!
+	header@ LdrBitmapHeader_Data + @ startbyteoffset@ + currentposition!
 
 	auto curbyte
 	currentposition@ gb curbyte!
 
 	if (startbyteoffset@ endbyteoffset@ ==)
-		[startbitoffset@]ExBitmapZeroMasks@ [endbitoffset@ 1 +]ExBitmapFillMasks@ &
+		[startbitoffset@]LdrBitmapZeroMasks@ [endbitoffset@ 1 +]LdrBitmapFillMasks@ &
 		curbyte@ & ~~ isclear!
 	end else
-		if ([startbitoffset@]ExBitmapZeroMasks@ curbyte@ &)
+		if ([startbitoffset@]LdrBitmapZeroMasks@ curbyte@ &)
 			0 isclear!
 			return
 		end
 
 		auto endposition
-		header@ ExBitmapHeader_Data + @ endbyteoffset@ + endposition!
+		header@ LdrBitmapHeader_Data + @ endbyteoffset@ + endposition!
 
 		1 currentposition +=
 
@@ -490,7 +441,7 @@ fn ExBitmapCheckClearBits { runlength index header -- isclear }
 
 		currentposition@ gb curbyte!
 
-		if ([endbitoffset@ 1 +]ExBitmapFillMasks@ curbyte@ &)
+		if ([endbitoffset@ 1 +]LdrBitmapFillMasks@ curbyte@ &)
 			0 isclear!
 		end else
 			1 isclear!

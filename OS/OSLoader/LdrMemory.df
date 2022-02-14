@@ -6,6 +6,10 @@
 
 #include "OSLoader.h"
 
+buffer LdrKernelSpaceBitmap 32768
+
+buffer LdrKernelSpaceBitmapHeader LdrBitmapHeader_SIZEOF
+
 var LdrMemoryDescriptorListHead 0
 public LdrMemoryDescriptorListHead
 
@@ -17,4 +21,174 @@ fn LdrMemoryInit { -- }
 	// descriptor list
 
 	LdrPlatformMemoryInit
+
+	1 1024 * 1024 * 1024 * // sizeinbits
+	LdrKernelSpaceBitmap // data
+	LdrKernelSpaceBitmapHeader // header
+	LdrBitmapInitialize
+
+	// mark POOLSPACE virtual range as allocated
+
+	POOLSPACESIZE PAGESHIFT >> // runlength
+	POOLSPACE KERNELSPACE - PAGESHIFT >> // index
+	LdrKernelSpaceBitmapHeader // header
+	LdrBitmapSetBits
+
+	auto desc
+	LdrMemoryDescriptorListHead@ desc!
+
+	while (desc@)
+		desc@ LdrMemoryDescriptor_Type + @ "%d " Printf
+		desc@ LdrMemoryDescriptor_StartPFN + @ "%d " Printf
+		desc@ LdrMemoryDescriptor_Pages + @ "%d\n" Printf
+
+		desc@ LdrMemoryDescriptor_Next + @ desc!
+	end
+end
+
+var LdrHeapPointer 0
+public LdrHeapPointer
+
+var LdrHeapTop 0
+public LdrHeapTop
+
+fn LdrMemoryAllocate { size -- ptr ok }
+	// extremely simple bump allocator since this is all gonna get reclaimed
+	// by the kernel anyway.
+
+	size@ 3 + 0xFFFFFFFC & size!
+
+	if (LdrHeapPointer@ size@ + LdrHeapTop@ <=)
+		0 ok!
+
+		LdrHeapPointer@ ptr!
+		size@ LdrHeapPointer +=
+
+		return
+	end
+
+	// yoink a chunk off the end of a free descriptor and use that as heap
+
+	"TODO apparently we use more than 32K heap now\n" LdrCrash
+end
+
+fn LdrMemoryAllocatePhysicalRange { pages type -- desc ok }
+	auto searchdesc
+	LdrMemoryDescriptorListHead@ searchdesc!
+
+	while (searchdesc@)
+		if (searchdesc@ LdrMemoryDescriptor_Pages + @ pages@ >=)
+			// draw the range from the end of this descriptor.
+
+			pages@ searchdesc@ LdrMemoryDescriptor_Pages + -=
+
+			LdrMemoryDescriptor_SIZEOF // size
+			LdrMemoryAllocate ok! desc!
+
+			if (ok@)
+				return
+			end
+
+			pages@ desc@ LdrMemoryDescriptor_Pages + !
+
+			searchdesc@ LdrMemoryDescriptor_Pages + @ searchdesc@ LdrMemoryDescriptor_StartPFN + @ +
+			desc@ LdrMemoryDescriptor_StartPFN + !
+
+			type@ desc@ LdrMemoryDescriptor_Type + !
+
+			searchdesc@ LdrMemoryDescriptor_Next + @ desc@ LdrMemoryDescriptor_Next + !
+			desc@ searchdesc@ LdrMemoryDescriptor_Next + !
+
+			if (desc@ LdrMemoryDescriptor_Next + @ ~~)
+				desc@ LdrMemoryDescriptorListTail!
+			end
+
+			return
+		end
+
+		searchdesc@ LdrMemoryDescriptor_Next + @ searchdesc!
+	end
+
+	LDRSTATUS_NO_MEMORY ok!
+end
+
+fn LdrMemoryFreePhysicalRange { desc -- }
+	OSLOADERMEM_FREE desc@ LdrMemoryDescriptor_Type + !
+end
+
+var LdrKernelSpaceHint 0
+
+fn LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
+	if (prefva@ KERNELSPACE <)
+		if (fixed@)
+			LDRSTATUS_ADDRESS_NOT_AVAILABLE ok!
+
+			return
+		end
+
+		KERNELSPACE prefva!
+	end
+
+	auto isclear
+
+	pages@ // runlength
+	prefva@ KERNELSPACE - PAGESHIFT >> // index
+	LdrKernelSpaceBitmapHeader // header
+	LdrBitmapCheckClearBits isclear!
+
+	if (isclear@)
+		// preferred range is available
+
+		pages@ // runlength
+		prefva@ KERNELSPACE - PAGESHIFT >> // index
+		LdrKernelSpaceBitmapHeader // header
+		LdrBitmapSetBits
+
+		prefva@ realva!
+
+		0 ok!
+
+		return
+	end
+
+	// preferred range isn't available
+
+	if (fixed@)
+		// caller NEEDED that address
+
+		LDRSTATUS_ADDRESS_NOT_AVAILABLE ok!
+
+		return
+	end
+
+	auto hint
+	if (prefva@ KERNELSPACE ~=)
+		prefva@ KERNELSPACE - PAGESHIFT >> hint!
+	end else
+		LdrKernelSpaceHint@ hint!
+	end
+
+	// find some other place
+
+	hint@ // hint
+	pages@ // runlength
+	LdrKernelSpaceBitmapHeader // header
+	LdrBitmapFindRun ok! realva!
+
+	if (ok@)
+		LDRSTATUS_ADDRESS_NOT_AVAILABLE ok!
+
+		return
+	end
+
+	if (prefva@ KERNELSPACE ==)
+		realva@ LdrKernelSpaceHint!
+	end
+
+	pages@ // runlength
+	realva@ // index
+	LdrKernelSpaceBitmapHeader // header
+	LdrBitmapSetBits
+
+	realva@ PAGESHIFT << KERNELSPACE + realva!
 end

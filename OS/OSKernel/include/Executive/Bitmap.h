@@ -9,3 +9,4 @@ extern ExBitmapClear { header -- }
 extern ExBitmapFindRun { hint runlength header -- offset ok }
 extern ExBitmapSetBits { runlength index header -- }
 extern ExBitmapClearBits { runlength index header -- }
+extern ExBitmapCheckClearBits { runlength index header -- isclear }

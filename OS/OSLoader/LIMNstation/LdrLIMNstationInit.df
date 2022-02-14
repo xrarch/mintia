@@ -62,6 +62,12 @@ end
 fn Main { args -- ret }
 	// a3x entrypoint
 
+	// clear BSS section
+
+	pointerof _bss
+	pointerof _bss_end pointerof _bss -
+	0 memset
+
 	// convert arguments to HAL-preferred format
 
 	args@ ArgsInit
@@ -85,43 +91,167 @@ fn LdrLIMNstationBuildDescriptors { -- }
 	-1 "nextDescriptor" a3xDCallMethod drop drop drop desc!
 
 	if (desc@ ~~)
-		"LdrLIMNstationBuildDescriptors: no first descriptor\n" LdrPanic
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: no first descriptor\n" LdrCrash
 	end
 
-	auto restype
-	auto ressize
-	auto resaddr
+	auto dtype
+	auto dsize
+	auto daddr
 
-	desc@ "getDescriptorInfo" a3xDCallMethod drop restype! ressize! resaddr!
+	desc@ "getDescriptorInfo" a3xDCallMethod drop dtype! dsize! daddr!
 
-	if (restype@ MEMORYRESERVED ~=)
-		"LdrLIMNstationBuildDescriptors: unexpected first descriptor type\n" LdrPanic
+	if (dtype@ MEMORYRESERVED ~=)
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: unexpected first descriptor type\n" LdrCrash
 	end
 
-	if (resaddr@ 0x1000 ~=)
-		"LdrLIMNstationBuildDescriptors: unexpected first descriptor address\n" LdrPanic
+	if (daddr@ 0x1000 ~=)
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: unexpected first descriptor address\n" LdrCrash
 	end
 
-	if (ressize@ resaddr@ + 0x40000 >)
-		"LdrLIMNstationBuildDescriptors: unexpected first descriptor size\n" LdrPanic
+	if (dsize@ 0x3F000 ~=)
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: unexpected first descriptor size\n" LdrCrash
 	end
 
+	// we'll come back to that later after we have a bump allocator
 
+	desc@ "nextDescriptor" a3xDCallMethod drop drop drop desc!
 
-	auto freedesc
-	0 freedesc!
+	if (desc@ ~~)
+		a3xDeviceExit
 
-	auto warned
-	0 warned!
+		"LdrLIMNstationBuildDescriptors: no second descriptor\n" LdrCrash
+	end
+
+	desc@ "getDescriptorInfo" a3xDCallMethod drop dtype! dsize! daddr!
+
+	if (dtype@ MEMORYFREE ~=)
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: unexpected second descriptor type\n" LdrCrash
+	end
+
+	if (daddr@ 0x40000 ~=)
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: unexpected second descriptor address\n" LdrCrash
+	end
+
+	if (dsize@ pointerof _bss_end 0x40000 - <)
+		a3xDeviceExit
+
+		"LdrLIMNstationBuildDescriptors: unexpected second descriptor size\n" LdrCrash
+	end
+
+	if (dsize@ 64 1024 * <)
+		a3xDeviceExit
+
+		"Not enough RAM in slot 0 (at least 256+64KB required)\n" LdrCrash
+	end
+
+	// initialize the heap as a 64KB chunk at the end of the first memory
+	// descriptor.
+
+	0x40000 dsize@ + 64 1024 * - LdrHeapPointer!
+	0x40000 dsize@ + LdrHeapTop!
+
+	auto rtop
+	pointerof _bss_end 0xFFF + 0xFFFFF000 & rtop!
+
+	auto ok
+	auto ldrdesc
+
+	// allocate the descriptor for the reclaimable memory range.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		a3xDeviceExit
+
+		ok@ "LdrLIMNstationBuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
+	1 ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	rtop@ 0x1000 - 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	ldrdesc@ LdrMemoryDescriptorListHead!
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the first free range.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		a3xDeviceExit
+
+		ok@ "LdrLIMNstationBuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	64 1024 * dsize -=
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_FREE ldrdesc@ LdrMemoryDescriptor_Type + !
+	rtop@ 12 >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	dsize@ rtop@ 0x40000 - - 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the first heap range.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		a3xDeviceExit
+
+		ok@ "LdrLIMNstationBuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
+	0x40000 dsize@ + 12 >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	64 1024 * 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	desc@ "nextDescriptor" a3xDCallMethod drop drop drop desc!
 
 	while (desc@)
-		auto dtype
-		auto dsize
-		auto daddr
-
 		desc@ "getDescriptorInfo" a3xDCallMethod drop dtype! dsize! daddr!
 
-		dtype@ dsize@ "%d %d\n" Printf
+		if (dtype@ MEMORYFREE ==)
+			// allocate the descriptor for this free range.
+
+			LdrMemoryDescriptor_SIZEOF // size
+			LdrMemoryAllocate ok! ldrdesc!
+
+			if (ok@)
+				a3xDeviceExit
+
+				ok@ "LdrLIMNstationBuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+			end
+
+			0 ldrdesc@ LdrMemoryDescriptor_Next + !
+			OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
+			daddr@ 12 >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+			dsize@ 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+			ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+			ldrdesc@ LdrMemoryDescriptorListTail!
+		end
 
 		desc@ "nextDescriptor" a3xDCallMethod drop drop drop desc!
 	end

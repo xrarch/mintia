@@ -75,6 +75,8 @@ fn Main { args -- ret }
 	// call generic bootloader entrypoint
 
 	ArgsBuffer LdrMain ret!
+
+	ret@ LdrExit
 end
 
 fn LdrLIMNstationBuildDescriptors { -- }
@@ -108,13 +110,13 @@ fn LdrLIMNstationBuildDescriptors { -- }
 		"LdrLIMNstationBuildDescriptors: unexpected first descriptor type\n" LdrCrash
 	end
 
-	if (daddr@ 0x1000 ~=)
+	if (daddr@ PAGESIZE ~=)
 		a3xDeviceExit
 
 		"LdrLIMNstationBuildDescriptors: unexpected first descriptor address\n" LdrCrash
 	end
 
-	if (dsize@ 0x3F000 ~=)
+	if (dsize@ 0x40000 PAGESIZE - ~=)
 		a3xDeviceExit
 
 		"LdrLIMNstationBuildDescriptors: unexpected first descriptor size\n" LdrCrash
@@ -182,7 +184,10 @@ fn LdrLIMNstationBuildDescriptors { -- }
 	0 ldrdesc@ LdrMemoryDescriptor_Next + !
 	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
 	1 ldrdesc@ LdrMemoryDescriptor_StartPFN + !
-	rtop@ 0x1000 - 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+	rtop@ PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	rtop@ PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
 	ldrdesc@ LdrMemoryDescriptorListHead!
 	ldrdesc@ LdrMemoryDescriptorListTail!
@@ -202,8 +207,11 @@ fn LdrLIMNstationBuildDescriptors { -- }
 
 	0 ldrdesc@ LdrMemoryDescriptor_Next + !
 	OSLOADERMEM_FREE ldrdesc@ LdrMemoryDescriptor_Type + !
-	rtop@ 12 >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
-	dsize@ rtop@ 0x40000 - - 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+	rtop@ PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	dsize@ rtop@ 0x40000 - - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	dsize@ rtop@ 0x40000 - - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
 	ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
 	ldrdesc@ LdrMemoryDescriptorListTail!
@@ -221,8 +229,11 @@ fn LdrLIMNstationBuildDescriptors { -- }
 
 	0 ldrdesc@ LdrMemoryDescriptor_Next + !
 	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
-	0x40000 dsize@ + 12 >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
-	64 1024 * 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+	0x40000 dsize@ + PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	64 1024 * PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	64 1024 * PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
 	ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
 	ldrdesc@ LdrMemoryDescriptorListTail!
@@ -246,8 +257,11 @@ fn LdrLIMNstationBuildDescriptors { -- }
 
 			0 ldrdesc@ LdrMemoryDescriptor_Next + !
 			OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
-			daddr@ 12 >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
-			dsize@ 12 >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+			daddr@ PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+			dsize@ PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+			1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+			dsize@ PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
 			ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
 			ldrdesc@ LdrMemoryDescriptorListTail!
@@ -259,15 +273,26 @@ fn LdrLIMNstationBuildDescriptors { -- }
 	a3xDeviceExit
 end
 
+extern LdrLimn2600MapInit { -- }
+
 fn LdrPlatformMemoryInit { -- }
 	// build memory descriptors
 
 	LdrLIMNstationBuildDescriptors
 
-	// create identity mappings of RAM at 0 and IDENTITYSPACE and enable
-	// paging
+	// create IDENTITYSPACE and enable paging
+
+	LdrLimn2600MapInit
 end
 
+extern LdrLimn2600MapExit { -- }
+
 fn LdrPlatformExit { ret -- }
+	// disable paging
+
+	LdrLimn2600MapExit
+
+	// return to firmware
+
 	ret@ a3xReturn
 end

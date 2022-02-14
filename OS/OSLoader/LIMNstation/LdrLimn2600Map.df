@@ -1,0 +1,169 @@
+//
+// Implements virtual address space management for limn2600.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "../OSLoader.h"
+
+var LdrPlatformKernelPageDirectory 0
+public LdrPlatformKernelPageDirectory
+
+extern LdrLimn2600MapEnablePaging { -- }
+
+fn LdrLimn2600MapInit { -- }
+	// create page directory
+
+	auto ok
+	auto desc
+
+	1 // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrLimn2600MapInit: failed to allocate page directory (%i)\n" LdrCrash
+	end
+
+	auto addr
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << addr!
+
+	addr@ // ptr
+	PAGESIZE // size
+	0 // word
+	memset
+
+	addr@ LdrPlatformKernelPageDirectory!
+
+	// identity map each memory descriptor at 0 and at IDENTITYSPACE
+
+	LdrMemoryDescriptorListHead@ desc!
+
+	while (desc@)
+		if (desc@ LdrMemoryDescriptor_OriginalDescriptor + @)
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // vaddr
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+			desc@ LdrMemoryDescriptor_OriginalExtent + @ // pages
+			0 // noncached
+			1 // reclaimablept
+			LdrPlatformMapRange
+
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << IDENTITYSPACE | // vaddr
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+			desc@ LdrMemoryDescriptor_OriginalExtent + @ // pages
+			0 // noncached
+			0 // reclaimablept
+			LdrPlatformMapRange
+		end
+
+		desc@ LdrMemoryDescriptor_Next + @ desc!
+	end
+
+	// enable paging
+
+	LdrLimn2600MapEnablePaging
+end
+
+const RS_MMU 4
+
+asm "
+
+LdrLimn2600MapExit:
+.global LdrLimn2600MapExit
+	mtcr rs, zero
+	ret
+
+LdrLimn2600MapEnablePaging:
+	subi t0, zero, 1
+	ftlb t0, t0
+
+	mtcr asid, zero
+
+	la   t0, LdrPlatformKernelPageDirectory
+	mov  t0, long [t0]
+	mtcr pgtb, t0
+	mfcr t0, rs
+	ori  t0, t0, RS_MMU
+	mtcr rs, t0
+	ret
+
+"
+
+fn LdrPlatformMapRange { vaddr phyaddr pages noncached reclaimablept -- }
+	while (pages@)
+		vaddr@ // vaddr
+		phyaddr@ // phyaddr
+		noncached@ // noncached
+		reclaimablept@ // reclaimablept
+		LdrPlatformMapPage
+
+		PAGESIZE vaddr +=
+		PAGESIZE phyaddr +=
+		1 pages -=
+	end
+end
+
+const PTE_V  1
+const PTE_W  2
+const PTE_K  4
+const PTE_NC 8
+const PTE_G  16
+
+const PTE_KPAGE (PTE_V PTE_W | PTE_K |)
+
+fn LdrPlatformMapPage { vaddr phyaddr noncached reclaimablept -- }
+	auto pdi
+	vaddr@ 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	auto pt
+	pdi@@ 5 >> PAGESHIFT << pt!
+
+	if (pt@ 0 ==)
+		// allocate a page table
+
+		auto desc
+		auto ok
+
+		if (reclaimablept@)
+			1 // pages
+			OSLOADERMEM_RECLAIMABLE // type
+			LdrMemoryAllocatePhysicalRange ok! desc!
+		end else		
+			1 // pages
+			OSLOADERMEM_USED // type
+			LdrMemoryAllocatePhysicalRange ok! desc!
+		end
+
+		if (ok@)
+			ok@ "LdrPlatformMapPage: failed to allocate page table (%i)\n" LdrCrash
+		end
+
+		desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << pt!
+
+		pt@ // ptr
+		PAGESIZE // size
+		0 // word
+		memset
+
+		pt@ PAGESHIFT >> 5 << PTE_V | pdi@!
+	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + pdi!
+
+	if (pdi@@ PTE_V &)
+		vaddr@ PAGESHIFT >> "LdrPlatformMapPage: vpn %x is already mapped!\n" LdrCrash
+	end
+
+	auto flags
+	PTE_KPAGE flags!
+
+	if (vaddr@ KERNELSPACE &)
+		PTE_G flags |=
+	end
+
+	if (noncached@)
+		PTE_NC flags |=
+	end
+
+	phyaddr@ PAGESHIFT >> 5 << flags@ | pdi@!
+end

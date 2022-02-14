@@ -9,4 +9,4 @@ AisixFSBoot.bin: AisixFSBoot.s
 	$(AS) format=flat AisixFSBoot.s AisixFSBoot.bin
 
 cleanup:
-	rm -f ${OBJ} *.bin
+	rm -f *.bin

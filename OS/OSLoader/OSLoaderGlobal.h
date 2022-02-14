@@ -5,6 +5,9 @@ struct LdrMemoryDescriptor
 
 	4 StartPFN
 	4 Pages
+
+	4 OriginalExtent
+	4 OriginalDescriptor
 endstruct
 
 const OSLOADERMEM_FREE        1 // not used by anything

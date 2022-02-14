@@ -1,4 +1,4 @@
-LOAD_DIR := Loader/LIMNstation
+LOAD_DIR := OSLoader
 KERN_DIR := OSKernel
 HAL_DIR  := HAL
 DBG_DIR  := KDebug

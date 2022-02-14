@@ -7,6 +7,9 @@ extern LdrExit { ret -- }
 extern LdrPlatformExit { ret -- }
 extern LdrPlatformMemoryInit { -- }
 
+extern LdrPlatformMapRange { vaddr phyaddr pages noncached reclaimablept -- }
+extern LdrPlatformMapPage { vaddr phyaddr noncached reclaimablept -- }
+
 extern LdrMemoryInit { -- }
 extern LdrMemoryAllocate { size -- ptr ok }
 

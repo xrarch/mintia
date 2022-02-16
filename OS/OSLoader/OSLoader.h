@@ -27,6 +27,8 @@ externptr LdrHeapTop
 const LDRSTATUS_SUCCESS                0
 const LDRSTATUS_NO_MEMORY             -1
 const LDRSTATUS_ADDRESS_NOT_AVAILABLE -2
+const LDRSTATUS_DEVICE_BUSY           -3
+const LDRSTATUS_BAD_FILESYSTEM        -4
 
 const KERNELSPACE      0x80000000
 const KERNELSTRUCTURES 0xA0000000
@@ -53,3 +55,14 @@ extern LdrBitmapFindRun { hint runlength header -- offset ok }
 extern LdrBitmapSetBits { runlength index header -- }
 extern LdrBitmapClearBits { runlength index header -- }
 extern LdrBitmapCheckClearBits { runlength index header -- isclear }
+
+struct LdrDevice
+	4 MountContext
+endstruct
+
+fnptr LdrMountFunction { device -- ok }
+
+extern LdrAisixFSMount { device -- ok }
+
+extern LdrDeviceMount { device -- ok }
+extern LdrFileOpen { path device -- file ok }

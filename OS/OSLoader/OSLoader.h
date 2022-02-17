@@ -17,6 +17,8 @@ extern LdrMemoryAllocate { size -- ptr ok }
 extern LdrMemoryAllocatePhysicalRange { pages type -- desc ok }
 extern LdrMemoryFreePhysicalRange { desc -- }
 
+extern LdrMemoryMapIORegion { pages phyaddr noncached -- vaddr ok }
+
 extern LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
 
 externptr LdrArgsBuffer
@@ -74,6 +76,7 @@ extern LdrBitmapCheckClearBits { runlength index header -- isclear }
 externptr LdrBootDeviceName
 externptr LdrBootDevice
 externptr LdrCommonBlockBuffer
+externptr LdrInfoBlock
 
 extern LdrIOInit { -- }
 extern LdrPlatformIOInit { bootdevname -- }

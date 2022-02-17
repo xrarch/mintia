@@ -298,6 +298,9 @@ fn LdrPlatformExit { ret -- }
 end
 
 fn LdrPlatformIOInit { bootdevname -- }
+	auto ok
+	auto devaddr
+
 	auto a3xdev
 
 	if (bootdevname@)
@@ -333,6 +336,79 @@ fn LdrPlatformIOInit { bootdevname -- }
 
 	a3xdev@ LdrBootDevice LdrFile_DriverContext + !
 	pointerof LdrLIMNstationReadA3XDevice LdrBootDevice LdrFile_ReadFunction + !
+
+	// map MMIO areas
+
+	"/bus/pboard/citron" a3xDevTreeWalk a3xdev!
+
+	if (a3xdev@)
+		a3xdev@ a3xDeviceSelectNode
+			"address" a3xDGetProperty devaddr!
+
+			1 // pages
+			devaddr@ // phyaddr
+			1 // noncached
+			LdrMemoryMapIORegion ok! devaddr!
+
+			if (ok@ ~~)
+				if (DEBUGCHECKS)
+					devaddr@ "LdrPlatformIOInit: citron @ 0x%08x\n" Printf
+				end
+
+				devaddr@ LdrInfoBlock LdrInfo_CitronBase + !
+			end
+		a3xDeviceExit
+	end
+
+	"/platform/lsic" a3xDevTreeWalk a3xdev!
+
+	if (a3xdev@)
+		a3xdev@ a3xDeviceSelectNode
+			"address" a3xDGetProperty devaddr!
+
+			1 // pages
+			devaddr@ // phyaddr
+			1 // noncached
+			LdrMemoryMapIORegion ok! devaddr!
+
+			if (ok@ ~~)
+				if (DEBUGCHECKS)
+					devaddr@ "LdrPlatformIOInit: lsic @ 0x%08x\n" Printf
+				end
+
+				devaddr@ LdrInfoBlock LdrInfo_LSICBase + !
+			end
+		a3xDeviceExit
+	end
+
+	"/screen" a3xDevTreeWalk a3xdev!
+
+	if (a3xdev@)
+		a3xdev@ a3xDeviceSelectNode
+			auto format
+			"model" a3xDGetProperty format!
+
+			if (format@ "AISA,kinnowfb" strcmp)
+				"vram" a3xDGetProperty devaddr!
+
+				"vramSize" a3xDGetProperty PAGEOFFSETMASK + PAGESHIFT >> // pages
+				devaddr@ // phyaddr
+				1 // noncached
+				LdrMemoryMapIORegion ok! devaddr!
+
+				if (ok@ ~~)
+					if (DEBUGCHECKS)
+						devaddr@ "LdrPlatformIOInit: HAL console @ 0x%08x\n" Printf
+					end
+
+					"width"  a3xDGetProperty LdrInfoBlock LdrInfo_HALConsoleFBWidth + !
+					"height" a3xDGetProperty LdrInfoBlock LdrInfo_HALConsoleFBHeight + !
+					OSBOOTFBFORMAT_AB5G5R5   LdrInfoBlock LdrInfo_HALConsoleFBFormat + !
+					devaddr@                 LdrInfoBlock LdrInfo_HALConsoleFBAddr + !
+				end
+			end
+		a3xDeviceExit
+	end
 end
 
 fn (LdrReadFunction) LdrLIMNstationReadA3XDevice { length buf offset file -- bytesread ok }

@@ -33,7 +33,7 @@ externptr LdrHeapTop
 
 externptr LdrInterruptStack
 
-const OSLOADERINTERRUPTSTACKPAGES 2
+const OSLOADERINTERRUPTSTACKPAGES 1
 
 const LDRSTATUS_SUCCESS                0
 const LDRSTATUS_NO_MEMORY             -1

@@ -66,6 +66,7 @@ extern LdrBitmapCheckClearBits { runlength index header -- isclear }
 
 externptr LdrBootDeviceName
 externptr LdrBootDevice
+externptr LdrCommonBlockBuffer
 
 extern LdrIOInit { -- }
 extern LdrPlatformIOInit { bootdevname -- }
@@ -90,3 +91,4 @@ extern LdrDeviceMount { device -- ok }
 
 extern LdrFileInitialize { file -- }
 extern LdrFileOpen { path device -- file ok }
+extern LdrFileRead { length buf offset file -- bytesread ok }

@@ -1,6 +1,6 @@
 #include "<inc>/OSLoaderGlobal.h"
 
-extern LdrMain { args -- ret }
+extern LdrMain { -- ret }
 extern LdrCrash { ... fmt -- }
 extern LdrExit { ret -- }
 
@@ -18,6 +18,8 @@ extern LdrMemoryFreePhysicalRange { desc -- }
 
 extern LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
 
+externptr LdrArgsBuffer
+
 externptr LdrMemoryDescriptorListHead
 externptr LdrMemoryDescriptorListTail
 
@@ -29,6 +31,7 @@ const LDRSTATUS_NO_MEMORY             -1
 const LDRSTATUS_ADDRESS_NOT_AVAILABLE -2
 const LDRSTATUS_DEVICE_BUSY           -3
 const LDRSTATUS_BAD_FILESYSTEM        -4
+const LDRSTATUS_NOT_SUPPORTED         -5
 
 const KERNELSPACE      0x80000000
 const KERNELSTRUCTURES 0xA0000000
@@ -45,6 +48,9 @@ const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 
 const DEBUGCHECKS 1
 
+extern LdrArgsValue { arg -- out }
+extern LdrArgsCheck { arg -- present }
+
 struct LdrBitmapHeader
 	4 Data
 	4 SizeInBits
@@ -56,13 +62,26 @@ extern LdrBitmapSetBits { runlength index header -- }
 extern LdrBitmapClearBits { runlength index header -- }
 extern LdrBitmapCheckClearBits { runlength index header -- isclear }
 
-struct LdrDevice
+externptr LdrBootDeviceName
+
+extern LdrIOInit { -- }
+extern LdrPlatformIOInit { bootdevname -- }
+
+struct LdrFile
+	4 OpenFunction
+	4 ReadFunction
+	4 DriverContext
 	4 MountContext
 endstruct
 
 fnptr LdrMountFunction { device -- ok }
 
+fnptr LdrOpenFunction { path device -- file ok }
+fnptr LdrReadFunction { length buf offset file -- bytesread ok }
+
 extern LdrAisixFSMount { device -- ok }
 
 extern LdrDeviceMount { device -- ok }
+
+extern LdrFileInitialize { file -- }
 extern LdrFileOpen { path device -- file ok }

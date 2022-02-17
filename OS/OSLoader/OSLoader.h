@@ -9,6 +9,7 @@ extern LdrPlatformMemoryInit { -- }
 
 extern LdrPlatformMapRange { vaddr phyaddr pages noncached reclaimablept -- }
 extern LdrPlatformMapPage { vaddr phyaddr noncached reclaimablept -- }
+extern LdrPlatformVirtualToPhysical { vaddr -- phyaddr ok }
 
 extern LdrMemoryInit { -- }
 extern LdrMemoryAllocate { size -- ptr ok }
@@ -44,6 +45,8 @@ const KERNELSTRUCTURES 0xA0000000
 const POOLSPACE        0xB8000000
 const POOLSPACESIZE    (32 1024 * 1024 *)
 const IDENTITYSPACE    0xC0000000
+
+const PFDBESIZE        16
 
 const PAGESIZE 4096
 const PAGEOFFSETMASK (PAGESIZE 1 -)

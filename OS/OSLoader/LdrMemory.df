@@ -16,9 +16,13 @@ public LdrMemoryDescriptorListHead
 var LdrMemoryDescriptorListTail 0
 public LdrMemoryDescriptorListTail
 
+var LdrMemoryPFDB 0
+public LdrMemoryPFDB
+
 fn LdrMemoryInit { -- }
 	// have the platform-dependent code "magically" populate our memory
-	// descriptor list
+	// descriptor list, create the IDENTITYSPACE, enable paging, whatever else
+	// it needs to do.
 
 	LdrPlatformMemoryInit
 
@@ -34,6 +38,8 @@ fn LdrMemoryInit { -- }
 	LdrKernelSpaceBitmapHeader // header
 	LdrBitmapSetBits
 
+	LdrMemoryPFDBInit
+
 	if (0)
 		auto desc
 		LdrMemoryDescriptorListHead@ desc!
@@ -45,6 +51,135 @@ fn LdrMemoryInit { -- }
 
 			desc@ LdrMemoryDescriptor_Next + @ desc!
 		end
+	end
+end
+
+fn LdrMemoryPFDBInit { -- }
+	// virtually allocate the page frame database in kernel space.
+
+	// we do this so fancily so that large sparse physical address spaces
+	// don't necessitate a massive PFDB array backed by real memory. we also
+	// might be able to avoid allocating PFDB pages for large areas that are
+	// permanently reserved by kernel code/data and firmware.
+
+	// first we need to determine how large of an area in kernel space we need
+	// to reserve for the pfdb. we do this by scanning the descriptor list and
+	// bumping up a maxpfn for each PFDB-able region.
+
+	auto maxpfn
+	0 maxpfn!
+
+	auto desc
+	LdrMemoryDescriptorListHead@ desc!
+
+	auto pfdbable
+
+	while (desc@)
+		if (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_FREE ==)
+			1 pfdbable!
+		end elseif (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_RECLAIMABLE ==)
+			1 pfdbable!
+		end else
+			0 pfdbable!
+		end
+
+		if (pfdbable@)
+			if (desc@ LdrMemoryDescriptor_Pages + @)
+				desc@ LdrMemoryDescriptor_StartPFN + @ desc@ LdrMemoryDescriptor_Pages + @ + maxpfn!
+			end
+		end
+
+		desc@ LdrMemoryDescriptor_Next + @ desc!
+	end
+
+	// reserve the virtual PFDB region.
+
+	auto ok
+	maxpfn@ PFDBESIZE * PAGEOFFSETMASK + PAGESHIFT >> // pages
+	KERNELSTRUCTURES // prefva
+	0 // fixed
+	LdrKernelSpaceAllocate ok! LdrMemoryPFDB!
+
+	if (ok@)
+		ok@ "LdrMemoryPFDBInit: couldn't reserve PFDB region in kernel space (%i)\n" LdrCrash
+	end
+
+	// allocate and initialize PFDB pages for each PFDB-able region.
+
+	LdrMemoryDescriptorListHead@ desc!
+
+	while (desc@)
+		if (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_FREE ==)
+			1 pfdbable!
+		end elseif (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_RECLAIMABLE ==)
+			1 pfdbable!
+		end else
+			0 pfdbable!
+		end
+
+		if (pfdbable@)
+			desc@ LdrMemoryCreatePFDBRegion
+		end
+
+		desc@ LdrMemoryDescriptor_Next + @ desc!
+	end
+end
+
+fn LdrMemoryCreatePFDBRegion { desc -- }
+	// break-out function for LdrMemoryPFDBInit, to be a little nicer.
+	// allocates a physical page for each PFDB page needed to describe the
+	// region.
+
+	if (desc@ LdrMemoryDescriptor_Pages + @ ~~)
+		return
+	end
+
+	// calculate the offset into the PFDB region of the first page frame of
+	// the region.
+
+	auto vaddr
+	desc@ LdrMemoryDescriptor_StartPFN + @ PFDBESIZE * LdrMemoryPFDB@ + vaddr!
+
+	auto endaddr
+	vaddr@ desc@ LdrMemoryDescriptor_Pages + @ PFDBESIZE * + endaddr!
+
+	// round vaddr down
+	PAGENUMBERMASK vaddr &=
+
+	// round endaddr up
+	endaddr@ PAGEOFFSETMASK + PAGENUMBERMASK & endaddr!
+
+	while (vaddr@ endaddr@ <)
+		// look up the vaddr to make sure we aren't double-allocating an area
+
+		auto ok
+		vaddr@ LdrPlatformVirtualToPhysical ok! drop
+
+		if (ok@)
+			// not valid, make it valid.
+
+			auto pfdesc
+			1 // pages
+			OSLOADERMEM_USED // type
+			LdrMemoryAllocatePhysicalRange ok! pfdesc!
+
+			if (ok@)
+				ok@ "LdrMemoryCreatePFDBRegion: failed to allocate PFDB page (%i)\n" LdrCrash
+			end
+
+			pfdesc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // ptr
+			PAGESIZE // size
+			0 // word
+			memset
+
+			vaddr@ // vaddr
+			pfdesc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+			0 // noncached
+			0 // reclaimablept
+			LdrPlatformMapPage
+		end
+
+		PAGESIZE vaddr +=
 	end
 end
 
@@ -71,7 +206,7 @@ fn LdrMemoryAllocate { size -- ptr ok }
 
 	// yoink a chunk off the end of a free descriptor and use that as heap
 
-	"TODO apparently we use more than 32K heap now\n" LdrCrash
+	"TODO apparently we use more than 32K bootloader heap now\n" LdrCrash
 end
 
 fn LdrMemoryAllocatePhysicalRange { pages type -- desc ok }

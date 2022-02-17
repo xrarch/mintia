@@ -40,6 +40,23 @@ fn LdrMemoryInit { -- }
 
 	LdrMemoryPFDBInit
 
+	// create interrupt stack
+
+	auto ok
+	OSLOADERINTERRUPTSTACKPAGES // pages
+	KERNELSTRUCTURES // prefva
+	0 // fixed
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRangeAndMap ok! LdrInterruptStack!
+
+	if (ok@)
+		"LdrMemoryInit: couldn't create interrupt stack (%i)\n" LdrCrash
+	end
+
+	if (DEBUGCHECKS)
+		LdrInterruptStack@ "LdrMemoryInit: interrupt stack @ 0x%08x\n" Printf
+	end
+
 	if (0)
 		auto desc
 		LdrMemoryDescriptorListHead@ desc!
@@ -335,6 +352,13 @@ fn LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
 	realva@ PAGESHIFT << KERNELSPACE + realva!
 end
 
+fn LdrKernelSpaceFree { pages vaddr -- }
+	pages@ // runlength
+	vaddr@ KERNELSPACE - PAGESHIFT >> // index
+	LdrKernelSpaceBitmapHeader // header
+	LdrBitmapClearBits
+end
+
 fn LdrMemoryMapIORegion { pages phyaddr noncached -- vaddr ok }
 	pages@ // pages
 	KERNELSTRUCTURES // prefva
@@ -349,6 +373,37 @@ fn LdrMemoryMapIORegion { pages phyaddr noncached -- vaddr ok }
 	phyaddr@ // phyaddr
 	pages@ // pages
 	noncached@ // noncached
+	0 // reclaimablept
+	LdrPlatformMapRange
+end
+
+fn LdrMemoryAllocatePhysicalRangeAndMap { pages prefva fixed type -- realva ok }
+	pages@ // pages
+	prefva@ // prefva
+	fixed@ // fixed
+	LdrKernelSpaceAllocate ok! realva!
+
+	if (ok@)
+		return
+	end
+
+	auto desc
+	pages@ // pages
+	type@ // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		pages@ // pages
+		realva@ // vaddr
+		LdrKernelSpaceFree
+
+		return
+	end
+
+	realva@ // vaddr
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+	pages@ // pages
+	0 // noncached
 	0 // reclaimablept
 	LdrPlatformMapRange
 end

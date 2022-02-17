@@ -19,6 +19,8 @@ extern LdrMemoryFreePhysicalRange { desc -- }
 
 extern LdrMemoryMapIORegion { pages phyaddr noncached -- vaddr ok }
 
+extern LdrMemoryAllocatePhysicalRangeAndMap { pages prefva fixed type -- realva ok }
+
 extern LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
 
 externptr LdrArgsBuffer
@@ -28,6 +30,10 @@ externptr LdrMemoryDescriptorListTail
 
 externptr LdrHeapPointer
 externptr LdrHeapTop
+
+externptr LdrInterruptStack
+
+const OSLOADERINTERRUPTSTACKPAGES 2
 
 const LDRSTATUS_SUCCESS                0
 const LDRSTATUS_NO_MEMORY             -1

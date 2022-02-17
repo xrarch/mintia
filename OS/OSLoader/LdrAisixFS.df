@@ -28,6 +28,175 @@ struct AFSSuperblock
 	4 VolSize
 endstruct
 
+struct AFSDirEnt
+	4 INum
+	60 name
+endstruct
+
+struct AFSINode
+	4 type
+	4 permissions
+	4 uid
+	4 iparent
+	4 timestamp
+	4 startblock
+	4 reserved2
+	4 bytesize
+endstruct
+
+const CACHEBLOCKS (PAGESIZE AFSBLOCKSIZE /)
+
+struct LdrAisixFSContext
+	4 FATStart
+	4 IStart
+	4 CachePage
+	(CACHEBLOCKS 4 *) CacheBlknos
+	4 ReplacementIndex
+endstruct
+
+fn LdrAisixFSCacheRead { blkno device noflood -- ptr ok }
+	auto i
+	0 i!
+
+	auto ctx
+	device@ LdrFile_MountContext + @ ctx!
+
+	auto blknos
+	ctx@ LdrAisixFSContext_CacheBlknos + blknos!
+
+	while (i@ CACHEBLOCKS <)
+		if (blknos@@ blkno@ ==)
+			// already in the cache
+
+			ctx@ LdrAisixFSContext_CachePage + @
+			i@ AFSBLOCKSHIFT << + ptr!
+			
+			0 ok!
+
+			return
+		end
+
+		4 blknos +=
+		1 i +=
+	end
+
+	// not in the cache, replace a block
+
+	auto rindex
+	ctx@ LdrAisixFSContext_ReplacementIndex + @ rindex!
+
+	if (rindex@ CACHEBLOCKS >=)
+		0 rindex!
+	end
+
+	ctx@ LdrAisixFSContext_CachePage + @
+	rindex@ AFSBLOCKSHIFT << + ptr!
+
+	AFSBLOCKSIZE // length
+	ptr@ // buf
+	blkno@ AFSBLOCKSHIFT << // offset
+	device@ // file
+	LdrFileRead ok! drop
+
+	if (ok@)
+		return
+	end
+
+	blkno@ ctx@ LdrAisixFSContext_CacheBlknos + rindex@ 2 << + !
+
+	if (noflood@ ~~)
+		rindex@ 1 + ctx@ LdrAisixFSContext_ReplacementIndex + !
+	end
+end
+
+fn LdrAisixFSBlockStatus { blkno device -- status ok }
+	auto fatblock
+	auto fatoff
+
+	auto ctx
+	device@ LdrFile_MountContext + @ ctx!
+
+	blkno@ AFSBLOCKSIZE 4 / / fatblock!
+	blkno@ AFSBLOCKSIZE 4 / % fatoff!
+
+	auto ptr
+	fatblock@ ctx@ LdrAisixFSContext_FATStart + @ + // blkno
+	device@ // device
+	0 // noflood
+	LdrAisixFSCacheRead ok! ptr!
+
+	if (ok@)
+		return
+	end
+
+	fatoff@ 2 << ptr@ + @ status!
+end
+
+fn LdrAisixFSFindEntry { name ino device -- dirent ok }
+	auto blkno
+	ino@ AFSINode_startblock + @ blkno!
+
+	auto bytesize
+	ino@ AFSINode_bytesize + @ bytesize!
+
+	auto byteoff
+	0 byteoff!
+
+	while (byteoff@ bytesize@ <)
+		if (byteoff@ AFSBLOCKOFFMASK & ~~)
+			// read next block
+
+			blkno@ // blkno
+			device@ // device
+			0 // noflood
+			LdrAisixFSCacheRead ok! dirent!
+
+			if (ok@)
+				return
+			end
+
+			blkno@ // blkno
+			device@ // device
+			LdrAisixFSBlockStatus ok! blkno!
+
+			if (ok@)
+				return
+			end
+		end
+
+		if (dirent@ AFSDirEnt_name + name@ strcmp)
+			return
+		end
+
+		AFSDirEnt_SIZEOF byteoff +=
+		AFSDirEnt_SIZEOF dirent +=
+	end
+
+	LDRSTATUS_NOT_FOUND ok!
+end
+
+fn LdrAisixFSReadINode { inum device -- inode ok }
+	auto ctx
+	device@ LdrFile_MountContext + @ ctx!
+
+	auto off
+	inum@ AFSINode_SIZEOF * off!
+
+	auto blkno
+	ctx@ LdrAisixFSContext_IStart + @ off@ AFSBLOCKSHIFT >> + blkno!
+
+	blkno@ // blkno
+	device@ // device
+	0 // noflood
+	LdrAisixFSCacheRead ok! inode!
+
+	if (ok@)
+		return
+	end
+
+	off@ AFSBLOCKOFFMASK & inode +=
+end
+
 fn (LdrMountFunction) LdrAisixFSMount { device -- ok }
 	auto buf
 	LdrCommonBlockBuffer AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & buf!
@@ -44,13 +213,278 @@ fn (LdrMountFunction) LdrAisixFSMount { device -- ok }
 		return
 	end
 
+	// check sanity
+
 	if (buf@ AFSSuperblock_Version + @ AFSSUPERBLOCKVERSION ~=)
 		LDRSTATUS_BAD_FILESYSTEM ok!
+
+		return
 	end
 
 	if (buf@ AFSSuperblock_Magic + @ AFSSUPERBLOCKMAGIC ~=)
 		LDRSTATUS_BAD_FILESYSTEM ok!
+
+		return
 	end
 
-	LDRSTATUS_BAD_FILESYSTEM ok!
+	// good enough, assemble the mount structures
+
+	auto ctx
+	LdrAisixFSContext_SIZEOF // size
+	LdrMemoryAllocate ok! ctx!
+
+	if (ok@)
+		return
+	end
+
+	// allocate a page to use as a small cache of 8 or so blocks
+
+	auto desc
+	1 // pages
+	OSLOADERMEM_RECLAIMABLE // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		return
+	end
+
+	buf@ AFSSuperblock_FATStart + @ ctx@ LdrAisixFSContext_FATStart + !
+	buf@ AFSSuperblock_IStart + @ ctx@ LdrAisixFSContext_IStart + !
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << ctx@ LdrAisixFSContext_CachePage + !
+
+	ctx@ LdrAisixFSContext_CacheBlknos + // ptr
+	CACHEBLOCKS 4 * // size
+	-1 // word
+	memset
+
+	0 ctx@ LdrAisixFSContext_ReplacementIndex + !
+
+	ctx@ device@ LdrFile_MountContext + !
+
+	pointerof LdrAisixFSOpen device@ LdrFile_OpenFunction + !
+
+	0 ok!
+end
+
+fn (LdrOpenFunction) LdrAisixFSOpen { path device -- file ok }
+	auto ino
+	1 // inum
+	device@ // device
+	LdrAisixFSReadINode ok! ino!
+
+	if (ok@)
+		return
+	end
+
+	auto pcomp
+	64 alloc pcomp!
+
+	while (1)
+		while (path@ gb '/' ==)
+			1 path +=
+		end
+
+		if (path@ gb ~~)
+			// no more path, done
+
+			break
+		end
+
+		// more path, traverse
+
+		auto len
+		0 len!
+
+		while (1)
+			if (path@ gb '/' ==)
+				break
+			end
+
+			if (path@ gb 0 ==)
+				break
+			end
+
+			if (len@ 59 >=)
+				LDRSTATUS_NAME_TOO_LONG ok!
+
+				return
+			end
+
+			path@ gb pcomp@ len@ + sb
+
+			1 len +=
+			1 path +=
+		end
+
+		0 pcomp@ len@ + sb
+
+		// try to find this name in the directory we're currently looking at
+
+		auto dirent
+		pcomp@ // name
+		ino@ // ino
+		device@ // device
+		LdrAisixFSFindEntry ok! dirent!
+
+		if (ok@)
+			return
+		end
+
+		dirent@ AFSDirEnt_INum + @ // inum
+		device@ // device
+		LdrAisixFSReadINode ok! ino!
+
+		if (ok@)
+			return
+		end
+
+		if (ino@ AFSINode_type + @ 1 ==)
+			if (path@ gb)
+				LDRSTATUS_NOT_A_DIRECTORY ok!
+				return
+			end
+		end
+	end
+
+	if (ino@ AFSINode_type + @ 2 ==)
+		LDRSTATUS_IS_A_DIRECTORY ok!
+		return
+	end
+
+	auto dctx
+	AFSINode_SIZEOF // size
+	LdrMemoryAllocate ok! dctx!
+
+	if (ok@)
+		return
+	end
+
+	dctx@ // dest
+	ino@ // src
+	AFSINode_SIZEOF // size
+	memcpy
+
+	LdrFile_SIZEOF // size
+	LdrMemoryAllocate ok! file!
+
+	if (ok@)
+		return
+	end
+
+	file@ LdrFileInitialize
+
+	dctx@ file@ LdrFile_DriverContext + !
+	device@ file@ LdrFile_Device + !
+
+	pointerof LdrAisixFSRead file@ LdrFile_ReadFunction + !
+end
+
+fn LdrAisixFSFATSeek { offset startblkno device -- blkno ok }
+	auto seeks
+	offset@ AFSBLOCKSHIFT >> seeks!
+
+	startblkno@ blkno!
+
+	0 ok!
+
+	while (seeks@)
+		blkno@ // blkno
+		device@ // device
+		LdrAisixFSBlockStatus ok! blkno!
+
+		if (ok@)
+			return
+		end
+
+		1 seeks -=
+	end
+end
+
+fn (LdrReadFunction) LdrAisixFSRead { length buf offset file -- bytesread ok }
+	0 ok!
+
+	auto device
+	file@ LdrFile_Device + @ device!
+
+	auto ino
+	file@ LdrFile_DriverContext + @ ino!
+
+	if (offset@ ino@ AFSINode_bytesize + @ >=)
+		0 bytesread!
+		return
+	end
+
+	if (offset@ length@ + ino@ AFSINode_bytesize + @ >)
+		ino@ AFSINode_bytesize + @ offset@ - length!
+	end
+
+	auto tot
+	0 tot!
+
+	auto blkno
+	offset@ // offset
+	ino@ AFSINode_startblock + @ // startblkno
+	device@ // device
+	LdrAisixFSFATSeek ok! blkno!
+
+	if (ok@)
+		return
+	end
+
+	auto ptr
+
+	if (offset@ AFSBLOCKOFFMASK &)
+		blkno@ // blkno
+		device@ // device
+		1 // noflood
+		LdrAisixFSCacheRead ok! ptr!
+
+		if (ok@)
+			return
+		end
+
+		blkno@ // blkno
+		device@ // device
+		LdrAisixFSBlockStatus ok! blkno!
+
+		if (ok@)
+			return
+		end
+	end
+
+	while (tot@ length@ <)
+		if (offset@ AFSBLOCKOFFMASK & ~~)
+			blkno@ // blkno
+			device@ // device
+			1 // noflood
+			LdrAisixFSCacheRead ok! ptr!
+
+			if (ok@)
+				return
+			end
+
+			blkno@ // blkno
+			device@ // device
+			LdrAisixFSBlockStatus ok! blkno!
+
+			if (ok@)
+				return
+			end
+		end
+
+		auto m
+		length@ tot@ -
+		AFSBLOCKSIZE offset@ AFSBLOCKOFFMASK & -
+		min m!
+
+		buf@
+		ptr@ offset@ AFSBLOCKOFFMASK & +
+		m@ memcpy
+
+		m@ buf +=
+		m@ offset +=
+		m@ tot +=
+	end
+
+	length@ bytesread!
 end

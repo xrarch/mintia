@@ -7,8 +7,6 @@ Windows NT and OpenVMS.
 It is an attempt at a better-designed sibling of the [AISIX](http://github.com/limnarch/aisix) project, which has been
 relegated to proof-of-concept status.
 
-WIP: MINTIA is not currently in an even minimally usable state.
-
 ## Building
 
 As with all LIMNstation projects, the [sdk](http://github.com/limnarch/sdk) should be in a directory `../sdk` relative to this repository.

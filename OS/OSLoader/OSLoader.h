@@ -32,6 +32,8 @@ const LDRSTATUS_ADDRESS_NOT_AVAILABLE -2
 const LDRSTATUS_DEVICE_BUSY           -3
 const LDRSTATUS_BAD_FILESYSTEM        -4
 const LDRSTATUS_NOT_SUPPORTED         -5
+const LDRSTATUS_UNALIGNED             -6
+const LDRSTATUS_IO_ERROR              -7
 
 const KERNELSPACE      0x80000000
 const KERNELSTRUCTURES 0xA0000000
@@ -63,6 +65,7 @@ extern LdrBitmapClearBits { runlength index header -- }
 extern LdrBitmapCheckClearBits { runlength index header -- isclear }
 
 externptr LdrBootDeviceName
+externptr LdrBootDevice
 
 extern LdrIOInit { -- }
 extern LdrPlatformIOInit { bootdevname -- }
@@ -72,6 +75,8 @@ struct LdrFile
 	4 ReadFunction
 	4 DriverContext
 	4 MountContext
+	4 BlockSize
+	4 Device
 endstruct
 
 fnptr LdrMountFunction { device -- ok }

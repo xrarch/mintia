@@ -34,6 +34,6 @@ Where there's a filename, it will interpret it as a path relative to the `/minti
 | HAL=[filename] | HAL          | Specifies an alternate code module to load in the place of the default platform HAL. |
 | DBG=[filename] | Debugger     | Specifies a kernel mode debugger to load. |
 | -relink        | Force Relink | Forces Loader to relink all modules, even if they were successfully loaded at their preferred address. This can help diagnose strange boot DLL version issues. |
-| BOOT=[dev]     | Boot Device  | Explicitly specifies the name of the boot device. Default is determined by the bootloader. |
-| ROOT=[dev]     | Root Device  | Explicitly specifies the name of the root device. Default is the same as the boot device. |
+| BOOTDEV=[dev]  | Boot Device  | Explicitly specifies the name of the boot device. Default is determined by the bootloader. |
+| ROOTDEV=[dev]  | Root Device  | Explicitly specifies the name of the root device. Default is the same as the boot device. |
 | -s             | Single User Mode | Causes SystemInit.exe to boot into single user mode. |

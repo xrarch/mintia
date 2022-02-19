@@ -52,9 +52,15 @@ struct LdrAisixFSContext
 	4 CachePage
 	(CACHEBLOCKS 4 *) CacheBlknos
 	4 ReplacementIndex
+	4 ReplacementCount
+
+	AFSINode_SIZEOF RootINode
+	4 SystemDirFile
+	4 BootRsrcFile
+	4 BootDrvFile
 endstruct
 
-fn LdrAisixFSCacheRead { blkno device noflood -- ptr ok }
+fn LdrAisixFSCacheRead { blkno device index noflood -- ptr ok }
 	auto i
 	0 i!
 
@@ -83,10 +89,25 @@ fn LdrAisixFSCacheRead { blkno device noflood -- ptr ok }
 	// not in the cache, replace a block
 
 	auto rindex
-	ctx@ LdrAisixFSContext_ReplacementIndex + @ rindex!
 
-	if (rindex@ CACHEBLOCKS >=)
-		0 rindex!
+	if (index@ -1 ~=)
+		if (ctx@ LdrAisixFSContext_CacheBlknos + index@ 2 << + @ -1 ==)
+			index@ rindex!
+		end elseif (ctx@ LdrAisixFSContext_CacheBlknos + index@ 1 + 2 << + @ -1 ==)
+			index@ 1 + rindex!
+		end elseif (ctx@ LdrAisixFSContext_ReplacementCount + @ 1 &)
+			index@ rindex!
+		end else
+			index@ 1 + rindex!
+		end
+
+		1 ctx@ LdrAisixFSContext_ReplacementCount + +=
+	end else
+		ctx@ LdrAisixFSContext_ReplacementIndex + @ rindex!
+
+		if (rindex@ CACHEBLOCKS >=)
+			4 rindex!
+		end
 	end
 
 	ctx@ LdrAisixFSContext_CachePage + @
@@ -105,7 +126,9 @@ fn LdrAisixFSCacheRead { blkno device noflood -- ptr ok }
 	blkno@ ctx@ LdrAisixFSContext_CacheBlknos + rindex@ 2 << + !
 
 	if (noflood@ ~~)
-		rindex@ 1 + ctx@ LdrAisixFSContext_ReplacementIndex + !
+		if (index@ -1 ==)
+			rindex@ 1 + ctx@ LdrAisixFSContext_ReplacementIndex + !
+		end
 	end
 end
 
@@ -122,6 +145,7 @@ fn LdrAisixFSBlockStatus { blkno device -- status ok }
 	auto ptr
 	fatblock@ ctx@ LdrAisixFSContext_FATStart + @ + // blkno
 	device@ // device
+	1 // index
 	0 // noflood
 	LdrAisixFSCacheRead ok! ptr!
 
@@ -148,6 +172,7 @@ fn LdrAisixFSFindEntry { name ino device -- dirent ok }
 
 			blkno@ // blkno
 			device@ // device
+			-1 // index
 			0 // noflood
 			LdrAisixFSCacheRead ok! dirent!
 
@@ -187,6 +212,7 @@ fn LdrAisixFSReadINode { inum device -- inode ok }
 
 	blkno@ // blkno
 	device@ // device
+	0 // index
 	0 // noflood
 	LdrAisixFSCacheRead ok! inode!
 
@@ -248,6 +274,11 @@ fn (LdrMountFunction) LdrAisixFSMount { device -- ok }
 		return
 	end
 
+	ctx@ // ptr
+	LdrAisixFSContext_SIZEOF // size
+	0 // word
+	memset
+
 	buf@ AFSSuperblock_FATStart + @ ctx@ LdrAisixFSContext_FATStart + !
 	buf@ AFSSuperblock_IStart + @ ctx@ LdrAisixFSContext_IStart + !
 	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << ctx@ LdrAisixFSContext_CachePage + !
@@ -257,16 +288,13 @@ fn (LdrMountFunction) LdrAisixFSMount { device -- ok }
 	-1 // word
 	memset
 
-	0 ctx@ LdrAisixFSContext_ReplacementIndex + !
+	4 ctx@ LdrAisixFSContext_ReplacementIndex + !
+	0 ctx@ LdrAisixFSContext_ReplacementCount + !
 
 	ctx@ device@ LdrFile_MountContext + !
 
 	pointerof LdrAisixFSOpen device@ LdrFile_OpenFunction + !
 
-	0 ok!
-end
-
-fn (LdrOpenFunction) LdrAisixFSOpen { path device -- file ok }
 	auto ino
 	1 // inum
 	device@ // device
@@ -274,6 +302,78 @@ fn (LdrOpenFunction) LdrAisixFSOpen { path device -- file ok }
 
 	if (ok@)
 		return
+	end
+
+	ctx@ LdrAisixFSContext_RootINode + // dest
+	ino@ // src
+	AFSINode_SIZEOF // size
+	memcpy
+
+	auto cachedfile
+	"/mintia" // path
+	device@ // device
+	LdrAisixFSOpen ok! cachedfile!
+
+	if (ok@)
+		0 ok!
+
+		return
+	end
+
+	cachedfile@ ctx@ LdrAisixFSContext_SystemDirFile + !
+
+	"/mintia/BootResources" // path
+	device@ // device
+	LdrAisixFSOpen ok! cachedfile!
+
+	if (ok@ ~~)
+		cachedfile@ ctx@ LdrAisixFSContext_BootRsrcFile + !
+	end
+
+	"/mintia/BootDrivers" // path
+	device@ // device
+	LdrAisixFSOpen ok! cachedfile!
+
+	if (ok@ ~~)
+		cachedfile@ ctx@ LdrAisixFSContext_BootDrvFile + !
+	end
+
+	0 ok!
+end
+
+fn (LdrOpenFunction) LdrAisixFSOpen { path device -- file ok }
+	auto ino
+	device@ LdrFile_MountContext + @ LdrAisixFSContext_RootINode + ino!
+
+	if (path@ "/mintia/" 8 strncmp)
+		8 path +=
+
+		if (device@ LdrFile_MountContext + @ LdrAisixFSContext_SystemDirFile + @ ~~)
+			LDRSTATUS_NOT_FOUND ok!
+			return
+		end
+
+		if (path@ "BootResources/" 14 strncmp)
+			if (device@ LdrFile_MountContext + @ LdrAisixFSContext_BootRsrcFile + @ ~~)
+				LDRSTATUS_NOT_FOUND ok!
+				return
+			end
+
+			device@ LdrFile_MountContext + @ LdrAisixFSContext_BootRsrcFile + @ LdrFile_DriverContext + @ ino!
+
+			14 path +=
+		end elseif (path@ "BootDrivers/" 12 strncmp)
+			if (device@ LdrFile_MountContext + @ LdrAisixFSContext_BootDrvFile + @ ~~)
+				LDRSTATUS_NOT_FOUND ok!
+				return
+			end
+
+			device@ LdrFile_MountContext + @ LdrAisixFSContext_BootDrvFile + @ LdrFile_DriverContext + @ ino!
+
+			12 path +=
+		end else
+			device@ LdrFile_MountContext + @ LdrAisixFSContext_SystemDirFile + @ LdrFile_DriverContext + @ ino!
+		end
 	end
 
 	auto pcomp
@@ -346,11 +446,6 @@ fn (LdrOpenFunction) LdrAisixFSOpen { path device -- file ok }
 		end
 	end
 
-	if (ino@ AFSINode_type + @ 2 ==)
-		LDRSTATUS_IS_A_DIRECTORY ok!
-		return
-	end
-
 	auto dctx
 	AFSINode_SIZEOF // size
 	LdrMemoryAllocate ok! dctx!
@@ -372,6 +467,8 @@ fn (LdrOpenFunction) LdrAisixFSOpen { path device -- file ok }
 	end
 
 	file@ LdrFileInitialize
+
+	ino@ AFSINode_bytesize + @ file@ LdrFile_Size + !
 
 	dctx@ file@ LdrFile_DriverContext + !
 	device@ file@ LdrFile_Device + !
@@ -436,6 +533,7 @@ fn (LdrReadFunction) LdrAisixFSRead { length buf offset file -- bytesread ok }
 	if (offset@ AFSBLOCKOFFMASK &)
 		blkno@ // blkno
 		device@ // device
+		-1 // index
 		1 // noflood
 		LdrAisixFSCacheRead ok! ptr!
 
@@ -456,6 +554,7 @@ fn (LdrReadFunction) LdrAisixFSRead { length buf offset file -- bytesread ok }
 		if (offset@ AFSBLOCKOFFMASK & ~~)
 			blkno@ // blkno
 			device@ // device
+			-1 // index
 			1 // noflood
 			LdrAisixFSCacheRead ok! ptr!
 

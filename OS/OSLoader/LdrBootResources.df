@@ -1,0 +1,120 @@
+//
+// Implements boot resource loading.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "OSLoader.h"
+
+fn LdrBootResourcesLoadAll { -- }
+	auto ok
+
+	LdrBootResourcesAppendBuffer // dest
+	"/mintia/BootResources/" // src
+	strcpy
+
+	pointerof LdrBootResourcesCallback // callback
+	"/mintia/BootResources.txt" // path
+	LdrBootDevice // device
+	LdrResourceFileParse ok!
+
+	if (ok@)
+		ok@ "LdrBootResourcesLoadAll: couldn't open /mintia/BootResources.txt (%i)\n" Printf
+		return
+	end
+end
+
+buffer LdrBootResourcesNameBuffer 64
+buffer LdrBootResourcesPathBuffer 256
+
+buffer LdrBootResourcesAppendBuffer 256
+
+fn (LdrResourceFileCallbackFunction) LdrBootResourcesCallback { linebuf -- }
+	auto name
+	LdrBootResourcesNameBuffer name!
+
+	auto path
+	LdrBootResourcesPathBuffer path!
+
+	while (linebuf@ gb linebuf@ gb ' ' ~= &&)
+		linebuf@ gb name@ sb
+
+		1 name +=
+		1 linebuf +=
+	end
+
+	0 name@ sb
+
+	while (linebuf@ gb ' ' ==)
+		1 linebuf +=
+	end
+
+	if (linebuf@ gb ~~)
+		return
+	end
+
+	while (linebuf@ gb linebuf@ gb ' ' ~= &&)
+		linebuf@ gb path@ sb
+
+		1 path +=
+		1 linebuf +=
+	end
+
+	0 path@ sb
+
+	LdrBootResourcesAppendBuffer 22 + // dest
+	LdrBootResourcesPathBuffer // src
+	strcpy
+
+	auto ok
+	auto file
+
+	LdrBootResourcesAppendBuffer // path
+	LdrBootDevice // device
+	LdrFileOpen ok! file!
+
+	if (ok@)
+		ok@
+		LdrBootResourcesAppendBuffer
+		"LdrBootResources: couldn't open '%s' (%i)\n" Printf
+		return
+	end
+
+	auto realva
+
+	file@ LdrFile_Size + @ PAGEOFFSETMASK + PAGESHIFT >> // pages
+	KERNELSTRUCTURES // prefva
+	0 // fixed
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRangeAndMap ok! realva!
+
+	if (ok@)
+		ok@
+		LdrBootResourcesPathBuffer
+		"LdrBootResources: couldn't allocate space for '%s' (%i)\n" Printf
+		return
+	end
+
+	auto bytesread
+
+	file@ LdrFile_Size + @ // length
+	realva@ // buf
+	0 // offset
+	file@ // file
+	LdrFileRead ok! bytesread!
+
+	if (ok@)
+		ok@
+		LdrBootResourcesPathBuffer
+		"LdrBootResources: couldn't load '%s' (%i)\n" Printf
+		return
+	end
+
+	if (bytesread@ file@ LdrFile_Size + @ <)
+		"LdrBootResources: couldn't read '%s'\n" LdrCrash
+	end
+
+	realva@
+	LdrBootResourcesPathBuffer
+	"LdrBootResources: loaded %s @ 0x%08x\n" Printf
+end

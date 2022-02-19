@@ -94,6 +94,7 @@ struct LdrFile
 	4 MountContext
 	4 BlockSize
 	4 Device
+	4 Size
 endstruct
 
 fnptr LdrMountFunction { device -- ok }
@@ -112,3 +113,5 @@ extern LdrFileRead { length buf offset file -- bytesread ok }
 extern LdrResourceFileParse { callback path device -- ok }
 
 fnptr LdrResourceFileCallbackFunction { linebuf -- }
+
+extern LdrBootResourcesLoadAll { -- }

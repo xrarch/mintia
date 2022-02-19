@@ -114,4 +114,6 @@ extern LdrResourceFileParse { callback path device -- ok }
 
 fnptr LdrResourceFileCallbackFunction { linebuf -- }
 
+externptr LdrBootResourcesListHead
+
 extern LdrBootResourcesLoadAll { -- }

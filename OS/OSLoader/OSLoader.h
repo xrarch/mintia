@@ -108,3 +108,7 @@ extern LdrDeviceMount { device -- ok }
 extern LdrFileInitialize { file -- }
 extern LdrFileOpen { path device -- file ok }
 extern LdrFileRead { length buf offset file -- bytesread ok }
+
+extern LdrResourceFileParse { callback path device -- ok }
+
+fnptr LdrResourceFileCallbackFunction { linebuf -- }

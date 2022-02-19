@@ -38,8 +38,8 @@ Logging in as `guest` works with any password, and the default password for `roo
 6. An Object Manager for centralized resource tracking and IPC.
 7. Unix-like permissions model.
 8. Loadable kernel-mode debugger with stack tracing.
-9. NT-like (filestream) cache.
-10. AisixFS read-only support.
+9. File page cache.
+10. AisixFS read support.
 11. Demand paging, memory-mapped files, etc.
 12. Userspace dynamic linking.
 13. Swapping and working set management.
@@ -48,8 +48,8 @@ Logging in as `guest` works with any password, and the default password for `roo
 
 ## Planned features (in rough descending order of priority)
 
-2. Useful command-line interface. (in progress)
-3. MBR partition table support; FAT32 driver
-4. Mac OS 9-lookalike window system.
+1. Useful command-line interface. (in progress)
+2. MBR partition table support; FAT32 driver
+3. Mac OS 9-lookalike window system.
 
 ![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)

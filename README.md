@@ -6,7 +6,7 @@ system, especially its object manager and virtual memory manager, though it is
 definitely simplified (one person can only do so much).
 
 It aims to be something that might have come off of a weird workstation
-computer made by a doomed company in 1989, and that would have been considered
+computer made by a doomed company in 1989, and that might have been considered
 a pretty strong system at the time. It also tries to be portable to other
 32-bit architectures, with vague plans for a period-accurate MIPS or i386 port
 in the future.
@@ -57,3 +57,5 @@ Logging in as `guest` works with any password, and the default password for `roo
 1. Useful command-line interface. (in progress)
 2. MBR partition table support; FAT32 driver
 3. Mac OS 9-lookalike window system.
+4. Self-hosting with a fully native toolchain.
+5. Networking.

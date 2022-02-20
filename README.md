@@ -1,8 +1,8 @@
 # MINTIA
 
 MINTIA is an overengineered operating system written in a custom programming
-language. Its overall design is a love letter to the Windows NT operating
-system, especially its object manager and virtual memory manager, though it is
+language. Its overall design pays homage to the Windows NT operating system,
+especially its object manager and virtual memory manager, though it is
 definitely simplified (one person can only do so much).
 
 It aims to be something that might have come off of a weird workstation

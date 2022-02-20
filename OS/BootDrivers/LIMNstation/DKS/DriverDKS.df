@@ -24,6 +24,10 @@
 const DKS_REALDISK  1
 const DKS_PARTITION 2
 
+const DKSBUFFERPHYS 0xF8020000
+
+var DKSBuffer 0
+
 struct Disk
 	4 Type
 	4 DKSID
@@ -113,8 +117,6 @@ endtable
 
 buffer DKSDPC KeDPC_SIZEOF
 
-externptr HALLIMNstationDKSBuffer
-
 fn private CreateDisk { name blocks type id offset -- dev }
 	auto sizeinbytes
 	blocks@ 512 * sizeinbytes!
@@ -144,6 +146,15 @@ end
 
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
+		0 // cached
+		512 // length
+		DKSBUFFERPHYS // phyaddr
+		MmIORegionMap ok! DKSBuffer!
+
+		if (ok@)
+			"DKSDriverInit: failed to map buffer (%i)\n" KeCrash
+		end
+
 		pointerof DriverDKSDPCFunction // function
 		DKSDPC // dpc
 		KeDPCInitialize
@@ -265,7 +276,7 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 
 	if (ior@ DKSRequest_Type + @ REQREAD ==)
 		ior@ DKSRequest_Buffer + @ // dest
-		HALLIMNstationDKSBuffer@ // src
+		DKSBuffer@ // src
 		ior@ DKSRequest_Length + @ // size
 		memcpy
 	end
@@ -303,7 +314,7 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 
 		return
 	end else
-		HALLIMNstationDKSBuffer@ // dest
+		DKSBuffer@ // dest
 		ior@ DKSRequest_Buffer + @ // src
 		disk@ Disk_BlockSize + @ // size
 		memcpy
@@ -417,7 +428,7 @@ fn DKSBlockWriteCommand { buf blockno disk event ior -- ok }
 
 		// no pending requests, start the disk
 
-		HALLIMNstationDKSBuffer@ // dest
+		DKSBuffer@ // dest
 		buf@ // src
 		disk@ Disk_BlockSize + @ // len
 		memcpy

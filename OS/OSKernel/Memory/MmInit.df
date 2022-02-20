@@ -9,7 +9,7 @@
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALResource.h"
 
-#include "../../Loader/LoaderGlobal.h"
+#include "../../OSLoader/OSLoaderGlobal.h"
 
 #include "<inc>/Kernel.h"
 
@@ -28,11 +28,7 @@
 #include "<ll>/OSDLL/OS.h"
 
 externptr HALLoaderPFDB
-externptr HALLoaderInitialBitmap
-externptr HALLoaderInitialBitmapSize
 externptr HALLoaderTotalRAM
-externptr HALLoaderHeap
-externptr HALLoaderHeapSize
 
 externptr HALResourceKeepHeaders
 externptr HALLoaderInfo
@@ -92,91 +88,69 @@ public MmAsyncEvictEvent
 
 externptr IOSwapFileCreationEvent
 
-// initializes physical memory allocation
+extern MmPlatformInit { -- }
 
 fn MmInitPhase0 { -- }
-	auto ptr
+	HALLoaderPFDB@ MmPageFrameDatabase!
 
-	HALLoaderPFDB@ dup MmPageFrameDatabase! ptr!
+	HALLoaderTotalRAM@ PAGESHIFT >> MmPageTotalTotal!
 
-	auto i
-	0 i!
+	// initialize the page DB by walking the memory descriptor list given to
+	// us by OSLoader and adding the pages of all the regions marked free to
+	// the free list.
 
-	auto pages
-	HALLoaderTotalRAM@ PAGESHIFT >> pages!
+	auto desc
+	HALLoaderInfo@ LdrInfo_MemoryDescriptorListHead + @ desc!
 
-	pages@ MmPageTotalTotal!
+	while (desc@)
+		auto pages
+		desc@ LdrMemoryDescriptor_Pages + @ pages!
 
-	auto bmp
-	HALLoaderInitialBitmap@ bmp!
+		auto pfn
+		desc@ LdrMemoryDescriptor_StartPFN + @ pfn!
 
-	auto sz
-	HALLoaderInitialBitmapSize@ 32 * sz!
+		auto pfdbe
+		pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-	auto word
-
-	auto last
-	0 last!
-
-	// initialize the page DB by linking all of the entries into the
-	// free list, except those marked allocated in the loader bitmap.
-
-	while (i@ pages@ <)
-		if (i@ sz@ <)
-			if (i@ 31 & ~~)
-				bmp@@ word!
-				4 bmp +=
-			end
-
-			if (word@ i@ 31 & bitget ~~)
+		while (pages@)
+			if (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_FREE ==)
 				1 MmPageFreeCount +=
+				1 MmPageTotal +=
 
-				if (last@)
-					ptr@ last@ MmPageFrameEntryFree_Next + !
-				end else
-					ptr@ MmPageFreeListHead!
-				end
-
-				ptr@ last!
-			end
-		end else
-			1 MmPageFreeCount +=
-
-			if (last@)
-				ptr@ last@ MmPageFrameEntryFree_Next + !
-			end else
-				ptr@ MmPageFreeListHead!
+				MmPageFreeListHead@ pfdbe@ MmPageFrameEntryFree_Next + !
+				pfdbe@ MmPageFreeListHead!
 			end
 
-			ptr@ last!
+			pfn@ pfdbe@ MmPageFrameEntry_PFN + !
+
+			MmPageFrameEntry_SIZEOF pfdbe +=
+			1 pages -=
+			1 pfn +=
 		end
 
-		0 ptr@ MmPageFrameEntryFree_Next + !
-		i@ ptr@ MmPageFrameEntry_PFN + !
-
-		MmPageFrameEntry_SIZEOF ptr +=
-		1 i +=
+		desc@ LdrMemoryDescriptor_Next + @ desc!
 	end
 
-	MmPageFreeCount@ MmPageTotal!
-
-	1 MmInited!
+	MmPlatformInit
 
 	"Pre-boot memory statistics:\n" "MmInitPhase0" HALLog
 
 	MmUsageDump
 
+	1 MmInited!
+
 	auto idleproc
 	KeProcessCurrent idleproc!
 
+	auto ok
 	MMQUOTAINFINITE // modmax
 	MMQUOTAINFINITE // wsmax
 	MMQUOTAINFINITE // vmmax
 	MMQUOTAINFINITE // heapmax
 	MmQuotaSystem // quota
-	MmQuotaBlockInitialize word!
+	MmQuotaBlockInitialize ok!
 
-	if (word@)
+	if (ok@)
 		"MmInitPhase0: couldn't initialize system quota block\n" KeCrash
 	end
 
@@ -224,7 +198,7 @@ fn MmInitPhase0 { -- }
 
 	MmPoolInit
 
-	MmReclaimFirmware
+	MmReclaimMemory
 
 	// initialize the commit limit to the free page count plus 100 pages.
 	// will get set to the size of the swapfile later.
@@ -325,12 +299,9 @@ fn MmInitPhase1 { -- }
 	end
 end
 
-fn MmReclaimFirmware { -- }
+fn MmReclaimMemory { -- }
 	// lift the resource list and DLL list into our kernel heap and then
-	// reclaim the firmware.
-
-	// XXX this is LIMNstation specific and will be replaced by a platform-
-	// -independent memory map based mechanism in the future.
+	// reclaim the reclaimable regions in the descriptor list.
 
 	auto ok
 
@@ -342,40 +313,40 @@ fn MmReclaimFirmware { -- }
 	auto new
 
 	auto current
-	HALLoaderInfo@ LoaderInfo_ResourceListHead + @ current!
+	HALLoaderInfo@ LdrInfo_ResourceListHead + @ current!
 
 	0 newlisthead!
 
 	while (current@)
-		BootResource_SIZEOF // bytes
+		LdrBootResource_SIZEOF // bytes
 		'nRSR' // tag
 		MmAllocWithTag ok! new!
 
 		if (ok@)
-			"MmReclaimFirmware: couldn't relocate resources list.\n" KeCrash
+			ok@ "MmReclaimMemory: couldn't relocate resources list (%i)\n" KeCrash
 		end
 
 		if (newlisthead@ ~~)
 			new@ newlisthead!
 		end else
-			new@ prev@ BootResource_Next + !
+			new@ prev@ LdrBootResource_Next + !
 		end
 
 		new@ prev!
 
 		new@ // dest
 		current@ // src
-		BootResource_SIZEOF // size
+		LdrBootResource_SIZEOF // size
 		memcpy
 
-		0 new@ BootResource_Next + !
+		0 new@ LdrBootResource_Next + !
 
-		current@ BootResource_Next + @ current!
+		current@ LdrBootResource_Next + @ current!
 	end
 
 	newlisthead@ HALResourceListHead!
 
-	// rebuild the DLL list on our own heap so we can reclaim the firmware
+	// rebuild the DLL list on our own heap
 
 	auto start
 	auto sz
@@ -383,73 +354,76 @@ fn MmReclaimFirmware { -- }
 
 	0 newlisthead!
 
-	HALLoaderInfo@ LoaderInfo_DLLListHead + @ current!
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ current!
 
 	while (current@)
-		if (HALResourceKeepHeaders@ ~~)
-			// free all the DLL information
-
-			current@ DLL_LOFF + LOFFLoaded_HeaderSize + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
-			current@ DLL_LOFF + LOFFLoaded_Base + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
-
-			while (sz@)
-				start@ MmPageFree
-
-				HALCPUInterruptDisable rs!
-				// the page is now un-wired
-				1 MmPageTotal +=
-				rs@ HALCPUInterruptRestore
-
-				1 start +=
-				1 sz -=
-			end
-		end
-
-		DLL_SIZEOF // bytes
+		LdrModule_SIZEOF // bytes
 		'nDLL' // tag
 		MmAllocWithTag ok! new!
 
 		if (ok@)
-			"MmReclaimFirmware: couldn't relocate DLL list. try unloading the debugger.\n" KeCrash
+			ok@ "MmReclaimMemory: couldn't relocate DLL list (%i)\n" KeCrash
 		end
 
 		if (newlisthead@ ~~)
 			new@ newlisthead!
 		end else
-			new@ prev@ DLL_Next + !
+			new@ prev@ LdrModule_Next + !
 		end
 
 		new@ prev!
 
 		new@ // dest
 		current@ // src
-		DLL_SIZEOF // size
+		LdrModule_SIZEOF // size
 		memcpy
 
-		0 new@ DLL_Next + !
+		0 new@ LdrModule_Next + !
 
-		current@ DLL_Next + @ current!
+		current@ LdrModule_Next + @ current!
 	end
 
-	newlisthead@ HALLoaderInfo@ LoaderInfo_DLLListHead + !
+	newlisthead@ HALLoaderInfo@ LdrInfo_DLLListHead + !
 
-	HALLoaderInfo@ LoaderInfo_TopOfReclaimable + @ PAGESHIFT >> sz!
-	
-	if (sz@)
-		1 start!
-		1 sz -=
+	auto desc
+	HALLoaderInfo@ LdrInfo_MemoryDescriptorListHead + @ desc!
 
-		while (sz@)
-			start@ MmPageFree
+	while (desc@)
+		auto reclaim
+		0 reclaim!
 
-			HALCPUInterruptDisable rs!
-			// the page is now un-wired
-			1 MmPageTotal +=
-			rs@ HALCPUInterruptRestore
-
-			1 start +=
-			1 sz -=
+		if (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_RECLAIMABLE ==)
+			1 reclaim!
+		end elseif (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_DEBUG ==)
+			if (HALResourceKeepHeaders@ ~~)
+				1 reclaim!
+			end
 		end
+
+		if (reclaim@)
+			auto pages
+			desc@ LdrMemoryDescriptor_Pages + @ pages!
+
+			auto pfn
+			desc@ LdrMemoryDescriptor_StartPFN + @ pfn!
+
+			auto pfdbe
+			pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+			while (pages@)
+				1 MmPageFreeCount +=
+				1 MmPageTotal +=
+
+				MmPageFreeListHead@ pfdbe@ MmPageFrameEntryFree_Next + !
+				pfdbe@ MmPageFreeListHead!
+
+				MmPageFrameEntry_SIZEOF pfdbe +=
+				1 pages -=
+				1 pfn +=
+			end
+		end
+
+		desc@ LdrMemoryDescriptor_Next + @ desc!
 	end
 end
 
@@ -464,9 +438,25 @@ fn MmResourceJettison { -- }
 	auto rs
 
 	while (rsrc@)
-		if (rsrc@ BootResource_Jettison + @)
-			rsrc@ BootResource_Size + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
-			rsrc@ BootResource_Data + @ IDENTITYSPACEMASK & PAGESHIFT >> start!
+		if (rsrc@ LdrBootResource_Jettison + @)
+			rsrc@ LdrBootResource_Size + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
+
+			auto pteaddr
+			rsrc@ LdrBootResource_Data + @ // vaddr
+			HALPlatformKernelPageDirectory@ // pagemap
+			MmVirtualtoPTEAddress ok! pteaddr!
+
+			if (ok@)
+				"MmResourceJettison: no PTE\n" KeCrash
+			end
+
+			pteaddr@ MmPTEInterpret ok! drop start!
+
+			if (ok@)
+				"MmResourceJettison: invalid PTE\n" KeCrash
+			end
+
+			PAGESHIFT start >>=
 
 			while (sz@)
 				start@ MmPageFree
@@ -480,11 +470,11 @@ fn MmResourceJettison { -- }
 				1 sz -=
 			end
 
-			0 rsrc@ BootResource_Data + ! // mark jettisoned
+			0 rsrc@ LdrBootResource_Data + ! // mark jettisoned
 		end
 
 		auto nrsrc
-		rsrc@ BootResource_Next + @ nrsrc!
+		rsrc@ LdrBootResource_Next + @ nrsrc!
 
 		rsrc@ MmFree
 

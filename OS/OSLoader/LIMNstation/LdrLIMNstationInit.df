@@ -86,6 +86,8 @@ fn Main { args -- ret }
 	ret@ LdrExit
 end
 
+const LDRINITIALHEAPSIZE 8192
+
 fn LdrLIMNstationBuildDescriptors { -- }
 	// use the bad a3x memory descriptors to make good OSLoader descriptors.
 
@@ -161,18 +163,18 @@ fn LdrLIMNstationBuildDescriptors { -- }
 		"LdrLIMNstationBuildDescriptors: unexpected second descriptor size\n" LdrCrash
 	end
 
-	if (dsize@ 64 1024 * <)
+	if (dsize@ LDRINITIALHEAPSIZE <)
 		a3xDeviceExit
 
-		"Not enough RAM in slot 0 (at least 256+64KB required)\n" LdrCrash
+		"Not enough RAM in slot 0 (at least 256+16KB required)\n" LdrCrash
 	end
 
 	dsize@ LdrMemoryTotalRAM +=
 
-	// initialize the heap as a 64KB chunk at the end of the first memory
+	// initialize the heap as a 16KB chunk at the end of the first memory
 	// descriptor.
 
-	0x40000 dsize@ + 64 1024 * - LdrHeapPointer!
+	0x40000 dsize@ + LDRINITIALHEAPSIZE - LdrHeapPointer!
 	0x40000 dsize@ + LdrHeapTop!
 
 	auto rtop
@@ -214,7 +216,7 @@ fn LdrLIMNstationBuildDescriptors { -- }
 		ok@ "LdrLIMNstationBuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
 	end
 
-	64 1024 * dsize -=
+	LDRINITIALHEAPSIZE dsize -=
 
 	0 ldrdesc@ LdrMemoryDescriptor_Next + !
 	OSLOADERMEM_FREE ldrdesc@ LdrMemoryDescriptor_Type + !
@@ -224,7 +226,7 @@ fn LdrLIMNstationBuildDescriptors { -- }
 	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
 	dsize@ rtop@ 0x40000 - - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
-	ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
 	ldrdesc@ LdrMemoryDescriptorListTail!
 
 	// allocate the descriptor for the first heap range.
@@ -241,12 +243,12 @@ fn LdrLIMNstationBuildDescriptors { -- }
 	0 ldrdesc@ LdrMemoryDescriptor_Next + !
 	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
 	0x40000 dsize@ + PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
-	64 1024 * PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+	LDRINITIALHEAPSIZE PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
 
 	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
-	64 1024 * PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+	LDRINITIALHEAPSIZE PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
-	ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
 	ldrdesc@ LdrMemoryDescriptorListTail!
 
 	desc@ "nextDescriptor" a3xDCallMethod drop drop drop desc!
@@ -276,7 +278,7 @@ fn LdrLIMNstationBuildDescriptors { -- }
 			1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
 			dsize@ PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
 
-			ldrdesc@ LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+			ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
 			ldrdesc@ LdrMemoryDescriptorListTail!
 		end
 
@@ -455,9 +457,16 @@ fn LdrLIMNstationLoadNode { -- }
 
 		4 wp +=
 
+		auto ok
 		0 // flags
 		name@ // name
-		LdrBootDriverLoad drop drop
+		LdrBootDriverLoad ok! drop
+
+		if (ok@)
+			if (ok@ LDRSTATUS_NOT_FOUND ~=)
+				ok@ "LdrBootDrivers: failed to load (%i)\n" Printf
+			end
+		end
 	end
 end
 

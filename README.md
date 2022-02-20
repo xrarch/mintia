@@ -5,11 +5,11 @@ language. Its overall design is a love letter to the Windows NT operating
 system, especially its object manager and virtual memory manager, though it is
 definitely simplified (one person can only do so much).
 
-It aims to be something that might have come straight off of an obscure
-workstation computer from 1989, and that would have been considered a pretty
-strong system at the time. It also tries to be portable to other 32-bit
-architectures, with vague plans for a period-accurate MIPS or i386 port in the
-future.
+It aims to be something that might have come off of a weird workstation
+computer made by a doomed company in 1989, and that would have been considered
+a pretty strong system at the time. It also tries to be portable to other
+32-bit architectures, with vague plans for a period-accurate MIPS or i386 port
+in the future.
 
 ![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)
 

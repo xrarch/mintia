@@ -7,132 +7,165 @@
 #include "<inc>/HALConsole.h"
 #include "<inc>/HALLog.h"
 
-#include "../Loader/LoaderGlobal.h"
+#include "../OSLoader/OSLoaderGlobal.h"
+#include "../OSLoader/LOFF.h"
 
 externptr HALLoaderInfo
 
-fn DebugGetSymbol { dll name -- symbol }
-	auto ptr
-	dll@ DLL_LOFF + LOFFLoaded_SymbolTable + @ ptr!
+fn DebugGetSymbolByAddress { address dll -- symbase symname symbol ok }
+	auto head
+	dll@ LdrModule_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+
+	-1 ok!
+
+	0 symbol!
+
+	if (address@ sectionheader@ LOFFSectionHeader_LinkedAddress + @ <)
+		return
+	end
+
+	if (address@ sectionheader@ LOFFSectionHeader_LinkedAddress + @
+		sectionheader@ LOFFSectionHeader_SectionSize + @ + >=)
+		return
+	end
+
+	auto symptr
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + symptr!
+
+	auto strtab
+	head@ LOFFHeader_StringTableOffset + @ head@ + strtab!
 
 	auto i
 	0 i!
 
 	auto count
-	dll@ DLL_LOFF + LOFFLoaded_SymbolCount + @ count!
-
-	auto stab
-	dll@ DLL_LOFF + LOFFLoaded_StringTable + @ stab!
-
-	0 symbol!
+	head@ LOFFHeader_SymbolCount + @ count!
 
 	while (i@ count@ <)
-		if (ptr@ LOFFSymbol_Type + @ 1 ==)
-			auto sname
-			ptr@ LOFFSymbol_NameOffset + @ stab@ + sname!
+		if (symptr@ LOFFSymbol_Type + @ LOFFGLOBAL == symptr@ LOFFSymbol_Section + @ LOFFTEXT == &&)
+			auto sbase
+			symptr@ LOFFSymbol_Value + @ sectionheader@ LOFFSectionHeader_LinkedAddress + @ + sbase!
 
-			if (sname@ name@ strcmp)
-				ptr@ symbol!
+			if (address@ sbase@ >=)
+				if (symptr@ LOFFSymbol_NameOffset + @ 0xFFFFFFFF ==)
+					0 symname!
+				end else
+					symptr@ LOFFSymbol_NameOffset + @ strtab@ + symname!
+				end
+
+				symptr@ symbol!
+				sbase@ symbase!
+			end elseif (address@ sbase@ <)
+				if (symbol@)
+					0 ok!
+				end
+
 				return
 			end
 		end
 
-		LOFFSymbol_SIZEOF ptr +=
+		LOFFSymbol_SIZEOF symptr +=
+		1 i +=
+	end
+
+	if (symbol@)
+		0 ok!
+	end
+end
+
+fn DebugGetSymbol { name dll -- symbol ok }
+	auto head
+	dll@ LdrModule_HeadVAddr + @ head!
+
+	head@ LOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ LOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ LOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	-1 ok!
+
+	while (i@ count@ <)
+		if (symbol@ LOFFSymbol_Type + @ LOFFGLOBAL ==)
+			auto sname
+			symbol@ LOFFSymbol_NameOffset + @ strtab@ + sname!
+
+			if (sname@ name@ strcmp)
+				0 ok!
+
+				return
+			end
+		end
+
+		LOFFSymbol_SIZEOF symbol +=
 		1 i +=
 	end
 end
 
-fn DebugGetSymbolAddress { dll name -- address }
-	auto sym
-	dll@ name@ DebugGetSymbol sym!
+fn DebugGetSymbolAddress { name dll -- address ok }
+	auto symbol
+	name@ dll@ DebugGetSymbol ok! symbol!
 
-	0 address!
-
-	if (sym@)
-		auto section
-		dll@ DLL_LOFF +
-		LOFFLoaded_TextLinkedAddr +
-		sym@ LOFFSymbol_Section + @ 1 -
-		LOFFLoadedSection_SIZEOF * + section!
-
-		sym@ LOFFSymbol_Value + @ section@ LOFFLoadedSection_RealAddr + @ + address!
+	if (ok@)
+		return
 	end
+
+	auto head
+	dll@ LdrModule_HeadVAddr + @ head!
+
+	auto sectionheader
+
+	if (symbol@ LOFFSymbol_Section + @ LOFFTEXT ==)
+		head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
+	end elseif (symbol@ LOFFSymbol_Section + @ LOFFDATA ==)
+		head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
+	end elseif (symbol@ LOFFSymbol_Section + @ LOFFBSS ==)
+		head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
+	end else
+		-1 ok!
+
+		return
+	end
+
+	symbol@ LOFFSymbol_Value + @ address!
+
+	sectionheader@ LOFFSectionHeader_LinkedAddress + @ address +=
 end
 
-fn DebugGetSymDLL { pc -- dll symbase symname }
-	HALLoaderInfo@ LoaderInfo_DLLListHead + @ dll!
+fn DebugGetSymDLL { address -- dll symbase symname symbol ok }
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ dll!
 
-	0 symbase!
-	0 symname!
+	-1 ok!
 
 	while (dll@)
-		auto loff
-		dll@ DLL_LOFF + loff!
+		address@ // address
+		dll@ // dll
+		DebugGetSymbolByAddress ok! symbol! symname! symbase!
 
-		if (pc@ loff@ LOFFLoaded_TextRealAddr + @ <)
-			dll@ DLL_Next + @ dll!
-			continue
-		end
-
-		if (pc@ loff@ LOFFLoaded_TextRealAddr + @ loff@ LOFFLoaded_TextSize + @ + >=)
-			dll@ DLL_Next + @ dll!
-			continue
-		end
-
-		auto ptr
-		loff@ LOFFLoaded_SymbolTable + @ ptr!
-
-		auto i
-		0 i!
-
-		auto count
-		loff@ LOFFLoaded_SymbolCount + @ count!
-
-		auto stab
-		loff@ LOFFLoaded_StringTable + @ stab!
-
-		while (i@ count@ <)
-			if (ptr@ LOFFSymbol_Section + @ 1 == ptr@ LOFFSymbol_Type + @ 1 == &&)
-				auto sptr
-				ptr@ LOFFSymbol_Value + @ loff@ LOFFLoaded_TextRealAddr + @ + sptr!
-
-				if (pc@ sptr@ >=)
-					sptr@ symbase!
-					if (ptr@ LOFFSymbol_NameOffset + @ 0xFFFFFFFF ~=)
-						ptr@ LOFFSymbol_NameOffset + @ stab@ + symname!
-
-						// symname@ sptr@ "%x %s " Printf
-					end else
-						0 symname!
-					end
-				end elseif (pc@ sptr@ <)
-					return
-				end
-			end
-
-			LOFFSymbol_SIZEOF ptr +=
-			1 i +=
-		end
-
-		if (symbase@)
+		if (ok@ ~~)
 			return
 		end
 
-		dll@ DLL_Next + @ dll!
+		dll@ LdrModule_Next + @ dll!
 	end
-
-	0 symbase!
-	0 symname!
 end
 
 fn DebugGetDLL { name -- dll }
-	HALLoaderInfo@ LoaderInfo_DLLListHead + @ dll!
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ dll!
 
 	while (dll@)
-		if (dll@ DLL_Name + name@ strcmp)
+		if (dll@ LdrModule_Name + name@ strcmp)
 			return
 		end
 
-		dll@ DLL_Next + @ dll!
+		dll@ LdrModule_Next + @ dll!
 	end
 end

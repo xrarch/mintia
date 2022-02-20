@@ -1,11 +1,17 @@
 # MINTIA
 
 MINTIA is an overengineered operating system written in a custom programming
-language. It implements a neat virtual memory system, inspired by that of
-Windows NT and OpenVMS.
+language. Its overall design is a love letter to the Windows NT operating
+system, especially its object manager and virtual memory manager, though it is
+definitely simplified (one person can only do so much).
 
-It is an attempt at a better-designed sibling of the [AISIX](http://github.com/limnarch/aisix) project, which has been
-relegated to proof-of-concept status.
+It aims to be something that might have come straight off of an obscure
+workstation computer from 1989, and that would have been considered a pretty
+strong system at the time. It also tries to be portable to other 32-bit
+architectures, with vague plans for a period-accurate MIPS or i386 port in the
+future.
+
+![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)
 
 ## Building
 
@@ -51,5 +57,3 @@ Logging in as `guest` works with any password, and the default password for `roo
 1. Useful command-line interface. (in progress)
 2. MBR partition table support; FAT32 driver
 3. Mac OS 9-lookalike window system.
-
-![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)

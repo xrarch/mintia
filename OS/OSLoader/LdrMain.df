@@ -12,6 +12,12 @@ public LdrInfoBlock
 var LdrInterruptStack 0
 public LdrInterruptStack
 
+var LdrInterruptStackTop 0
+public LdrInterruptStackTop
+
+var LdrSystemEntryPoint 0
+public LdrSystemEntryPoint
+
 fn LdrMain { -- ret }
 	0 ret!
 
@@ -30,7 +36,81 @@ fn LdrMain { -- ret }
 
 	LdrBootResourcesLoadAll
 
-	"hi\n" Printf
+	auto dll
+
+	0 // flags
+	"OSKernel.exe" // name
+	LdrModuleLoad ret! dll!
+
+	if (ret@)
+		ret@ "Failed to load OSKernel.exe (%i)\n" LdrCrash
+	end
+
+	if (LdrSystemEntryPoint@ ~~)
+		"No system entrypoint identified\n" LdrCrash
+	end
+
+	auto kemain
+	"KeMain" // name
+	dll@ // dll
+	LdrGetSymbolAddress ret! kemain!
+
+	if (ret@)
+		"Symbol 'KeMain' not found in kernel image\n" LdrCrash
+	end
+
+	auto dbg
+	"DBG" LdrArgsValue dbg!
+
+	if (dbg@)
+		0 // flags
+		dbg@ // name
+		LdrModuleLoad ret! dll!
+
+		if (ret@)
+			ret@
+			dbg@
+			"Couldn't load debugger image '%s' (%i)\n" LdrCrash
+		end
+
+		"DebugInit" // name
+		dll@ // dll
+		LdrGetSymbolAddress ret! dbg!
+
+		if (ret@)
+			"Symbol 'DebugInit' not found in debugger image\n" LdrCrash
+		end
+	end
+
+	LdrBootDriversLoadAll
+
+	auto ldrinfo
+	LdrInfoBlock ldrinfo!
+
+	OSLOADERMAJOR ldrinfo@ LdrInfo_Major + !
+	OSLOADERMINOR ldrinfo@ LdrInfo_Minor + !
+
+	LdrMemoryDescriptorListHead@ ldrinfo@ LdrInfo_MemoryDescriptorListHead + !
+	LdrDLLListHead@              ldrinfo@ LdrInfo_DLLListHead + !
+	LdrBootResourcesListHead@    ldrinfo@ LdrInfo_ResourceListHead + !
+	LdrArgsBuffer                ldrinfo@ LdrInfo_ArgsBuffer + !
+
+	kemain@                      ldrinfo@ LdrInfo_KeMain + !
+
+	LdrInterruptStack@           ldrinfo@ LdrInfo_InterruptStack + !
+	OSLOADERINTERRUPTSTACKPAGES  ldrinfo@ LdrInfo_InterruptStackPages + !
+
+	dbg@                         ldrinfo@ LdrInfo_DebugInit + !
+
+	LdrMemoryPFDB@               ldrinfo@ LdrInfo_PageFrameDB + !
+
+	LdrPlatformKernelPageDirectory@ ldrinfo@ LdrInfo_PageDirectory + !
+
+	LdrBootDeviceName            ldrinfo@ LdrInfo_BootDeviceName + !
+
+	LdrMemoryTotalRAM@           ldrinfo@ LdrInfo_TotalRAM + !
+
+	LdrPlatformStartSystem
 end
 
 fn LdrCrash { ... fmt -- }

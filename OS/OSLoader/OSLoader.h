@@ -31,7 +31,16 @@ externptr LdrMemoryDescriptorListTail
 externptr LdrHeapPointer
 externptr LdrHeapTop
 
+externptr LdrMemoryTotalRAM
+
+externptr LdrMemoryPFDB
+
+externptr LdrPlatformKernelPageDirectory
+
 externptr LdrInterruptStack
+externptr LdrInterruptStackTop
+
+externptr LdrSystemEntryPoint
 
 const OSLOADERINTERRUPTSTACKPAGES 1
 
@@ -47,6 +56,8 @@ const LDRSTATUS_NOT_FOUND             -8
 const LDRSTATUS_NAME_TOO_LONG         -9
 const LDRSTATUS_NOT_A_DIRECTORY       -10
 const LDRSTATUS_IS_A_DIRECTORY        -11
+const LDRSTATUS_BAD_EXECUTABLE        -12
+const LDRSTATUS_EXEC_NOT_FOR_ARCH     -13
 
 const KERNELSPACE      0x80000000
 const KERNELSTRUCTURES 0xA0000000
@@ -79,6 +90,8 @@ extern LdrBitmapSetBits { runlength index header -- }
 extern LdrBitmapClearBits { runlength index header -- }
 extern LdrBitmapCheckClearBits { runlength index header -- isclear }
 
+externptr LdrPlatformHALName
+
 externptr LdrBootDeviceName
 externptr LdrBootDevice
 externptr LdrCommonBlockBuffer
@@ -110,6 +123,8 @@ extern LdrFileInitialize { file -- }
 extern LdrFileOpen { path device -- file ok }
 extern LdrFileRead { length buf offset file -- bytesread ok }
 
+extern LdrLastComponent { path -- lcomp }
+
 extern LdrResourceFileParse { callback path device -- ok }
 
 fnptr LdrResourceFileCallbackFunction { linebuf -- }
@@ -117,3 +132,17 @@ fnptr LdrResourceFileCallbackFunction { linebuf -- }
 externptr LdrBootResourcesListHead
 
 extern LdrBootResourcesLoadAll { -- }
+
+externptr LdrDLLListHead
+
+extern LdrGetSymbolAddress { name dll -- address ok }
+extern LdrModuleLoad { flags name -- dll ok }
+
+extern LdrDoFixup { ptr value type -- ok }
+
+extern LdrBootDriversLoadAll { -- }
+extern LdrBootDriverLoad { flags name -- dll ok }
+
+extern LdrPlatformBootDriversLoadAll { -- }
+
+extern LdrPlatformStartSystem { -- }

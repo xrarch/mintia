@@ -10,6 +10,9 @@
 buffer LdrArgsBuffer 256
 public LdrArgsBuffer
 
+var LdrPlatformHALName 0
+public LdrPlatformHALName
+
 fn ArgsInit { argp -- }
 	auto p
 	LdrArgsBuffer p!
@@ -72,6 +75,10 @@ fn Main { args -- ret }
 
 	args@ ArgsInit
 
+	// get HAL name
+
+	"HALLIMNstation.dll" LdrPlatformHALName!
+
 	// call generic bootloader entrypoint
 
 	LdrMain ret!
@@ -86,6 +93,8 @@ fn LdrLIMNstationBuildDescriptors { -- }
 	// section and add that to our list as reclaimable memory. similarly we
 	// have to contract the second descriptor (which should be free memory) by
 	// the same amount. everything after that we just copy over 1:1.
+
+	0x40000 LdrMemoryTotalRAM!
 
 	"/memory" a3xDeviceSelect
 
@@ -157,6 +166,8 @@ fn LdrLIMNstationBuildDescriptors { -- }
 
 		"Not enough RAM in slot 0 (at least 256+64KB required)\n" LdrCrash
 	end
+
+	dsize@ LdrMemoryTotalRAM +=
 
 	// initialize the heap as a 64KB chunk at the end of the first memory
 	// descriptor.
@@ -244,6 +255,8 @@ fn LdrLIMNstationBuildDescriptors { -- }
 		desc@ "getDescriptorInfo" a3xDCallMethod drop dtype! dsize! daddr!
 
 		if (dtype@ MEMORYFREE ==)
+			dsize@ LdrMemoryTotalRAM +=
+
 			// allocate the descriptor for this free range.
 
 			LdrMemoryDescriptor_SIZEOF // size
@@ -409,6 +422,65 @@ fn LdrPlatformIOInit { bootdevname -- }
 			end
 		a3xDeviceExit
 	end
+end
+
+fn LdrLIMNstationLoadNode { -- }
+	auto name
+	128 alloc name!
+
+	auto rv
+	16 alloc rv!
+
+	auto model
+	"model" a3xDGetProperty model!
+
+	auto wp
+
+	if (model@)
+		name@ model@ strcpy
+
+		model@ strlen wp!
+
+		name@ wp@ + ":" strcpy
+
+		1 wp +=
+
+		"revision" a3xDGetProperty rv@ itoa
+
+		name@ wp@ + rv@ strcpy
+
+		rv@ strlen wp +=
+
+		name@ wp@ + ".sys" strcpy
+
+		4 wp +=
+
+		0 // flags
+		name@ // name
+		LdrBootDriverLoad drop drop
+	end
+end
+
+fn LdrLIMNstationIterateNode { iter -- }
+	while (iter@)
+		iter@ a3xDevIterate iter!
+			LdrLIMNstationLoadNode
+
+			a3xDevIteratorInit LdrLIMNstationIterateNode
+		a3xDeviceExit
+	end
+end
+
+fn LdrPlatformBootDriversLoadAll { -- }
+	"/platform" a3xDeviceSelect
+		a3xDevIteratorInit LdrLIMNstationIterateNode
+	a3xDeviceExit
+end
+
+extern LdrLimn2600StartSystem { -- }
+
+fn LdrPlatformStartSystem { -- }
+	LdrLimn2600StartSystem
 end
 
 fn (LdrReadFunction) LdrLIMNstationReadA3XDevice { length buf offset file -- bytesread ok }

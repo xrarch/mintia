@@ -108,7 +108,6 @@ externptr MmInited
 externptr MmEventPageAvailable
 externptr MmEventLowMemory
 externptr MmModifiedPageEvent
-externptr MmAsyncEvictEvent
 externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType

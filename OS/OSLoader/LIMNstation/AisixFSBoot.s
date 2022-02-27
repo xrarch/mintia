@@ -6,7 +6,6 @@
 ;=========== BOOT PROGRAM ============
 
 .section text
-.org 0x40000 ;boot program is loaded at 0x40000 by a3x
 .ds "ANTE"   ;magic number so a3x knows this is a valid bootloader
 
              ;entry pointer so a3x knows where to jump
@@ -108,11 +107,10 @@ AisixFSBoot:
 	li   t0, _a3xCIC_DeviceSelectNode
 	fwc  0
 
-	li   a0, 512
-	li   t0, _a3xCIC_Malloc
-	fwc  0
-	mov  long [s0 + Vars_BlockBuffer], a0
-	mov  s1, a0
+	la   s1, DiskBlockBuffer
+	mov  long [s0 + Vars_BlockBuffer], s1
+
+	;load the superblock
 
 	li   a0, 0
 	mov  a1, s1
@@ -132,7 +130,7 @@ AisixFSBoot:
 	subi s3, zero, 1
 	subi s6, zero, 1
 
-	la   s4, 0x40200
+	la   s4, 0x40400
 
 .loadloop:
 	mov  a0, s2
@@ -161,7 +159,7 @@ AisixFSBoot:
 	mov  a1, long [s0 + Vars_DeviceNode]
 	mov  a2, long [s0 + Vars_API]
 
-	la   t0, 0x40200
+	la   t0, 0x40400
 
 	la   t1, 0x45544E41
 	mov  t2, long [t0]
@@ -239,3 +237,8 @@ notfoundmessage:
 	.ds ": not found\n\0"
 
 .align 512            ;fill rest of disk block with zeroes
+
+.section bss
+
+DiskBlockBuffer:
+	.bytes 512 0

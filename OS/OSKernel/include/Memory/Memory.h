@@ -70,14 +70,12 @@ extern MmResourceJettison { -- }
 
 extern MmPoolInit { -- }
 
-extern MmIsMemoryLow { threshold freethresh -- ok }
-
 extern MmPageAlloc { priority -- pfdbe pfn ok }
 extern MmPageFree { pfn -- }
 extern MmHeapCheck { -- }
 extern MmHeapDumpBuckets { -- }
 extern MmHeapDumpBlockInfo { block -- }
-extern MmAllocWithTag { bytes tag -- ptr ok }
+extern MmAllocWithTag { bytes tag flags -- ptr ok }
 extern MmFree { ptr -- }
 extern MmChargeBytesGet { bytes -- charge }
 extern MmBlockChargeGet { block -- charge }
@@ -119,9 +117,11 @@ externptr MmPeakWorkingSetSize
 externptr MmCommitLimit
 externptr MmCommitUsage
 
-const MMMUSTSUCCEEDL2PAGES 10
-const MMMUSTSUCCEEDPAGES   18
-const MMDIREPAGES          15
+const MMNORMALTHRESH        20
+const MMPOOLTHRESH          15
+const MMMUSTSUCCEEDL2THRESH 5
+const MMMUSTSUCCEEDTHRESH   0
+const MMDIREPAGES           15
 
 const MMWORKINGSETDEFAULTMINIMUM 16
 const MMWORKINGSETDEFAULTMAXIMUM 64
@@ -136,3 +136,4 @@ const CANBLOCK      0x10000
 const CACHEALLOC    0x20000
 const MUSTSUCCEEDL2 0x40000
 const TRYFOREVER    0x80000
+const POOLALLOC     0x100000

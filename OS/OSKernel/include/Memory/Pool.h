@@ -20,7 +20,7 @@ extern MmPoolSpaceRelease { pages offset -- }
 externptr MmSlabBytesUsedExternally
 externptr MmSlabBytesUsedInternally
 
-extern MmSlabAlloc { bytes tag -- ptr ok }
+extern MmSlabAlloc { bytes tag flags -- ptr ok }
 extern MmSlabFree  { ptr -- }
 
 extern MmPoolPageRemove { pfdbe -- }

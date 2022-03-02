@@ -117,9 +117,9 @@ externptr MmPeakWorkingSetSize
 externptr MmCommitLimit
 externptr MmCommitUsage
 
-const MMNORMALTHRESH        20
-const MMPOOLTHRESH          15
-const MMMUSTSUCCEEDL2THRESH 5
+const MMNORMALTHRESH        15
+const MMPOOLTHRESH          8
+const MMMUSTSUCCEEDL2THRESH 4
 const MMMUSTSUCCEEDTHRESH   0
 const MMDIREPAGES           15
 

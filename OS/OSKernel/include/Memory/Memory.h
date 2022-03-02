@@ -117,11 +117,20 @@ externptr MmPeakWorkingSetSize
 externptr MmCommitLimit
 externptr MmCommitUsage
 
-const MMNORMALTHRESH        15
-const MMPOOLTHRESH          8
-const MMMUSTSUCCEEDL2THRESH 4
-const MMMUSTSUCCEEDTHRESH   0
+// free page count thresholds at which various types/priorities of page
+// allocation will block or fail.
+
+const MMNORMALTHRESH        15 // normal allocations
+const MMPOOLTHRESH          8  // pool/heap allocations
+const MMMUSTSUCCEEDL2THRESH 4  // mustsucceed level 2
+const MMMUSTSUCCEEDTHRESH   0  // mustsucceed
+
+// free page count threshold that counts as "dire", meaning the working set
+// trimmer will ignore working set lower limits and go woo wild.
+
 const MMDIREPAGES           (MMNORMALTHRESH 1 -)
+
+// default working set heuristics
 
 const MMWORKINGSETDEFAULTMINIMUM 16
 const MMWORKINGSETDEFAULTMAXIMUM 64

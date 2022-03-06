@@ -71,6 +71,9 @@ fn MmSlabAlloc { bytes tag flags -- ptr ok }
 
 	auto pfdbe
 
+	auto pfn
+	0 pfn!
+
 	auto listhead
 	[bucketindex@]MmSlabListHeads listhead!
 
@@ -79,74 +82,111 @@ fn MmSlabAlloc { bytes tag flags -- ptr ok }
 
 	listhead@@ ptr!
 
-	if (ptr@)
-		if (ptr@ MmPoolSlab_Magic + gi MMSLABFREEMAGIC ~=)
-			ptr@ MmPoolSlab_TagOrNextFree + @
-			ptr@ MmPoolSlab_Magic + gi
-			ptr@ "MmSlabAlloc: slab 0x%08x had bad magic (0x%04x) %x\n" KeCrash
-		end
-
-		if (DEBUGCHECKS)
-			if (ptr@ MmPoolSlab_Reserved + gb)
-				ptr@ MmPoolSlab_Reserved + gb
-				ptr@ "MmSlabAlloc: slab 0x%08x had a non-zero reserved byte (0x%08x)\n" KeCrash
+	while (1)
+		if (ptr@)
+			if (ptr@ MmPoolSlab_Magic + gi MMSLABFREEMAGIC ~=)
+				ptr@ MmPoolSlab_TagOrNextFree + @
+				ptr@ MmPoolSlab_Magic + gi
+				ptr@ "MmSlabAlloc: slab 0x%08x had bad magic (0x%04x) %x\n" KeCrash
 			end
 
-			if (ptr@ MmPoolSlab_BucketIndex + gb bucketindex@ ~=)
-				ptr@ MmPoolSlab_BucketIndex + gb
-				bucketindex@
-				ptr@ "MmSlabAlloc: slab 0x%08x had a weird bucketindex, wanted %d, found %d\n" KeCrash
+			if (DEBUGCHECKS)
+				if (ptr@ MmPoolSlab_Reserved + gb)
+					ptr@ MmPoolSlab_Reserved + gb
+					ptr@ "MmSlabAlloc: slab 0x%08x had a non-zero reserved byte (0x%08x)\n" KeCrash
+				end
+
+				if (ptr@ MmPoolSlab_BucketIndex + gb bucketindex@ ~=)
+					ptr@ MmPoolSlab_BucketIndex + gb
+					bucketindex@
+					ptr@ "MmSlabAlloc: slab 0x%08x had a weird bucketindex, wanted %d, found %d\n" KeCrash
+				end
 			end
+
+			ptr@ IDENTITYSPACE ~ & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+			pfdbe@ MmEvictablePageReference drop
+
+			auto n
+			ptr@ MmPoolSlab_TagOrNextFree + @ n!
+
+			n@ listhead@!
+
+			if (n@)
+				0 n@ MmPoolSlab_PrevFree + !
+			end
+
+			sz@ MmSlabBytesUsedInternally +=
+
+			rs@ HALCPUInterruptRestore
+
+			if (pfn@)
+				pfn@ MmPageFree
+			end
+
+			tag@ ptr@ MmPoolSlab_TagOrNextFree + !
+			MMSLABSWIFTMAGIC ptr@ MmPoolSlab_Magic + si
+			0 ptr@ MmPoolSlab_PrevFree + !
+
+			MmPoolSlab_SIZEOF ptr +=
+
+			return
 		end
 
-		ptr@ IDENTITYSPACE ~ & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-		pfdbe@ MmEvictablePageReference drop
+		// no slab found, allocate a physical page and turn it into a bunch of
+		// properly-sized slabs. dip down into IPLDPC and turn interrupts back
+		// on since this just turned into a lengthy operation.
 
-		auto n
-		ptr@ MmPoolSlab_TagOrNextFree + @ n!
+		auto ipl
 
-		n@ listhead@!
-
-		if (n@)
-			0 n@ MmPoolSlab_PrevFree + !
+		if (flags@ CANBLOCK & ~~)
+			IPLDPC KeIPLRaise ipl!
 		end
-
-		sz@ MmSlabBytesUsedInternally +=
 
 		rs@ HALCPUInterruptRestore
 
-		tag@ ptr@ MmPoolSlab_TagOrNextFree + !
-		MMSLABSWIFTMAGIC ptr@ MmPoolSlab_Magic + si
-		0 ptr@ MmPoolSlab_PrevFree + !
+		0 // flags
+		MmSlabEvictableFunctions // evictablefuncs
+		FREEFIRST flags@ | // priority
+		MmEvictablePageAlloc ok! pfn! pfdbe!
 
-		MmPoolSlab_SIZEOF ptr +=
+		if (flags@ CANBLOCK &)
+			HALCPUInterruptDisable rs!
 
-		return
-	end
+			listhead@@ ptr!
 
-	// no slab found, allocate a physical page and turn it into a bunch of
-	// properly-sized slabs. dip down into IPLDPC and turn interrupts back
-	// on since this just turned into a lengthy operation.
+			if (ptr@)
+				// while we were blocked waiting for that page, someone else
+				// managed to accomplish what we were doing. free the page we
+				// just allocated, and continue in our weird loop so that we
+				// can just yoink that one.
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+				if (ok@)
+					// we failed to allocate the page anyway so don't defer
+					// freeing it.
 
-	rs@ HALCPUInterruptRestore
+					0 pfn!
+				end
 
-	0 // flags
-	MmSlabEvictableFunctions // evictablefuncs
-	FREEFIRST flags@ | // priority
-	MmEvictablePageAlloc ok! ptr! pfdbe!
+				continue
+			end
 
-	if (ok@)
-		ipl@ KeIPLLower
+			IPLDPC KeIPLRaise ipl!
 
-		return
+			rs@ HALCPUInterruptRestore
+		end
+
+		if (ok@)
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		break
 	end
 
 	bucketindex@ pfdbe@ MmPageFrameEntrySlab_BucketIndex + !
 
-	ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
+	pfn@ PAGESHIFT << IDENTITYSPACE | ptr!
 
 	if (DEBUGCHECKS)
 		0 ptr@ MmPoolSlab_Reserved + sb

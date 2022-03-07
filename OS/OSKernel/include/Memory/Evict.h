@@ -69,11 +69,12 @@ struct MmPageFrameEntryAnonymous
 	4 Context7
 	4 Context8
 	4 SwapPageNumber
-	4 WriteMode
+	4 Context9
 	4 PrototypePTE
 endstruct
 
 const MMEVICTFLAG_MODIFIED   1
+const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_COW        16
 
 const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
@@ -81,6 +82,7 @@ const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
                                 // removed from an evictable list.
 
 extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
+extern MmEvictablePageDelete { pfdbe -- }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }
 extern MmEvictablePageRemove { pfdbe -- }

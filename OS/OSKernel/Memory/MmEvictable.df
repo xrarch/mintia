@@ -75,6 +75,21 @@ fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 	end
 end
 
+fn MmEvictablePageDelete { pfdbe -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (DEBUGCHECKS)
+		if (pfdbe@ MmPageFrameEntryEvictable_References + @ ~~)
+			"MmEvictablePageDelete: page frame will leak\n" KeCrash
+		end
+	end
+
+	MMEVICTFLAG_DELETED pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn MmEvictablePageInsert { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
@@ -157,6 +172,21 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	oldcount@ 1 - pfdbe@ MmPageFrameEntryEvictable_References + !
 
 	if (oldcount@ 1 ==)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_DELETED &)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+				1 MmTotalWorkingSetSize -=
+			end
+
+			rs@ HALCPUInterruptRestore
+
+			// page frame was marked deleted, free it instead of putting it on
+			// evictable list.
+
+			pfdbe@ MmPageFrameEntry_PFN + @ MmPageFree
+
+			return
+		end
+
 		// no refs now, add to back of evictable page LRU list
 
 		pfdbe@ MmEvictablePageInsert

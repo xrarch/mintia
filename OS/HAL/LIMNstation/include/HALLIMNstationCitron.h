@@ -10,6 +10,8 @@ extern HALLIMNstationCitronOuti { int port -- }
 
 extern HALLIMNstationCitronOutl { long port -- }
 
+extern HALLIMNstationCitronWait { port -- }
+
 extern HALLIMNstationCitronCommand { command port -- }
 
 // doesn't wait for the device to report the operation as completed before returning

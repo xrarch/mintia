@@ -28,6 +28,7 @@
 struct SerialPort
 	4 PortCMD
 	4 PortData
+	4 TransmitBuffer
 	KeDPC_SIZEOF DPC
 endstruct
 
@@ -47,107 +48,89 @@ const SERIALCMDREAD    2
 const SERIALCMDINTR    3
 const SERIALCMDINTROFF 4
 
+fn SerialCreate { name intn cmdport dataport -- deviceobject }
+	auto ok
+
+	auto rawbuffer
+	10 // sizelog (2^10 = 1024 bytes)
+	0 // valuesizelog (2^0 = 1 byte)
+	IPLSERIAL // synchipl
+	0 // quotablock
+	ExRingBufferCreate ok! rawbuffer!
+
+	if (ok@)
+		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+	end
+
+	auto transmitbuffer
+	7 // sizelog (2^7 = 128 bytes)
+	0 // valuesizelog (2^0 = 1 byte)
+	IPLSERIAL // synchipl
+	0 // quotablock
+	ExRingBufferCreate ok! transmitbuffer!
+
+	if (ok@)
+		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+	end
+
+	auto serialport
+	SerialPort_SIZEOF // bytes
+	'Sril' // tag
+	MUSTSUCCEED // flags
+	MmAllocWithTag ok! serialport!
+
+	if (ok@)
+		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+	end
+
+	cmdport@  serialport@ SerialPort_PortCMD + !
+	dataport@ serialport@ SerialPort_PortData + !
+
+	transmitbuffer@ serialport@ SerialPort_TransmitBuffer + !
+
+	pointerof DriverSerialDPCFunction // function
+	serialport@ SerialPort_DPC + // dpc
+	KeDPCInitialize
+
+	pointerof DriverSerialConsoleOutput // outputfunc
+	serialport@ // context
+	rawbuffer@ // rawbuffer
+	0 // quotablock
+	name@ // name
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
+	1 // permanent
+	CoConsoleCreateObject ok! deviceobject! drop
+
+	if (ok@)
+		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+	end
+
+	deviceobject@ IODeviceDirectoryInsert ok!
+
+	if (ok@)
+		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+	end
+end
+
 fn (FDriverInit) DriverInit { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
+		auto deviceobject
 		auto syscons
 
-		auto deviceobject
-		auto serialport
-		auto rawbuffer
-
-		10 // sizelog (2^10 = 1024 bytes)
-		0 // valuesizelog (2^0 = 1 byte)
-		IPLSERIAL // synchipl
-		0 // quotablock
-		ExRingBufferCreate ok! rawbuffer!
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
-		end
-
-		SerialPort_SIZEOF // bytes
-		'Sril' // tag
-		MUSTSUCCEED // flags
-		MmAllocWithTag ok! serialport!
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
-		end
-
-		SERIALA_PORTCMD  serialport@ SerialPort_PortCMD + !
-		SERIALA_PORTDATA serialport@ SerialPort_PortData + !
-
-		pointerof DriverSerialDPCFunction // function
-		serialport@ SerialPort_DPC + // dpc
-		KeDPCInitialize
-
-		pointerof DriverSerialConsoleOutput // outputfunc
-		serialport@ // context
-		rawbuffer@ // rawbuffer
-		0 // quotablock
 		"ttyS0" // name
-		ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-		1 // permanent
-		CoConsoleCreateObject ok! deviceobject! drop
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
-		end
-
-		deviceobject@ IODeviceDirectoryInsert ok!
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS0 (%i)\n" KeCrash
-		end
-
-		deviceobject@ IODeviceGetExtension syscons!
+		SERIALA_INTERRUPT // intn
+		SERIALA_PORTCMD // cmdport
+		SERIALA_PORTDATA // dataport
+		SerialCreate deviceobject!
 
 		deviceobject@ SerialPortA!
+		deviceobject@ IODeviceGetExtension syscons!
 
-		10 // sizelog (2^10 = 1024 bytes)
-		0 // valuesizelog (2^0 = 1 byte)
-		IPLSERIAL // synchipl
-		0 // quotablock
-		ExRingBufferCreate ok! rawbuffer!
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
-		end
-
-		SerialPort_SIZEOF // bytes
-		'Sril' // tag
-		MUSTSUCCEED // flags
-		MmAllocWithTag ok! serialport!
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
-		end
-
-		SERIALB_PORTCMD  serialport@ SerialPort_PortCMD + !
-		SERIALB_PORTDATA serialport@ SerialPort_PortData + !
-
-		pointerof DriverSerialDPCFunction // function
-		serialport@ SerialPort_DPC + // dpc
-		KeDPCInitialize
-
-		pointerof DriverSerialConsoleOutput // outputfunc
-		serialport@ // context
-		rawbuffer@ // rawbuffer
-		0 // quotablock
 		"ttyS1" // name
-		ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions // permissions
-		1 // permanent
-		CoConsoleCreateObject ok! deviceobject! drop
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
-		end
-
-		deviceobject@ IODeviceDirectoryInsert ok!
-
-		if (ok@)
-			ok@ "SerialInit: failed to create ttyS1 (%i)\n" KeCrash
-		end
+		SERIALB_INTERRUPT // intn
+		SERIALB_PORTCMD // cmdport
+		SERIALB_PORTDATA // dataport
+		SerialCreate deviceobject!
 
 		deviceobject@ SerialPortB!
 
@@ -170,17 +153,77 @@ fn (FDriverInit) DriverInit { stage -- ok }
 	0 ok!
 end
 
-fn SerialPutc { c s -- }
-	// huge TODO: make serial port writing interrupt-driven. in real life this
-	// place could have interrupts disabled for a REALLY long time!
+fn SerialPutc { c s dontblock -- }
+	auto ringbuffer
+	0 ringbuffer!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLSERIAL KeIPLRaise ipl!
 
-	c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-	SERIALCMDWRITE s@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
+	if (s@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+		// serial port not ready to transmit more characters
 
-	rs@ HALCPUInterruptRestore
+		ipl@ KeIPLLower
+
+		s@ SerialPort_TransmitBuffer + @ ringbuffer!
+
+		c@ // value
+		0 // overwrite
+		OSWAIT_TIMEOUTINFINITE // timeout
+		KERNELMODE // lastmode
+		dontblock@ ~~ // waitonfull
+		ringbuffer@ // ringbuffer
+		ExRingBufferWriteValue drop drop
+
+		IPLSERIAL KeIPLRaise ipl!
+	end else
+		c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+	end
+
+	if (ringbuffer@)
+		// we inserted a character into the ringbuffer.
+		// we had to dip below IPLSERIAL to do that since it might have
+		// blocked, so now we have to do some of the work of the interrupt
+		// handler, which may not have gotten a chance to run properly.
+
+		auto wrote
+		0 wrote!
+
+		while (1)
+			if (s@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+				// serial port not ready to transmit more characters
+
+				break
+			end
+
+			auto ok
+			0 // timeout
+			KERNELMODE // lastmode
+			EXRINGDONTWAIT // waitonempty
+			ringbuffer@ // ringbuffer
+			ExRingBufferReadValue ok! drop c!
+
+			if (ok@)
+				// no more characters pending transmission
+
+				break
+			end
+
+			1 wrote!
+
+			c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+		end
+
+		if (wrote@)
+			IPLDPC KeIPLLower
+
+			IOBOOSTCONSOLE // priboost
+			ringbuffer@ // ringbuffer
+			ExRingBufferWakeWriter
+		end
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn SerialGetc { s -- c }
@@ -231,6 +274,32 @@ fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
 		serialport@ SerialGetc c!
 	end
 
+	auto transmitbuf
+	serialport@ SerialPort_TransmitBuffer + @ transmitbuf!
+
+	while (1)
+		if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+			// serial port not ready to transmit more characters
+
+			break
+		end
+
+		auto ok
+		0 // timeout
+		KERNELMODE // lastmode
+		EXRINGDONTWAIT // waitonempty
+		transmitbuf@ // ringbuffer
+		ExRingBufferReadValue ok! drop c!
+
+		if (ok@)
+			// no more characters pending transmission
+
+			break
+		end
+
+		c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+	end
+
 	auto dpc
 	serialport@ SerialPort_DPC + dpc!
 
@@ -239,7 +308,7 @@ fn (HALInterruptHandler) DriverSerialInterrupt { int -- }
 		// otherwise we will BSOD since we're at IPLSERIAL
 
 		console@ // context1
-		0 // context2
+		transmitbuf@ // context2
 		DPCLOWIMPORTANCE // importance
 		dpc@ // dpc
 		KeDPCEnqueue
@@ -248,6 +317,10 @@ end
 
 fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
 	context1@ CoConsoleCook
+
+	IOBOOSTCONSOLE // priboost
+	context2@ // ringbuffer
+	ExRingBufferWakeWriter
 end
 
 fn (CoOutputFunction) DriverSerialConsoleOutput { echo console -- ok }
@@ -274,11 +347,11 @@ fn (CoOutputFunction) DriverSerialConsoleOutput { echo console -- ok }
 		end
 
 		if (c@ 0x7F ==)
-			'\b' serialport@ SerialPutc
-			' ' serialport@ SerialPutc
-			'\b' serialport@ SerialPutc
+			'\b' serialport@ echo@ SerialPutc
+			' ' serialport@ echo@ SerialPutc
+			'\b' serialport@ echo@ SerialPutc
 		end else
-			c@ serialport@ SerialPutc
+			c@ serialport@ echo@ SerialPutc
 		end
 	end
 end

@@ -9,3 +9,4 @@
 #include "<inc>/Memory/PTE.h"
 #include "<inc>/Memory/WorkingSet.h"
 #include "<inc>/Memory/IORegion.h"
+#include "<inc>/Memory/MDL.h"

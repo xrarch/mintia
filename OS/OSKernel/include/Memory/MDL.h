@@ -9,4 +9,3 @@ endstruct
 
 const MDLFLAG_LOCKED 1
 const MDLFLAG_MAPPED 2
-const MDLFLAG_LOCKEDINWS 4

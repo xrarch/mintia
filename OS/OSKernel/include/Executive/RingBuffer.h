@@ -33,6 +33,7 @@ extern ExRingBufferWriteValue { value overwrite timeout lastmode waitonfull ring
 extern ExRingBufferReadValue { timeout lastmode waitonempty ringbuffer -- value valueptr ok }
 
 extern ExRingBufferIsFull { ringbuffer -- isfull }
+extern ExRingBufferIsEmpty { ringbuffer -- isempty }
 
 extern ExRingBufferRubout { ringbuffer -- value valueptr ok }
 extern ExRingBufferPutBack { value ringbuffer -- valueptr ok }

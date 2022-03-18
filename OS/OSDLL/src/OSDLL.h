@@ -49,7 +49,7 @@ extern DLLGetSymbolAddress { name dll -- address ok }
 
 // heap stuff
 
-const DLLHEAPINITIALSEGMENTS 128
+const DLLHEAPINITIALSEGMENTS 16
 
 const DLLHEAPSWIFTMAGIC 0x1DCE
 const DLLHEAPFREEMAGIC  0xE433

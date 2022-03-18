@@ -6,5 +6,5 @@ struct MmMDLHeader
 	4 MappedAddress
 endstruct
 
-const MMMDL_LOCKED 1
+const MMMDL_PINNED 1
 const MMMDL_MAPPED 2

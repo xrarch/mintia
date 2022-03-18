@@ -27,29 +27,55 @@ fn MmMDLInitialize { length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_MappedAddress + !
 end
 
-fn MmMDLLock { mdl -- ok }
-	// lock all of the pages described by the MDL into memory, resources
-	// permitting. must be done in the context of the process whose buffer it
-	// is.
+fn MmMDLPin { lockforwrite mdl -- ok }
+	// pin all of the pages described by the MDL into memory, resources
+	// permitting. must be called in the context of the process whose buffer
+	// it is.
+
+	// NOTE: buffer parameters (start virtual address, length, etc) must have
+	// been validated by the caller. this function trusts them blindly.
 
 	if (DEBUGCHECKS)
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_LOCKED &)
-			"MmMDLLock: double lock\n" KeCrash
+		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED &)
+			"MmMDLPin: double pin\n" KeCrash
 		end
 	end
 
-	// touch all of the pages until their PTE is valid. call MmMDLUnlock to
-	// clean up the partial lock if we fail at any point.
+	auto process
+	KeProcessCurrent process!
 
-	// stub
+	// lock the process's VAD list mutex so we know nothing can get yoinked
+	// out from underneath us by another thread in the process. in particular
+	// this avoids race conditions involving the COW pages we might create
+	// here if we probe for writing. it is fine to keep this mutex locked
+	// during pagefaults we incur later because it can be locked recursively.
+
+	process@ MmVADListLock ok!
+
+	if (ok@)
+		return
+	end
+
+	// check to ensure that there aren't any VADs corresponding to memory-
+	// -mapped devices overlapping our buffer, since these pages are yucky and
+	// don't correspond to RAM and so they must not be looked up in the PFDB.
+
+	// TODO that
+
+	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
+	// clean up the partial pin if we fail at any point.
+
+	// TODO that
+
+	process@ MmVADListUnlock
 end
 
-fn MmMDLUnlock { mdl -- }
-	// unlock all of the pages described by the MDL.
+fn MmMDLUnpin { mdl -- }
+	// unpin all of the pages described by the MDL.
 
 	if (DEBUGCHECKS)
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_LOCKED & ~~)
-			"MmMDLUnlock: not locked\n" KeCrash
+		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED & ~~)
+			"MmMDLUnpin: not pinned\n" KeCrash
 		end
 	end
 
@@ -57,7 +83,7 @@ fn MmMDLUnlock { mdl -- }
 end
 
 fn MmMDLMap { mdl -- vaddr ok }
-	// map the page frames into system space that are locked by the MDL.
+	// map the page frames into system space that are pinned by the MDL.
 
 	if (DEBUGCHECKS)
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
@@ -69,7 +95,7 @@ fn MmMDLMap { mdl -- vaddr ok }
 end
 
 fn MmMDLUnmap { mdl -- }
-	// unmap the page frames from system space that are locked by the MDL.
+	// unmap the page frames from system space that are pinned by the MDL.
 
 	if (DEBUGCHECKS)
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED & ~~)

@@ -108,6 +108,7 @@ externptr PsProcessListTail
 externptr PsActiveProcessCount
 
 externptr PsSystemProcess
+externptr PsSystemInitProcess
 
 externptr PsOSDLLInformation
 externptr PsOSDLLSectionObject

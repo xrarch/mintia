@@ -117,11 +117,26 @@ externptr MmPeakWorkingSetSize
 externptr MmCommitLimit
 externptr MmCommitUsage
 
+externptr MmPoolLimit
+
+externptr MmPageTotal
+
+// arbitrary margin to avoid overcommiting
+
+const MMCOMMITLIMITMARGIN (128 1024 *)
+
+// pool allocation thresholds at which various types of pool allocation
+// will fail when the global limit is reached.
+
+const MMPOOL_NORMALTHRESH        (16 1024 *)
+const MMPOOL_MUSTSUCCEEDL2THRESH (8 1024 *)
+const MMPOOL_MUSTSUCCEEDTHRESH   0
+
 // free page count thresholds at which various types/priorities of page
 // allocation will block or fail.
 
 const MMNORMALTHRESH        15 // normal allocations
-const MMPOOLTHRESH          8  // pool/heap allocations
+const MMPOOLTHRESH          8  // nonblockable pool allocations
 const MMMUSTSUCCEEDL2THRESH 4  // mustsucceed level 2
 const MMMUSTSUCCEEDTHRESH   0  // mustsucceed
 

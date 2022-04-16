@@ -9,6 +9,8 @@ buffer BootFilesystemName OBNAMEMAX
 
 buffer BootMemoryInformation OSMemoryInformation_SIZEOF
 
+buffer SwapFileInformation OSFileInformation_SIZEOF
+
 var BootFlags 0
 
 fn SetSystemConsole { path -- ok }
@@ -51,141 +53,69 @@ fn TrySystemConsole { -- ok }
 	SetSystemConsole ok!
 end
 
-fn CreateSwapFilePrompt { path -- handle ok }
-	auto response
-	128 alloc response!
+fn SetSwapFile { config -- ok }
+	auto section
+	"SwapFile" // sectionname
+	config@ // config
+	OSConfigGetSection ok! section!
 
-	path@ "%s: not found or too small. create? [y] " Printf
-	
-	response@ // s
-	127 // max
-	Gets
-
-	if (response@ gb)
-		if (response@ gb 'y' ~=)
-			STATUS_NOT_FOUND ok!
-			return
-		end
-	end
-
-	BootMemoryInformation OSMemoryQuery drop
-
-	auto totalpagecount
-	BootMemoryInformation OSMemoryInformation_PageTotalCount + @ totalpagecount!
-
-	auto recommended
-	totalpagecount@ 2 * OSPAGESHIFT << recommended!
-
-	auto minimum
-	totalpagecount@ OSPAGESHIFT << minimum!
-
-	"\nStrike ^D to cancel.\n" Printf
-
-	while (1)
-		recommended@ 1024 /
-		minimum@ 1024 /
-		"Enter the desired size in kilobytes (minimum %d) [%d]: " Printf
-
-		if (response@ 127 OSReadline)
-			"\n\n" Printf
-			STATUS_NOT_FOUND ok!
-			return
-		end
-
-		auto size
-
-		if (response@ gb)
-			response@ atoi 1024 * size!
-
-			if (size@ minimum@ <)
-				size@ 1024 / "Error: %dKB below minimum.\n" Printf
-				continue
-			end
-		end else
-			recommended@ size!
-		end
-
-		ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-		0 // flags
-		ACCESS_READ ACCESS_WRITE | // access
-		path@ // path
-		OSFileCreate ok! handle!
-
-		if (ok@)
-			return
-		end
-
-		size@ "sizing swapfile to %d bytes... " Printf
-		OSFlushLine
-
-		size@ // newsize
-		1 // growing
-		handle@ // handle
-		OSFileTruncate ok! drop
-
-		if (ok@)
-			handle@ OSClose drop
-
-			if (ok@ STATUS_END_OF_DISK ==)
-				size@ "exceeded the capacity of the disk.\n" Printf
-				continue
-			end
-
-			'\n' Putc
-
-			return
-		end
-
-		"succeeded\n\n" Printf
-
-		OSFlushDirtyPages drop
-
+	if (ok@)
+		STATUS_INVALID_CONFIG_FILE ok!
 		return
 	end
-end
 
-fn SetSwapFile { path -- ok }
+	auto path
+	"name" // keyname
+	section@ // section
+	OSConfigGetKey ok! path!
+
+	if (ok@)
+		"/mintia/SwapFile.sys" path!
+	end else
+		path@ OSConfigGetKeyValue path!
+	end
+
+	auto size
+	"size" // keyname
+	section@ // section
+	OSConfigGetKey ok! size!
+
+	if (ok@)
+		1024 1024 * size!
+	end else
+		size@ OSConfigGetKeyValue atoi size!
+	end
+
 	auto handle
-
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
 	0 // flags
 	ACCESS_READ ACCESS_WRITE | // access
 	path@ // path
-	0 // ftype
-	OSFileOpen ok! handle!
+	OSFileCreate ok! handle!
 
 	if (ok@)
-		if (ok@ STATUS_NOT_FOUND ~=)
-			return
-		end
+		return
+	end
 
-		path@ CreateSwapFilePrompt ok! handle!
+	size@ // newsize
+	0 // growing
+	handle@ // handle
+	OSFileTruncate ok! drop
 
-		if (ok@)
-			return
-		end
+	if (ok@)
+		handle@ OSClose drop
+
+		return
 	end
 
 	auto sizeinpages
+	handle@ // filehandle
+	OSSwapFileCreate ok! sizeinpages!
 
-	while (1)
-		handle@ // filehandle
-		OSSwapFileCreate ok! sizeinpages!
-
-		if (ok@ ~~)
-			break
-		end
-
+	if (ok@)
 		handle@ OSClose drop
 
-		if (ok@ STATUS_SWAP_TOO_SMALL ~=)
-			return
-		end
-
-		path@ CreateSwapFilePrompt ok! handle!
-
-		if (ok@)
-			return
-		end
+		return
 	end
 
 	handle@ OSClose drop
@@ -264,42 +194,6 @@ fn Main { ... -- ret }
 
 	bootdevicehandle@ OSClose drop
 
-	"/mintia/SwapFile.sys" SetSwapFile ret!
-
-	if (ret@)
-		ret@ OSStatusGetName "Failed to establish swapfile: %s\n" Printf
-
-		if (ret@ STATUS_FORBIDDEN_OPERATION ==)
-			"SystemInit shouldn't be run as a subprocess!\n" OSGetStdErr FPrintf
-			-1 OSExit
-		end
-	end
-
-	auto swapfilename
-	OSFILEPATHMAX alloc swapfilename!
-
-	while (ret@)
-		"Enter the path of the swapfile [none]: " Printf
-		
-		swapfilename@ // s
-		OSFILEPATHMAX 1 - // max
-		Gets
-
-		if (swapfilename@ gb ~~)
-			"No swapfile -- NOT RECOMMENDED!\n" Printf
-
-			break
-		end
-
-		swapfilename@ SetSwapFile ret!
-
-		if (ret@)
-			ret@ OSStatusGetName "Failed to establish swapfile: %s\n" Printf
-		end
-	end
-
-	LotsOfTests
-
 	if (BootFlags@ OSBOOTFLAG_SINGLEUSERMODE &)
 		"\n" Printf
 
@@ -329,6 +223,12 @@ fn Main { ... -- ret }
 
 		if (ret@ ~~)
 			config@ StartLines
+
+			config@ SetSwapFile ret!
+
+			if (ret@)
+				ret@ OSStatusGetName "Failed to establish swapfile: %s\n" Printf
+			end
 
 			config@ OSConfigFileFree
 		end else
@@ -396,7 +296,7 @@ fn StartLines { config -- }
 	auto ok
 
 	auto iterator
-	"" // sectionname
+	"DeviceManagers" // sectionname
 	config@ // config
 	OSConfigGetKeyIterator ok! iterator!
 

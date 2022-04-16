@@ -27,6 +27,8 @@ fn MmMDLInitialize { length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_MappedAddress + !
 end
 
+var MmPinnedPagesCount 0
+
 fn MmMDLPin { lockforwrite mdl -- ok }
 	// pin all of the pages described by the MDL into memory, resources
 	// permitting. must be called in the context of the process whose buffer
@@ -43,6 +45,12 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 	auto process
 	KeProcessCurrent process!
+
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto pages
+	buffer@ PAGEOFFSETMASK & mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	// lock the process's VAD list mutex so we know nothing can get yoinked
 	// out from underneath us by another thread in the process. in particular
@@ -74,7 +82,45 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
 	// clean up the partial pin if we fail at any point.
 
-	// TODO that
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	MMMDL_PINNED mdl@ MmMDLHeader_Flags + |=
+
+	-1 mdlpos@!
+
+	while (pages@)
+		if (lockforwrite@)
+			// force any COWs and discover any read-only violations.
+
+			buffer@ KeSafeProbeWrite ok!
+
+			if (ok@)
+				process@ MmVADListUnlock
+
+				mdl@ MmMDLUnpin
+
+				return
+			end
+		end
+
+		// TODO check PTE and pin pages
+
+		4 mdlpos +=
+		1 pages -=
+		PAGESIZE buffer +=
+
+		// this is so that we probe at the start of each subsequent page after
+		// the first one. the reason for this is that KeSafeProbeWrite works
+		// by reading and then writing the same byte from the given address.
+		// this is acceptable within the buffer because its contents
+		// mid-syscall ought to be expected to be unpredictable anyway, but it
+		// is not acceptable to do this to random memory that may be just
+		// beyond the buffer because it will cause satanic race conditions
+		// with any other threads in this process.
+
+		PAGENUMBERMASK buffer &=
+	end
 
 	process@ MmVADListUnlock
 end

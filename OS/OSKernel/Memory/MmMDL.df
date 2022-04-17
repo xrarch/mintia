@@ -41,6 +41,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED &)
 			"MmMDLPin: double pin\n" KeCrash
 		end
+
+		if (mdl@ MmMDLHeader_Length + @ ~~)
+			"MmMDLPin: length=0\n" KeCrash
+		end
 	end
 
 	auto process
@@ -87,6 +91,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 	MMMDL_PINNED mdl@ MmMDLHeader_Flags + |=
 
+	if (lockforwrite@)
+		MMMDL_MODIFIED mdl@ MmMDLHeader_Flags + |=
+	end
+
 	-1 mdlpos@!
 
 	while (pages@)
@@ -104,7 +112,54 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			end
 		end
 
-		// TODO check PTE and pin pages
+		while (1)
+			buffer@ KeSafeGetByte ok! drop
+
+			if (ok@)
+				process@ MmVADListUnlock
+
+				mdl@ MmMDLUnpin
+
+				return
+			end
+
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			auto pte
+			buffer@ // vaddr
+			process@ KeProcess_PageDirectory + @ // pagemap
+			MmVirtualtoPTEAddress ok! pte!
+
+			if (ok@)
+				ipl@ KeIPLLower
+
+				continue
+			end
+
+			auto pfdbe
+			pte@ // pteaddr
+			MmPTEInterpret ok! drop pfdbe!
+
+			if (ok@)
+				ipl@ KeIPLLower
+
+				continue
+			end
+
+			pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+			// we got a pfdbe, time to pin it and record it in our MDL.
+
+			pfdbe@ MmEvictablePageReference drop
+
+			ipl@ KeIPLLower
+
+			pfdbe@ mdlpos@!
+			-1 mdlpos@ 4 + !
+
+			break
+		end
 
 		4 mdlpos +=
 		1 pages -=
@@ -134,7 +189,8 @@ fn MmMDLUnpin { mdl -- }
 		end
 	end
 
-	// stub
+	// TODO after unifying anon and file cache pages.
+	// NOTE remember to modify pages if MDL had modify flag set
 end
 
 fn MmMDLMap { mdl -- vaddr ok }

@@ -46,3 +46,4 @@ extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 extern MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 externptr MmAnonymousPageCount
+externptr MmAnonymousEvictableFunctions

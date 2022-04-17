@@ -87,6 +87,8 @@ extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
 
+externptr IOCacheEvictableFunctions
+
 externptr IOCacheDirtyPageListHead
 externptr IOCacheDirtyPageListTail
 

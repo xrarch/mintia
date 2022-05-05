@@ -22,3 +22,6 @@ extern MmWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok 
 extern MmWorkingSetEntryFree { wsli wsleptr process -- }
 
 extern MmManageWorkingSets { -- success }
+
+const MMWORKINGSETTABLESIZE       (128 MmPoolSlab_SIZEOF -)
+const MMWORKINGSETENTRIESPERTABLE (MMWORKINGSETTABLESIZE 4 /)

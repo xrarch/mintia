@@ -3,85 +3,57 @@ fnptr MmEvictionFunction { pfdbe -- }
 fnptr MmReferenceFunction { oldcount pfdbe -- }
 fnptr MmDereferenceFunction { oldcount pfdbe -- }
 
-struct MmEvictableFunctions
-	4 EvictionFunc
-	4 ReferenceFunc
-	4 DereferenceFunc
-	4 WriteModifiedFunc
-	4 Reserved2
-	4 Reserved3
-	4 Reserved4
-	4 Reserved5
-endstruct
-
 // should be kept in sync with IOPageFrameEntryCache,
 // and the page frame entries below
 struct MmPageFrameEntryEvictable
 	4 Next
-	4 PFN
 	4 Prev
-	4 EvictionFlags
-	4 EvictableFunctions
-	4 References
-	4 WorkingSetIndexHint
+	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
+	4 Context0
+	4 Context1
+	4 Context2
 	4 Context3
 	4 Context4
 	4 Context5
-	4 Context6
-	4 Context7
-	4 Context8
-	4 Context9
-	4 Context10
-	4 Context11
 endstruct
 
 struct MmPageFrameEntrySlab
 	4 Next
-	4 PFN
 	4 Prev
-	4 EvictionFlags
-	4 EvictableFunctions
-	4 References
-	4 WorkingSetIndexHint
-	4 Context3
-	4 Context4
-	4 Context5
-	4 Context6
-	4 Context7
-	4 Context8
+	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
+	4 Context1
+	4 Context2
 	4 BucketIndex
 	4 PoolListNext
 	4 PoolListPrev
+	4 Context3
 endstruct
 
 struct MmPageFrameEntryAnonymous
 	4 Next
-	4 PFN
 	4 Prev
-	4 EvictionFlags
-	4 EvictableFunctions
+	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
+	4 SwapPageNumber
+	4 PrototypePTE
 	4 References
-	4 WorkingSetIndexHint
+	4 Context2
 	4 Context3
 	4 Context4
-	4 Context5
-	4 Context6
-	4 Context7
-	4 Context8
-	4 SwapPageNumber
-	4 Context9
-	4 PrototypePTE
 endstruct
 
 const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_COW        16
 
+const MMEVICTTYPE_FILE       0
+const MMEVICTTYPE_ANON       1
+const MMEVICTTYPE_SLAB       2
+
 const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
                                 // for working set accounting when inserted or
                                 // removed from an evictable list.
 
-extern MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
+extern MmEvictablePageAlloc { flags evictabletype priority -- pfdbe pfn ok }
 extern MmEvictablePageDelete { pfdbe -- }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }

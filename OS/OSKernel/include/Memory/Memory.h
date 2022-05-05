@@ -4,7 +4,7 @@ const MMLOWESTSYSTEMADDRESS 0x80000000
 
 struct MmPageFrameEntry
 	4 R1
-	4 PFN
+	4 R2
 	4 R3
 	4 R4
 	4 R5
@@ -12,18 +12,11 @@ struct MmPageFrameEntry
 	4 R7
 	4 R8
 	4 R9
-	4 R10
-	4 R11
-	4 R12
-	4 R13
-	4 R14
-	4 R15
-	4 R16
 endstruct
 
 struct MmPageFrameEntryFree
 	4 Next
-	4 PFN
+	4 R2
 	4 R3
 	4 R4
 	4 R5
@@ -31,32 +24,18 @@ struct MmPageFrameEntryFree
 	4 R7
 	4 R8
 	4 R9
-	4 R10
-	4 R11
-	4 R12
-	4 R13
-	4 R14
-	4 R15
-	4 R16
 endstruct
 
 struct MmPageFrameEntryPool
-	4 PoolListNext
-	4 PFN
-	4 PoolListPrev
 	4 ByteSize
 	4 Tag
 	4 VirtualAddress
+	4 Context3
 	4 Context4
-	4 Context5
-	4 Context6
-	4 Context7
-	4 Context8
-	4 Context9
-	4 Context10
 	4 BucketIndex
-	4 Context11
-	4 Context12
+	4 PoolListNext
+	4 PoolListPrev
+	4 Context5
 endstruct
 
 extern MmUsageDump { -- }
@@ -72,6 +51,7 @@ extern MmPoolInit { -- }
 
 extern MmPageAlloc { priority -- pfdbe pfn ok }
 extern MmPageFree { pfn -- }
+extern MmPageFreeByEntry { pfdbe -- }
 extern MmHeapCheck { -- }
 extern MmHeapDumpBuckets { -- }
 extern MmHeapDumpBlockInfo { block -- }

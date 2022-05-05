@@ -801,7 +801,7 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 		ipl@ KeIPLLower
 	end
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW &)
 		// COW page. create transition PTE so we can soft-fault it back in
 		// later.
 
@@ -861,111 +861,6 @@ fn MmWorkingSetEntryFindByIndex { wsli process -- wsleptr ok }
 	end
 
 	tab@ off@ 2 << + wsleptr!
-end
-
-fn MmWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok }
-	"MmWorkingSetEntryFindByVirtualAddress: REVIEW ME\n" KeCrash
-
-	// look up a virtual address in the working set and return the pointer.
-	// return -1 in ok if the virtual address is not part of the working set.
-
-	// caller must make sure the vaddr points to a physical page frame.
-
-	if (DEBUGCHECKS)
-		if (vaddr@ PAGEOFFSETMASK &)
-			"MmWorkingSetEntryFindByVirtualAddress: unaligned vaddr\n" KeCrash
-		end
-	end
-
-	// look up vaddr in process's pagemap, if it's not valid we know it's not
-	// in the working set.
-
-	auto pteaddr
-	vaddr@ // vaddr
-	process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
-	MmVirtualtoPTEAddress ok! pteaddr!
-
-	if (ok@)
-		return
-	end
-
-	auto pfdbe
-
-	pteaddr@ // pteaddr
-	MmPTEInterpret ok! drop pfdbe!
-
-	if (ok@)
-		return
-	end
-
-	pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-	// it is valid. look in pfdbe for working set index hint and see if it
-	// resides in that entry.
-
-	pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + @ wsli!
-
-	wsli@ // wsli
-	process@ // process
-	MmWorkingSetEntryFindByIndex ok! wsleptr!
-
-	auto wsle
-
-	if (ok@ ~~)
-		wsleptr@@ wsle!
-
-		if (wsle@ MMWORKINGSETENTRY_VALID &)
-			if (wsle@ PAGENUMBERMASK & vaddr@ ==)
-				// found it!
-
-				return
-			end
-		end
-	end
-
-	// not there. search the entire working set up to the last valid index.
-
-	0 wsli!
-
-	auto tabptr
-	process@ PsProcess_WorkingSetListPointers + tabptr!
-
-	tabptr@@ wsleptr!
-
-	auto leftintable
-	MMWORKINGSETENTRIESPERTABLE leftintable!
-
-	auto maxi
-	process@ PsProcess_WorkingSetMaximumIndex + @ maxi!
-
-	if (maxi@ -1 ==)
-		-1 ok!
-		return
-	end
-
-	while (wsli@ maxi@ <=)
-		if (leftintable@ ~~)
-			4 tabptr +=
-			tabptr@@ wsleptr!
-			MMWORKINGSETENTRIESPERTABLE leftintable!
-		end
-
-		wsleptr@@ wsle!
-
-		if (wsle@ MMWORKINGSETENTRY_VALID &)
-			if (wsle@ PAGENUMBERMASK & vaddr@ ==)
-				// found it!
-
-				return
-			end
-		end
-
-		1 leftintable -=
-		4 wsleptr +=
-		1 wsli +=
-	end
-
-	-1 ok!
 end
 
 fn MmWorkingSetEntryFree { wsli wsleptr process -- }

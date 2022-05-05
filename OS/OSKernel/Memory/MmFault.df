@@ -190,7 +190,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 					if (DEBUGCHECKS)
-						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW & ~~)
+						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW & ~~)
 							"MmSatisfyFault: transition PTE wasn't COW\n" KeCrash
 						end
 					end
@@ -250,12 +250,11 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 						return
 					end
 
-					MMEVICTFLAG_COW pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW |
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 					PAGESHIFT phyaddr <<=
 				end
-
-				wsli@ pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
 
 				PTE_V flags!
 
@@ -420,8 +419,6 @@ fn MmNormalFault { vaddr process -- signal }
 
 	1 process@ PsProcess_ThrottleFaultCount + +=
 
-	wsli@ pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
-
 	phyaddr@ // phyaddr
 	flags@ // flags
 	vaddr@ // vaddr
@@ -499,13 +496,13 @@ fn MmSatisfyFileFault { section offset vad -- flags pfdbe phyaddr ok }
 	0 // flags
 	offset@ PAGENUMBERMASK & // offset
 	fcb@ // fcb
-	IOCachePageRead ok! pfdbe! drop
+	IOCachePageRead ok! pfdbe! phyaddr!
 
 	if (ok@)
 		return
 	end
 
-	pfdbe@ MmPageFrameEntry_PFN + @ PAGESHIFT << phyaddr!
+	IDENTITYSPACEMASK phyaddr &=
 
 	PTE_V flags!
 end
@@ -600,7 +597,7 @@ fn MmWriteFault { vaddr process -- signal }
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_COW &)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW &)
 				// dirtied an anonymous page, free its swap page
 
 				pfdbe@ // pfdbe
@@ -633,7 +630,9 @@ fn MmWriteFault { vaddr process -- signal }
 
 				// starts at demand-zero, which isn't true here
 				MMSWAPPAGE_NONE cowpfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
-				MMEVICTFLAG_MODIFIED cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+
+				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 				// we unlocked the working set mutex so we have to recheck
 				// everything...
@@ -643,7 +642,8 @@ fn MmWriteFault { vaddr process -- signal }
 
 			1 vad@ MmVAD_COWCount + +=
 
-			MMEVICTFLAG_COW cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW |
+			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 			PAGESHIFT cowaddr <<=
 

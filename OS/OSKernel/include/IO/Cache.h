@@ -18,21 +18,14 @@ const IOCACHEBLOCKFLAG_TRUNCATING 1
 // should be kept in sync with MmPageFrameEntryEvictable
 struct IOPageFrameEntryCache
 	4 Next
-	4 PFN
 	4 Prev
-	4 EvictionFlags
-	4 EvictionFunction
-	4 References
-	4 WorkingSetIndexHint
-	4 Context3
-	4 Context4
-	4 Context5
-	4 DirtyPTE
+	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 FCB
 	4 Flags
 	4 OffsetInFile
 	4 NextCachePage
 	4 PrevCachePage
+	4 DirtyPTE
 endstruct
 
 const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?
@@ -86,8 +79,6 @@ extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritte
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
-
-externptr IOCacheEvictableFunctions
 
 externptr IOCacheDirtyPageListHead
 externptr IOCacheDirtyPageListTail

@@ -40,7 +40,38 @@ public MmTotalWorkingSetSize
 var MmPeakWorkingSetSize 0
 public MmPeakWorkingSetSize
 
-fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
+extern IOCachePageReferenceFunction { oldcount pfdbe -- }
+extern IOCachePageDereferenceFunction { oldcount pfdbe -- }
+extern IOCachePageEvictionFunction { pfdbe -- }
+
+extern MmAnonymousEvictionFunction { pfdbe -- }
+
+extern MmSlabEvictionFunction { pfdbe -- }
+
+table MmEvictableFunctionsTable
+	// file
+	pointerof IOCachePageEvictionFunction
+	pointerof IOCachePageReferenceFunction
+	pointerof IOCachePageDereferenceFunction
+
+	// anon
+	pointerof MmAnonymousEvictionFunction
+	0
+	0
+
+	// slab
+	pointerof MmSlabEvictionFunction
+	0
+	0
+endtable
+
+struct MmEvictableFunctions
+	4 EvictionFunc
+	4 ReferenceFunc
+	4 DereferenceFunc
+endstruct
+
+fn MmEvictablePageAlloc { flags evictabletype priority -- pfdbe pfn ok }
 	priority@ // priority
 	MmPageAlloc ok! pfn! pfdbe!
 
@@ -48,16 +79,13 @@ fn MmEvictablePageAlloc { flags evictablefuncs priority -- pfdbe pfn ok }
 		return
 	end
 
-	1 pfdbe@ MmPageFrameEntryEvictable_References + !
+	1 pfdbe@ MmPageFrameEntryEvictable_ReferencesI + si
 
 	0 pfdbe@ MmPageFrameEntryEvictable_Next + !
 	0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
 
-	flags@ pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + !
-
-	0 pfdbe@ MmPageFrameEntryEvictable_WorkingSetIndexHint + !
-
-	evictablefuncs@ pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + !
+	flags@ pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+	evictabletype@ pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + sb
 
 	if (flags@ MMEVICTFLAG_WORKINGSET &)
 		auto rs
@@ -80,12 +108,13 @@ fn MmEvictablePageDelete { pfdbe -- }
 	HALCPUInterruptDisable rs!
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_References + @ ~~)
+		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi ~~)
 			"MmEvictablePageDelete: page frame will leak\n" KeCrash
 		end
 	end
 
-	MMEVICTFLAG_DELETED pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + |=
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED |
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 	rs@ HALCPUInterruptRestore
 end
@@ -93,14 +122,14 @@ end
 fn MmEvictablePageInsert { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 		// insertion to evictable list implies removal from a working set.
 		1 MmTotalWorkingSetSize -=
 	end
 
 	auto t
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 		1 MmModifiedPageCount +=
 
 		MmModifiedPageListTail@ t!
@@ -141,19 +170,15 @@ end
 
 fn MmEvictablePageDereference { pfdbe -- oldcount }
 	auto evictionfuncs
-	pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
-
-	if (DEBUGCHECKS)
-		if (evictionfuncs@ ~~)
-			"MmEvictablePageDereference: no eviction funcs for page\n" KeCrash
-		end
-	end
+	MmEvictableFunctionsTable
+	pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb
+	MmEvictableFunctions_SIZEOF * + evictionfuncs!
 
 	auto dereffunc
 	evictionfuncs@ MmEvictableFunctions_DereferenceFunc + @ dereffunc!
 
 	if (dereffunc@)
-		pfdbe@ MmPageFrameEntryEvictable_References + @ // oldcount (not guaranteed to be accurate...)
+		pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi // oldcount (not guaranteed to be accurate...)
 		pfdbe@ // pfdbe
 		dereffunc@ MmDereferenceFunction
 	end
@@ -161,7 +186,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	pfdbe@ MmPageFrameEntryEvictable_References + @ oldcount!
+	pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -169,11 +194,11 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 		end
 	end
 
-	oldcount@ 1 - pfdbe@ MmPageFrameEntryEvictable_References + !
+	oldcount@ 1 - pfdbe@ MmPageFrameEntryEvictable_ReferencesI + si
 
 	if (oldcount@ 1 ==)
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_DELETED &)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 				1 MmTotalWorkingSetSize -=
 			end
 
@@ -182,7 +207,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 			// page frame was marked deleted, free it instead of putting it on
 			// evictable list.
 
-			pfdbe@ MmPageFrameEntry_PFN + @ MmPageFree
+			pfdbe@ MmPageFreeByEntry
 
 			return
 		end
@@ -195,7 +220,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	rs@ HALCPUInterruptRestore
 
 	if (oldcount@ 1 ==)
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			if (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
 				0 // priboost
 				MmModifiedPageEvent // event
@@ -214,7 +239,7 @@ fn MmEvictablePageRemoveForDeletion { pfdbe -- }
 
 	pfdbe@ MmEvictablePageRemove
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 		1 MmTotalWorkingSetSize -=
 	end
 end
@@ -222,7 +247,7 @@ end
 fn MmEvictablePageRemove { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_WORKINGSET &)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 		// removal from evictable list implies addition to a working set.
 		1 MmTotalWorkingSetSize +=
 
@@ -231,7 +256,7 @@ fn MmEvictablePageRemove { pfdbe -- }
 		end
 	end
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 		1 MmModifiedPageCount -=
 	end else
 		1 MmEvictablePageCount -=
@@ -246,7 +271,7 @@ fn MmEvictablePageRemove { pfdbe -- }
 	if (ls@)
 		ns@ ls@ MmPageFrameEntryEvictable_Next + !
 	end else
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			ns@ MmModifiedPageListHead!
 		end else
 			ns@ MmEvictablePageListHead!
@@ -256,7 +281,7 @@ fn MmEvictablePageRemove { pfdbe -- }
 	if (ns@)
 		ls@ ns@ MmPageFrameEntryEvictable_Prev + !
 	end else
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlags + @ MMEVICTFLAG_MODIFIED &)
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			ls@ MmModifiedPageListTail!
 		end else
 			ls@ MmEvictablePageListTail!
@@ -271,9 +296,9 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	pfdbe@ MmPageFrameEntryEvictable_References + @ oldcount!
+	pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi oldcount!
 
-	oldcount@ 1 + pfdbe@ MmPageFrameEntryEvictable_References + !
+	oldcount@ 1 + pfdbe@ MmPageFrameEntryEvictable_ReferencesI + si
 
 	if (oldcount@ 0 ==)
 		// ref'd, remove from evictable page LRU list
@@ -284,13 +309,9 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 	rs@ HALCPUInterruptRestore
 
 	auto evictionfuncs
-	pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @ evictionfuncs!
-
-	if (DEBUGCHECKS)
-		if (evictionfuncs@ ~~)
-			"MmEvictablePageDereference: no eviction funcs for page\n" KeCrash
-		end
-	end
+	MmEvictableFunctionsTable
+	pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb
+	MmEvictableFunctions_SIZEOF * + evictionfuncs!
 
 	auto reffunc
 	evictionfuncs@ MmEvictableFunctions_ReferenceFunc + @ reffunc!
@@ -312,15 +333,20 @@ fn MmEvictSinglePage { -- pfdbe ok }
 		return
 	end
 
+	auto evictionfuncs
+	MmEvictableFunctionsTable
+	pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb
+	MmEvictableFunctions_SIZEOF * + evictionfuncs!
+
 	pfdbe@ // pfdbe
-	pfdbe@ MmPageFrameEntryEvictable_EvictableFunctions + @
+	evictionfuncs@
 	MmEvictableFunctions_EvictionFunc + @ MmEvictionFunction
 
 	// evicted, yoink
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_References + @ 0 ~=)
-			pfdbe@ MmPageFrameEntryEvictable_References + @
+		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi 0 ~=)
+			pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
 			"MmEvictSingleFastPage: attempt to evict a page with %d references\n" KeCrash
 		end
 	end

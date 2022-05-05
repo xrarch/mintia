@@ -91,10 +91,10 @@ extern MmEvictablePageInsert { pfdbe -- }
 
 extern MmEvictSinglePage { -- pfdbe ok }
 
-externptr MmEvictableModifiedPageListHead
-externptr MmEvictableModifiedPageListTail
+externptr MmModifiedPageListHead
+externptr MmModifiedPageListTail
 
-externptr MmEvictableModifiedPageCount
+externptr MmModifiedPageCount
 
 externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail

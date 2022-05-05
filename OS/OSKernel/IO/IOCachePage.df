@@ -106,7 +106,7 @@ fn IOCachePageInsertDirty { pfdbe -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOCachePageDirtyCleanup { pfdbe -- extent }
+fn IOCachePageDirtyCleanup { pfdbe -- }
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
@@ -163,9 +163,6 @@ fn IOCachePageDirtyCleanup { pfdbe -- extent }
 		0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
 	end
 
-	pfdbe@ IOPageFrameEntryCache_DirtyExtent + @ extent!
-	0 pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
-
 	ipl@ KeIPLLower
 end
 
@@ -182,8 +179,7 @@ fn IOCachePageWriteDirty { dontderef pfdbe -- ok }
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
-	auto extent
-	pfdbe@ IOCachePageDirtyCleanup extent!
+	pfdbe@ IOCachePageDirtyCleanup
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
@@ -191,19 +187,11 @@ fn IOCachePageWriteDirty { dontderef pfdbe -- ok }
 	auto off
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
-	if (DEBUGCHECKS)
-		if (off@ extent@ + fcb@ IOFileControlBlock_SizeInBytes + @ >)
-			fcb@ IOFileControlBlock_SizeInBytes + @
-			off@ extent@ +
-			"IOCachePageWriteDirty: dirty page extent (%d) beyond end of file (%d)\n" KeCrash
-		end
-	end
-
 	// perform the write operation
 
 	0 // flags
 	0 // kflags
-	extent@ // length
+	PAGESIZE // length
 	off@ // offset
 	pfdbe@ IOPageFrameEntryCache_PFN + @ PAGESHIFT << IDENTITYSPACE | // buffer
 	fcb@ // fcb
@@ -403,7 +391,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	0 pfdbe@ IOPageFrameEntryCache_Flags + !
 	offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 	fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
-	0 pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
 	0 pfdbe@ IOPageFrameEntryCache_DirtyQuotaBlock + !
 	0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
 	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
@@ -633,7 +620,7 @@ fn IOCachePageDirtyQuotaUncharge { pfdbe -- }
 	quotablock@ MmQuotaBlockDereference
 end
 
-fn IOCachePageDirtyFunction { extent pfdbe -- ok }
+fn IOCachePageDirtyFunction { pfdbe -- ok }
 	// mark a page dirty and insert it on the dirty page list if
 	// necessary.
 
@@ -653,14 +640,6 @@ fn IOCachePageDirtyFunction { extent pfdbe -- ok }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
-
-	if (extent@ pfdbe@ IOPageFrameEntryCache_DirtyExtent + @ >)
-		fcb@ IOFileControlBlock_SizeInBytes + @ pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ -
-		extent@
-		min extent!
-
-		extent@ pfdbe@ IOPageFrameEntryCache_DirtyExtent + !
-	end
 
 	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
 		ipl@ KeIPLLower

@@ -25,7 +25,7 @@ struct IOPageFrameEntryCache
 	4 References
 	4 WorkingSetIndexHint
 	4 Context3
-	4 DirtyExtent
+	4 Context4
 	4 DirtyQuotaBlock
 	4 DirtyPTE
 	4 FCB
@@ -75,9 +75,9 @@ extern IOCachePageWriteDirty { dontderef pfdbe -- ok }
 
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
-extern IOCachePageDirtyFunction { extent pfdbe -- ok }
+extern IOCachePageDirtyFunction { pfdbe -- ok }
 
-extern IOCachePageDirtyCleanup { pfdbe -- extent }
+extern IOCachePageDirtyCleanup { pfdbe -- }
 
 extern IOCachePageDirtyQuotaCharge { quotablock pfdbe -- charged }
 extern IOCachePageDirtyQuotaUncharge { pfdbe -- }

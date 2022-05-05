@@ -41,9 +41,9 @@ struct MmPageFrameEntryFree
 endstruct
 
 struct MmPageFrameEntryPool
-	4 Next
+	4 PoolListNext
 	4 PFN
-	4 Prev
+	4 PoolListPrev
 	4 ByteSize
 	4 Tag
 	4 VirtualAddress
@@ -55,8 +55,8 @@ struct MmPageFrameEntryPool
 	4 Context9
 	4 Context10
 	4 BucketIndex
-	4 PoolListNext
-	4 PoolListPrev
+	4 Context11
+	4 Context12
 endstruct
 
 extern MmUsageDump { -- }

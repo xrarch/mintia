@@ -65,6 +65,5 @@ const STATUS_INVALID_CONFIG_FILE   -63
 const STATUS_NO_SUCH_GROUP         -64
 const STATUS_NOT_A_CONSOLE         -65
 const STATUS_OVERLAPS_MMIO         -66
-const STATUS_NO_POOL               -67
 
 extern OSStatusGetName { status -- name }

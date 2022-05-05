@@ -23,9 +23,6 @@ public MmPoolSpaceBitmapHeader
 
 buffer MmPoolSpaceBitmap (POOLPAGES 7 + 3 >>)
 
-var MmPoolLimit 0
-public MmPoolLimit
-
 var MmPoolBytesUsed 0
 public MmPoolBytesUsed
 
@@ -123,25 +120,14 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 		end
 	end
 
-	auto margin
-
 	if (flags@ 0 ==)
 		POOLALLOC flags!
-	end
-
-	if (flags@ MUSTSUCCEEDL2 &)
-		MMPOOL_MUSTSUCCEEDL2THRESH margin!
-	end elseif (flags@ MUSTSUCCEED &)
-		MMPOOL_MUSTSUCCEEDTHRESH margin!
-	end else
-		MMPOOL_NORMALTHRESH margin!
 	end
 
 	// round up to nearest long
 	bytes@ 3 + 3 ~ & bytes!
 
 	if (bytes@ MmPoolSlab_SIZEOF + PAGESIZE 2 / >=)
-		margin@ // margin
 		bytes@ // bytes
 		tag@ // tag
 		flags@ // flags
@@ -150,7 +136,6 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 		return
 	end
 
-	margin@ // margin
 	bytes@ // bytes
 	tag@ // tag
 	flags@ // flags
@@ -232,34 +217,16 @@ fn MmPoolSpaceRelease { pages offset -- }
 	ipl@ KeIPLLower
 end
 
-fn MmPoolPageAlignedAlloc { margin bytes tag flags -- pfdbe ptr ok }
+fn MmPoolPageAlignedAlloc { bytes tag flags -- pfdbe ptr ok }
 	auto pagesneeded
 	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	if (MmPoolBytesUsed@ MmSlabBytesUsedExternally@ + pagesneeded@ PAGESHIFT << + margin@ + MmPoolLimit@ >)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_NO_POOL ok!
-
-		return
-	end
-
-	pagesneeded@ PAGESHIFT << MmPoolBytesUsed +=
-
-	rs@ HALCPUInterruptRestore
-
 	auto offset
+
 	pagesneeded@ // pagesneeded
 	MmPoolSpaceReserve ok! offset!
 
 	if (ok@)
-		HALCPUInterruptDisable rs!
-		pagesneeded@ PAGESHIFT << MmPoolBytesUsed -=
-		rs@ HALCPUInterruptRestore
-
 		return
 	end
 
@@ -315,10 +282,6 @@ fn MmPoolPageAlignedAlloc { margin bytes tag flags -- pfdbe ptr ok }
 			offset@ // offset
 			MmPoolSpaceRelease
 
-			HALCPUInterruptDisable rs!
-			pagesneeded@ PAGESHIFT << MmPoolBytesUsed -=
-			rs@ HALCPUInterruptRestore
-
 			return
 		end
 
@@ -347,6 +310,11 @@ fn MmPoolPageAlignedAlloc { margin bytes tag flags -- pfdbe ptr ok }
 		PAGESIZE vaddr +=
 		1 i +=
 	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+	pagesneeded@ PAGESHIFT << MmPoolBytesUsed +=
+	rs@ HALCPUInterruptRestore
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!

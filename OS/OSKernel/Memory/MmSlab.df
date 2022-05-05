@@ -45,7 +45,7 @@ public MmSlabBucketCounts
 
 extern MmHeapPrintTag { tag -- }
 
-fn MmSlabAlloc { margin bytes tag flags -- ptr ok }
+fn MmSlabAlloc { bytes tag flags -- ptr ok }
 	0 ok!
 
 	// calculate as much stuff as possible here before we disable interrupts
@@ -82,16 +82,6 @@ fn MmSlabAlloc { margin bytes tag flags -- ptr ok }
 
 	auto rs
 	HALCPUInterruptDisable rs!
-
-	if (MmPoolBytesUsed@ MmSlabBytesUsedInternally@ + sz@ + margin@ + MmPoolLimit@ >)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_NO_MEMORY ok!
-
-		return
-	end
-
-	sz@ MmSlabBytesUsedInternally +=
 
 	listhead@@ ptr!
 
@@ -132,6 +122,8 @@ fn MmSlabAlloc { margin bytes tag flags -- ptr ok }
 				1 [bucketindex@]MmSlabBucketCounts +=
 			end
 
+			sz@ MmSlabBytesUsedInternally +=
+
 			rs@ HALCPUInterruptRestore
 
 			if (pfn@)
@@ -146,19 +138,6 @@ fn MmSlabAlloc { margin bytes tag flags -- ptr ok }
 
 			return
 		end
-
-		// check pool limit again, this time against the external usage. it
-		// may forbid us from allocating a new page even if we really want to.
-
-		if (MmPoolBytesUsed@ MmSlabBytesUsedExternally@ + PAGESIZE + margin@ + MmPoolLimit@ >)
-			rs@ HALCPUInterruptRestore
-
-			STATUS_NO_POOL ok!
-
-			return
-		end
-
-		PAGESIZE MmSlabBytesUsedExternally +=
 
 		// no slab found, allocate a physical page and turn it into a bunch of
 		// properly-sized slabs. dip down into IPLDPC and turn interrupts back
@@ -204,9 +183,6 @@ fn MmSlabAlloc { margin bytes tag flags -- ptr ok }
 		end
 
 		if (ok@)
-			sz@ MmSlabBytesUsedInternally -=
-			PAGESIZE MmSlabBytesUsedExternally -=
-
 			ipl@ KeIPLLower
 
 			return
@@ -262,6 +238,9 @@ fn MmSlabAlloc { margin bytes tag flags -- ptr ok }
 	if (DEBUGCHECKS)
 		1 [bucketindex@]MmSlabBucketCounts +=
 	end
+
+	PAGESIZE MmSlabBytesUsedExternally +=
+	sz@ MmSlabBytesUsedInternally +=
 
 	ipl@ KeIPLLower
 

@@ -46,9 +46,6 @@ struct OSQuotaInformation
 	4 WorkingSetUsed
 	4 WorkingSetMaximum
 
-	4 DirtyPagesUsed
-	4 DirtyPagesMaximum
-
 	48 Reserved
 endstruct
 
@@ -56,7 +53,6 @@ struct OSQuota
 	4 Heap
 	4 VirtualMemory
 	4 WorkingSet
-	4 DirtyPages
 
 	48 Reserved
 endstruct

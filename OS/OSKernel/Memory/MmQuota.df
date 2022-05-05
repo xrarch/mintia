@@ -20,7 +20,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmQuotaBlockCreate { modmax wsmax vmmax heapmax -- quotablock ok }
+fn MmQuotaBlockCreate { wsmax vmmax heapmax -- quotablock ok }
 	MmQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
 	CANBLOCK // flags
@@ -30,7 +30,7 @@ fn MmQuotaBlockCreate { modmax wsmax vmmax heapmax -- quotablock ok }
 		return
 	end
 
-	modmax@ wsmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
+	wsmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
 end
 
 fn MmQuotaBlockFork { quotablock -- newquotablock ok }
@@ -43,7 +43,6 @@ fn MmQuotaBlockFork { quotablock -- newquotablock ok }
 		return
 	end
 
-	quotablock@ MmQuotaBlock_DirtyPagesMax + @ // modmax
 	quotablock@ MmQuotaBlock_WorkingSetMax + @ // wsmax
 	quotablock@ MmQuotaBlock_VMMax + @ // vmmax
 	quotablock@ MmQuotaBlock_HeapMax + @ // heapmax
@@ -51,7 +50,7 @@ fn MmQuotaBlockFork { quotablock -- newquotablock ok }
 	MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockInitialize { modmax wsmax vmmax heapmax quotablock -- ok }
+fn MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
 	0 ok!
 
 	1 quotablock@ MmQuotaBlock_References + !
@@ -64,9 +63,6 @@ fn MmQuotaBlockInitialize { modmax wsmax vmmax heapmax quotablock -- ok }
 
 	0 quotablock@ MmQuotaBlock_WorkingSetUsed + !
 	wsmax@ quotablock@ MmQuotaBlock_WorkingSetMax + !
-
-	0 quotablock@ MmQuotaBlock_DirtyPagesUsed + !
-	modmax@ quotablock@ MmQuotaBlock_DirtyPagesMax + !
 end
 
 fn MmQuotaBlockReference { quotablock -- }
@@ -294,62 +290,12 @@ fn MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn MmQuotaBlockChargeDirtyPages { charge quotablock -- ok }
-	if (charge@ 0 s<)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
-
-	0 ok!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto modmax
-	quotablock@ MmQuotaBlock_DirtyPagesMax + @ modmax!
-
-	auto oldcharge
-	quotablock@ MmQuotaBlock_DirtyPagesUsed + @ oldcharge!
-
-	if (oldcharge@ charge@ + modmax@ >)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_VM_QUOTA_EXCEEDED ok!
-
-		return
-	end
-
-	oldcharge@ charge@ + quotablock@ MmQuotaBlock_DirtyPagesUsed + !
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn MmQuotaBlockUnchargeDirtyPages { charge quotablock -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto oldcharge
-	quotablock@ MmQuotaBlock_DirtyPagesUsed + @ oldcharge!
-
-	if (DEBUGCHECKS)
-		if (charge@ oldcharge@ >)
-			"MmQuotaBlockUnchargeDirtyPages: attempt to uncharge more than was charged\n" KeCrash
-		end
-	end
-
-	oldcharge@ charge@ - quotablock@ MmQuotaBlock_DirtyPagesUsed + !
-
-	rs@ HALCPUInterruptRestore
-end
-
 fn MmSetQuota { quota quotablock -- }
 	// set new limits on the quotablock.
 
 	quota@ OSQuota_Heap + @ quotablock@ MmQuotaBlock_HeapMax + !
 	quota@ OSQuota_VirtualMemory + @ quotablock@ MmQuotaBlock_VMMax + !
 	quota@ OSQuota_WorkingSet + @ quotablock@ MmQuotaBlock_WorkingSetMax + !
-	quota@ OSQuota_DirtyPages + @ quotablock@ MmQuotaBlock_DirtyPagesMax + !
 end
 
 fn MmQuotaQuery { query quotablock -- }
@@ -366,9 +312,6 @@ fn MmQuotaQuery { query quotablock -- }
 
 	quotablock@ MmQuotaBlock_WorkingSetUsed + @ query@ OSQuotaInformation_WorkingSetUsed + !
 	quotablock@ MmQuotaBlock_WorkingSetMax + @ query@ OSQuotaInformation_WorkingSetMaximum + !
-
-	quotablock@ MmQuotaBlock_DirtyPagesUsed + @ query@ OSQuotaInformation_DirtyPagesUsed + !
-	quotablock@ MmQuotaBlock_DirtyPagesMax + @ query@ OSQuotaInformation_DirtyPagesMaximum + !
 end
 
 fn MmQuotaBlockPrint { quotablock -- }
@@ -380,9 +323,6 @@ fn MmQuotaBlockPrint { quotablock -- }
 
 	quotablock@ MmQuotaBlock_WorkingSetMax + @
 	quotablock@ MmQuotaBlock_WorkingSetUsed + @ " WSET = %d/%i pages\n" Printf
-
-	quotablock@ MmQuotaBlock_DirtyPagesMax + @
-	quotablock@ MmQuotaBlock_DirtyPagesUsed + @ " DIRT = %d/%i pages\n" Printf
 
 	quotablock@ MmQuotaBlock_References + @ " REFS = %d\n" Printf
 end

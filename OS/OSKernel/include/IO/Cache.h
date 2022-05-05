@@ -26,7 +26,7 @@ struct IOPageFrameEntryCache
 	4 WorkingSetIndexHint
 	4 Context3
 	4 Context4
-	4 DirtyQuotaBlock
+	4 Context5
 	4 DirtyPTE
 	4 FCB
 	4 Flags

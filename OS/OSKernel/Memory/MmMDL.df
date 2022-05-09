@@ -21,8 +21,8 @@
 fn MmMDLInitialize { length vaddr mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
-
 	0 mdl@ MmMDLHeader_Flags + !
+	0 mdl@ MmMDLHeader_Process + !
 
 	0 mdl@ MmMDLHeader_MappedAddress + !
 end
@@ -82,6 +82,8 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 		return
 	end
+
+	process@ mdl@ MmMDLHeader_Process + !
 
 	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
 	// clean up the partial pin if we fail at any point.
@@ -187,10 +189,38 @@ fn MmMDLUnpin { mdl -- }
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED & ~~)
 			"MmMDLUnpin: not pinned\n" KeCrash
 		end
+
+		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
+			"MmMDLUnpin: mapped\n" KeCrash
+		end
 	end
+
+	MMMDL_PINNED ~ mdl@ MmMDLHeader_Flags + &=
 
 	// TODO after unifying anon and file cache pages.
 	// NOTE remember to modify pages if MDL had modify flag set
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	while (1)
+		if (mdlpos@@ -1 ==)
+			return
+		end
+
+		auto pfdbe
+		mdlpos@@ pfdbe!
+
+		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MODIFIED &)
+			pfdbe@ // pfdbe
+			mdl@ MmMDLHeader_Process + @ // process
+			MmEvictablePageModify
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		4 mdlpos +=
+	end
 end
 
 fn MmMDLMap { mdl -- vaddr ok }
@@ -198,7 +228,7 @@ fn MmMDLMap { mdl -- vaddr ok }
 
 	if (DEBUGCHECKS)
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
-			"MmMDLMap: double map\n" KeCrash
+			"MmMDLMap: already mapped\n" KeCrash
 		end
 	end
 

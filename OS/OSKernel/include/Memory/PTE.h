@@ -7,7 +7,6 @@ extern MmPTEInterpret { pteaddr -- phyaddr flags ok }
 extern MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflags ok }
 extern MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
 extern MmPTEValid { pteaddr -- valid }
-extern MmPTEUndirty { pteaddr -- }
 
 // platform-independent generic PTE flag representations
 const PTE_V  1  // valid

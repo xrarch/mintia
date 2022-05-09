@@ -236,10 +236,10 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 		buckethead@ 4 + @ pfdbe!
 
 		while (pfdbe@)
-			if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 				ipl@ KeIPLLower
 
-				1 pfdbe@ IOCachePageWriteDirty drop
+				pfdbe@ IOCachePageWrite drop
 
 				IPLDPC KeIPLRaise ipl!
 
@@ -279,15 +279,9 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (cacheblock@ IOCacheInfoBlock_DirtyPages + @ cacheblock@ IOCacheInfoBlock_PageReferences + @ ~=)
+	if (cacheblock@ IOCacheInfoBlock_PageReferences + @)
 		// one or more page frames in this cache is currently in use.
 		// don't allow truncation for now.
-
-		if (DEBUGCHECKS)
-			if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_DirtyPages + @ <)
-				"IOCacheInfoBlockTruncate: page references < dirty page count\n" KeCrash
-			end
-		end
 
 		rs@ HALCPUInterruptRestore
 
@@ -301,17 +295,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
 
 	rs@ HALCPUInterruptRestore
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ IOCacheInfoBlock_PageReferences + @ cacheblock@ IOCacheInfoBlock_DirtyPages + @ ~=)
-			// they should both either be zero (all dirty pages written out and zero other references),
-			// or both be equal (only dirty pages, and writeout==0)
-
-			cacheblock@ IOCacheInfoBlock_DirtyPages + @
-			cacheblock@ IOCacheInfoBlock_PageReferences + @
-			"IOCacheInfoBlockTruncate: page references (%d) != dirty page count (%d)\n" KeCrash
-		end
-	end
 
 	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
 	// for each bucket, free all cached pages. if a page is dirty,
@@ -339,27 +322,10 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		buckethead@ 4 + @ pfdbe!
 
 		while (pfdbe@)
-			if (DEBUGCHECKS)
-				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-					if (pfdbe@ IOPageFrameEntryCache_ReferencesI + gi 1 ~=)
-						pfdbe@
-						pfdbe@ IOPageFrameEntryCache_ReferencesI + gi
-						"IOCacheInfoBlockTruncate: found page with strange refcount %d (0x%08x)\n" KeCrash
-					end
-				end elseif (pfdbe@ IOPageFrameEntryCache_ReferencesI + gi 0 ~=)
-					pfdbe@
-					pfdbe@ IOPageFrameEntryCache_ReferencesI + gi
-					"IOCacheInfoBlockTruncate: 2 found page with strange refcount %d (0x%08x)\n" KeCrash
-				end
-			end
-
-			auto npfdbe
-
-			// get this now, because who knows what will happen to it
-			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
-
 			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
-				if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
+				pfdbe@ MmEvictablePageReference drop
+
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 					if (writeout@)
 						// this is a dirty page, and caller wants us to
 						// write them out to disk. the alternative is
@@ -368,37 +334,22 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 						ipl@ KeIPLLower
 
-						1 pfdbe@ IOCachePageWriteDirty drop
+						pfdbe@ IOCachePageWrite drop
 
 						IPLDPC KeIPLRaise ipl!
-					end else
-						// this is a dirty page and the caller doesn't want
-						// us to write it to disk, so we need to clean it up
-						// ourselves by decrementing this cacheblock's
-						// dirty page count and removing it from the
-						// dirty list.
-
-						pfdbe@ IOCachePageDirtyCleanup
-					end
-
-					pfdbe@ MmEvictablePageDereference drop
-				end
-
-				if (DEBUGCHECKS)
-					if (pfdbe@ IOPageFrameEntryCache_ReferencesI + gi)
-						"IOCacheInfoBlockTruncate: page acquired references\n" KeCrash
 					end
 				end
-
-				pfdbe@ MmEvictablePageRemoveForDeletion
-
-				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
 
 				pfdbe@ // pfdbe
 				buckethead@ // buckethead
 				IOCachePageRemove
 
-				pfdbe@ MmPageFreeByEntry
+				pfdbe@ MmEvictablePageDelete
+
+				auto npfdbe
+				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
+
+				pfdbe@ MmEvictablePageDereference drop
 
 				npfdbe@ pfdbe!
 
@@ -425,10 +376,15 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 end
 
 fn IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
+	// XXX this is an INCORRECT solution...
+	// we have to direct I/O blast some zeroes to the end of the file to fix
+	// (reliably) the situation that necessitates this.
+
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto pageframe
 	auto ok
+	auto deref
 
 	if (pfdbe@ ~~)
 		0 // flags
@@ -440,8 +396,12 @@ fn IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
 		if (ok@)
 			ok@ "IOCacheInfoBlockZeroEnd: failed to read page (%i)\n" KeCrash
 		end
+
+		1 deref!
 	end else
 		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
+
+		0 deref!
 	end
 
 	pageframe@ offset@ PAGEOFFSETMASK & + // ptr
@@ -450,12 +410,11 @@ fn IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
 	memset
 
 	pfdbe@ // pfdbe
-	IOCachePageDirtyFunction ok!
+	KeProcessCurrent // process
+	MmEvictablePageModify
 
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "IOCacheInfoBlockZeroEnd: failed to dirty page (%i)\n" KeCrash
-		end
+	if (deref@)
+		pfdbe@ MmEvictablePageDereference drop
 	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop

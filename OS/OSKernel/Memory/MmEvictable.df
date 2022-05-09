@@ -12,7 +12,15 @@
 
 #include "<inc>/Kernel.h"
 
+#include "<inc>/Executive.h"
+
 #include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
 
@@ -320,6 +328,46 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 		oldcount@ // oldcount
 		pfdbe@ // pfdbe
 		reffunc@ MmReferenceFunction
+	end
+end
+
+fn MmEvictablePageModify { pfdbe process -- }
+	if (DEBUGCHECKS)
+		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi ~~)
+			"MmEvictablePageModify: modified a page with no references\n" KeCrash
+		end
+	end
+
+	auto rs
+	auto tx
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
+		HALCPUInterruptDisable rs!
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		rs@ HALCPUInterruptRestore
+	end elseif (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+		HALCPUInterruptDisable rs!
+		pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ tx!
+		MMSWAPPAGE_NONE pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		rs@ HALCPUInterruptRestore
+
+		if (tx@ 0 s<)
+			// nothing to do
+			return
+		end
+
+		tx@ IOSwapPageFree
+	end else
+		"MmEvictablePageModify: modified a page type that doesn't like to be modified\n" KeCrash
+	end
+
+	if (process@)
+		HALCPUInterruptDisable rs!
+		1 process@ PsProcess_ModifiedPages + +=
+		rs@ HALCPUInterruptRestore
 	end
 end
 

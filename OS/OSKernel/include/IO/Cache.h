@@ -25,11 +25,10 @@ struct IOPageFrameEntryCache
 	4 OffsetInFile
 	4 NextCachePage
 	4 PrevCachePage
-	4 DirtyPTE
+	4 Context1
 endstruct
 
 const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?
-const IOCACHEPAGEFLAG_DIRTY 2 // is the page dirty (does it need to be written out)?
 
 extern IOWritebehindWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
@@ -61,32 +60,14 @@ extern IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
 extern IOCachePageRemove { pfdbe buckethead -- }
 extern IOCachePageInsert { pfdbe buckethead -- }
 
-extern IOCachePageRemoveDirty { pfdbe -- }
-extern IOCachePageInsertDirty { pfdbe -- }
-
-extern IOCachePageWriteDirty { dontderef pfdbe -- ok }
-
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
-extern IOCachePageDirtyFunction { pfdbe -- ok }
 
-extern IOCachePageDirtyCleanup { pfdbe -- }
-
-extern IOCachePageDirtyQuotaCharge { quotablock pfdbe -- charged }
-extern IOCachePageDirtyQuotaUncharge { pfdbe -- }
+extern IOCachePageWrite { pfdbe -- ok }
 
 extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
 
-externptr IOCacheDirtyPageListHead
-externptr IOCacheDirtyPageListTail
-
-externptr IOCachePagesDirtyCount
-
 externptr IOCachePagesUsed
-
-externptr IOCachePagesDirtyMaximum
-
-externptr IODirtyPageEvent

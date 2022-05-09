@@ -27,155 +27,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-var IOCacheDirtyPageListHead 0
-public IOCacheDirtyPageListHead
-
-var IOCacheDirtyPageListTail 0
-public IOCacheDirtyPageListTail
-
 var IOCachePagesUsed 0
 public IOCachePagesUsed
-
-var IOCachePagesDirtyMaximum 0
-public IOCachePagesDirtyMaximum
-
-var IOCachePagesDirtyCount 0
-public IOCachePagesDirtyCount
-
-fn IOCachePageRemoveDirty { pfdbe -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	// remove from dirty list
-	auto n
-	pfdbe@ MmPageFrameEntryEvictable_Next + @ n!
-
-	if (n@)
-		pfdbe@ MmPageFrameEntryEvictable_Prev + @ n@ MmPageFrameEntryEvictable_Prev + !
-	end else // no next means we were the tail
-		pfdbe@ MmPageFrameEntryEvictable_Prev + @ IOCacheDirtyPageListTail!
-	end
-
-	auto p
-	pfdbe@ MmPageFrameEntryEvictable_Prev + @ p!
-
-	if (p@)
-		pfdbe@ MmPageFrameEntryEvictable_Next + @ p@ MmPageFrameEntryEvictable_Next + !
-	end else // no prev means we were the head
-		pfdbe@ MmPageFrameEntryEvictable_Next + @ IOCacheDirtyPageListHead!
-	end
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOCachePageInsertDirty { pfdbe -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	// use the evict LRU links to insert the page on the back of the dirty list
-
-	auto t
-	IOCacheDirtyPageListTail@ t!
-
-	if (t@ ~~)
-		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-		0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
-
-		pfdbe@ IOCacheDirtyPageListHead!
-		pfdbe@ IOCacheDirtyPageListTail!
-	end else
-		0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-
-		t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
-		pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-		pfdbe@ IOCacheDirtyPageListTail!
-	end
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOCachePageDirtyCleanup { pfdbe -- }
-	auto fcb
-	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
-
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (DEBUGCHECKS)
-		if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY & ~~)
-			pfdbe@ "IOCachePageDirtyCleanup: page wasn't dirty (0x%08x)\n" KeCrash
-		end
-	end
-
-	// clear dirty flag
-	IOCACHEPAGEFLAG_DIRTY ~ pfdbe@ IOPageFrameEntryCache_Flags + &=
-
-	// decrement dirty page count
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ IOCacheInfoBlock_DirtyPages + @ 0 ==)
-			"IOCachePageDirtyCleanup: underflow\n" KeCrash
-		end
-	end
-
-	1 cacheblock@ IOCacheInfoBlock_DirtyPages + -=
-	1 IOCachePagesDirtyCount -=
-
-	// remove from dirty list
-	pfdbe@ IOCachePageRemoveDirty
-
-	// if there's a dirty PTE somewhere, clear the writable bit so that
-	// the next time the process writes to it, this page gets properly
-	// marked as dirty again
-
-	if (pfdbe@ IOPageFrameEntryCache_DirtyPTE + @)
-		pfdbe@ IOPageFrameEntryCache_DirtyPTE + @ MmPTEUndirty
-		0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
-	end
-
-	ipl@ KeIPLLower
-end
-
-fn IOCachePageWriteDirty { dontderef pfdbe -- ok }
-	// XXX call with care: data loss could occur if thread can receive signals
-	// during this operation
-
-	if (DEBUGCHECKS)
-		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"IOCachePageWriteDirty: could be killed\n" KeCrash
-		end
-	end
-
-	auto fcb
-	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
-
-	pfdbe@ IOCachePageDirtyCleanup
-
-	auto writefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
-
-	auto off
-	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
-
-	// perform the write operation
-
-	0 // flags
-	0 // kflags
-	PAGESIZE // length
-	off@ // offset
-	pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | // buffer
-	fcb@ // fcb
-	KERNELMODE // lastmode
-	writefunc@ IODispatchWriteFunction ok! drop
-
-	if (dontderef@ ~~)
-		// no longer dirty, unbias the refcount
-		pfdbe@ MmEvictablePageDereference drop
-	end
-end
 
 fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	if (DEBUGCHECKS)
@@ -364,7 +217,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	0 pfdbe@ IOPageFrameEntryCache_Flags + !
 	offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 	fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
-	0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
 	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
 	0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
 
@@ -508,58 +360,50 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 	1 IOCachePagesUsed -=
 end
 
-fn IOCachePageDirtyFunction { pfdbe -- ok }
-	// mark a page dirty and insert it on the dirty page list if
-	// necessary.
+fn IOCachePageWrite { pfdbe -- ok }
+	// assumes caller referenced the page
 
-	0 ok!
+	auto rs
+	HALCPUInterruptDisable rs!
 
-	auto fcb
-	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+		// page is already clean, nothing to do but report success.
 
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+		rs@ HALCPUInterruptRestore
 
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"IOCachePageDirty: no cacheblock on FCB\n" KeCrash
-		end
-	end
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_DIRTY &)
-		ipl@ KeIPLLower
+		0 ok!
 
 		return
 	end
 
-	// bias the refcount so that it doesn't get evicted while dirty.
-	// this gets undone when it is written out.
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-	pfdbe@ MmEvictablePageReference drop
+	rs@ HALCPUInterruptRestore
 
-	pfdbe@ IOCachePageInsertDirty
+	KeThreadCurrent@ KeThreadIgnoreKill drop
 
-	IOCACHEPAGEFLAG_DIRTY pfdbe@ IOPageFrameEntryCache_Flags + |=
+	auto fcb
+	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
-	// mark valid: the page must either already be valid, and only be
-	// partially dirty, or be invalid and fully overwritten (in which case,
-	// it is now valid). caller guarantees this.
-	IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
 
-	// will be decremented when written out
-	1 cacheblock@ IOCacheInfoBlock_DirtyPages + +=
-	1 IOCachePagesDirtyCount +=
+	auto off
+	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
-	if (IOCachePagesDirtyCount@ IOCachePagesDirtyMaximum@ >=)
-		0 // priboost
-		IODirtyPageEvent // event
-		KeEventSignal
-	end
+	// perform the write operation
 
-	ipl@ KeIPLLower
+	0 // flags
+	0 // kflags
+	PAGESIZE // length
+	off@ // offset
+	pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | // buffer
+	fcb@ // fcb
+	KERNELMODE // lastmode
+	writefunc@ IODispatchWriteFunction ok! drop
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }

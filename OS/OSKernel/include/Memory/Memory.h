@@ -74,6 +74,8 @@ extern MmZeroPageWorker { -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }
 
+extern MmFlushModifiedPages { -- }
+
 externptr MmPageFrameDatabase
 externptr MmPageFreeListHead
 externptr MmPageZeroListHead

@@ -61,6 +61,8 @@ extern MmEvictablePageRemove { pfdbe -- }
 extern MmEvictablePageRemoveForDeletion { pfdbe -- }
 extern MmEvictablePageInsert { pfdbe -- }
 
+extern MmEvictablePageModify { pfdbe process -- }
+
 extern MmEvictSinglePage { -- pfdbe ok }
 
 externptr MmModifiedPageListHead

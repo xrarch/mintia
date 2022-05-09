@@ -80,41 +80,64 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			if (pfdbe@)
 				pfdbe@ MmEvictablePageReference drop
 
-				if (DEBUGCHECKS)
-					if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ~=)
-						"MmModifiedPageWriter: swap page exists\n" KeCrash
-					end
-				end
-
-				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-				ipl@ KeIPLLower
-
-				auto pno
-				pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | // pageframe
-				IOSwapPageWrite ok! pno!
-
-				IPLDPC KeIPLRaise ipl!
-
-				if (ok@ ~~)
-					// swapout worked
-
-					if (modcount@)
-						1 modcount -=
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+					if (DEBUGCHECKS)
+						if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ~=)
+							"MmModifiedPageWriter: swap page exists\n" KeCrash
+						end
 					end
 
-					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
-						MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
-						// modified or deleted, free the swap page :(
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-						pno@ IOSwapPageFree
-					end else
-						pno@ pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+					ipl@ KeIPLLower
+
+					auto pno
+					pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | // pageframe
+					IOSwapPageWrite ok! pno!
+
+					IPLDPC KeIPLRaise ipl!
+
+					if (ok@ ~~)
+						// swapout worked
+
+						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
+							MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
+							// modified or deleted, free the swap page :(
+
+							pno@ IOSwapPageFree
+						end else
+							pno@ pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+						end
+					end
+				end elseif (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
+					auto cacheblock
+					pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockTryLockShared ok!
+
+					if (ok@)
+						// locked successfully
+
+						ipl@ KeIPLLower
+
+						// write out page
+
+						pfdbe@ IOCachePageWrite drop
+
+						cacheblock@ // cacheblock
+						IOCacheInfoBlockUnlock
+
+						IPLDPC KeIPLRaise ipl!
 					end
 				end
 
 				pfdbe@ MmEvictablePageDereference drop
+
+				if (modcount@)
+					1 modcount -=
+				end
 			end else
 				0 modcount!
 			end
@@ -122,4 +145,14 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			ipl@ KeIPLLower
 		end
 	end
+end
+
+fn MmFlushModifiedPages { -- }
+	// artifically signal the dirty page event to sweep all the dirty
+	// pages to disk. returns asynchronously, up to the caller to query the
+	// dirty page count and figure out when they've all been written.
+
+	0 // priboost
+	MmModifiedPageEvent // event
+	KeEventSignal
 end

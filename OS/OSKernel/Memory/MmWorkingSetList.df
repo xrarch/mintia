@@ -25,7 +25,6 @@
 #include "<ll>/OSDLL/OS.h"
 
 const MMWORKINGSETENTRY_VALID 1
-const MMWORKINGSETENTRY_FILE  2
 
 fn MmWorkingSetLock { processobject -- ok }
 	KERNELMODE // waitmode
@@ -387,7 +386,7 @@ fn MmWorkingSetTrimRange { startva endva process -- }
 	end
 end
 
-fn MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
+fn MmWorkingSetEntryInsert { vaddr wsleptr process -- }
 	// caller must create the associated PTE before calling this function.
 
 	// increments the working set size.
@@ -401,10 +400,6 @@ fn MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
 
 	auto wsle
 	vaddr@ MMWORKINGSETENTRY_VALID | wsle!
-
-	if (isfilepage@)
-		MMWORKINGSETENTRY_FILE wsle |=
-	end
 
 	1 process@ PsProcess_WorkingSetSize + +=
 
@@ -733,9 +728,6 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 	auto vaddr
 	wsleptr@@ PAGENUMBERMASK & vaddr!
 
-	auto isfile
-	wsleptr@@ MMWORKINGSETENTRY_FILE & isfile!
-
 	auto pteaddr
 	auto ok
 
@@ -764,25 +756,12 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 
 	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-	auto ipl
-	-1 ipl!
-
-	if (isfile@)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
 		if (flags@ PTE_W &)
-			IPLDPC KeIPLRaise ipl!
+			// page was modified, reflect that in the pfdbe
 
-			if (pfdbe@ IOPageFrameEntryCache_DirtyPTE + @ pteaddr@ ==)
-				0 pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
-				
-				// DONT undirty the PTE, just leave IPL raised and allow it
-				// to be unmapped below
-
-				// pteaddr@ MmPTEUndirty
-			end else
-				ipl@ KeIPLLower
-
-				-1 ipl!
-			end
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 		end
 	end
 
@@ -794,10 +773,6 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 	pteaddr@ // pteaddr
 	process@ PsProcess_PCB + KeProcess_ASID + @ // asid
 	MmPTEUpdate drop drop drop
-
-	if (ipl@ -1 ~=)
-		ipl@ KeIPLLower
-	end
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW &)
 		// COW page. create transition PTE so we can soft-fault it back in

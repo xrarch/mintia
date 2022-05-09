@@ -47,13 +47,13 @@
 .extern OSMountCountQuery
 .extern OSMountUpdateFlags
 .extern OSMountGetFilesystemName
-.extern OSFlushDirtyPages
 .extern OSSectionCreate
 .extern OSSectionMapView
 .extern OSUnmapView
 .extern OSRemapView
 .extern OSMemoryQuery
 .extern OSWorkingSetPurge
+.extern OSFlushModifiedPages
 .extern OSProcessCreate
 .extern OSProcessSignal
 .extern OSProcessOpenByPID
@@ -136,13 +136,13 @@ OSCallTable:
 	.dl OSTOSMountCountQuery                             ;43
 	.dl OSTOSMountUpdateFlags                            ;44
 	.dl OSTOSMountGetFilesystemName                      ;45
-	.dl OSTOSFlushDirtyPages                             ;46
-	.dl OSTOSSectionCreate                               ;47
-	.dl OSTOSSectionMapView                              ;48
-	.dl OSTOSUnmapView                                   ;49
-	.dl OSTOSRemapView                                   ;50
-	.dl OSTOSMemoryQuery                                 ;51
-	.dl OSTOSWorkingSetPurge                             ;52
+	.dl OSTOSSectionCreate                               ;46
+	.dl OSTOSSectionMapView                              ;47
+	.dl OSTOSUnmapView                                   ;48
+	.dl OSTOSRemapView                                   ;49
+	.dl OSTOSMemoryQuery                                 ;50
+	.dl OSTOSWorkingSetPurge                             ;51
+	.dl OSTOSFlushModifiedPages                          ;52
 	.dl OSTOSProcessCreate                               ;53
 	.dl OSTOSProcessSignal                               ;54
 	.dl OSTOSProcessOpenByPID                            ;55
@@ -876,19 +876,6 @@ OSTOSMountGetFilesystemName:
 	addi sp, sp, 4
 	ret
 
-OSTOSFlushDirtyPages:
-.global OSTOSFlushDirtyPages
-	subi sp, sp, 4
-	mov  long [sp], lr
-
-	jal  OSFlushDirtyPages
-
-	mov  long [s18 + 4], a0 ;t1
-
-	mov  lr, long [sp]
-	addi sp, sp, 4
-	ret
-
 OSTOSSectionCreate:
 .global OSTOSSectionCreate
 	subi sp, sp, 8
@@ -990,6 +977,19 @@ OSTOSWorkingSetPurge:
 	mov  long [sp], lr
 
 	jal  OSWorkingSetPurge
+
+	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSFlushModifiedPages:
+.global OSTOSFlushModifiedPages
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSFlushModifiedPages
 
 	mov  long [s18 + 4], a0 ;t1
 

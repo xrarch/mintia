@@ -71,8 +71,6 @@ extern OSMountCountQuery { -- count ok }
 extern OSMountUpdateFlags { newflags handle -- ok }
 extern OSMountGetFilesystemName { buffer handle -- ok }
 
-extern OSFlushDirtyPages { -- ok }
-
 // Mm
 extern OSSectionCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
 extern OSSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
@@ -82,6 +80,8 @@ extern OSRemapView { pageprotection length vaddr processhandle -- ok }
 extern OSMemoryQuery { query -- ok }
 
 extern OSWorkingSetPurge { -- ok }
+
+extern OSFlushModifiedPages { -- ok }
 
 // Ps
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }

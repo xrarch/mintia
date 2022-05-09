@@ -273,7 +273,6 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 				MmPTEUpdate drop drop drop
 
 				vaddr@ PAGENUMBERMASK & // vaddr
-				0 // isfilepage
 				wsleptr@ // wsleptr
 				process@ // process
 				MmWorkingSetEntryInsert
@@ -323,7 +322,6 @@ fn MmNormalFault { vaddr process -- signal }
 	auto section
 	auto vad
 	auto ok
-	auto isfilepage
 	auto flags
 	auto phyaddr
 	auto pfdbe
@@ -385,13 +383,11 @@ fn MmNormalFault { vaddr process -- signal }
 	end
 
 	if (section@ MmSection_FileObject + @)
-		1 isfilepage!
 		section@ // section
 		offset@ // offset
 		vad@ // vad
 		MmSatisfyFileFault ok! phyaddr! pfdbe! flags!
 	end else
-		0 isfilepage!
 		section@ // section
 		offset@ // offset
 		vad@ // vad
@@ -427,7 +423,6 @@ fn MmNormalFault { vaddr process -- signal }
 	MmPTEUpdate drop drop drop
 
 	vaddr@ PAGENUMBERMASK & // vaddr
-	isfilepage@ // isfilepage
 	wsleptr@ // wsleptr
 	process@ // process
 	MmWorkingSetEntryInsert
@@ -598,11 +593,9 @@ fn MmWriteFault { vaddr process -- signal }
 
 		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
 			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW &)
-				// dirtied an anonymous page, free its swap page
-
 				pfdbe@ // pfdbe
 				process@ // process
-				MmAnonymousPageModify
+				MmEvictablePageModify
 
 				phyaddr@ // phyaddr
 				PTE_V PTE_W | // flags
@@ -671,35 +664,9 @@ fn MmWriteFault { vaddr process -- signal }
 			OSSIGNAL_SEGV signal!
 			break
 		end else
-			if (section@ MmSection_FileObject + @ ~~)
-				// dirtied an anonymous page, free its swap page
-
-				pfdbe@ // pfdbe
-				process@ // process
-				MmAnonymousPageModify
-
-				phyaddr@ // phyaddr
-				PTE_V PTE_W | // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate drop drop drop
-
-				break
-			end
-
-			// dirty fault. mark the file page dirty.
-
-			IPLDPC KeIPLRaise ipl!
-
 			pfdbe@ // pfdbe
-			IOCachePageDirtyFunction ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"MmWriteFault: failed to dirty page\n" KeCrash
-				end
-			end
+			process@ // process
+			MmEvictablePageModify
 
 			phyaddr@ // phyaddr
 			PTE_V PTE_W | // flags
@@ -707,14 +674,6 @@ fn MmWriteFault { vaddr process -- signal }
 			pteaddr@ // pteaddr
 			process@ KeProcess_ASID + @ // asid
 			MmPTEUpdate drop drop drop
-
-			if (pfdbe@ IOPageFrameEntryCache_DirtyPTE + @)
-				pfdbe@ IOPageFrameEntryCache_DirtyPTE + @ MmPTEUndirty
-			end
-
-			pteaddr@ pfdbe@ IOPageFrameEntryCache_DirtyPTE + !
-
-			ipl@ KeIPLLower
 
 			break
 		end

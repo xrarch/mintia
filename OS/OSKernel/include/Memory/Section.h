@@ -38,8 +38,6 @@ extern MmUnmapView { length vaddr processhandle -- ok }
 extern MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 extern MmRemapView { pageprotection length vaddr processhandle -- ok }
 
-extern MmAnonymousPageModify { pfdbe process -- }
-
 extern MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 
 extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }

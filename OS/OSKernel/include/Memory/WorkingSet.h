@@ -13,7 +13,7 @@ extern MmWorkingSetPurge { process -- }
 
 extern MmWorkingSetRemap { flags startva endva process -- }
 
-extern MmWorkingSetEntryInsert { vaddr isfilepage wsleptr process -- }
+extern MmWorkingSetEntryInsert { vaddr wsleptr process -- }
 extern MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 extern MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 extern MmWorkingSetEntryRemove { wsleptr process -- }

@@ -11,7 +11,6 @@ struct MmPageFrameEntry
 	4 R6
 	4 R7
 	4 R8
-	4 R9
 endstruct
 
 struct MmPageFrameEntryFree
@@ -23,7 +22,6 @@ struct MmPageFrameEntryFree
 	4 R6
 	4 R7
 	4 R8
-	4 R9
 endstruct
 
 struct MmPageFrameEntryPool
@@ -35,7 +33,6 @@ struct MmPageFrameEntryPool
 	4 BucketIndex
 	4 PoolListNext
 	4 PoolListPrev
-	4 Context5
 endstruct
 
 extern MmUsageDump { -- }

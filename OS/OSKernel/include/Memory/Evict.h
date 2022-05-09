@@ -14,7 +14,6 @@ struct MmPageFrameEntryEvictable
 	4 Context2
 	4 Context3
 	4 Context4
-	4 Context5
 endstruct
 
 struct MmPageFrameEntrySlab
@@ -26,7 +25,6 @@ struct MmPageFrameEntrySlab
 	4 BucketIndex
 	4 PoolListNext
 	4 PoolListPrev
-	4 Context3
 endstruct
 
 struct MmPageFrameEntryAnonymous
@@ -38,7 +36,6 @@ struct MmPageFrameEntryAnonymous
 	4 References
 	4 Context2
 	4 Context3
-	4 Context4
 endstruct
 
 const MMEVICTFLAG_MODIFIED   1

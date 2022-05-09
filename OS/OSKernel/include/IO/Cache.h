@@ -6,7 +6,6 @@ struct IOCacheInfoBlock
 	ExRwLock_SIZEOF RwLock
 
 	4 PageReferences
-	4 DirtyPages
 	4 Flags
 
 	(IOCACHEPAGEBUCKETS KeMutex_SIZEOF *) PageBucketMutexes
@@ -25,7 +24,6 @@ struct IOPageFrameEntryCache
 	4 OffsetInFile
 	4 NextCachePage
 	4 PrevCachePage
-	4 Context1
 endstruct
 
 const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?

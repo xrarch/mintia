@@ -32,7 +32,7 @@ struct Disk
 	4 Type
 	4 DKSID
 	4 BlockOffset
-	4 BlockSize
+	4 BlockLog
 	4 Blocks
 endstruct
 
@@ -132,7 +132,7 @@ fn private CreateDisk { name blocks type id offset -- dev }
 		ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
 	end
 
-	512 dev@ IODeviceSetBlockSize
+	9 dev@ IODeviceSetBlockLog // 1<<9 = 512
 
 	auto disk
 	dev@ IODeviceGetExtension disk!
@@ -141,7 +141,7 @@ fn private CreateDisk { name blocks type id offset -- dev }
 	id@ disk@ Disk_DKSID + !
 	offset@ disk@ Disk_BlockOffset + !
 	blocks@ disk@ Disk_Blocks + !
-	512 disk@ Disk_BlockSize + !
+	9 disk@ Disk_BlockLog + !
 end
 
 fn (FDriverInit) DriverInit { stage -- ok }
@@ -318,7 +318,7 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 	end else
 		DKSBuffer@ // dest
 		ior@ DKSRequest_Buffer + @ // src
-		disk@ Disk_BlockSize + @ // size
+		1 disk@ Disk_BlockLog + @ << // size
 		memcpy
 
 		HALCPUInterruptDisable rs!
@@ -432,7 +432,7 @@ fn DKSBlockWriteCommand { buf blockno disk event ior -- ok }
 
 		DKSBuffer@ // dest
 		buf@ // src
-		disk@ Disk_BlockSize + @ // len
+		1 disk@ Disk_BlockLog + @ << // len
 		memcpy
 
 		auto rs
@@ -471,8 +471,8 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	auto disk
 	devobj@ IODeviceGetExtension disk!
 
-	auto blocksize
-	disk@ Disk_BlockSize + @ blocksize!
+	auto blocklog
+	disk@ Disk_BlockLog + @ blocklog!
 
 	0 ok!
 
@@ -483,9 +483,6 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 
 		return
 	end
-
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
 
 	auto length
 	mdl@ MmMDLHeader_Length + @ length!
@@ -508,58 +505,46 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	auto ior
 	DKSRequest_SIZEOF alloc ior!
 
-	auto blockbuf
-	0 blockbuf!
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
 
-	if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
-		blocksize@ // bytes
-		'Bloc' // tag
-		0 // flags
-		MmAllocWithTag ok! blockbuf!
-
-		if (ok@)
-			return
-		end
+	if (ok@)
+		return
 	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		mdl@ MmMDLUnpin
+		return
+	end
+
+	auto buffer
+	mdl@ MmMDLHeader_MappedAddress + @ buffer!
 
 	while (bytesread@ length@ <)
 		auto blockoff
-		offset@ blocksize@ 1 - & blockoff!
+		offset@ 1 blocklog@ << 1 - & blockoff!
 
 		auto m
 		length@ bytesread@ -
-		blocksize@ blockoff@ -
+		1 blocklog@ << blockoff@ -
 		min m!
 
-		if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
-			// sadly for direct USERMODE reads we need to split the read
-			// operation between the disk request and the copy to userspace.
+		buffer@ blockoff@ + // buf
+		m@ // len
+		offset@ blocklog@ >> // blockno
+		disk@ // disk
+		event@ // event
+		ior@ // ior
+		DKSBlockReadCommand ok!
 
-			blockbuf@ blockoff@ + // buf
-			m@ // len
-			offset@ blocksize@ / // blockno
-			disk@ // disk
-			event@ // event
-			ior@ // ior
-			DKSBlockReadCommand ok!
-
-			if (ok@)
-				blockbuf@ MmFree
-
-				return
-			end
-		end else
-			buffer@ blockoff@ + // buf
-			m@ // len
-			offset@ blocksize@ / // blockno
-			disk@ // disk
-			event@ // event
-			ior@ // ior
-			DKSBlockReadCommand ok!
-
-			if (ok@)
-				return
-			end
+		if (ok@)
+			mdl@ MmMDLUnmap
+			mdl@ MmMDLUnpin
+		
+			return
 		end
 
 		KERNELMODE // waitmode
@@ -574,19 +559,6 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 			end
 		end
 
-		if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
-			buffer@ blockoff@ + // dest
-			blockbuf@ // src
-			m@ // size
-			KeSafeCopyOut ok!
-
-			if (ok@)
-				blockbuf@ MmFree
-
-				return
-			end
-		end
-
 		event@ KeEventReset drop
 
 		m@ buffer +=
@@ -594,17 +566,16 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		m@ offset +=
 	end
 
-	if (blockbuf@)
-		blockbuf@ MmFree
-	end
+	mdl@ MmMDLUnmap
+	mdl@ MmMDLUnpin
 end
 
 fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byteswritten ok }
 	auto disk
 	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
 
-	auto blocksize
-	disk@ Disk_BlockSize + @ blocksize!
+	auto blocklog
+	disk@ Disk_BlockLog + @ blocklog!
 
 	auto bytesize
 	fcb@ IOFileControlBlockGetSize bytesize!
@@ -618,9 +589,6 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 
 		return
 	end
-
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
 
 	auto length
 	mdl@ MmMDLHeader_Length + @ length!
@@ -637,19 +605,23 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 	auto ior
 	DKSRequest_SIZEOF alloc ior!
 
-	auto blockbuf
-	0 blockbuf!
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
 
-	if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
-		blocksize@ // bytes
-		'Bloc' // tag
-		0 // flags
-		MmAllocWithTag ok! blockbuf!
-
-		if (ok@)
-			return
-		end
+	if (ok@)
+		return
 	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		mdl@ MmMDLUnpin
+		return
+	end
+
+	auto buffer
+	mdl@ MmMDLHeader_MappedAddress + @ buffer!
 
 	bytesize@ offset@ -
 	length@
@@ -657,61 +629,34 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 
 	while (byteswritten@ length@ <)
 		auto blockoff
-		offset@ blocksize@ 1 - & blockoff!
+		offset@ 1 blocklog@ << 1 - & blockoff!
 
 		auto m
 		length@ byteswritten@ -
-		blocksize@ blockoff@ -
+		1 blocklog@ << blockoff@ -
 		min m!
 
-		if (m@ blocksize@ ~=)
-			if (blockbuf@)
-				blockbuf@ MmFree
-			end
+		if (m@ 1 blocklog@ << ~=)
+			mdl@ MmMDLUnmap
+			mdl@ MmMDLUnpin
 
 			STATUS_UNALIGNED ok!
 
 			return
 		end
 
-		if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
-			// sadly for direct USERMODE writes we need to split the write
-			// operation between the disk request and the copy from userspace.
+		buffer@ // buf
+		offset@ blocklog@ >> // blockno
+		disk@ // disk
+		event@ // event
+		ior@ // ior
+		DKSBlockWriteCommand ok!
 
-			blockbuf@ // dest
-			buffer@ // src
-			blocksize@ // size
-			KeSafeCopyIn ok!
+		if (ok@)
+			mdl@ MmMDLUnmap
+			mdl@ MmMDLUnpin
 
-			if (ok@)
-				blockbuf@ MmFree
-
-				return
-			end
-
-			blockbuf@ // buf
-			offset@ blocksize@ / // blockno
-			disk@ // disk
-			event@ // event
-			ior@ // ior
-			DKSBlockWriteCommand ok!
-
-			if (ok@)
-				blockbuf@ MmFree
-
-				return
-			end
-		end else
-			buffer@ // buf
-			offset@ blocksize@ / // blockno
-			disk@ // disk
-			event@ // event
-			ior@ // ior
-			DKSBlockWriteCommand ok!
-
-			if (ok@)
-				return
-			end
+			return
 		end
 
 		KERNELMODE // waitmode
@@ -733,9 +678,8 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 		m@ offset +=
 	end
 
-	if (blockbuf@)
-		blockbuf@ MmFree
-	end
+	mdl@ MmMDLUnmap
+	mdl@ MmMDLUnpin
 end
 
 // routines for I/O by block offset. rarely called.
@@ -747,7 +691,7 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 	devobject@ IODeviceGetExtension disk!
 
 	auto blocksize
-	disk@ Disk_BlockSize + @ blocksize!
+	1 disk@ Disk_BlockLog + @ << blocksize!
 
 	if (blockno@ disk@ Disk_Blocks + @ >=)
 		STATUS_END_OF_DISK ok!
@@ -798,7 +742,7 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 	devobject@ IODeviceGetExtension disk!
 
 	auto blocksize
-	disk@ Disk_BlockSize + @ blocksize!
+	1 disk@ Disk_BlockLog + @ << blocksize!
 
 	if (blockno@ disk@ Disk_Blocks + @ >=)
 		STATUS_END_OF_DISK ok!

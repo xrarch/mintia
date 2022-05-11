@@ -6,7 +6,7 @@ struct IODriver
 	4 DeviceType
 	4 DispatchTable
 	4 ExtensionSize
-	4 BlockSize
+	4 BlockLog
 
 	4 Reserved1
 	4 Reserved2
@@ -21,7 +21,7 @@ struct IODevice
 	4 Driver
 	4 Extension
 	4 FileControlBlock
-	4 BlockSize
+	4 BlockLog
 	4 IsAConsole
 
 	4 Reserved1
@@ -38,5 +38,5 @@ extern IODeviceDirectoryInsert { deviceobject -- ok }
 extern IODeviceDeleteObject { object -- ok }
 
 extern IODeviceGetExtension { deviceobject -- extension }
-extern IODeviceSetBlockSize { blocksize deviceobject -- }
-extern IODeviceGetBlockSize { deviceobject -- blocksize }
+extern IODeviceSetBlockLog { blocklog deviceobject -- }
+extern IODeviceGetBlockLog { deviceobject -- blocklog }

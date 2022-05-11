@@ -14,3 +14,8 @@ extern IODirectoryUnlink { name filehandle -- ok }
 
 extern IODirectoryRead { dirent filehandle -- ok }
 extern IODirectoryReadObject { dirent fileobject -- ok }
+
+// direct transfer helpers
+
+extern IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
+extern IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }

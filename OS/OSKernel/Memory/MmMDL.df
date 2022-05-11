@@ -30,18 +30,49 @@ fn MmMDLInitialize { mode length vaddr mdl -- }
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> mdl@ MmMDLHeader_Pages + !
 	0 mdl@ MmMDLHeader_Flags + !
 	0 mdl@ MmMDLHeader_Process + !
+	mode@ mdl@ MmMDLHeader_Mode + !
+
+	0 mdl@ MmMDLHeader_PinCount + !
+	0 mdl@ MmMDLHeader_MapCount + !
 
 	0 mdl@ MmMDLHeader_MappedAddress + !
+end
 
-	if (mode@ KERNELMODE ==)
-		if (DEBUGCHECKS)
-			if (vaddr@ MMLOWESTSYSTEMADDRESS <)
-				"MmMDLInitialize: kernelmode MDL tracks lower half\n" KeCrash
-			end
+fn MmMDLAllocate { mode@ length vaddr kflags -- mdl ok }
+	// try pretty hard not to call this since it puts IO integrity at the
+	// mercy of the memory manager.
+	//
+	// it is sadly necessary for some stuff like non-contiguous disk transfers
+	// from filesystem drivers.
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC >=)
+			"MmMDLAllocate: ipl >= IPLDPC\n" KeCrash
 		end
-
-		MMMDL_PINNED mdl@ MmMDLHeader_Flags + !
 	end
+
+	auto bytes
+	vaddr@ length@ MmMDLGetSize bytes!
+
+	auto flags
+	CANBLOCK flags!
+
+	if (kflags@ IOKFLAG_SWAPOUT &)
+		MUSTSUCCEED flags |=
+	end elseif (kflags@ IOKFLAG_URGENT &)
+		MUSTSUCCEEDL2 flags |=
+	end
+
+	bytes@ // bytes
+	'MMDL' // tag
+	flags@ // flags
+	MmAllocWithTag ok! mdl!
+
+	if (ok@)
+		return
+	end
+
+	mode@ length@ vaddr@ mdl@ MmMDLInitialize
 end
 
 fn MmMDLGetSize { vaddr length -- size }
@@ -51,6 +82,13 @@ fn MmMDLGetSize { vaddr length -- size }
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	pages@ 1 + 2 << MmMDLHeader_SIZEOF + size!
+end
+
+fn MmMDLSplit { vaddr length srcmdl destmdl -- }
+	// split the source MDL into a destination MDL that only describes a
+	// subset.
+
+	// stub
 end
 
 var MmPinnedPagesLimit 0
@@ -118,7 +156,8 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	// NOTE: buffer parameters (start virtual address, length, etc) must have
 	// been validated by the caller. this function trusts them blindly.
 
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED &)
+	if (mdl@ MmMDLHeader_PinCount + @)
+		1 mdl@ MmMDLHeader_PinCount + +=
 		0 ok!
 		return
 	end
@@ -189,7 +228,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
-	MMMDL_PINNED mdl@ MmMDLHeader_Flags + |=
+	1 mdl@ MmMDLHeader_PinCount + !
 
 	if (lockforwrite@)
 		MMMDL_MODIFIED mdl@ MmMDLHeader_Flags + |=
@@ -288,13 +327,19 @@ fn MmMDLUnpin { mdl -- }
 	// unpin all of the pages described by the MDL.
 
 	if (DEBUGCHECKS)
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED & ~~)
+		if (mdl@ MmMDLHeader_PinCount + @ ~~)
 			"MmMDLUnpin: not pinned\n" KeCrash
 		end
 
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
 			"MmMDLUnpin: mapped\n" KeCrash
 		end
+	end
+
+	1 mdl@ MmMDLHeader_PinCount + -=
+
+	if (mdl@ MmMDLHeader_PinCount + @)
+		return
 	end
 
 	mdl@ MmMDLHeader_Pages + @ // count
@@ -325,7 +370,8 @@ end
 fn MmMDLMap { mdl -- ok }
 	// map the page frames into system space that are pinned by the MDL.
 
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
+	if (mdl@ MmMDLHeader_MapCount + @)
+		1 mdl@ MmMDLHeader_MapCount + +=
 		0 ok!
 		return
 	end
@@ -340,7 +386,7 @@ fn MmMDLMap { mdl -- ok }
 		return
 	end
 
-	MMMDL_MAPPED mdl@ MmMDLHeader_Flags + |=
+	1 mdl@ MmMDLHeader_MapCount + !
 
 	auto vaddr
 	offset@ PAGESHIFT << POOLSPACE | vaddr!
@@ -380,12 +426,16 @@ fn MmMDLUnmap { mdl -- }
 	// unmap the page frames from system space that are pinned by the MDL.
 
 	if (DEBUGCHECKS)
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED & ~~)
+		if (mdl@ MmMDLHeader_MapCount + @ ~~)
 			"MmMDLUnmap: not mapped\n" KeCrash
 		end
 	end
 
-	MMMDL_MAPPED ~ mdl@ MmMDLHeader_Flags + &=
+	1 mdl@ MmMDLHeader_MapCount + -=
+
+	if (mdl@ MmMDLHeader_MapCount + @)
+		return
+	end
 
 	auto pages
 	mdl@ MmMDLHeader_Pages + @ pages!

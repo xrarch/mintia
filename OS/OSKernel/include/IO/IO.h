@@ -63,14 +63,18 @@ endstruct
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
 
-// largest uncached IO allowed to occur in one transfer. the two constraints
-// here are:
-//   1. IOCHUNKMAX/PAGESIZE * 4 should reasonably fit on a kernel stack so
+// largest uncached IO allowed to occur in one transfer. the three main
+// constraints are:
+//   1. IOTRANSFERMAX/PAGESIZE * 4 should reasonably fit on a kernel stack so
 //      that we can allocate MDLs there idiomatically.
 //   2. shouldn't be so large that its easy to completely IO-starve the system
-//      by just spamming uncached IO accesses.
+//      by just doing huge uncached IO accesses.
+//   3. should be large enough to allow things like console IO to occur w/o
+//      odd effects due to transfer fragmentation by the IO system.
 
 const IOTRANSFERMAX (64 1024 *)
+
+const IOMDLMAXPAGES (IOTRANSFERMAX PAGESHIFT >> 1 + 4 *)
 
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }

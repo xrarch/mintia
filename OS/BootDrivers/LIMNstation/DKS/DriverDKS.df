@@ -21,6 +21,10 @@
 
 #include "<inc>/IO.h"
 
+const DKSBLOCKSHIFT 9
+const DKSBLOCKSIZE (1 DKSBLOCKSHIFT <<)
+const DKSBLOCKOFFMASK (DKSBLOCKSIZE 1 -)
+
 const DKS_REALDISK  1
 const DKS_PARTITION 2
 
@@ -32,7 +36,6 @@ struct Disk
 	4 Type
 	4 DKSID
 	4 BlockOffset
-	4 BlockLog
 	4 Blocks
 endstruct
 
@@ -45,7 +48,7 @@ struct DKSRequest
 	4 Type
 	4 Buffer
 	4 BlockNumber
-	4 Length
+	4 BlockCount
 	4 WakeEvent
 	4 Disk
 endstruct
@@ -141,7 +144,6 @@ fn private CreateDisk { name blocks type id offset -- dev }
 	id@ disk@ Disk_DKSID + !
 	offset@ disk@ Disk_BlockOffset + !
 	blocks@ disk@ Disk_Blocks + !
-	9 disk@ Disk_BlockLog + !
 end
 
 fn (FDriverInit) DriverInit { stage -- ok }
@@ -279,21 +281,28 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 	if (ior@ DKSRequest_Type + @ REQREAD ==)
 		ior@ DKSRequest_Buffer + @ // dest
 		DKSBuffer@ // src
-		ior@ DKSRequest_Length + @ // size
+		DKSBLOCKSIZE // size
 		memcpy
 	end
 
-	IOBOOSTDISK // priboost
-	ior@ DKSRequest_WakeEvent + @ // event
-	KeEventSignal
+	1 ior@ DKSRequest_BlockCount + -=
+	1 ior@ DKSRequest_BlockNumber + +=
+	DKSBLOCKSIZE ior@ DKSRequest_Buffer + +=
 
-	ior@ DKSRequest_Next + @ ior!
+	if (ior@ DKSRequest_BlockCount + @ ~~)
+		// complete, start next one
 
-	ior@ DKSRequestListHead!
+		IOBOOSTDISK // priboost
+		ior@ DKSRequest_WakeEvent + @ // event
+		KeEventSignal
 
-	if (ior@ ~~)
-		0 DKSRequestListTail!
-		return
+		ior@ DKSRequest_Next + @ ior!
+		ior@ DKSRequestListHead!
+
+		if (ior@ ~~)
+			0 DKSRequestListTail!
+			return
+		end
 	end
 
 	auto rs
@@ -318,7 +327,7 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 	end else
 		DKSBuffer@ // dest
 		ior@ DKSRequest_Buffer + @ // src
-		1 disk@ Disk_BlockLog + @ << // size
+		DKSBLOCKSIZE // size
 		memcpy
 
 		HALCPUInterruptDisable rs!
@@ -364,19 +373,19 @@ fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
 	end
 end
 
-fn DKSBlockReadCommand { buf len blockno disk event ior -- ok }
+fn DKSBlockReadCommand { buf blocks blockno disk event ior -- ok }
 	0 ok!
 
 	REQREAD ior@ DKSRequest_Type + !
 	buf@ ior@ DKSRequest_Buffer + !
 	blockno@ ior@ DKSRequest_BlockNumber + !
-	len@ ior@ DKSRequest_Length + !
+	blocks@ ior@ DKSRequest_BlockCount + !
 	disk@ ior@ DKSRequest_Disk + !
 	0 ior@ DKSRequest_Next + !
 	event@ ior@ DKSRequest_WakeEvent + !
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	auto t
 	DKSRequestListTail@ t!
@@ -386,38 +395,33 @@ fn DKSBlockReadCommand { buf len blockno disk event ior -- ok }
 		ior@ DKSRequestListTail!
 
 		// no pending requests, start the disk
-
-		auto rs
-		HALCPUInterruptDisable rs!
 
 		disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
 		DKSCMDSELECT DKSPORTCMD HALLIMNstationCitronCommand
 
 		blockno@ disk@ Disk_BlockOffset + @ + DKSPORTA HALLIMNstationCitronOutl
 		DKSCMDREAD DKSPORTCMD HALLIMNstationCitronCommandASync
-
-		rs@ HALCPUInterruptRestore
 	end else
 		ior@ t@ DKSRequest_Next + !
 		ior@ DKSRequestListTail!
 	end
 
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
-fn DKSBlockWriteCommand { buf blockno disk event ior -- ok }
+fn DKSBlockWriteCommand { buf blocks blockno disk event ior -- ok }
 	0 ok!
 
 	REQWRITE ior@ DKSRequest_Type + !
 	buf@ ior@ DKSRequest_Buffer + !
 	blockno@ ior@ DKSRequest_BlockNumber + !
-	0 ior@ DKSRequest_Length + ! // always blocksize
+	blocks@ ior@ DKSRequest_BlockCount + !
 	disk@ ior@ DKSRequest_Disk + !
 	0 ior@ DKSRequest_Next + !
 	event@ ior@ DKSRequest_WakeEvent + !
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	auto t
 	DKSRequestListTail@ t!
@@ -426,16 +430,15 @@ fn DKSBlockWriteCommand { buf blockno disk event ior -- ok }
 		ior@ DKSRequestListHead!
 		ior@ DKSRequestListTail!
 
-		ipl@ KeIPLLower
+		rs@ HALCPUInterruptRestore
 
 		// no pending requests, start the disk
 
 		DKSBuffer@ // dest
 		buf@ // src
-		1 disk@ Disk_BlockLog + @ << // len
+		DKSBLOCKSIZE // len
 		memcpy
 
-		auto rs
 		HALCPUInterruptDisable rs!
 
 		disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
@@ -449,7 +452,7 @@ fn DKSBlockWriteCommand { buf blockno disk event ior -- ok }
 		ior@ t@ DKSRequest_Next + !
 		ior@ DKSRequestListTail!
 
-		ipl@ KeIPLLower
+		rs@ HALCPUInterruptRestore
 	end
 end
 
@@ -471,39 +474,26 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	auto disk
 	devobj@ IODeviceGetExtension disk!
 
-	auto blocklog
-	disk@ Disk_BlockLog + @ blocklog!
-
 	0 ok!
 
 	fcb@ IOFileControlBlockGetSize bytesread!
 
 	if (offset@ bytesread@ >=)
 		0 bytesread!
-
 		return
 	end
 
 	auto length
-	mdl@ MmMDLHeader_Length + @ length!
-
 	bytesread@ offset@ -
-	length@
+	mdl@ MmMDLHeader_Length + @
 	min length!
 
+	if (length@ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+		return
+	end
+
 	0 bytesread!
-
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"DKSReadEvent" // name
-	event@ // event
-	KeEventInitialize
-
-	auto ior
-	DKSRequest_SIZEOF alloc ior!
 
 	1 // lockforwrite
 	mdl@ // mdl
@@ -520,69 +510,61 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		return
 	end
 
-	auto buffer
-	mdl@ MmMDLHeader_MappedAddress + @ buffer!
+	auto event
+	KeEvent_SIZEOF alloc event!
 
-	while (bytesread@ length@ <)
-		auto blockoff
-		offset@ 1 blocklog@ << 1 - & blockoff!
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"DKSReadEvent" // name
+	event@ // event
+	KeEventInitialize
 
-		auto m
-		length@ bytesread@ -
-		1 blocklog@ << blockoff@ -
-		min m!
+	auto ior
+	DKSRequest_SIZEOF alloc ior!
 
-		buffer@ blockoff@ + // buf
-		m@ // len
-		offset@ blocklog@ >> // blockno
-		disk@ // disk
-		event@ // event
-		ior@ // ior
-		DKSBlockReadCommand ok!
+	mdl@ MmMDLHeader_MappedAddress + @ // buf
+	length@ DKSBLOCKSHIFT >> // blocks
+	offset@ DKSBLOCKSHIFT >> // blockno
+	disk@ // disk
+	event@ // event
+	ior@ // ior
+	DKSBlockReadCommand ok!
 
+	if (ok@)
+		mdl@ MmMDLUnmap
+		mdl@ MmMDLUnpin
+
+		return
+	end
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
 		if (ok@)
-			mdl@ MmMDLUnmap
-			mdl@ MmMDLUnpin
-		
-			return
+			ok@ "DriverDKSRead: couldn't wait on event (%i)\n" KeCrash
 		end
-
-		KERNELMODE // waitmode
-		0 // alertable
-		OSWAIT_TIMEOUTINFINITE // timeout
-		event@ // object
-		KeThreadWaitForObject ok!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				ok@ "DriverDKSRead: couldn't wait on event (%i)\n" KeCrash
-			end
-		end
-
-		event@ KeEventReset drop
-
-		m@ buffer +=
-		m@ bytesread +=
-		m@ offset +=
 	end
 
 	mdl@ MmMDLUnmap
 	mdl@ MmMDLUnpin
+
+	mdl@ MmMDLHeader_Length + @ bytesread!
 end
 
 fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byteswritten ok }
 	auto disk
 	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
 
-	auto blocklog
-	disk@ Disk_BlockLog + @ blocklog!
-
-	auto bytesize
-	fcb@ IOFileControlBlockGetSize bytesize!
-
 	0 ok!
 
 	0 byteswritten!
+
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
 
 	if (offset@ bytesize@ >=)
 		STATUS_END_OF_DISK ok!
@@ -591,19 +573,14 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 	end
 
 	auto length
-	mdl@ MmMDLHeader_Length + @ length!
+	bytesize@ offset@ -
+	mdl@ MmMDLHeader_Length + @
+	min length!
 
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"DKSWriteEvent" // name
-	event@ // event
-	KeEventInitialize
-
-	auto ior
-	DKSRequest_SIZEOF alloc ior!
+	if (length@ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+		return
+	end
 
 	0 // lockforwrite
 	mdl@ // mdl
@@ -620,66 +597,49 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 		return
 	end
 
-	auto buffer
-	mdl@ MmMDLHeader_MappedAddress + @ buffer!
+	auto event
+	KeEvent_SIZEOF alloc event!
 
-	bytesize@ offset@ -
-	length@
-	min length!
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"DKSWriteEvent" // name
+	event@ // event
+	KeEventInitialize
 
-	while (byteswritten@ length@ <)
-		auto blockoff
-		offset@ 1 blocklog@ << 1 - & blockoff!
+	auto ior
+	DKSRequest_SIZEOF alloc ior!
 
-		auto m
-		length@ byteswritten@ -
-		1 blocklog@ << blockoff@ -
-		min m!
+	mdl@ MmMDLHeader_MappedAddress + @ // buf
+	length@ DKSBLOCKSHIFT >> // blocks
+	offset@ DKSBLOCKSHIFT >> // blockno
+	disk@ // disk
+	event@ // event
+	ior@ // ior
+	DKSBlockWriteCommand ok!
 
-		if (m@ 1 blocklog@ << ~=)
-			mdl@ MmMDLUnmap
-			mdl@ MmMDLUnpin
+	if (ok@)
+		mdl@ MmMDLUnmap
+		mdl@ MmMDLUnpin
 
-			STATUS_UNALIGNED ok!
+		return
+	end
 
-			return
-		end
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject ok!
 
-		buffer@ // buf
-		offset@ blocklog@ >> // blockno
-		disk@ // disk
-		event@ // event
-		ior@ // ior
-		DKSBlockWriteCommand ok!
-
+	if (DEBUGCHECKS)
 		if (ok@)
-			mdl@ MmMDLUnmap
-			mdl@ MmMDLUnpin
-
-			return
+			ok@ "DriverDKSWrite: couldn't wait on event (%i)\n" KeCrash
 		end
-
-		KERNELMODE // waitmode
-		0 // alertable
-		OSWAIT_TIMEOUTINFINITE // timeout
-		event@ // object
-		KeThreadWaitForObject ok!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				ok@ "DriverDKSWrite: couldn't wait on event (%i)\n" KeCrash
-			end
-		end
-
-		event@ KeEventReset drop
-
-		m@ buffer +=
-		m@ byteswritten +=
-		m@ offset +=
 	end
 
 	mdl@ MmMDLUnmap
 	mdl@ MmMDLUnpin
+
+	mdl@ MmMDLHeader_Length + @ byteswritten!
 end
 
 // routines for I/O by block offset. rarely called.
@@ -689,9 +649,6 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 
 	auto disk
 	devobject@ IODeviceGetExtension disk!
-
-	auto blocksize
-	1 disk@ Disk_BlockLog + @ << blocksize!
 
 	if (blockno@ disk@ Disk_Blocks + @ >=)
 		STATUS_END_OF_DISK ok!
@@ -712,6 +669,7 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 	DKSRequest_SIZEOF alloc ior!
 
 	buffer@ // buf
+	1 // blocks
 	blockno@ // blockno
 	disk@ // disk
 	event@ // event
@@ -741,9 +699,6 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 	auto disk
 	devobject@ IODeviceGetExtension disk!
 
-	auto blocksize
-	1 disk@ Disk_BlockLog + @ << blocksize!
-
 	if (blockno@ disk@ Disk_Blocks + @ >=)
 		STATUS_END_OF_DISK ok!
 
@@ -763,7 +718,7 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 	DKSRequest_SIZEOF alloc ior!
 
 	buffer@ // buf
-	blocksize@ // len
+	1 // blocks
 	blockno@ // blockno
 	disk@ // disk
 	event@ // event

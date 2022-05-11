@@ -88,7 +88,64 @@ fn MmMDLSplit { vaddr length srcmdl destmdl -- }
 	// split the source MDL into a destination MDL that only describes a
 	// subset.
 
-	// stub
+	auto srcva
+	srcmdl@ MmMDLHeader_VirtualAddress + @ srcva!
+
+	if (DEBUGCHECKS)
+		if (srcmdl@ MmMDLHeader_PinCount + @ ~~)
+			"MmMDLSplit: srcmdl must be pinned\n" KeCrash
+		end
+
+		// make sure the address and length actually fits into the source MDL
+		if (vaddr@ srcva@ <)
+			"MmMDLSplit: vaddr < srcmdl vaddr\n" KeCrash
+		end
+
+		if (vaddr@ length@ +
+			srcva@ srcmdl@ MmMDLHeader_Length + @ >)
+			"MmMDLSplit: vaddr+length > srcmdl vaddr+length\n" KeCrash
+		end
+
+		if (destmdl@ MmMDLHeader_VirtualAddress + @ vaddr@ ~=)
+			"MmMDLSplit: destmdl wasn't initialized properly\n" KeCrash
+		end
+
+		if (destmdl@ MmMDLHeader_Length + @ length@ ~=)
+			"MmMDLSplit: destmdl wasn't initialized properly\n" KeCrash
+		end
+	end
+
+	auto offset
+	vaddr@ srcva@ - offset!
+
+	1 destmdl@ MmMDLHeader_PinCount + !
+	srcmdl@ MmMDLHeader_MapCount + @ destmdl@ MmMDLHeader_MapCount + !
+
+	// reuse the mapping from the source MDL
+	srcmdl@ MmMDLHeader_MappedAddress + @ offset@ + destmdl@ MmMDLHeader_MappedAddress + !
+
+	auto destmdlpos
+	destmdl@ MmMDLHeader_SIZEOF + destmdlpos!
+
+	auto srcmdlpos
+	srcmdl@ MmMDLHeader_SIZEOF + offset@ PAGESHIFT >> 4 * + srcmdlpos!
+
+	auto pages
+	destmdl@ MmMDLHeader_Pages + @ pages!
+
+	while (pages@)
+		if (DEBUGCHECKS)
+			if (srcmdlpos@@ -1 ==)
+				"MmMDLSplit: srcmdl ended early\n" KeCrash
+			end
+		end
+
+		srcmdlpos@@ destmdlpos@!
+
+		4 destmdlpos +=
+		4 srcmdlpos +=
+		1 pages -=
+	end
 end
 
 var MmPinnedPagesLimit 0
@@ -331,7 +388,7 @@ fn MmMDLUnpin { mdl -- }
 			"MmMDLUnpin: not pinned\n" KeCrash
 		end
 
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
+		if (mdl@ MmMDLHeader_MapCount + @)
 			"MmMDLUnpin: mapped\n" KeCrash
 		end
 	end
@@ -345,8 +402,6 @@ fn MmMDLUnpin { mdl -- }
 	mdl@ MmMDLHeader_Pages + @ // count
 	mdl@ MmMDLHeader_Process + @ // process
 	MmMDLUnchargePinnedPages
-
-	MMMDL_PINNED ~ mdl@ MmMDLHeader_Flags + &=
 
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
@@ -391,7 +446,7 @@ fn MmMDLMap { mdl -- ok }
 	auto vaddr
 	offset@ PAGESHIFT << POOLSPACE | vaddr!
 
-	vaddr@ mdl@ MmMDLHeader_MappedAddress + !
+	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & vaddr@ + mdl@ MmMDLHeader_MappedAddress + !
 
 	auto kdir
 	HALPlatformKernelPageDirectory@ kdir!
@@ -441,7 +496,7 @@ fn MmMDLUnmap { mdl -- }
 	mdl@ MmMDLHeader_Pages + @ pages!
 
 	auto vaddr
-	mdl@ MmMDLHeader_MappedAddress + @ vaddr!
+	mdl@ MmMDLHeader_MappedAddress + @ PAGENUMBERMASK & vaddr!
 
 	auto kdir
 	HALPlatformKernelPageDirectory@ kdir!

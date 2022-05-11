@@ -18,6 +18,8 @@ extern MmMDLInitialize { mode length vaddr mdl -- }
 
 extern MmMDLGetSize { vaddr length -- size }
 
+extern MmMDLSplit { vaddr length srcmdl destmdl -- }
+
 extern MmMDLPin { lockforwrite mdl -- ok }
 extern MmMDLUnpin { mdl -- }
 

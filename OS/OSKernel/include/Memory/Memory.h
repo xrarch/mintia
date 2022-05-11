@@ -114,6 +114,11 @@ const MMDIREPAGES           (MMNORMALTHRESH 1 -)
 const MMWORKINGSETDEFAULTMINIMUM 16
 const MMWORKINGSETDEFAULTMAXIMUM 64
 
+// a process will always be able to pin at least this many pages, no matter
+// what kind of load the system is undergoing.
+
+const MMPROCESSPINGUARANTEE 8
+
 // page allocation priorities
 
 const ZEROMUST    1

@@ -16,18 +16,89 @@
 
 #include "<inc>/Memory.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
+#include "<inc>/IO.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
 
 fn MmMDLInitialize { length vaddr mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
+	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> mdl@ MmMDLHeader_Pages + !
 	0 mdl@ MmMDLHeader_Flags + !
 	0 mdl@ MmMDLHeader_Process + !
 
 	0 mdl@ MmMDLHeader_MappedAddress + !
 end
 
+fn MmMDLGetSize { vaddr length -- size }
+	// calculate the required size for an MDL to describe this buffer
+
+	auto pages
+	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	pages@ 1 + 2 << MmMDLHeader_SIZEOF + size!
+end
+
+var MmPinnedPagesLimit 0
+public MmPinnedPagesLimit
+
 var MmPinnedPagesCount 0
+public MmPinnedPagesCount
+
+fn MmMDLChargePinnedPages { count process -- ok }
+	// charge the system for the number of pinned pages.
+	// the unusual consequence of failing this operation is that someone's IO
+	// transfer will unexpectedly fail, so this needs to work reasonably.
+	// the consequence of this operation being too lenient is that its easy to
+	// put the system in a memory chokehold by accident.
+
+	// will succeed if any of these is true:
+	//   1. the process is owned by the root user,
+	//   2. memory pressure is very low,
+	//   3. the per-process guarantee can accomodate these pages,
+	//   4. the total number of pinned pages in the system is below a
+	//      certain threshold.
+
+	STATUS_WS_QUOTA_EXCEEDED ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (process@ PsProcess_UID + @ UID_SYSTEM ==)
+		0 ok!
+	end elseif (MmPageFreeCount@ MmEvictablePageCount@ + count@ + MmPageFreeCountSufficient@ >=)
+		0 ok!
+	end elseif (process@ PsProcess_PinnedPageCount + @ count@ + MMPROCESSPINGUARANTEE <)
+		0 ok!
+	end elseif (MmPinnedPagesCount@ count@ + MmPinnedPagesLimit@ <)
+		0 ok!
+	end
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	count@ process@ PsProcess_PinnedPageCount + +=
+	count@ MmPinnedPagesCount +=
+
+	ipl@ KeIPLLower
+end
+
+fn MmMDLUnchargePinnedPages { count process -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	count@ process@ PsProcess_PinnedPageCount + -=
+	count@ MmPinnedPagesCount -=
+
+	rs@ HALCPUInterruptRestore
+end
 
 fn MmMDLPin { lockforwrite mdl -- ok }
 	// pin all of the pages described by the MDL into memory, resources
@@ -45,6 +116,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		if (mdl@ MmMDLHeader_Length + @ ~~)
 			"MmMDLPin: length=0\n" KeCrash
 		end
+
+		if (mdl@ MmMDLHeader_Length + @ IOCHUNKMAX >)
+			"MmMDLPin: length>IOCHUNKMAX\n" KeCrash
+		end
 	end
 
 	auto process
@@ -54,7 +129,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
 
 	auto pages
-	buffer@ PAGEOFFSETMASK & mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
+	mdl@ MmMDLHeader_Pages + @ pages!
 
 	// lock the process's VAD list mutex so we know nothing can get yoinked
 	// out from underneath us by another thread in the process. in particular
@@ -83,6 +158,16 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		return
 	end
 
+	pages@ // count
+	process@ // process
+	MmMDLChargePinnedPages ok!
+
+	if (ok@)
+		process@ MmVADListUnlock
+
+		return
+	end
+
 	process@ mdl@ MmMDLHeader_Process + !
 
 	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
@@ -95,6 +180,8 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 	if (lockforwrite@)
 		MMMDL_MODIFIED mdl@ MmMDLHeader_Flags + |=
+	end else
+		MMMDL_MODIFIED ~ mdl@ MmMDLHeader_Flags + &=
 	end
 
 	-1 mdlpos@!
@@ -115,6 +202,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		end
 
 		while (1)
+			// poke the buffer page to make sure it is resident.
 			buffer@ KeSafeGetByte ok! drop
 
 			if (ok@)
@@ -134,6 +222,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			MmVirtualtoPTEAddress ok! pte!
 
 			if (ok@)
+				// not resident, loop, re-poke, and try again.
 				ipl@ KeIPLLower
 
 				continue
@@ -144,6 +233,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			MmPTEInterpret ok! drop pfdbe!
 
 			if (ok@)
+				// not resident, loop, re-poke, and try again.
 				ipl@ KeIPLLower
 
 				continue
@@ -175,7 +265,6 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		// is not acceptable to do this to random memory that may be just
 		// beyond the buffer because it will cause satanic race conditions
 		// with any other threads in this process.
-
 		PAGENUMBERMASK buffer &=
 	end
 
@@ -195,16 +284,16 @@ fn MmMDLUnpin { mdl -- }
 		end
 	end
 
+	mdl@ MmMDLHeader_Pages + @ // count
+	mdl@ MmMDLHeader_Process + @ // process
+	MmMDLUnchargePinnedPages
+
 	MMMDL_PINNED ~ mdl@ MmMDLHeader_Flags + &=
 
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
-	while (1)
-		if (mdlpos@@ -1 ==)
-			return
-		end
-
+	while (mdlpos@@ -1 ~=)
 		auto pfdbe
 		mdlpos@@ pfdbe!
 
@@ -220,7 +309,7 @@ fn MmMDLUnpin { mdl -- }
 	end
 end
 
-fn MmMDLMap { mdl -- vaddr ok }
+fn MmMDLMap { mdl -- ok }
 	// map the page frames into system space that are pinned by the MDL.
 
 	if (DEBUGCHECKS)
@@ -229,7 +318,50 @@ fn MmMDLMap { mdl -- vaddr ok }
 		end
 	end
 
-	// stub
+	auto pages
+	mdl@ MmMDLHeader_Pages + @ pages!
+
+	auto offset
+	pages@ MmPoolSpaceReserve ok! offset!
+
+	if (ok@)
+		return
+	end
+
+	MMMDL_MAPPED mdl@ MmMDLHeader_Flags + |=
+
+	auto vaddr
+	offset@ PAGESHIFT << POOLSPACE | vaddr!
+
+	vaddr@ mdl@ MmMDLHeader_MappedAddress + !
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	while (pages@)
+		auto phyaddr
+		mdlpos@@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
+
+		phyaddr@ // phyaddr
+		PTE_G PTE_K | PTE_W | PTE_V | // flags
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmMDLMap: failed to map virtual address\n" KeCrash
+			end
+		end
+
+		PAGESIZE vaddr +=
+		4 mdlpos +=
+		1 pages -=
+	end
 end
 
 fn MmMDLUnmap { mdl -- }
@@ -241,5 +373,41 @@ fn MmMDLUnmap { mdl -- }
 		end
 	end
 
-	// stub
+	MMMDL_MAPPED ~ mdl@ MmMDLHeader_Flags + &=
+
+	auto pages
+	mdl@ MmMDLHeader_Pages + @ pages!
+
+	auto vaddr
+	mdl@ MmMDLHeader_MappedAddress + @ vaddr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	while (pages@)
+		auto ok
+		0 // phyaddr
+		0 // flags
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		0 // asid
+		MmPTEUpdateByVirtual ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmMDLUnmap: failed to unmap virtual address\n" KeCrash
+			end
+		end
+
+		PAGESIZE vaddr +=
+		4 mdlpos +=
+		1 pages -=
+	end
+
+	mdl@ MmMDLHeader_Pages + @ // pages
+	mdl@ MmMDLHeader_MappedAddress + @ POOLSPACE - PAGESHIFT >> // offset
+	MmPoolSpaceRelease
 end

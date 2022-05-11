@@ -63,6 +63,9 @@ endstruct
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
 
+const IOCHUNKMAX (128 1024 *) // largest uncached IO allowed to occur in one
+                              // transfer.
+
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }
 extern IOFileControlBlockSetContext { context fcb -- }

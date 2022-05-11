@@ -51,6 +51,8 @@ struct PsProcess
 
 	4 VADListLRUHead
 
+	4 PinnedPageCount
+
 	4 PageFaultCount
 	4 ThrottleFaultCount
 

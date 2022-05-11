@@ -42,6 +42,8 @@ struct PsProcess
 
 	4 SwapOutNext
 
+	4 MappedMMIOCount
+
 	KeMutex_SIZEOF VADListMutex
 
 	4 ModifiedPages

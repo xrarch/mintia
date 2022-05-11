@@ -38,7 +38,7 @@ fn MmMDLInitialize { mode length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_MappedAddress + !
 end
 
-fn MmMDLAllocate { mode@ length vaddr kflags -- mdl ok }
+fn MmMDLAllocate { mode length vaddr kflags -- mdl ok }
 	// try pretty hard not to call this since it puts IO integrity at the
 	// mercy of the memory manager.
 	//
@@ -102,7 +102,7 @@ fn MmMDLSplit { vaddr length srcmdl destmdl -- }
 		end
 
 		if (vaddr@ length@ +
-			srcva@ srcmdl@ MmMDLHeader_Length + @ >)
+			srcva@ srcmdl@ MmMDLHeader_Length + @ + >)
 			"MmMDLSplit: vaddr+length > srcmdl vaddr+length\n" KeCrash
 		end
 
@@ -145,6 +145,60 @@ fn MmMDLSplit { vaddr length srcmdl destmdl -- }
 		4 destmdlpos +=
 		4 srcmdlpos +=
 		1 pages -=
+	end
+end
+
+fn MmMDLFill { mdl -- }
+	// fill up an MDL with system space.
+
+	1 mdl@ MmMDLHeader_PinCount + !
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	auto pages
+	mdl@ MmMDLHeader_Pages + @ pages!
+
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto ok
+
+	-1 mdlpos@!
+
+	while (pages@)
+		auto pte
+		buffer@ // vaddr
+		kdir@ // pagemap
+		MmVirtualtoPTEAddress ok! pte!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmMDLFill: invalid system space\n" KeCrash
+			end
+		end
+
+		auto pfdbe
+		pte@ // pteaddr
+		MmPTEInterpret ok! drop pfdbe!
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"MmMDLFill: invalid system space\n" KeCrash
+			end
+		end
+
+		pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		pfdbe@ mdlpos@!
+
+		4 mdlpos +=
+		-1 mdlpos@!
+
+		1 pages -=
+		PAGESIZE buffer +=
 	end
 end
 
@@ -229,11 +283,20 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		end
 	end
 
-	auto process
-	KeProcessCurrent process!
-
 	auto buffer
 	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	if (buffer@ MMLOWESTSYSTEMADDRESS >=)
+		mdl@ MmMDLFill
+
+		// 2 so that nothing happens when it tries to unpin...
+		2 mdl@ MmMDLHeader_PinCount + !
+
+		return
+	end
+
+	auto process
+	KeProcessCurrent process!
 
 	auto pages
 	mdl@ MmMDLHeader_Pages + @ pages!
@@ -429,6 +492,12 @@ fn MmMDLMap { mdl -- ok }
 		1 mdl@ MmMDLHeader_MapCount + +=
 		0 ok!
 		return
+	end
+
+	if (mdl@ MmMDLHeader_VirtualAddress + @ MMLOWESTSYSTEMADDRESS >=)
+		mdl@ MmMDLHeader_VirtualAddress + @ mdl@ MmMDLHeader_MappedAddress + !
+
+		2 mdl@ MmMDLHeader_MapCount + !
 	end
 
 	auto pages

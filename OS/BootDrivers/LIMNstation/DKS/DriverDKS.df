@@ -464,7 +464,7 @@ end
 // if caller isn't careful these can lead to some redundant reads and writes.
 // which are slow.
 
-fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
+fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb -- bytesread ok }
 	auto devobj
 	fcb@ IOFileControlBlockGetDeviceObject devobj!
 
@@ -483,6 +483,12 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 
 		return
 	end
+
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto length
+	mdl@ MmMDLHeader_Length + @ length!
 
 	bytesread@ offset@ -
 	length@
@@ -505,7 +511,7 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 	auto blockbuf
 	0 blockbuf!
 
-	if (lastmode@ USERMODE ==)
+	if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
 		blocksize@ // bytes
 		'Bloc' // tag
 		0 // flags
@@ -518,14 +524,14 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 
 	while (bytesread@ length@ <)
 		auto blockoff
-		offset@ blocksize@ % blockoff!
+		offset@ blocksize@ 1 - & blockoff!
 
 		auto m
 		length@ bytesread@ -
 		blocksize@ blockoff@ -
 		min m!
 
-		if (lastmode@ USERMODE ==)
+		if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
 			// sadly for direct USERMODE reads we need to split the read
 			// operation between the disk request and the copy to userspace.
 
@@ -568,7 +574,7 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 			end
 		end
 
-		if (lastmode@ USERMODE ==)
+		if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
 			buffer@ blockoff@ + // dest
 			blockbuf@ // src
 			m@ // size
@@ -593,7 +599,7 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags length offset b
 	end
 end
 
-fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
+fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byteswritten ok }
 	auto disk
 	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
 
@@ -613,6 +619,12 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags length offset buffer 
 		return
 	end
 
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto length
+	mdl@ MmMDLHeader_Length + @ length!
+
 	auto event
 	KeEvent_SIZEOF alloc event!
 
@@ -628,7 +640,7 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags length offset buffer 
 	auto blockbuf
 	0 blockbuf!
 
-	if (lastmode@ USERMODE ==)
+	if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
 		blocksize@ // bytes
 		'Bloc' // tag
 		0 // flags
@@ -645,7 +657,7 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags length offset buffer 
 
 	while (byteswritten@ length@ <)
 		auto blockoff
-		offset@ blocksize@ % blockoff!
+		offset@ blocksize@ 1 - & blockoff!
 
 		auto m
 		length@ byteswritten@ -
@@ -662,7 +674,7 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags length offset buffer 
 			return
 		end
 
-		if (lastmode@ USERMODE ==)
+		if (mdl@ MmMDLHeader_Mode + @ USERMODE ==)
 			// sadly for direct USERMODE writes we need to split the write
 			// operation between the disk request and the copy from userspace.
 

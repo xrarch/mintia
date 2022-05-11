@@ -74,8 +74,6 @@ const IOPOKE_READ  2
 
 const IOTRANSFERMAX (64 1024 *)
 
-const IOMDLMAXPAGES (IOTRANSFERMAX PAGESHIFT >> 1 + 4 *)
-
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }
 extern IOFileControlBlockSetContext { context fcb -- }

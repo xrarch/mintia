@@ -45,12 +45,11 @@ Logging in as `guest` works with any password, and the default password for `roo
 7. Unix-like permissions model.
 8. Loadable kernel-mode debugger with stack tracing.
 9. File page cache.
-10. AisixFS read support.
+10. AisixFS support.
 11. Demand paging, memory-mapped files, etc.
 12. Userspace dynamic linking.
 13. Swapping and working set management.
 14. Minimal command-line interface over TTY.
-15. AisixFS write support.
 
 ## Planned features (in rough descending order of priority)
 

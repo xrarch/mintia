@@ -12,6 +12,7 @@
 #include "<inc>/HALLIMNstationCitron.h"
 #include "<inc>/HALInterrupt.h"
 #include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
 
 #include "<inc>/Kernel.h"
 
@@ -46,6 +47,7 @@ struct DKSRequest
 	4 Next
 
 	4 Type
+	4 MDL
 	4 Buffer
 	4 BlockNumber
 	4 BlockCount
@@ -278,11 +280,28 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 		end
 	end
 
+	auto mdl
+	ior@ DKSRequest_MDL + @ mdl!
+
 	if (ior@ DKSRequest_Type + @ REQREAD ==)
-		ior@ DKSRequest_Buffer + @ // dest
-		DKSBuffer@ // src
-		DKSBLOCKSIZE // size
-		memcpy
+		if (mdl@)
+			// there's an MDL, try to copy directly thru identityspace with
+			// the pinned pages.
+
+			// holy crap new record for worst thing ever
+			mdl@ MmMDLHeader_SIZEOF + ior@ DKSRequest_Buffer + @ PAGESHIFT >> 2 << + @
+			MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+			ior@ DKSRequest_Buffer + @ PAGEOFFSETMASK & + // dest
+
+			DKSBuffer@ // src
+			DKSBLOCKSIZE // len
+			memcpy
+		end else
+			ior@ DKSRequest_Buffer + @ // dest
+			DKSBuffer@ // src
+			DKSBLOCKSIZE // size
+			memcpy
+		end
 	end
 
 	1 ior@ DKSRequest_BlockCount + -=
@@ -303,6 +322,8 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 			0 DKSRequestListTail!
 			return
 		end
+
+		ior@ DKSRequest_MDL + @ mdl!
 	end
 
 	auto rs
@@ -325,10 +346,21 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 
 		return
 	end else
-		DKSBuffer@ // dest
-		ior@ DKSRequest_Buffer + @ // src
-		DKSBLOCKSIZE // size
-		memcpy
+		if (mdl@)
+			DKSBuffer@ // dest
+
+			mdl@ MmMDLHeader_SIZEOF + ior@ DKSRequest_Buffer + @ PAGESHIFT >> 2 << + @
+			MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+			ior@ DKSRequest_Buffer + @ PAGEOFFSETMASK & + // src
+
+			DKSBLOCKSIZE // size
+			memcpy
+		end else
+			DKSBuffer@ // dest
+			ior@ DKSRequest_Buffer + @ // src
+			DKSBLOCKSIZE // size
+			memcpy
+		end
 
 		HALCPUInterruptDisable rs!
 
@@ -373,11 +405,16 @@ fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
 	end
 end
 
-fn DKSBlockReadCommand { buf blocks blockno disk event ior -- ok }
+fn DKSBlockReadCommand { buf mdl blocks blockno disk event ior -- ok }
 	0 ok!
+
+	if (mdl@)
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+	end
 
 	REQREAD ior@ DKSRequest_Type + !
 	buf@ ior@ DKSRequest_Buffer + !
+	mdl@ ior@ DKSRequest_MDL + !
 	blockno@ ior@ DKSRequest_BlockNumber + !
 	blocks@ ior@ DKSRequest_BlockCount + !
 	disk@ ior@ DKSRequest_Disk + !
@@ -409,11 +446,16 @@ fn DKSBlockReadCommand { buf blocks blockno disk event ior -- ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn DKSBlockWriteCommand { buf blocks blockno disk event ior -- ok }
+fn DKSBlockWriteCommand { buf mdl blocks blockno disk event ior -- ok }
 	0 ok!
+
+	if (mdl@)
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+	end
 
 	REQWRITE ior@ DKSRequest_Type + !
 	buf@ ior@ DKSRequest_Buffer + !
+	mdl@ ior@ DKSRequest_MDL + !
 	blockno@ ior@ DKSRequest_BlockNumber + !
 	blocks@ ior@ DKSRequest_BlockCount + !
 	disk@ ior@ DKSRequest_Disk + !
@@ -434,10 +476,20 @@ fn DKSBlockWriteCommand { buf blocks blockno disk event ior -- ok }
 
 		// no pending requests, start the disk
 
-		DKSBuffer@ // dest
-		buf@ // src
-		DKSBLOCKSIZE // len
-		memcpy
+		if (mdl@)
+			// there's an MDL, try to copy directly thru identityspace with
+			// the pinned pages.
+
+			DKSBuffer@ // dest
+			mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | buf@ + // src
+			DKSBLOCKSIZE // len
+			memcpy
+		end else
+			DKSBuffer@ // dest
+			buf@ // src
+			DKSBLOCKSIZE // len
+			memcpy
+		end
 
 		HALCPUInterruptDisable rs!
 
@@ -508,13 +560,6 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		return
 	end
 
-	mdl@ MmMDLMap ok!
-
-	if (ok@)
-		mdl@ MmMDLUnpin
-		return
-	end
-
 	auto event
 	KeEvent_SIZEOF alloc event!
 
@@ -527,7 +572,8 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	auto ior
 	DKSRequest_SIZEOF alloc ior!
 
-	mdl@ MmMDLHeader_MappedAddress + @ // buf
+	0 // buf
+	mdl@ // mdl
 	length@ DKSBLOCKSHIFT >> // blocks
 	offset@ DKSBLOCKSHIFT >> // blockno
 	disk@ // disk
@@ -536,7 +582,6 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	DKSBlockReadCommand ok!
 
 	if (ok@)
-		mdl@ MmMDLUnmap
 		mdl@ MmMDLUnpin
 
 		return
@@ -554,7 +599,6 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		end
 	end
 
-	mdl@ MmMDLUnmap
 	mdl@ MmMDLUnpin
 
 	mdl@ MmMDLHeader_Length + @ bytesread!
@@ -600,13 +644,6 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 		return
 	end
 
-	mdl@ MmMDLMap ok!
-
-	if (ok@)
-		mdl@ MmMDLUnpin
-		return
-	end
-
 	auto event
 	KeEvent_SIZEOF alloc event!
 
@@ -619,7 +656,8 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 	auto ior
 	DKSRequest_SIZEOF alloc ior!
 
-	mdl@ MmMDLHeader_MappedAddress + @ // buf
+	0 // buf
+	mdl@ // mdl
 	length@ DKSBLOCKSHIFT >> // blocks
 	offset@ DKSBLOCKSHIFT >> // blockno
 	disk@ // disk
@@ -628,7 +666,6 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 	DKSBlockWriteCommand ok!
 
 	if (ok@)
-		mdl@ MmMDLUnmap
 		mdl@ MmMDLUnpin
 
 		return
@@ -646,7 +683,6 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 		end
 	end
 
-	mdl@ MmMDLUnmap
 	mdl@ MmMDLUnpin
 
 	mdl@ MmMDLHeader_Length + @ byteswritten!
@@ -680,6 +716,7 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 	DKSRequest_SIZEOF alloc ior!
 
 	buffer@ // buf
+	0 // mdl
 	1 // blocks
 	blockno@ // blockno
 	disk@ // disk
@@ -729,6 +766,7 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 	DKSRequest_SIZEOF alloc ior!
 
 	buffer@ // buf
+	0 // mdl
 	1 // blocks
 	blockno@ // blockno
 	disk@ // disk

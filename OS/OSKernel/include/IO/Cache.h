@@ -61,7 +61,7 @@ extern IOCachePageInsert { pfdbe buckethead -- }
 extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
-extern IOCachePageWrite { pfdbe -- ok }
+extern IOCachePageWrite { kflags pfdbe -- ok }
 
 extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }

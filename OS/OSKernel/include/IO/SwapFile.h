@@ -1,8 +1,13 @@
 extern IOSwapFileCreate { filehandle -- sizeinpages ok }
 
+extern IOSwapFileReserve { pagesneeded -- offset ok }
+extern IOSwapFileRelease { pages offset -- }
+
 extern IOSwapPageFree { pno -- }
-extern IOSwapPageWrite { pageframe -- pno ok }
 extern IOSwapPageRead { pageframe pno -- ok }
+
+extern IOSwapFileWriteMDL { pagecount mdl -- ok }
+
 extern IOSwapFileAwaitCreation { -- }
 
 externptr IOSwapPagesUsed

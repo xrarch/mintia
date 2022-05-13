@@ -107,8 +107,6 @@ fn (IODispatchReadFunction) AFSReadFile { timeout flags kflags offset mdl fcb --
 end
 
 fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- byteswritten ok }
-	// XXX remember IOCACHEGETFLAG_SWAPOUT in kflags semantics
-
 	auto bytesize
 	fcb@ IOFileControlBlockGetSize bytesize!
 
@@ -125,11 +123,24 @@ fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- bytes
 		return
 	end
 
+	0 mdl@ MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		mdl@ MmMDLUnpin
+		return
+	end
+
 	auto lastmode
 	mdl@ MmMDLHeader_Mode + @ lastmode!
 
 	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+	mdl@ MmMDLHeader_MappedAddress + @ buffer!
 
 	auto length
 	mdl@ MmMDLHeader_Length + @ length!
@@ -159,7 +170,7 @@ fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- bytes
 		AFSBlockMap ok! blockno!
 
 		if (ok@)
-			return
+			break
 		end
 
 		auto bw
@@ -172,7 +183,7 @@ fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- bytes
 		FSVolumeWrite ok! bw!
 
 		if (ok@)
-			return
+			break
 		end
 
 		if (DEBUGCHECKS)
@@ -185,4 +196,7 @@ fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- bytes
 		m@ byteswritten +=
 		m@ offset +=
 	end
+
+	mdl@ MmMDLUnmap
+	mdl@ MmMDLUnpin
 end

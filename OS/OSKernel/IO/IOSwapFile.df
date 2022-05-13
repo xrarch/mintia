@@ -223,6 +223,56 @@ fn IOSwapFileCreate { filehandle -- sizeinpages ok }
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
+fn IOSwapFileReserve { pagesneeded -- offset ok }
+	auto bmpheader
+	IOSwapBitmap bmpheader!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	IOSwapPageHint@ // hint
+	pagesneeded@ // runlength
+	bmpheader@ // header
+	ExBitmapFindRun ok! offset!
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		STATUS_NO_SWAP ok!
+
+		return
+	end
+
+	pagesneeded@ IOSwapPagesUsed +=
+
+	if (IOSwapPagesUsed@ IOSwapPagesUsedPeak@ >)
+		IOSwapPagesUsed@ IOSwapPagesUsedPeak!
+	end
+
+	offset@ IOSwapPageHint!
+
+	pagesneeded@ // runlength
+	offset@ // index
+	bmpheader@ // header
+	ExBitmapSetBits
+
+	ipl@ KeIPLLower
+end
+
+fn IOSwapFileRelease { pages offset -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pages@ IOSwapPagesUsed -=
+
+	pages@ // runlength
+	offset@ // index
+	IOSwapBitmap // header
+	ExBitmapClearBits
+
+	ipl@ KeIPLLower
+end
+
 fn IOSwapPageFree { pno -- }
 	// frees a page in swap
 
@@ -249,92 +299,6 @@ fn IOSwapPageFree { pno -- }
 	end
 
 	ipl@ KeIPLLower
-end
-
-fn IOSwapPageWrite { pageframe -- pno ok }
-	// writes the pageframe to swap and returns the offset in pno.
-
-	if (DEBUGCHECKS)
-		if (pageframe@ PAGEOFFSETMASK &)
-			"IOSwapPageWrite: pageframe wasn't page-aligned\n" KeCrash
-		end
-
-		if (IOSwapFileObject@ ~~)
-			"IOSwapPageWrite: no swapfile\n" KeCrash
-		end
-	end
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	// find a free swap page
-
-	IOSwapPageHint@ // hint
-	1 // runlength
-	IOSwapBitmap // header
-	ExBitmapFindRun ok! pno!
-
-	if (ok@)
-		ipl@ KeIPLLower
-
-		// no free swap pages
-
-		STATUS_NO_SWAP ok!
-
-		return
-	end
-
-	pno@ IOSwapPageHint!
-
-	1 // runlength
-	pno@ // index
-	IOSwapBitmap // header
-	ExBitmapSetBits
-
-	1 IOSwapPagesUsed +=
-
-	if (IOSwapPagesUsed@ IOSwapPagesUsedPeak@ >)
-		IOSwapPagesUsed@ IOSwapPagesUsedPeak!
-	end
-
-	ipl@ KeIPLLower
-
-	auto fcb
-	IOSwapFileObject@ IOFile_FileControlBlock + @ fcb!
-
-	auto writefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
-
-	// perform the write operation
-
-	auto mdl
-	MmMDLHeader_SIZEOF 4 2 * + alloc mdl!
-
-	KERNELMODE // mode
-	PAGESIZE // length
-	pageframe@ // vaddr
-	mdl@ // mdl
-	MmMDLInitialize
-
-	0 // flags
-	IOKFLAG_SWAPOUT // kflags
-	pno@ PAGESHIFT << // offset
-	mdl@ // mdl
-	fcb@ // fcb
-	writefunc@ IODispatchWriteFunction ok! drop
-
-	if (ok@)
-		// write failed!
-
-		pno@ IOSwapPageFree
-
-		return
-	end
-
-	auto rs
-	HALCPUInterruptDisable rs!
-	1 IOSwapPagesWritten +=
-	rs@ HALCPUInterruptRestore
 end
 
 fn IOSwapPageRead { pageframe pno -- ok }
@@ -383,4 +347,78 @@ fn IOSwapPageRead { pageframe pno -- ok }
 	HALCPUInterruptDisable rs!
 	1 IOSwapPagesRead +=
 	rs@ HALCPUInterruptRestore
+end
+
+fn IOSwapFileWriteMDL { pagecount mdl -- ok }
+	if (DEBUGCHECKS)
+		if (IOSwapFileObject@ ~~)
+			"IOSwapFileWriteMDL: no swapfile\n" KeCrash
+		end
+	end
+
+	KERNELMODE // mode
+	pagecount@ PAGESHIFT << // length
+	0 // vaddr
+	mdl@ // mdl
+	MmMDLInitialize
+
+	1 mdl@ MmMDLHeader_PinCount + !
+
+	auto offset
+	pagecount@ IOSwapFileReserve ok! offset!
+
+	if (ok@)
+		return
+	end
+
+	auto fcb
+	IOSwapFileObject@ IOFile_FileControlBlock + @ fcb!
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	// perform the write operation
+
+	0 // flags
+	IOKFLAG_SWAPOUT // kflags
+	offset@ PAGESHIFT << // offset
+	mdl@ // mdl
+	fcb@ // fcb
+	writefunc@ IODispatchWriteFunction ok! drop
+
+	if (ok@)
+		pagecount@ // pages
+		offset@ // offset
+		IOSwapFileRelease
+
+		return
+	end
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	while (pagecount@)
+		auto pfdbe
+		mdlpos@@ pfdbe!
+
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
+			MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
+			// modified or deleted, free the swap page :(
+
+			offset@ IOSwapPageFree
+		end else
+			offset@ pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		1 offset +=
+		1 pagecount -=
+		4 mdlpos +=
+	end
+
+	ipl@ KeIPLLower
 end

@@ -33,8 +33,11 @@ fn (IODispatchReadFunction) AFSReadFile { timeout flags kflags offset mdl fcb --
 	auto bytesize
 	fcb@ IOFileControlBlockGetSize bytesize!
 
-	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	auto volfcb
+	fcb@ FSVolumeGetFCB volfcb!
+
+	auto readfunc
+	volfcb@ FSVolumeFCBGetReadFunction readfunc!
 
 	0 ok!
 
@@ -44,74 +47,173 @@ fn (IODispatchReadFunction) AFSReadFile { timeout flags kflags offset mdl fcb --
 		return
 	end
 
-	auto lastmode
-	mdl@ MmMDLHeader_Mode + @ lastmode!
+	mdl@ MmMDLHeader_Length + @ bytesread!
 
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+	if (bytesread@ AFSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
 
-	auto length
-	mdl@ MmMDLHeader_Length + @ length!
+		return
+	end
 
 	bytesize@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytesize!
 
 	bytesize@ offset@ -
-	length@
-	min length!
+	bytesread@
+	min bytesread!
 
-	while (bytesread@ length@ <)
-		auto blockno
-		offset@ AFSBLOCKSHIFT >> blockno!
+	if (bytesread@ ~~)
+		return
+	end
 
-		auto blockoff
-		offset@ AFSBLOCKOFFMASK & blockoff!
+	bytesread@ mdl@ MmMDLHeader_Length + !
 
-		auto m
+	1 mdl@ MmMDLPin ok!
 
-		length@ bytesread@ -
-		AFSBLOCKSIZE blockoff@ -
-		min m!
+	if (ok@)
+		return
+	end
 
-		blockno@ // blkoff
+	auto fragmentstart
+	auto fragmentlength
+
+	auto fragmentlastblkno
+	-1 fragmentlastblkno!
+
+	auto fragmentoffset
+	0 fragmentoffset!
+
+	auto bufoffset
+	0 bufoffset!
+
+	auto fragmdl
+	0 fragmdl!
+
+	while (bufoffset@ bytesread@ <)
+		auto blkno
+		offset@ AFSBLOCKSHIFT >> // blkoff
 		fcb@ // fcb
 		kflags@ // kflags
-		AFSBlockMap ok! blockno!
+		AFSBlockMap ok! blkno!
 
 		if (ok@)
-			return
+			break
 		end
 
-		auto br
+		if (fragmentlastblkno@ -1 ~=)
+			if (blkno@ fragmentlastblkno@ 1 + ~=)
+				// not contiguous -- new fragment.
+				// write the last one.
 
-		m@ // length
-		blockno@ AFSBLOCKSHIFT << blockoff@ + // offset
-		buffer@ // buf
-		lastmode@ // lastmode
-		mount@ // mount
-		FSVolumeRead ok! br!
+				0 // mode (gets filled in by MmMDLSplit)
+				fragmentlength@ // length
+				mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+				kflags@ // kflags
+				MmMDLAllocate ok! fragmdl!
 
-		if (ok@)
-			return
-		end
+				if (ok@)
+					break
+				end
 
-		if (DEBUGCHECKS)
-			if (br@ m@ ~=)
-				blockno@ br@ m@ "AFSReadFile: volume read failed (expected %d, read %d, blkno=%d)\n" KeCrash
+				mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+				fragmentlength@ // length
+				mdl@ // srcmdl
+				fragmdl@ // destmdl
+				MmMDLSplit
+
+				timeout@ // timeout
+				flags@ // flags
+				kflags@ // kflags
+				fragmentstart@ // offset
+				fragmdl@ // mdl
+				volfcb@ // fcb
+				readfunc@ IODispatchReadFunction ok! drop
+
+				fragmdl@ MmFree
+
+				if (ok@)
+					break
+				end
+
+				-1 fragmentlastblkno!
 			end
 		end
 
-		m@ buffer +=
-		m@ bytesread +=
-		m@ offset +=
+		if (fragmentlastblkno@ -1 ==)
+			blkno@ AFSBLOCKSHIFT << fragmentstart!
+			bufoffset@ fragmentoffset!
+			0 fragmentlength!
+		end
+
+		AFSBLOCKSIZE fragmentlength +=
+		blkno@ fragmentlastblkno!
+
+		AFSBLOCKSIZE offset +=
+		AFSBLOCKSIZE bufoffset +=
 	end
+
+	if (ok@)
+		mdl@ MmMDLUnpin
+		return
+	end
+
+	if (fragmdl@ ~~)
+		// transfer never fragmented, pass the entire MDL to the volume file
+
+		timeout@ // timeout
+		flags@ // flags
+		kflags@ // kflags
+		fragmentstart@ // offset
+		mdl@ // mdl
+		volfcb@ // fcb
+		readfunc@ IODispatchReadFunction ok! drop
+	end else
+		while (1)
+			0 // mode (gets filled in by MmMDLSplit)
+			fragmentlength@ // length
+			mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+			kflags@ // kflags
+			MmMDLAllocate ok! fragmdl!
+
+			if (ok@)
+				break
+			end
+
+			mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+			fragmentlength@ // length
+			mdl@ // srcmdl
+			fragmdl@ // destmdl
+			MmMDLSplit
+
+			timeout@ // timeout
+			flags@ // flags
+			kflags@ // kflags
+			fragmentstart@ // offset
+			fragmdl@ // mdl
+			volfcb@ // fcb
+			readfunc@ IODispatchReadFunction ok! drop
+
+			fragmdl@ MmFree
+
+			if (ok@)
+				break
+			end
+
+			break
+		end
+	end
+
+	mdl@ MmMDLUnpin
 end
 
 fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- byteswritten ok }
 	auto bytesize
 	fcb@ IOFileControlBlockGetSize bytesize!
 
-	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	auto volfcb
+	fcb@ FSVolumeGetFCB volfcb!
+
+	auto writefunc
+	volfcb@ FSVolumeFCBGetWriteFunction writefunc!
 
 	0 ok!
 
@@ -123,80 +225,162 @@ fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- bytes
 		return
 	end
 
+	mdl@ MmMDLHeader_Length + @ byteswritten!
+
+	if (byteswritten@ AFSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	bytesize@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytesize!
+
+	bytesize@ offset@ -
+	byteswritten@
+	min byteswritten!
+
+	if (byteswritten@ ~~)
+		return
+	end
+
+	byteswritten@ mdl@ MmMDLHeader_Length + !
+
 	0 mdl@ MmMDLPin ok!
 
 	if (ok@)
 		return
 	end
 
-	mdl@ MmMDLMap ok!
+	auto fragmentstart
+	auto fragmentlength
+
+	auto fragmentlastblkno
+	-1 fragmentlastblkno!
+
+	auto fragmentoffset
+	0 fragmentoffset!
+
+	auto bufoffset
+	0 bufoffset!
+
+	auto fragmdl
+	0 fragmdl!
+
+	while (bufoffset@ byteswritten@ <)
+		auto blkno
+		offset@ AFSBLOCKSHIFT >> // blkoff
+		fcb@ // fcb
+		kflags@ // kflags
+		AFSBlockMap ok! blkno!
+
+		if (ok@)
+			break
+		end
+
+		if (fragmentlastblkno@ -1 ~=)
+			if (blkno@ fragmentlastblkno@ 1 + ~=)
+				// not contiguous -- new fragment.
+				// write the last one.
+
+				0 // mode (gets filled in by MmMDLSplit)
+				fragmentlength@ // length
+				mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+				kflags@ // kflags
+				MmMDLAllocate ok! fragmdl!
+
+				if (ok@)
+					break
+				end
+
+				mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+				fragmentlength@ // length
+				mdl@ // srcmdl
+				fragmdl@ // destmdl
+				MmMDLSplit
+
+				flags@ // flags
+				kflags@ // kflags
+				fragmentstart@ // offset
+				fragmdl@ // mdl
+				volfcb@ // fcb
+				writefunc@ IODispatchWriteFunction ok! drop
+
+				fragmdl@ MmFree
+
+				if (ok@)
+					break
+				end
+
+				-1 fragmentlastblkno!
+			end
+		end
+
+		if (fragmentlastblkno@ -1 ==)
+			blkno@ AFSBLOCKSHIFT << fragmentstart!
+			bufoffset@ fragmentoffset!
+			0 fragmentlength!
+		end
+
+		AFSBLOCKSIZE fragmentlength +=
+		blkno@ fragmentlastblkno!
+
+		AFSBLOCKSIZE offset +=
+		AFSBLOCKSIZE bufoffset +=
+	end
 
 	if (ok@)
 		mdl@ MmMDLUnpin
 		return
 	end
 
-	auto lastmode
-	mdl@ MmMDLHeader_Mode + @ lastmode!
+	if (fragmdl@ ~~)
+		// transfer never fragmented, pass the entire MDL to the volume file
 
-	auto buffer
-	mdl@ MmMDLHeader_MappedAddress + @ buffer!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+		mdl@ MmMDLHeader_Length + @ "%d " Printf
+		ipl@ KeIPLLower
 
-	auto length
-	mdl@ MmMDLHeader_Length + @ length!
-
-	bytesize@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytesize!
-
-	bytesize@ offset@ -
-	length@
-	min length!
-
-	while (byteswritten@ length@ <)
-		auto blockno
-		offset@ AFSBLOCKSHIFT >> blockno!
-
-		auto blockoff
-		offset@ AFSBLOCKOFFMASK & blockoff!
-
-		auto m
-
-		length@ byteswritten@ -
-		AFSBLOCKSIZE blockoff@ -
-		min AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & m!
-
-		blockno@ // blkoff
-		fcb@ // fcb
+		flags@ // flags
 		kflags@ // kflags
-		AFSBlockMap ok! blockno!
+		fragmentstart@ // offset
+		mdl@ // mdl
+		volfcb@ // fcb
+		writefunc@ IODispatchWriteFunction ok! drop
+	end else
+		while (1)
+			0 // mode (gets filled in by MmMDLSplit)
+			fragmentlength@ // length
+			mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+			kflags@ // kflags
+			MmMDLAllocate ok! fragmdl!
 
-		if (ok@)
-			break
-		end
-
-		auto bw
-
-		m@ // length
-		blockno@ AFSBLOCKSHIFT << blockoff@ + // offset
-		buffer@ // buf
-		lastmode@ // lastmode
-		mount@ // mount
-		FSVolumeWrite ok! bw!
-
-		if (ok@)
-			break
-		end
-
-		if (DEBUGCHECKS)
-			if (bw@ m@ ~=)
-				"AFSWriteFile: volume write failed\n" KeCrash
+			if (ok@)
+				break
 			end
-		end
 
-		m@ buffer +=
-		m@ byteswritten +=
-		m@ offset +=
+			mdl@ MmMDLHeader_VirtualAddress + @ fragmentoffset@ + // vaddr
+			fragmentlength@ // length
+			mdl@ // srcmdl
+			fragmdl@ // destmdl
+			MmMDLSplit
+
+			flags@ // flags
+			kflags@ // kflags
+			fragmentstart@ // offset
+			fragmdl@ // mdl
+			volfcb@ // fcb
+			writefunc@ IODispatchWriteFunction ok! drop
+
+			fragmdl@ MmFree
+
+			if (ok@)
+				break
+			end
+
+			break
+		end
 	end
 
-	mdl@ MmMDLUnmap
 	mdl@ MmMDLUnpin
 end

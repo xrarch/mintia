@@ -73,6 +73,8 @@ extern MmPageFault { writing badaddr trapframe -- handled }
 
 extern MmFlushModifiedPages { -- }
 
+extern MmThrottle { -- }
+
 externptr MmPageFrameDatabase
 externptr MmPageFreeListHead
 externptr MmPageZeroListHead

@@ -110,6 +110,24 @@ fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 	HALCPUInterruptDisable drop
 end
 
+fn MmThrottle { -- }
+	auto process
+	KeProcessCurrent process!
+
+	if (process@ PsProcess_ModifiedPages + @ 20 >)
+		while (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
+			// throttle the thread
+
+			75 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+		end
+
+		0 process@ PsProcess_ModifiedPages + !
+	end
+end
+
 fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	0 signal!
 
@@ -126,18 +144,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	auto wsleptr
 	auto wsli
 
-	if (process@ PsProcess_ModifiedPages + @ 20 >)
-		while (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
-			// throttle the thread
-
-			50 // ms
-			KERNELMODE // waitmode
-			0 // alertable
-			KeThreadSleep drop
-
-			0 process@ PsProcess_ModifiedPages + !
-		end
-	end
+	MmThrottle
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -258,8 +265,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 				PTE_V flags!
 
-				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ==)
-					// no swap page, fine to map writable
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 					if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
 						PTE_W flags |=
 					end
@@ -513,9 +519,7 @@ fn MmSatisfyAnonFault { section offset vad -- flags pfdbe phyaddr ok }
 
 	PTE_V flags!
 
-	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ MMSWAPPAGE_NONE ==)
-		// no swap page, it's okay to map writable since we're either already
-		// dirty or have never been written to swap.
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
 			PTE_W flags |=
 		end
@@ -594,7 +598,7 @@ fn MmWriteFault { vaddr process -- signal }
 		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
 			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW &)
 				pfdbe@ // pfdbe
-				0 // process
+				process@ // process
 				MmEvictablePageModify
 
 				phyaddr@ // phyaddr
@@ -665,7 +669,7 @@ fn MmWriteFault { vaddr process -- signal }
 			break
 		end else
 			pfdbe@ // pfdbe
-			0 // process
+			process@ // process
 			MmEvictablePageModify
 
 			phyaddr@ // phyaddr

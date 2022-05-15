@@ -89,6 +89,8 @@ var CoVideoConsoleBG 0
 
 var CoVideoConsoleEscape 0
 
+const COVIDEOUPDATEINTERVAL 50
+
 table CoVideoConsoleColorTable
 	0x000000 // black
 	0xFF0000 // red
@@ -109,6 +111,8 @@ table CoVideoConsoleColorTable
 endtable
 
 buffer CoVideoConsoleOutputEvent KeEvent_SIZEOF
+
+buffer CoVideoConsoleTimer KeTimer_SIZEOF
 
 fn CoVideoConsoleInit { -- }
 	if (CoVideoConsoleRawBuffer@ ~~)
@@ -226,6 +230,11 @@ fn CoVideoConsoleInit { -- }
 	"CoVideoConsoleOutputEvent" // name
 	CoVideoConsoleOutputEvent // event
 	KeEventInitialize
+
+	"CoVideoConsoleTimer" // name
+	0 // function
+	CoVideoConsoleTimer // timer
+	KeTimerInitialize
 
 	auto i
 	0 i!
@@ -492,6 +501,24 @@ fn CoVideoConsoleInitializeBuffer { buf -- }
 	memset
 end
 
+fn CoVideoConsoleMakeDirty { -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"CoVideoConsoleMakeDirty: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	1 CoVideoConsoleIsDirty!
+
+	if (CoVideoConsoleTimer KeTimer_Enqueued + @ ~~)
+		0 // context1
+		0 // context2
+		COVIDEOUPDATEINTERVAL // interval
+		CoVideoConsoleTimer // timer
+		KeTimerEnqueue
+	end
+end
+
 fn CoVideoConsoleClear { -- }
 	CoVideoConsoleUpdateBuffer@ CoVideoConsoleInitializeBuffer
 
@@ -507,7 +534,7 @@ fn CoVideoConsoleClear { -- }
 	CoVideoConsoleDefaultFG@ CoVideoConsoleFG!
 	CoVideoConsoleDefaultBG@ CoVideoConsoleBG!
 
-	1 CoVideoConsoleIsDirty!
+	CoVideoConsoleMakeDirty
 end
 
 fn CoVideoConsoleScroll { -- }
@@ -528,7 +555,7 @@ fn CoVideoConsoleScroll { -- }
 	CoVideoConsoleColumns@ 1 - CoVideoConsoleDirtyX2!
 	CoVideoConsoleRows@ 1 - CoVideoConsoleDirtyY2!
 
-	1 CoVideoConsoleIsDirty!
+	CoVideoConsoleMakeDirty
 end
 
 fn CoVideoConsoleNewline { -- }
@@ -540,7 +567,7 @@ fn CoVideoConsoleNewline { -- }
 		CoVideoConsoleScroll
 	end
 
-	1 CoVideoConsoleIsDirty!
+	CoVideoConsoleMakeDirty
 end
 
 fn CoVideoConsoleBackUp { -- }
@@ -554,7 +581,7 @@ fn CoVideoConsoleBackUp { -- }
 		1 CoVideoConsoleUpdateCursorX -=
 	end
 
-	1 CoVideoConsoleIsDirty!
+	CoVideoConsoleMakeDirty
 end
 
 fn CoVideoConsoleRubout { -- }
@@ -731,7 +758,7 @@ fn CoVideoConsolePutCharacter { c -- }
 		CoVideoConsoleNewline
 	end
 
-	1 CoVideoConsoleIsDirty!
+	CoVideoConsoleMakeDirty
 
 	ipl@ KeIPLLower
 end
@@ -929,14 +956,22 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
+	auto objecttable
+	8 alloc objecttable!
+
+	CoVideoConsoleOutputEvent objecttable@!
+	CoVideoConsoleTimer objecttable@ 4 + !
+
 	auto ok
 
 	while (1)
 		USERMODE // waitmode
 		0 // alertable
-		50 // timeout
-		CoVideoConsoleOutputEvent // object
-		KeThreadWaitForObject drop
+		OSWAITANY // waittype
+		OSWAIT_TIMEOUTINFINITE // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		KeThreadWaitForMultipleObjects drop
 
 		if (CoVideoConsoleIsDirty@)
 			auto ipl
@@ -946,5 +981,7 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 
 			ipl@ KeIPLLower
 		end
+
+		CoVideoConsoleTimer KeTimerReset drop
 	end
 end

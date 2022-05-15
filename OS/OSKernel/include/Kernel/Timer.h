@@ -18,3 +18,4 @@ endstruct
 extern KeTimerInitialize { name function timer -- }
 extern KeTimerDequeue { timer -- }
 extern KeTimerEnqueue { context1 context2 interval timer -- }
+extern KeTimerReset { timer -- signaled }

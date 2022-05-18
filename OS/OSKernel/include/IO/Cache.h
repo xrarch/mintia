@@ -1,6 +1,13 @@
-const IOCACHEPAGEBUCKETS 8 // must be a power of two
-const IOCACHEPAGESHIFT 4 // 1<<IOCACHEPAGESHIFT must equal IOCACHEPAGEBUCKETS
+const IOCACHEPAGESHIFT 4
+const IOCACHEPAGEBUCKETS (1 IOCACHEPAGESHIFT <<)
 const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
+
+// main considerations with this are:
+//   1. too great of a value means hash buckets will get longer than they must
+//      for small files.
+//   2. too small of a value means I/O clustering will perform more poorly.
+const IOCACHEPAGEHASHSHIFT 3
+const IOCACHEPAGECLUSTERMAX (1 IOCACHEPAGEHASHSHIFT <<)
 
 struct IOCacheInfoBlock
 	ExRwLock_SIZEOF RwLock

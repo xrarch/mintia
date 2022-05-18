@@ -53,7 +53,7 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	end
 
 	auto bucket
-	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
+	offset@ PAGESHIFT >> IOCACHEPAGEHASHSHIFT >> IOCACHEPAGEMASK & bucket!
 
 	if (locked@ ~~)
 		cacheblock@ // cacheblock
@@ -342,7 +342,7 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
 
 	auto bucket
-	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
+	offset@ PAGESHIFT >> IOCACHEPAGEHASHSHIFT >> IOCACHEPAGEMASK & bucket!
 
 	auto buckethead
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
@@ -357,56 +357,135 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 end
 
 fn IOCachePageWrite { kflags pfdbe -- ok }
-	// assumes caller referenced the page
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
-		// page is already clean, nothing to do but report success.
-
-		rs@ HALCPUInterruptRestore
-
-		0 ok!
-
-		return
-	end
-
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-	rs@ HALCPUInterruptRestore
-
-	KeThreadCurrent@ KeThreadIgnoreKill drop
+	// assumes caller referenced the page.
+	// will cluster pages that it finds are in order.
 
 	auto fcb
 	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
 
-	auto writefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	auto mdl
+	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	auto pagecount
+	0 pagecount!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	auto off
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
-	// perform the write operation
+	// search "backward" in the bucket for more modified pages
+	while (pagecount@ IOCACHEPAGECLUSTERMAX 1 - <)
+		auto spfdbe
+		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ spfdbe!
 
-	auto mdl
-	MmMDLHeader_SIZEOF 4 2 * + alloc mdl!
+		if (spfdbe@ ~~)
+			break
+		end
+
+		if (spfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+			break
+		end
+
+		if (spfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off@ PAGESIZE - ~=)
+			break
+		end
+
+		spfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
+		spfdbe@ pfdbe!
+
+		1 pagecount +=
+	end
+
+	0 pagecount!
+
+	auto startoffset
+	off@ startoffset!
+	-1 off!
+
+	// now go "forward" to build the MDL
+	while (pagecount@ IOCACHEPAGECLUSTERMAX <)
+		if (pagecount@ IOTRANSFERMAX PAGESHIFT >> >=)
+			break
+		end
+
+		if (pfdbe@ ~~)
+			break
+		end
+
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+			break
+		end
+
+		if (off@ -1 ~=)
+			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off@ PAGESIZE + ~=)
+				break
+			end
+		end
+
+		pfdbe@ MmEvictablePageReference drop
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+		pfdbe@ mdlpos@!
+
+		pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
+		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
+
+		4 mdlpos +=
+		1 pagecount +=
+	end
+
+	ipl@ KeIPLLower
+
+	if (pagecount@ ~~)
+		// no pages to write...
+		0 ok!
+		return
+	end
 
 	KERNELMODE // mode
-	PAGESIZE // length
-	pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | // vaddr
+	pagecount@ PAGESHIFT << // length
+	0 // vaddr
 	mdl@ // mdl
 	MmMDLInitialize
 
+	1 mdl@ MmMDLHeader_PinCount + !
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
 	0 // flags
 	kflags@ // kflags
-	off@ // offset
+	startoffset@ // offset
 	mdl@ // mdl
 	fcb@ // fcb
 	writefunc@ IODispatchWriteFunction ok! drop
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	IPLDPC KeIPLRaise ipl!
+
+	while (pagecount@)
+		mdlpos@@ MmEvictablePageDereference drop
+
+		1 pagecount -=
+		4 mdlpos +=
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
@@ -426,7 +505,7 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 	end
 
 	auto bucket
-	offset@ PAGESHIFT >> IOCACHEPAGEMASK & bucket!
+	offset@ PAGESHIFT >> IOCACHEPAGEHASHSHIFT >> IOCACHEPAGEMASK & bucket!
 
 	bucket@ // bucket
 	cacheblock@ // cacheblock

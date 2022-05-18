@@ -41,6 +41,11 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 	auto truncfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
 
+	auto grew
+	0 grew!
+
+	auto oldsize
+
 	if (truncfunc@ ~~)
 		// driver provides no way to grow this file
 
@@ -68,6 +73,43 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 		PAGENUMBERMASK offset@ -
 		length@
 		min length!
+
+		if (offset@ length@ + bytesize@ >)
+			// ga grow tha file
+
+			1 grew!
+
+			fcb@ IOFileControlBlockUnlock
+
+			offset@ length@ + // newsize
+			1 // growing
+			1 // keeplocked
+			0 // zero
+			fcb@ // fcb
+			IOFileControlBlockTruncate ok! oldsize!
+
+			if (ok@)
+				// don't unlock FCB, IOFileControlBlockTruncate leaves it
+				// unlocked in case of error.
+
+				return
+			end
+
+			if (offset@ oldsize@ >)
+				// zero up to the offset
+
+				offset@ oldsize@ - // size
+				oldsize@ // offset
+				fcb@ // fcb
+				IOCacheZeroData ok!
+
+				if (ok@)
+					fcb@ IOFileControlBlockUnlock
+
+					return
+				end
+			end
+		end
 	end
 
 	while (byteswritten@ length@ <)
@@ -93,54 +135,6 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			end
 		end
 
-		auto dirty
-		0 dirty!
-
-		auto oldsize
-
-		if (truncfunc@)
-			fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
-
-			if (offset@ m@ + bytesize@ >)
-				fcb@ IOFileControlBlockUnlock
-
-				if (offset@ bytesize@ - PAGESIZE <= m@ PAGESIZE == &&)
-					// growing by <= a page and writing the pagesize, no need
-					// to zero.
-
-					offset@ m@ + // newsize
-					1 // growing
-					1 // keeplocked
-					0 // zero
-					fcb@ // fcb
-					IOFileControlBlockTruncate ok! drop
-
-					1 dirty!
-					bytesize@ oldsize!
-				end else
-					// if we're growing by more than a pagesize then we need
-					// to ask the filesystem driver to zero out all the blocks
-					// inbetween.
-
-					offset@ m@ + // newsize
-					1 // growing
-					1 // keeplocked
-					1 // zero
-					fcb@ // fcb
-					IOFileControlBlockTruncate ok! drop
-				end
-
-				if (ok@)
-					// don't unlock FCB, IOFileControlBlockTruncate leaves it
-					// unlocked in case of error.
-
-					return
-				end
-
-				fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
-			end
-		end
-
 		if (m@ PAGESIZE ==)
 			// writing a full page -- no need to read something we're about to
 			// overwrite.
@@ -152,14 +146,16 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			IOCachePageGet ok! pfdbe! pageframe!
 
 			if (ok@)
-				fcb@ IOFileControlBlockUnlock
+				if (grew@)
+					// zero the remaining length
 
-				if (dirty@)
-					PAGESIZE // size
-					pageno@ // offset
+					length@ byteswritten@ - // size
+					offset@ byteswritten@ + // offset
 					fcb@ // fcb
 					IOCacheZeroData drop
 				end
+
+				fcb@ IOFileControlBlockUnlock
 
 				return
 			end
@@ -173,6 +169,15 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			IOCachePageRead ok! pfdbe! pageframe!
 
 			if (ok@)
+				if (grew@)
+					// zero the remaining length
+
+					length@ byteswritten@ - // size
+					offset@ byteswritten@ + // offset
+					fcb@ // fcb
+					IOCacheZeroData drop
+				end
+
 				fcb@ IOFileControlBlockUnlock
 
 				return
@@ -186,16 +191,25 @@ fn IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok
 			KeSafeCopyIn ok!
 
 			if (ok@)
-				if (dirty@)
-					// zero out the remainder of the page
+				// zero the rest of the page
 
-					pageframe@ pageoff@ + // ptr
-					m@ // size
-					0 // word
-					memset
-				end
+				pageframe@ pageoff@ + // ptr
+				m@ // size
+				0 // word
+				memset
+
+				m@ byteswritten +=
 
 				pfdbe@ MmEvictablePageDereference drop
+
+				if (grew@)
+					// zero the remaining length
+
+					length@ byteswritten@ - // size
+					offset@ byteswritten@ + // offset
+					fcb@ // fcb
+					IOCacheZeroData drop
+				end
 
 				fcb@ IOFileControlBlockUnlock
 

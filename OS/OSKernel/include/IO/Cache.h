@@ -12,7 +12,7 @@ const IOCACHEPAGECLUSTERMAX (1 IOCACHEPAGEHASHSHIFT <<)
 struct IOCacheInfoBlock
 	ExRwLock_SIZEOF RwLock
 
-	4 PageReferences
+	4 MapCount
 	4 Flags
 
 	(IOCACHEPAGEBUCKETS KeMutex_SIZEOF *) PageBucketMutexes

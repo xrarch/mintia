@@ -1,7 +1,4 @@
-fnptr MmWriteModifiedFunction { pfdbe -- written dropped ok }
 fnptr MmEvictionFunction { pfdbe -- }
-fnptr MmReferenceFunction { oldcount pfdbe -- }
-fnptr MmDereferenceFunction { oldcount pfdbe -- }
 
 // should be kept in sync with IOPageFrameEntryCache,
 // and the page frame entries below
@@ -33,7 +30,7 @@ struct MmPageFrameEntryAnonymous
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 SwapPageNumber
 	4 PrototypePTE
-	4 References
+	4 Context1
 	4 Context2
 	4 Context3
 endstruct

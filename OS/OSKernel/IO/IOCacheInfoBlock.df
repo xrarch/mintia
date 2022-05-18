@@ -39,7 +39,7 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 		return
 	end
 
-	0 cacheblock@ IOCacheInfoBlock_PageReferences + !
+	0 cacheblock@ IOCacheInfoBlock_MapCount + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
 
 	"IOCacheInfoBlockRwLock" // name
@@ -155,9 +155,9 @@ fn IOCacheInfoBlockReference { cacheblock -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+	cacheblock@ IOCacheInfoBlock_MapCount + @ oldcount!
 
-	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_PageReferences + !
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_MapCount + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -176,9 +176,9 @@ fn IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
 		return
 	end
 
-	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+	cacheblock@ IOCacheInfoBlock_MapCount + @ oldcount!
 
-	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_PageReferences + !
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_MapCount + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -187,7 +187,7 @@ fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	cacheblock@ IOCacheInfoBlock_PageReferences + @ oldcount!
+	cacheblock@ IOCacheInfoBlock_MapCount + @ oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -195,7 +195,7 @@ fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
 		end
 	end
 
-	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_PageReferences + !
+	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_MapCount + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -213,9 +213,6 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
 	// for each bucket, iterate all pages. if a page if dirty, write it
 	// out to disk.
-
-	// ensure thread can't receive signals while writing out dirty pages
-	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto i
 	0 i!
@@ -257,9 +254,6 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 		1 i +=
 	end
 
-	// allow thread to receive signals again
-	KeThreadCurrent@ KeThreadAcceptKill drop
-
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockUnlock
 end
@@ -282,9 +276,8 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (cacheblock@ IOCacheInfoBlock_PageReferences + @)
-		// one or more page frames in this cache is currently in use.
-		// don't allow truncation for now.
+	if (cacheblock@ IOCacheInfoBlock_MapCount + @)
+		// this file is currently mapped. truncation isn't allowed.
 
 		rs@ HALCPUInterruptRestore
 
@@ -303,9 +296,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	// for each bucket, free all cached pages. if a page is dirty,
 	// and caller wanted us to write out dirty pages (writeout==1),
 	// write the page out first.
-
-	// ensure thread can't receive signals while writing out dirty pages
-	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto i
 	0 i!
@@ -372,9 +362,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	HALCPUInterruptDisable rs!
 	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=
 	rs@ HALCPUInterruptRestore
-
-	// allow thread to receive signals again
-	KeThreadCurrent@ KeThreadAcceptKill drop
 
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockUnlock

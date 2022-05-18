@@ -52,7 +52,6 @@ extern IOCacheInfoBlockLockBucket { bucket cacheblock -- ok }
 extern IOCacheInfoBlockTryLockBucket { bucket cacheblock -- locked }
 extern IOCacheInfoBlockUnlockBucket { bucket cacheblock -- }
 
-extern IOCacheInfoBlockReference { cacheblock -- oldcount }
 extern IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
 extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 

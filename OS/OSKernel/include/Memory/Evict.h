@@ -38,14 +38,14 @@ endstruct
 const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_COW        16
+const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
+                                // for working set accounting when inserted or
+                                // removed from an evictable list.
+const MMEVICTFLAG_VALID      64 // file cache
 
 const MMEVICTTYPE_FILE       0
 const MMEVICTTYPE_ANON       1
 const MMEVICTTYPE_SLAB       2
-
-const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
-                                // for working set accounting when inserted or
-                                // removed from an evictable list.
 
 extern MmEvictablePageAlloc { flags evictabletype priority -- pfdbe pfn ok }
 extern MmEvictablePageDelete { pfdbe -- }

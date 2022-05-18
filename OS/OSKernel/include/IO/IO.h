@@ -5,6 +5,7 @@ const IOKFLAG_SWAPOUT 1 // this read is involved in a swapout operation which
                         // means different page allocation behavior is needed
 
 const IOKFLAG_URGENT  2
+const IOKFLAG_ZEROES  4 // force IOCachePageGet to allocate zero pages
 
 extern IOInitPhase1 { -- }
 

@@ -79,10 +79,7 @@ externptr MmPageFrameDatabase
 externptr MmPageFreeListHead
 externptr MmPageZeroListHead
 externptr MmPageFreeCount
-// externptr MmHeapBuckets
-// externptr MmHeapSize
-// externptr MmHeapBytesFree
-// externptr MmHeap
+externptr MmConstantZeroPage
 externptr MmInited
 externptr MmEventPageAvailable
 externptr MmEventLowMemory

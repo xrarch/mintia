@@ -1,0 +1,156 @@
+//
+// Implements efficient zeroing of newly allocated file space.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+const IOCACHEZEROMAX (512 1024 * PAGESHIFT >>)
+
+fn IOCacheZeroData { size offset fcb -- ok }
+	// expects the FCB to be locked.
+
+	auto pagestozero
+	offset@ PAGEOFFSETMASK & size@ + PAGEOFFSETMASK + PAGESHIFT >> pagestozero!
+
+	if (fcb@ IOFileControlBlock_CacheInfoBlock + @)
+		if (pagestozero@ IOCACHEZEROMAX <=)
+			if (MmPageFreeCount@ MmEvictablePageCount@ + pagestozero@ + MmPageFreeCountSufficient@ >=)
+				// sufficient resources to zero in the cache
+
+				size@ // size
+				offset@ // offset
+				fcb@ // fcb
+				IOCacheZeroInCache ok!
+				
+				return
+			end
+		end
+	end
+
+	size@ // size
+	offset@ // offset
+	fcb@ // fcb
+	IOCacheZeroDirectIO ok!
+end
+
+fn IOCacheZeroDirectIO { size offset fcb -- ok }
+	// use direct IO with our funky constant zero page to obliterate the
+	// specified range.
+
+	auto mdl
+	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	// initialize all the MDL page frames to point to the zero page.
+
+	auto pagecount
+	IOTRANSFERMAX PAGESHIFT >> pagecount!
+
+	while (pagecount@)
+		MmConstantZeroPage@ mdlpos@!
+
+		4 mdlpos +=
+		1 pagecount -=
+	end
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	while (size@ IOTRANSFERMAX >=)
+		KERNELMODE // mode
+		IOTRANSFERMAX // length
+		offset@ PAGEOFFSETMASK & // vaddr
+		mdl@ // mdl
+		MmMDLInitialize
+
+		1 mdl@ MmMDLHeader_PinCount + !
+
+		0 // flags
+		IOKFLAG_URGENT // kflags
+		offset@ // offset
+		mdl@ // mdl
+		fcb@ // fcb
+		writefunc@ IODispatchWriteFunction ok! drop
+
+		if (ok@)
+			0 size!
+			break
+		end
+
+		IOTRANSFERMAX offset +=
+		IOTRANSFERMAX size -=
+	end
+
+	if (size@)
+		KERNELMODE // mode
+		size@ // length
+		offset@ PAGEOFFSETMASK & // vaddr
+		mdl@ // mdl
+		MmMDLInitialize
+
+		1 mdl@ MmMDLHeader_PinCount + !
+
+		0 // flags
+		IOKFLAG_URGENT // kflags
+		offset@ // offset
+		mdl@ // mdl
+		fcb@ // fcb
+		writefunc@ IODispatchWriteFunction ok! drop
+	end
+end
+
+fn IOCacheZeroInCache { size offset fcb -- ok }
+	MmThrottle
+
+	0 ok!
+
+	auto pagestozero
+	offset@ PAGEOFFSETMASK & size@ + PAGEOFFSETMASK + PAGESHIFT >> pagestozero!
+
+	while (pagestozero@)
+		auto pfdbe
+		IOKFLAG_ZEROES IOKFLAG_URGENT | // kflags
+		0 // locked
+		offset@ PAGENUMBERMASK & // offset
+		fcb@ // fcb
+		IOCachePageGet ok! pfdbe! drop
+
+		if (ok@)
+			return
+		end
+
+		pfdbe@ // pfdbe
+		KeProcessCurrent // process
+		MmEvictablePageModify
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		1 pagestozero -=
+		PAGESIZE offset +=
+	end
+end

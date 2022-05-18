@@ -304,7 +304,7 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		buckethead@ 4 + @ pfdbe!
 
 		while (pfdbe@)
-			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ >=)
+			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ newsize@ >=)
 				pfdbe@ MmEvictablePageReference drop
 
 				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
@@ -338,6 +338,18 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 				npfdbe@ pfdbe!
 
 				1 IOCachePagesUsed -=
+			end elseif (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ ==)
+				// zero out the end of the page
+
+				auto pageframe
+				pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
+
+				pageframe@ newsize@ PAGEOFFSETMASK & + // ptr
+				PAGESIZE newsize@ PAGEOFFSETMASK & - // size
+				0 // word
+				memset
+
+				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
 			end else
 				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
 			end
@@ -354,51 +366,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockUnlock
-end
-
-fn IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
-	// XXX this is an INCORRECT solution...
-	// we have to direct I/O blast some zeroes to the end of the file to fix
-	// (reliably) the situation that necessitates this.
-
-	KeThreadCurrent@ KeThreadIgnoreKill drop
-
-	auto pageframe
-	auto ok
-	auto deref
-
-	if (pfdbe@ ~~)
-		0 // flags
-		IOKFLAG_URGENT // kflags
-		offset@ // offset
-		fcb@ // fcb
-		IOCachePageRead ok! pfdbe! pageframe!
-
-		if (ok@)
-			ok@ "IOCacheInfoBlockZeroEnd: failed to read page (%i)\n" KeCrash
-		end
-
-		1 deref!
-	end else
-		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
-
-		0 deref!
-	end
-
-	pageframe@ offset@ PAGEOFFSETMASK & + // ptr
-	PAGESIZE offset@ PAGEOFFSETMASK & - // size
-	0 // word
-	memset
-
-	pfdbe@ // pfdbe
-	KeProcessCurrent // process
-	MmEvictablePageModify
-
-	if (deref@)
-		pfdbe@ MmEvictablePageDereference drop
-	end
-
-	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }

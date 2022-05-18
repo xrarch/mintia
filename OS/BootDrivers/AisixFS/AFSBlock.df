@@ -25,10 +25,6 @@
 
 #include "AisixFS.h"
 
-// 1.5x the blocksize to ensure it can be internally aligned to the blocksize
-// because disk drivers usually don't like unaligned buffers.
-buffer ZeroBlock (AFSBLOCKSIZE AFSBLOCKSIZE 1 << +)
-
 fn AFSBlockBitmapReadFAT { mount -- ok }
 	// read the entire FAT page-by-page to construct an in-memory bitmap of
 	// free blocks. assumes disks will be a reasonable size (100-500MB) or
@@ -265,74 +261,6 @@ fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 	end
 end
 
-fn AFSBlockZeroChain { blkno mount -- }
-	auto fatblkno
-	0 fatblkno!
-
-	auto curfatblkno
-	-1 curfatblkno!
-
-	auto fatpfdbe
-	0 fatpfdbe!
-
-	auto ok
-
-	auto off
-
-	auto fatdata
-
-	auto afsdata
-	mount@ IOMountGetContext afsdata!
-
-	while (blkno@ 0xFFFFFFFF ~=)
-		// zero out the block on disk.
-
-		AFSBLOCKSIZE // length
-		blkno@ AFSBLOCKSHIFT << // offset
-		ZeroBlock AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & // buf
-		KERNELMODE // lastmode
-		mount@ // mount
-		FSVolumeWrite ok! drop
-
-		if (ok@)
-			ok@ "AFSBlockZeroChain: failed to zero block (%i)\n" KeCrash
-		end
-
-		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
-		blkno@ 2 << AFSBLOCKOFFMASK & off!
-
-		if (fatblkno@ curfatblkno@ ~=)
-			// must read in a new FAT block
-
-			if (fatpfdbe@)
-				fatpfdbe@ // pfdbe
-				mount@ // mount
-				FSVolumeBlockWrite drop
-
-				fatpfdbe@ MmEvictablePageDereference drop
-			end
-
-			0 // flags
-			IOKFLAG_URGENT // kflags
-			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
-
-			if (ok@)
-				ok@ "AFSBlockZeroChain: failed to read FAT block (%i)\n" KeCrash
-			end
-
-			fatblkno@ curfatblkno!
-		end
-
-		fatdata@ off@ + @ blkno!
-	end
-
-	if (fatpfdbe@)
-		fatpfdbe@ MmEvictablePageDereference drop
-	end
-end
-
 fn AFSBlockDeallocateChain { first blkno mount -- }
 	mount@ AFSBlockBitmapLockUnalertable
 
@@ -533,21 +461,6 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 			ExBitmapSetBits
 
 			blkno@ afsdata@ AFSData_FreeBlockHint + !
-		end
-
-		if (zero@ 2 == blocks@ 1 == &&)
-			// zero out the block on disk.
-
-			AFSBLOCKSIZE // length
-			blkno@ AFSBLOCKSHIFT << // offset
-			ZeroBlock AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & // buf
-			KERNELMODE // lastmode
-			mount@ // mount
-			FSVolumeWrite ok! drop
-
-			if (ok@)
-				ok@ "AFSBlockAllocateChain: failed to zero block (%i)\n" KeCrash
-			end
 		end
 
 		if (fatpfdbe@)
@@ -790,9 +703,26 @@ fn AFSBlockTruncate { newblocks oldblocks zero fcb -- ok }
 		if (zero@ 1 ==)
 			// zero out the chain now that we know it was allocated.
 
-			startblock@ // blkno
-			fcb@ IOFileControlBlockGetMount
-			AFSBlockZeroChain
+			newblocks@ oldblocks@ - AFSBLOCKSHIFT << // size
+			oldblocks@ AFSBLOCKSHIFT << // offset
+			fcb@ // fcb
+			IOCacheZeroData ok!
+
+			if (ok@)
+				if (oldblocks@)
+					1 // first
+					startblock@ // blkno
+					fcb@ IOFileControlBlockGetMount // mount
+					AFSBlockDeallocateChain
+				end else
+					0 // first
+					startblock@ // blkno
+					fcb@ IOFileControlBlockGetMount // mount
+					AFSBlockDeallocateChain
+
+					0xFFFFFFFF fcbdata@ AFSFCBData_FirstFATLink + !
+				end
+			end
 		end
 	end
 

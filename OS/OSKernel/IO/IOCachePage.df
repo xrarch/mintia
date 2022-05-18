@@ -128,7 +128,11 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 
 	// not in the cache -- allocate a page for it.
 
-	if (filesize@ offset@ - PAGESIZE <)
+	auto zeroes
+	filesize@ offset@ - PAGESIZE <
+	kflags@ IOKFLAG_ZEROES & || zeroes!
+
+	if (zeroes@)
 		// not a full page -- get zeroes because this might leak data
 
 		MMEVICTFLAG_WORKINGSET // flags
@@ -169,7 +173,7 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 			CANBLOCK kflags!
 		end
 
-		if (filesize@ offset@ - PAGESIZE <)
+		if (zeroes@)
 			MMEVICTFLAG_WORKINGSET // flags
 			MMEVICTTYPE_FILE // evictablefuncs
 			ZEROMUST kflags@ | // priority
@@ -182,7 +186,7 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		end
 
 		if (ok@)
-			if (kflags@ MUSTSUCCEED ==)
+			if (kflags@ 0xFF & MUSTSUCCEED ==)
 				// we needed this page for a swapout, system detonates.
 				// this flag is also used for certain other situations
 				// where an IO operation must succeed.
@@ -202,7 +206,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		end
 	end
 
-	0 pfdbe@ IOPageFrameEntryCache_Flags + !
 	offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 	fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
 	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
@@ -507,7 +510,7 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		return
 	end
 
-	if (pfdbe@ IOPageFrameEntryCache_Flags + @ IOCACHEPAGEFLAG_VALID & ~~)
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
 		// this cache page is invalid and needs to be read in
 
 		auto readfunc
@@ -554,7 +557,11 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
 		// read succeeded, page is now valid
 
-		IOCACHEPAGEFLAG_VALID pfdbe@ IOPageFrameEntryCache_Flags + |=
+		auto rs
+		HALCPUInterruptDisable rs!
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		rs@ HALCPUInterruptRestore
 	end
 
 	bucket@ // bucket

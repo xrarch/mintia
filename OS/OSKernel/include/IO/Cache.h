@@ -27,13 +27,11 @@ struct IOPageFrameEntryCache
 	4 Prev
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 FCB
-	4 Flags
+	4 Context1
 	4 OffsetInFile
 	4 NextCachePage
 	4 PrevCachePage
 endstruct
-
-const IOCACHEPAGEFLAG_VALID 1 // does the page contain valid data (does it need to be read in)?
 
 extern IOWritebehindWorker { context1 context2 -- }
 extern IOFilesystemSyncWorker { context1 context2 -- }
@@ -59,8 +57,6 @@ extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
-extern IOCacheInfoBlockZeroEnd { pfdbe offset fcb -- }
-
 extern IOCachePageRemove { pfdbe buckethead -- }
 extern IOCachePageInsert { pfdbe buckethead -- }
 
@@ -73,5 +69,7 @@ extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritte
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
+
+extern IOCacheZeroData { size offset fcb -- ok }
 
 externptr IOCachePagesUsed

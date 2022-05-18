@@ -6,7 +6,7 @@ const IOCACHEPAGEMASK (IOCACHEPAGEBUCKETS 1 -)
 //   1. too great of a value means hash buckets will get longer than they must
 //      for small files.
 //   2. too small of a value means I/O clustering will perform more poorly.
-const IOCACHEPAGEHASHSHIFT 3
+const IOCACHEPAGEHASHSHIFT 4
 const IOCACHEPAGECLUSTERMAX (1 IOCACHEPAGEHASHSHIFT <<)
 
 struct IOCacheInfoBlock

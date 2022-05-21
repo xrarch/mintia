@@ -62,9 +62,6 @@ extern MmKernelStackFree { kstack -- }
 extern MmKernelStackSwapOut { thread -- }
 extern MmKernelStackSwapIn { thread -- }
 
-extern MmPageDirectoryAlloc { -- pdir ok }
-extern MmPageDirectoryFree { pdir -- }
-
 extern MmModifiedPageWriter { context1 context2 -- }
 extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }

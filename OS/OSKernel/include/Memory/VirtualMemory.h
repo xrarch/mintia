@@ -1,4 +1,4 @@
 extern MmFlushUserTLBAll { -- }
 
-extern MmPageDirectoryInitialize { pagemap -- }
+extern MmPageDirectoryAlloc { -- pdir ok }
 extern MmPageDirectoryDestroy { pagemap -- }

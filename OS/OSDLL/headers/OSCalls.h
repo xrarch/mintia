@@ -72,8 +72,8 @@ extern OSMountUpdateFlags { newflags handle -- ok }
 extern OSMountGetFilesystemName { buffer handle -- ok }
 
 // Mm
-extern OSSectionCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
-extern OSSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
+extern OSSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
+extern OSMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
 extern OSUnmapView { length vaddr processhandle -- ok }
 extern OSRemapView { pageprotection length vaddr processhandle -- ok }
 

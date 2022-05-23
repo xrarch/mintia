@@ -1,5 +1,5 @@
 //
-// Implements virtual memory mapping of section objects.
+// Implements virtual memory mapping of section and file objects.
 //
 
 #include "<df>/dragonfruit.h"
@@ -24,126 +24,104 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmSectionPrepare { prot endofview offset sectionobject -- ok }
-	// helper function
+fn MmFilePrepareForMap { prot endofview offset fileobject -- ok }
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-	0 ok!
+	if (endofview@ fcb@ IOFileControlBlock_SizeInBytes + @ >)
+		STATUS_END_OF_FILE ok!
 
-	auto fileobject
-	sectionobject@ MmSection_FileObject + @ fileobject!
+		return
+	end
 
-	if (fileobject@)
-		if (DEBUGCHECKS)
-			if (sectionobject@ MmSection_AnonSize + @)
-				"MmSectionPrepare: anonsize != 0\n" KeCrash
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+		if (prot@ PAGEACCESS_WRITECOPY &)
+			// can't COW character devices, that's a weird thing to do.
+			// also it breaks everything which is secretly the main reason
+
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+
+		// character devices need a GetPageAddress function to be mappable
+
+		if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_GetPageAddress + @ ~~)
+			STATUS_NOT_SUPPORTED ok!
+
+			return
+		end
+	end elseif (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end else
+		auto cacheblock
+		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+		if (cacheblock@ ~~)
+			// initialize caching on mapped FCB
+
+			1 // wantcaching
+			fcb@ // fcb
+			IOFileControlBlockCacheCheck ok! cacheblock!
+
+			if (ok@)
+				return
 			end
 		end
 
-		auto fcb
-		fileobject@ IOFile_FileControlBlock + @ fcb!
+		fcb@ IOFileControlBlockLockShared ok!
+
+		if (ok@)
+			return
+		end
+
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockTryReference ok! drop
+
+		if (ok@)
+			fcb@ IOFileControlBlockUnlock
+
+			return
+		end
 
 		if (endofview@ fcb@ IOFileControlBlock_SizeInBytes + @ >)
+			// could have been truncated by now, check again
+
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockDereference drop
+
+			fcb@ IOFileControlBlockUnlock
+
 			STATUS_END_OF_FILE ok!
 
 			return
 		end
 
-		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-			if (prot@ PAGEACCESS_WRITECOPY &)
-				// can't COW character devices, that's a weird thing to do.
-				// also it breaks everything which is secretly the main reason
+		fcb@ IOFileControlBlockUnlock
+	end
+end
 
-				STATUS_INVALID_ARGUMENT ok!
+fn MmFileUnprepareForMap { fileobject -- }
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-				return
-			end
-		end else
-			auto cacheblock
-			fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
+		auto cacheblock
+		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-			if (cacheblock@ ~~)
-				// initialize caching on mapped FCB
-
-				1 // wantcaching
-				fcb@ // fcb
-				IOFileControlBlockCacheCheck ok! cacheblock!
-
-				if (ok@)
-					return
-				end
-			end
-
-			fcb@ IOFileControlBlockLockShared ok!
-
-			if (ok@)
-				return
-			end
-
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockTryReference ok! drop
-
-			if (ok@)
-				fcb@ IOFileControlBlockUnlock
-
-				return
-			end
-
-			if (endofview@ fcb@ IOFileControlBlock_SizeInBytes + @ >)
-				// could have been truncated by now, check again
-
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDereference drop
-
-				fcb@ IOFileControlBlockUnlock
-
-				STATUS_END_OF_FILE ok!
-
-				return
-			end
-
-			fcb@ IOFileControlBlockUnlock
-		end
-	end else
 		if (DEBUGCHECKS)
-			if (sectionobject@ MmSection_AnonSize + @ ~~)
-				"MmSectionPrepare: anonsize == 0\n" KeCrash
+			if (cacheblock@ ~~)
+				"MmFileUnprepareForMap: no cacheblock\n" KeCrash
 			end
 		end
 
-		if (endofview@ sectionobject@ MmSection_AnonSize + @ >)
-			STATUS_INVALID_ARGUMENT ok!
-
-			return
-		end
+		cacheblock@ IOCacheInfoBlockDereference drop
 	end
 end
 
-fn MmSectionUnprepare { sectionobject -- }
-	// helper function
-
-	auto fileobject
-	sectionobject@ MmSection_FileObject + @ fileobject!
-
-	if (fileobject@)
-		auto fcb
-		fileobject@ IOFile_FileControlBlock + @ fcb!
-
-		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
-			auto cacheblock
-			fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-			if (DEBUGCHECKS)
-				if (cacheblock@ ~~)
-					"MmSectionUnprepare: no cacheblock\n" KeCrash
-				end
-			end
-
-			cacheblock@ IOCacheInfoBlockDereference drop
-		end
-	end
-end
-
-fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject processobject pageprotection flags -- realva ok }
+fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobject pageprotection flags -- realva ok }
 	if (sectionoffset@ PAGEOFFSETMASK &)
 		// requested section offset isn't page-aligned
 		STATUS_INVALID_ARGUMENT ok!
@@ -206,11 +184,19 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 	auto perm
 	pageprotection@ PAGEACCESS_ALL & perm!
 
-	if (sectionobject@ MmSection_PageProtection + @ perm@ & perm@ ~=)
-		// section doesn't have required permissions
-		STATUS_PERMISSION_DENIED ok!
+	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ MmSectionObjectType@ ==)
+		if (mappedobject@ MmSection_PageProtection + @ perm@ & perm@ ~=)
+			// section doesn't have required permissions
+			STATUS_PERMISSION_DENIED ok!
 
-		return
+			return
+		end
+
+		if (endofview@ mappedobject@ MmSection_AnonSize + @ >)
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
 	end
 
 	// XXX in principle we only need to do this if the target process is
@@ -225,37 +211,40 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 		return
 	end
 
-	// if the section has a file object, initialize caching on its FCB and
-	// reference the cacheblock so that it can't be truncated.
-	// this is done in MmSectionPrepare.
+	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
+		// if the section has a file object, initialize caching on its FCB and
+		// reference the cacheblock so that it can't be truncated.
 
-	pageprotection@ // prot
-	endofview@ // endofview
-	sectionoffset@ // offset
-	sectionobject@ // sectionobject
-	MmSectionPrepare ok!
+		pageprotection@ // prot
+		endofview@ // endofview
+		sectionoffset@ // offset
+		mappedobject@ // fileobject
+		MmFilePrepareForMap ok!
 
-	if (ok@)
-		processobject@ PsProcessCreateDeleteUnlock
+		if (ok@)
+			processobject@ PsProcessCreateDeleteUnlock
 
-		return
+			return
+		end
 	end
 
-	// from here on we need to call MmSectionUnprepare when we return with an
-	// error...
+	// from here on we need to call MmFileUnprepareForMap when we return with
+	// an error...
 
 	length@ // viewsize
 	startva@ // startva
 	flags@ OSMAPFLAG_FIXEDADDRESS & // fixedva
 	pageprotection@ // pageprotection
 	sectionoffset@ // sectionoffset
-	sectionobject@ // sectionobject
+	mappedobject@ // mappedobject
 	processobject@ // processobject
 	MmVADFindAndMapFreeRegion ok! realva!
 
 	if (ok@)
-		sectionobject@ // sectionobject
-		MmSectionUnprepare
+		if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
+			mappedobject@ // fileobject
+			MmFileUnprepareForMap
+		end
 
 		processobject@ PsProcessCreateDeleteUnlock
 
@@ -265,16 +254,26 @@ fn MmSectionMapViewProcessObject { length startva sectionoffset sectionobject pr
 	processobject@ PsProcessCreateDeleteUnlock
 end
 
-fn MmSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
+fn MmMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
 	auto access
-	auto sectionobject
+	auto mappedobject
 
-	MmSectionObjectType@ // type
-	sectionhandle@ // handle
-	ObObjectReferenceByHandle ok! sectionobject! access!
+	0 // type
+	mappedhandle@ // handle
+	ObObjectReferenceByHandle ok! mappedobject! access!
 
 	if (ok@)
 		return
+	end
+
+	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ~=)
+		if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ MmSectionObjectType@ ~=)
+			STATUS_INVALID_OBJECT_TYPE ok!
+
+			mappedobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
 	end
 
 	// XXX assumes access bits and page protection bits lines up.
@@ -282,19 +281,18 @@ fn MmSectionMapView { length startva sectionoffset sectionhandle processhandle p
 	access@ pageprotection@ PAGEACCESS_ALL & SeCheckAccess ok!
 
 	if (ok@)
-		sectionobject@ ObObjectDereferenceByPointer drop
+		mappedobject@ ObObjectDereferenceByPointer drop
 
 		return
 	end
 
 	auto processobject
-
 	PsProcessObjectType@ // type
 	processhandle@ // handle
 	ObObjectReferenceByHandle ok! processobject! access!
 
 	if (ok@)
-		sectionobject@ ObObjectDereferenceByPointer drop
+		mappedobject@ ObObjectDereferenceByPointer drop
 
 		return
 	end
@@ -303,7 +301,7 @@ fn MmSectionMapView { length startva sectionoffset sectionhandle processhandle p
 
 	if (ok@)
 		processobject@ ObObjectDereferenceByPointer drop
-		sectionobject@ ObObjectDereferenceByPointer drop
+		mappedobject@ ObObjectDereferenceByPointer drop
 
 		return
 	end
@@ -311,14 +309,14 @@ fn MmSectionMapView { length startva sectionoffset sectionhandle processhandle p
 	length@ // length
 	startva@ // startva
 	sectionoffset@ // sectionoffset
-	sectionobject@ // sectionobject
+	mappedobject@ // mappedobject
 	processobject@ // processobject
 	pageprotection@ // pageprotection
 	flags@ // flags
-	MmSectionMapViewProcessObject ok! realva!
+	MmMapViewProcessObject ok! realva!
 
 	processobject@ ObObjectDereferenceByPointer drop
-	sectionobject@ ObObjectDereferenceByPointer drop
+	mappedobject@ ObObjectDereferenceByPointer drop
 end
 
 fn MmUnmapViewProcess { length vaddr processobject -- ok }
@@ -453,10 +451,7 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 		return
 	end
 
-	auto sectionobject
-	vad@ MmVAD_SectionObject + @ sectionobject!
-
-	if (sectionobject@ MmSection_NoCommit + @)
+	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		// we'd need to traverse the page tables to update the PTEs; not
 		// implemented for now.
 

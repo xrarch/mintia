@@ -571,7 +571,6 @@ OSSectionCreate:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	mov  t5, long [sp + 4]
 
 	li   t0, 46
 	sys  0
@@ -581,8 +580,8 @@ OSSectionCreate:
 
 	ret
 
-OSSectionMapView:
-.global OSSectionMapView
+OSMapView:
+.global OSMapView
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2

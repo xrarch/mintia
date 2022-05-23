@@ -3,8 +3,6 @@ extern MmSectionObjectDelete { object -- }
 struct MmSection
 	4 PageProtection // processes may only map with protections that are a subset of this
 
-	4 FileObject
-
 	4 AnonSize
 	4 AnonPrototypePageTable
 
@@ -25,13 +23,14 @@ const MMWRITEMODE_DEFERREDFREE 2
 extern MmSectionPPTLock { sectionobject -- ok }
 extern MmSectionPPTUnlock { sectionobject -- }
 
-extern MmSectionObjectCreateObject { pageprotection anonsize fileobject permissions name -- sectionobject ok }
-extern MmSectionObjectCreate { pageprotection anonsize filehandle permissions name -- sectionhandle ok }
+extern MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
+extern MmSectionObjectCreate { pageprotection anonsize permissions name -- sectionhandle ok }
 
-extern MmSectionUnprepare { sectionobject -- }
+extern MmFilePrepareForMap { prot endofview offset fileobject -- ok }
+extern MmFileUnprepareForMap { fileobject -- }
 
-extern MmSectionMapViewProcessObject { length startva sectionoffset sectionobject processobject pageprotection flags -- realva ok }
-extern MmSectionMapView { length startva sectionoffset sectionhandle processhandle pageprotection flags -- realva ok }
+extern MmMapViewProcessObject { length startva sectionoffset mappedobject processobject pageprotection flags -- realva ok }
+extern MmMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
 extern MmUnmapViewProcess { length vaddr processobject -- ok }
 extern MmUnmapView { length vaddr processhandle -- ok }
 

@@ -48,7 +48,7 @@
 .extern OSMountUpdateFlags
 .extern OSMountGetFilesystemName
 .extern OSSectionCreate
-.extern OSSectionMapView
+.extern OSMapView
 .extern OSUnmapView
 .extern OSRemapView
 .extern OSMemoryQuery
@@ -137,7 +137,7 @@ OSCallTable:
 	.dl OSTOSMountUpdateFlags                            ;44
 	.dl OSTOSMountGetFilesystemName                      ;45
 	.dl OSTOSSectionCreate                               ;46
-	.dl OSTOSSectionMapView                              ;47
+	.dl OSTOSMapView                                     ;47
 	.dl OSTOSUnmapView                                   ;48
 	.dl OSTOSRemapView                                   ;49
 	.dl OSTOSMemoryQuery                                 ;50
@@ -878,15 +878,12 @@ OSTOSMountGetFilesystemName:
 
 OSTOSSectionCreate:
 .global OSTOSSectionCreate
-	subi sp, sp, 8
+	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
 	mov  a1, long [s18 + 8] ;t2
 	mov  a2, long [s18 + 12] ;t3
 	mov  a3, long [s18 + 16] ;t4
-
-	mov  t0, long [s18 + 20] ;t5
-	mov  long [sp + 4], t0
 
 	jal  OSSectionCreate
 
@@ -894,11 +891,11 @@ OSTOSSectionCreate:
 	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
-	addi sp, sp, 8
+	addi sp, sp, 4
 	ret
 
-OSTOSSectionMapView:
-.global OSTOSSectionMapView
+OSTOSMapView:
+.global OSTOSMapView
 	subi sp, sp, 16
 	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
@@ -915,7 +912,7 @@ OSTOSSectionMapView:
 	mov  t0, long [s18 + 28] ;a1
 	mov  long [sp + 12], t0
 
-	jal  OSSectionMapView
+	jal  OSMapView
 
 	mov  long [s18 + 4], a0 ;t1
 	mov  long [s18 + 8], a1 ;t2

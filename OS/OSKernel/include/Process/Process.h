@@ -115,7 +115,7 @@ externptr PsSystemProcess
 externptr PsSystemInitProcess
 
 externptr PsOSDLLInformation
-externptr PsOSDLLSectionObject
+externptr PsOSDLLFileObject
 
 externptr PsProcessCreationCount
 externptr PsProcessDeletionCount

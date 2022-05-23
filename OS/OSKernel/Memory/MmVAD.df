@@ -27,7 +27,7 @@
 // routines for creating, destroying, and manipulating
 // Virtual Address Descriptors (VADs).
 
-fn MmVADCreate { startva endva prot offset processobject sectionobject quotablock -- vad ok }
+fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock -- vad ok }
 	// allocates a VAD structure.
 	// references the section object, and the quotablock if applicable.
 
@@ -78,9 +78,9 @@ fn MmVADCreate { startva endva prot offset processobject sectionobject quotabloc
 
 	quotablock@ MmQuotaBlockReference
 
-	sectionobject@ ObObjectReferenceByPointer drop
+	mappedobject@ ObObjectReferenceByPointer drop
 
-	sectionobject@ vad@ MmVAD_SectionObject + !
+	mappedobject@ vad@ MmVAD_MappedObject + !
 	offset@ vad@ MmVAD_OffsetInSection + !
 
 	0 vad@ MmVAD_Next + !
@@ -89,14 +89,27 @@ fn MmVADCreate { startva endva prot offset processobject sectionobject quotabloc
 	0 vad@ MmVAD_LRUNext + !
 	0 vad@ MmVAD_LRUPrev + !
 
+	0 vad@ MmVAD_Flags + !
+
 	startva@ vad@ MmVAD_StartVA + !
 	endva@ vad@ MmVAD_EndVA + !
 	0 vad@ MmVAD_FurthestExtentMapped + !
 	prot@ vad@ MmVAD_PageProtection + !
 	quotablock@ vad@ MmVAD_QuotaBlock + !
-	processobject@ vad@ MmVAD_ProcessObject + !
 
 	0 vad@ MmVAD_COWCount + !
+
+	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
+		MMVADFLAG_FILE vad@ MmVAD_Flags + |=
+
+		if (mappedobject@ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+			MMVADFLAG_NOCOMMIT vad@ MmVAD_Flags + |=
+		end
+	end elseif (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ MmSectionObjectType@ ==)
+		MMVADFLAG_SECTION vad@ MmVAD_Flags + |=
+	end else
+		"MmVADCreate: mappedobject has unsupported type\n" KeCrash
+	end
 end
 
 fn MmVADListLock { processobject -- ok }
@@ -199,7 +212,7 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 	STATUS_BAD_ADDRESS ok!
 end
 
-fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset sectionobject processobject -- realva ok }
+fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset mappedobject processobject -- realva ok }
 	// find a fitting region with a preferred virtual address of startva.
 	// if fixedva is true, then *only* this virtual address can be used; if
 	// it is not available an error will be returned.
@@ -312,7 +325,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	pageprotection@ // prot
 	sectionoffset@ // offset
 	processobject@ // processobject
-	sectionobject@ // sectionobject
+	mappedobject@ // mappedobject
 	processobject@ PsProcess_QuotaBlock + @ // quotablock
 	MmVADCreate ok! vad!
 	
@@ -364,7 +377,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 
 	vad@ processobject@ PsProcess_VADListLRUHead + !
 
-	if (vad@ MmVAD_SectionObject + @ MmSection_NoCommit + @)
+	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		1 processobject@ PsProcess_MappedMMIOCount + +=
 	end
 
@@ -412,7 +425,7 @@ fn MmVADUnmap { vad processobject -- }
 	end
 
 	auto commitcharge
-	vad@ MmVAD_SectionObject + @ MmSection_NoCommit + @ ~~ commitcharge!
+	vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT & ~~ commitcharge!
 
 	if (commitcharge@)
 		processobject@ MmWorkingSetLock drop
@@ -566,15 +579,16 @@ fn MmVADUnmap { vad processobject -- }
 
 	quotablock@ MmQuotaBlockDereference
 
-	if (vad@ MmVAD_SectionObject + @ MmSection_NoCommit + @)
+	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		1 processobject@ PsProcess_MappedMMIOCount + -=
 	end
 
-	auto sectionobject
-	vad@ MmVAD_SectionObject + @ sectionobject!
+	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
+		vad@ MmVAD_MappedObject + @ // fileobject
+		MmFileUnprepareForMap
+	end
 
-	sectionobject@ MmSectionUnprepare
-	sectionobject@ ObObjectDereferenceByPointer drop
+	vad@ MmVAD_MappedObject + @ ObObjectDereferenceByPointer drop
 
 	vad@ MmFree
 end
@@ -595,7 +609,7 @@ fn MmVADListCheckRange { startva endva process -- ok }
 			break
 		end
 
-		if (vad@ MmVAD_SectionObject + @ MmSection_NoCommit + @)
+		if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 			// this VAD maps an MMIO range, check if it overlaps our checked
 			// range.
 

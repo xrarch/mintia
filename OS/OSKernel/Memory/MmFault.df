@@ -302,7 +302,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	process@ MmVADListUnlock
 end
 
-fn MmFaultParameters { vaddr process -- offset section vad ok }
+fn MmFaultParameters { vaddr process -- offset object vad ok }
 	vaddr@ // vaddr
 	0 // length
 	0 // mustbestart
@@ -317,7 +317,7 @@ fn MmFaultParameters { vaddr process -- offset section vad ok }
 		vaddr@ PAGENUMBERMASK & vad@ MmVAD_FurthestExtentMapped + !
 	end
 
-	vad@ MmVAD_SectionObject + @ section!
+	vad@ MmVAD_MappedObject + @ object!
 	vaddr@ vad@ MmVAD_StartVA + @ - vad@ MmVAD_OffsetInSection + @ + offset!
 end
 
@@ -325,7 +325,7 @@ fn MmNormalFault { vaddr process -- signal }
 	0 signal!
 
 	auto offset
-	auto section
+	auto object
 	auto vad
 	auto ok
 	auto flags
@@ -337,18 +337,18 @@ fn MmNormalFault { vaddr process -- signal }
 
 	vaddr@ // vaddr
 	process@ // process
-	MmFaultParameters ok! vad! section! offset!
+	MmFaultParameters ok! vad! object! offset!
 
 	if (ok@)
 		OSSIGNAL_SEGV signal!
 		return
 	end
 
-	if (section@ MmSection_FileObject + @)
-		if (section@ MmSection_FileObject + @ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
+		if (object@ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
 			vaddr@ // vaddr
 			process@ // process
-			section@ // section
+			object@ // fileobject
 			offset@ // offset
 			vad@ // vad
 			MmSatisfyCharFault ok!
@@ -388,13 +388,13 @@ fn MmNormalFault { vaddr process -- signal }
 		return
 	end
 
-	if (section@ MmSection_FileObject + @)
-		section@ // section
+	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
+		object@ // fileobject
 		offset@ // offset
 		vad@ // vad
 		MmSatisfyFileFault ok! phyaddr! pfdbe! flags!
 	end else
-		section@ // section
+		object@ // section
 		offset@ // offset
 		vad@ // vad
 		MmSatisfyAnonFault ok! phyaddr! pfdbe! flags!
@@ -436,9 +436,9 @@ fn MmNormalFault { vaddr process -- signal }
 	process@ MmWorkingSetUnlock
 end
 
-fn MmSatisfyCharFault { vaddr process section offset vad -- ok }
+fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	auto fcb
-	section@ MmSection_FileObject + @ IOFile_FileControlBlock + @ fcb!
+	fileobject@ IOFile_FileControlBlock + @ fcb!
 
 	auto getpagefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_GetPageAddress + @ getpagefunc!
@@ -489,9 +489,9 @@ fn MmSatisfyCharFault { vaddr process section offset vad -- ok }
 	MmPTEUpdate drop drop drop
 end
 
-fn MmSatisfyFileFault { section offset vad -- flags pfdbe phyaddr ok }
+fn MmSatisfyFileFault { fileobject offset vad -- flags pfdbe phyaddr ok }
 	auto fcb
-	section@ MmSection_FileObject + @ IOFile_FileControlBlock + @ fcb!
+	fileobject@ IOFile_FileControlBlock + @ fcb!
 
 	0 // kflags
 	0 // flags

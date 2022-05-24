@@ -70,6 +70,10 @@ struct PsProcess
 	4 WorkingSetReplacementIndex
 
 	(WORKINGSETLISTCOUNT 4 *) WorkingSetListPointers
+
+	64 CommittedPageTablesBitmap // assumes 32-bit but this will have to change completely if we ever do a 64-bit port anyway
+
+	4 CommittedPageTablesCount
 endstruct
 
 struct PsThread

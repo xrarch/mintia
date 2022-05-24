@@ -43,10 +43,20 @@ fn MmProcessInitialize { sectionobject process -- ok }
 
 	0 process@ PsProcess_PinnedPageCount + !
 
+	0 process@ PsProcess_CommittedPageTablesCount + !
+
 	"PsProcessVADListMutex" // name
 	KERNELMODE // mode
 	process@ PsProcess_VADListMutex + // mutex
 	KeMutexInitialize
+
+	// size is 64 assuming a 32-bit address space, but this entire method of
+	// keeping track of page table commit will have to change with a 64-bit
+	// port anyway.
+	process@ PsProcess_CommittedPageTablesBitmap + // ptr
+	64 // size
+	0 // word
+	memset
 
 	process@ MmWorkingSetListInitialize ok!
 
@@ -289,13 +299,15 @@ fn MmProcessUninitialize { process -- ok }
 	process@ MmWorkingSetListFree
 	process@ MmWorkingSetUnlock
 
+	process@ MmProcessUnchargePageTables
+
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn MmProcessSwapOut { process -- }
 	// invalidate and free the process's working set structures.
 
-	// TODO dereference page table pages
+	// TODO dereference page directory
 
 	process@ MmWorkingSetLock drop
 
@@ -303,6 +315,76 @@ fn MmProcessSwapOut { process -- }
 	process@ MmWorkingSetListFree
 
 	process@ MmWorkingSetUnlock
+end
+
+fn MmProcessChargePageTables { startva endva process -- ok }
+	// charge VM quota for page tables.
+	// assumes the caller has the VAD list mutex held.
+	// currently this will never get uncharged until the process exits.
+
+	// page tables are "stickier" than other pages so we charge kernel heap
+	// quota too to reflect that, as we do for all pages whose swapout is
+	// conditional on some relatively extraordinary circumstance (kernel stack,
+	// etc)
+
+	auto firstpt
+	startva@ PERPAGETABLESHIFT >> firstpt!
+
+	auto lastpt
+	endva@ PERPAGETABLESHIFT >> lastpt!
+
+	auto bmp
+	process@ PsProcess_CommittedPageTablesBitmap + bmp!
+
+	auto quotablock
+	process@ PsProcess_QuotaBlock + @ quotablock!
+
+	0 ok!
+
+	while (firstpt@ lastpt@ <=)
+		if (bmp@ firstpt@ 3 >> + gb 1 firstpt@ 7 & << & ~~)
+			// bit not set, set & charge page
+
+			PAGESIZE // quota
+			process@ PsProcess_QuotaBlock + @ // quotablock
+			MmQuotaBlockChargeVM ok!
+
+			if (ok@)
+				return
+			end
+
+			PAGESIZE // quota
+			process@ PsProcess_QuotaBlock + @ // quotablock
+			MmQuotaBlockCharge ok!
+
+			if (ok@)
+				PAGESIZE // quota
+				process@ PsProcess_QuotaBlock + @ // quotablock
+				MmQuotaBlockUnchargeVM
+
+				return
+			end
+
+			1 firstpt@ 31 & << bmp@ firstpt@ 5 >> 2 << + |=
+
+			1 process@ PsProcess_CommittedPageTablesCount + +=
+		end
+
+		1 firstpt +=
+	end 
+end
+
+fn MmProcessUnchargePageTables { process -- }
+	// uncharge quota for all the page tables the process committed in its
+	// lifetime.
+
+	process@ PsProcess_CommittedPageTablesCount + @ PAGESHIFT << // quota
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockUnchargeVM
+
+	process@ PsProcess_CommittedPageTablesCount + @ PAGESHIFT << // quota
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockUncharge
 end
 
 fn MmThreadInitialize { thread -- ok }

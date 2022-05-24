@@ -30,7 +30,4 @@ extern MmQuotaBlockPrint { quotablock -- }
 extern MmSetQuota { quota quotablock -- }
 extern MmQuotaQuery { query quotablock -- }
 
-extern MmChargePageTables { startva endva quotablock -- ok }
-extern MmUnchargePageTables { startva endva quotablock -- }
-
 externptr MmQuotaSystem

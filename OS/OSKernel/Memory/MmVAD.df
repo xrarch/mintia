@@ -55,9 +55,9 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 		return
 	end
 
-	if (prot@ PAGEACCESS_WRITECOPY &)
+	if (prot@ PAGEACCESS_WRITECOPY & mappedobject@ ~~ ||)
 		// charge vm quota for this VAD because it has the potential to
-		// allocate lots of anonymous pages via COW.
+		// allocate lots of anonymous pages via COW, or is private.
 
 		endva@ startva@ - // charge
 		quotablock@ // quotablock
@@ -78,8 +78,6 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 
 	quotablock@ MmQuotaBlockReference
 
-	mappedobject@ ObObjectReferenceByPointer drop
-
 	mappedobject@ vad@ MmVAD_MappedObject + !
 	offset@ vad@ MmVAD_OffsetInSection + !
 
@@ -99,16 +97,20 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 
 	0 vad@ MmVAD_COWCount + !
 
-	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
-		MMVADFLAG_FILE vad@ MmVAD_Flags + |=
+	if (mappedobject@)
+		mappedobject@ ObObjectReferenceByPointer drop
 
-		if (mappedobject@ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-			MMVADFLAG_NOCOMMIT vad@ MmVAD_Flags + |=
+		if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
+			MMVADFLAG_FILE vad@ MmVAD_Flags + |=
+
+			if (mappedobject@ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+				MMVADFLAG_NOCOMMIT vad@ MmVAD_Flags + |=
+			end
+		end elseif (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ MmSectionObjectType@ ==)
+			MMVADFLAG_SECTION vad@ MmVAD_Flags + |=
+		end else
+			"MmVADCreate: mappedobject has unsupported type\n" KeCrash
 		end
-	end elseif (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ MmSectionObjectType@ ==)
-		MMVADFLAG_SECTION vad@ MmVAD_Flags + |=
-	end else
-		"MmVADCreate: mappedobject has unsupported type\n" KeCrash
 	end
 end
 
@@ -480,13 +482,13 @@ fn MmVADUnmap { vad processobject -- }
 					end
 
 					if (pte@ PTE_INSWAP &)
-						// free COW page in swap
+						// free private page in swap
 
 						ipl@ KeIPLLower
 
 						pte@ PAGESHIFT >> IOSwapPageFree
 					end elseif (pte@ PTE_TRANSITION &)
-						// free COW page
+						// free private page
 
 						pte@ PAGENUMBERMASK & phyaddr!
 
@@ -588,7 +590,9 @@ fn MmVADUnmap { vad processobject -- }
 		MmFileUnprepareForMap
 	end
 
-	vad@ MmVAD_MappedObject + @ ObObjectDereferenceByPointer drop
+	if (vad@ MmVAD_MappedObject + @)
+		vad@ MmVAD_MappedObject + @ ObObjectDereferenceByPointer drop
+	end
 
 	vad@ MmFree
 end

@@ -26,12 +26,76 @@
 
 fn MmAllocateProcessObject { length startva processobject pageprotection flags -- realva ok }
 	if (pageprotection@ PAGEACCESS_WRITECOPY &)
-		// makes no sense for private memory
-
+		// COW makes no sense for private memory.
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
 	end
+
+	if (startva@ PAGEOFFSETMASK &)
+		// requested startva isn't page-aligned
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	if (length@ 0 ==)
+		// length is given as 0 which makes this a no-op
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & length!
+
+	if (length@ 0 ==)
+		// length overflowed
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (startva@ length@ + startva@ <)
+		// startva+length overflows
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (startva@ length@ + MMHIGHESTUSERADDRESS >)
+		// requested region goes outside userspace
+
+		if (flags@ OSMAPFLAG_FIXEDADDRESS &)
+			STATUS_UNAVAILABLE_ADDRESS ok!
+
+			return
+		end
+
+		0 startva!
+	end
+
+	// XXX in principle we only need to do this if the target process is
+	// different from the calling process, but its easier to just always lock
+	// the createdelete rwlock.
+
+	0 // needsthread
+	processobject@ // processobject
+	PsProcessCreateDeleteAcquireCheck ok!
+
+	if (ok@)
+		return
+	end
+
+	length@ // viewsize
+	startva@ // startva
+	flags@ OSMAPFLAG_FIXEDADDRESS & // fixedva
+	pageprotection@ // pageprotection
+	0 // sectionoffset
+	0 // mappedobject
+	processobject@ // processobject
+	MmVADFindAndMapFreeRegion ok! realva!
+
+	processobject@ PsProcessCreateDeleteUnlock
 end
 
 fn MmAllocate { length startva processhandle pageprotection flags -- realva ok }

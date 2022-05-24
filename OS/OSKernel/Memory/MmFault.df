@@ -187,7 +187,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 			pteaddr@@ flags!
 
 			if (flags@ PTE_TRANSITION PTE_INSWAP | &)
-				// COW page. we need to do work here
+				// private page. we need to do work here
 
 				flags@ PAGENUMBERMASK & phyaddr!
 
@@ -197,7 +197,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 					if (DEBUGCHECKS)
-						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW & ~~)
+						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
 							"MmSatisfyFault: transition PTE wasn't COW\n" KeCrash
 						end
 					end
@@ -257,7 +257,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 						return
 					end
 
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW |
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
 					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 					PAGESHIFT phyaddr <<=
@@ -394,6 +394,7 @@ fn MmNormalFault { vaddr process -- signal }
 		vad@ // vad
 		MmSatisfyFileFault ok! phyaddr! pfdbe! flags!
 	end else
+		pteaddr@ // pteaddr
 		object@ // section
 		offset@ // offset
 		vad@ // vad
@@ -508,13 +509,30 @@ fn MmSatisfyFileFault { fileobject offset vad -- flags pfdbe phyaddr ok }
 	PTE_V flags!
 end
 
-fn MmSatisfyAnonFault { section offset vad -- flags pfdbe phyaddr ok }
-	offset@ // sectionoffset
-	section@ // sectionobject
-	MmSectionPageGet ok! pfdbe! phyaddr!
+fn MmSatisfyAnonFault { pteaddr section offset vad -- flags pfdbe phyaddr ok }
+	if (section@)
+		offset@ // sectionoffset
+		section@ // sectionobject
+		MmSectionPageGet ok! pfdbe! phyaddr!
 
-	if (ok@)
-		return
+		if (ok@)
+			return
+		end
+	end else
+		// private page
+
+		pteaddr@ // pte
+		ZEROMUST // pri
+		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+
+		if (ok@)
+			return
+		end
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+		PAGESHIFT phyaddr <<=
 	end
 
 	PTE_V flags!
@@ -596,7 +614,7 @@ fn MmWriteFault { vaddr process -- signal }
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW &)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
 				pfdbe@ // pfdbe
 				process@ // process
 				MmEvictablePageModify
@@ -639,7 +657,7 @@ fn MmWriteFault { vaddr process -- signal }
 
 			1 vad@ MmVAD_COWCount + +=
 
-			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_COW |
+			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
 			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 			PAGESHIFT cowaddr <<=

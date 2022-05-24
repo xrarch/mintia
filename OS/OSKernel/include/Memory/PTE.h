@@ -1,12 +1,15 @@
 extern MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
-extern MmPTEDelete { pteaddr vaddr pagemap -- ok }
+extern MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 
-extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr ok }
+extern MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
+extern MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
+extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }
 
 extern MmPTEInterpret { pteaddr -- phyaddr flags ok }
 extern MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflags ok }
 extern MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
 extern MmPTEValid { pteaddr -- valid }
+extern MmPTECountSave { pfdbe pde -- }
 
 // platform-independent generic PTE flag representations
 const PTE_V  1  // valid

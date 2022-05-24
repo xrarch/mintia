@@ -457,12 +457,14 @@ fn MmVADUnmap { vad processobject -- }
 		// character device.
 
 		while (vaddr@ max@ <=)
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
+			auto ptpfdbe
 
 			vaddr@ // vaddr
 			pdir@ // pagemap
-			MmVirtualtoPTEAddress ok! pteaddr!
+			MmPTEReference ok! pteaddr! ptpfdbe!
+
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
 
 			if (ok@ ~~)
 				pteaddr@@ pte!
@@ -473,6 +475,9 @@ fn MmVADUnmap { vad processobject -- }
 				pteaddr@ // pteaddr
 				asid@ // asid
 				MmPTEUpdate ok! flags! phyaddr!
+
+				auto deref
+				1 deref!
 
 				if (vad@ MmVAD_ChargeVMQuota + @)
 					if (DEBUGCHECKS)
@@ -486,25 +491,15 @@ fn MmVADUnmap { vad processobject -- }
 
 						ipl@ KeIPLLower
 
+						0 deref!
+
 						pte@ PAGESHIFT >> IOSwapPageFree
 					end elseif (pte@ PTE_TRANSITION &)
 						// free private page
 
-						pte@ PAGENUMBERMASK & phyaddr!
-
-						phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-						pfdbe@ MmEvictablePageReference drop
-						pfdbe@ MmEvictablePageDelete
-
-						1 MmAnonymousPageCount -=
-
-						ipl@ KeIPLLower
-
-						if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
-							pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
-						end
-
-						pfdbe@ MmEvictablePageDereference drop
+						ipl@ // ipl
+						pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
+						MmAnonymousPageDelete
 					end else
 						ipl@ KeIPLLower
 					end
@@ -515,11 +510,16 @@ fn MmVADUnmap { vad processobject -- }
 				if (pte@)
 					// there was a PTE containing some information, so delete it.
 
+					deref@ // deref
 					pteaddr@ // pteaddr
 					vaddr@ // vaddr
 					pdir@ // pagemap
 					MmPTEDelete drop
 				end
+
+				ptpfdbe@ MmEvictablePageDereference drop
+			end elseif (ok@ -1 ~=)
+				ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
 			end else
 				ipl@ KeIPLLower
 			end

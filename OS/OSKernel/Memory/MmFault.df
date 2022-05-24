@@ -32,8 +32,7 @@ fn (HALPageFaultHandler) MmPageFault { writing badaddr trapframe -- handled }
 	HALCPUInterruptEnable
 
 	if (KeIPLCurrentGet IPLDPC >=)
-		0 handled!
-		return
+		"MmPageFault: ipl >= IPLDPC\n" KeCrash
 	end
 
 	auto signal
@@ -143,15 +142,17 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	auto pfdbe
 	auto wsleptr
 	auto wsli
+	auto ptpfdbe
+	0 ptpfdbe!
 
 	MmThrottle
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
 	vaddr@ // vaddr
 	process@ KeProcess_PageDirectory + @ // pagemap
-	MmVirtualtoPTEAddress ok! pteaddr!
+	MmPTEReference ok! pteaddr! ptpfdbe!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	if (ok@ ~~)
 		pteaddr@ // pteaddr
@@ -164,22 +165,31 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 			if (flags@ PTE_W &)
 				// no work to do
+
 				process@ MmVADListUnlock
+				ptpfdbe@ MmEvictablePageDereference drop
+
 				return
 			end elseif (writing@)
+				pteaddr@ // pteaddr
 				vaddr@ // vaddr
 				process@ // process
 				MmWriteFault signal!
 
 				if (signal@ -1 ~=)
 					process@ MmVADListUnlock
+					ptpfdbe@ MmEvictablePageDereference drop
+
 					return
 				end else
 					0 signal!
 				end
 			end else
 				// no work to do
+
 				process@ MmVADListUnlock
+				ptpfdbe@ MmEvictablePageDereference drop
+
 				return
 			end
 		end else
@@ -224,6 +234,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 					process@ MmWorkingSetUnlock
 					process@ MmVADListUnlock
+					ptpfdbe@ MmEvictablePageDereference drop
 
 					OSSIGNAL_KILL signal!
 
@@ -251,6 +262,7 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 						process@ MmWorkingSetUnlock
 						process@ MmVADListUnlock
+						ptpfdbe@ MmEvictablePageDereference drop
 
 						OSSIGNAL_KILL signal!
 
@@ -261,6 +273,8 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 					PAGESHIFT phyaddr <<=
+
+					0 ptpfdbe!
 				end
 
 				PTE_V flags!
@@ -286,13 +300,21 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 				process@ MmWorkingSetUnlock
 				process@ MmVADListUnlock
 
+				if (ptpfdbe@)
+					ptpfdbe@ MmEvictablePageDereference drop
+				end
+
 				return
 			end else
 				ipl@ KeIPLLower
 			end
 		end
+	end elseif (ok@ -1 ~=)
+		ok@ "MmSatisfyFault: failed to reference PTE (%i)\n" KeCrash
 	end else
 		ipl@ KeIPLLower
+
+		0 ptpfdbe!
 	end
 
 	vaddr@ // vaddr
@@ -300,6 +322,10 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 	MmNormalFault signal!
 
 	process@ MmVADListUnlock
+
+	if (ptpfdbe@)
+		ptpfdbe@ MmEvictablePageDereference drop
+	end
 end
 
 fn MmFaultParameters { vaddr process -- offset object vad ok }
@@ -379,6 +405,7 @@ fn MmNormalFault { vaddr process -- signal }
 	process@ MmWorkingSetUnlock
 
 	if (ok@)
+		1 // deref
 		pteaddr@ // pteaddr
 		vaddr@ // vaddr
 		process@ KeProcess_PageDirectory + @ // pagemap
@@ -411,6 +438,7 @@ fn MmNormalFault { vaddr process -- signal }
 
 		process@ MmWorkingSetUnlock
 
+		1 // deref
 		pteaddr@ // pteaddr
 		vaddr@ // vaddr
 		process@ KeProcess_PageDirectory + @ // pagemap
@@ -544,12 +572,11 @@ fn MmSatisfyAnonFault { pteaddr section offset vad -- flags pfdbe phyaddr ok }
 	end
 end
 
-fn MmWriteFault { vaddr process -- signal }
+fn MmWriteFault { pteaddr vaddr process -- signal }
 	// COW or dirty fault. lets find out which one
 
 	0 signal!
 
-	auto pteaddr
 	auto phyaddr
 
 	auto cowpfdbe
@@ -569,16 +596,6 @@ fn MmWriteFault { vaddr process -- signal }
 		// the loss of this convenient assumption is one reason that it sounds
 		// hard to allow multiple threads to take a page fault per process without
 		// waiting for eachother.
-
-		vaddr@ // vaddr
-		process@ KeProcess_PageDirectory + @ // pagemap
-		MmVirtualtoPTEAddress ok! pteaddr!
-
-		if (ok@)
-			// invalid
-			-1 signal!
-			break
-		end
 
 		pteaddr@ // pteaddr
 		MmPTEInterpret ok! drop phyaddr!

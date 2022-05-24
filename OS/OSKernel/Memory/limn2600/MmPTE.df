@@ -27,17 +27,6 @@ fn MmFlushUserTLBAll { -- }
 	HALLimn2500TLBFlushAll
 end
 
-struct MmPageFrameEntryPageTable
-	4 PTECount
-	4 R2
-	4 R3
-	4 R4
-	4 R5
-	4 R6
-	4 R7
-	4 R8
-endstruct
-
 // PTE addresses are given and returned as virtual addresses.
 // pagemap addresses are given as physical addresses.
 // synchronization regarding the pagemap is a responsibility of the caller.
@@ -54,11 +43,14 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 	auto ent
 	vaddr@ 22 >> 2 << pagemap@ + ent!
 
-	auto alloced
-	0 alloced!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	if (DEBUGCHECKS)
+		if (ent@@ PTE_INSWAP &)
+			"MmPTECreate: PTE swapped out\n" KeCrash
+		end
+	end
 
 	auto pt
 	ent@@ 5 >> PAGESHIFT << pt!
@@ -70,7 +62,7 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 		// dip into MUSTSUCCEEDL2 pool to increase odds of successfully
 		// satisfying a page fault in high memory pressure conditions.
 
-		rs@ HALCPUInterruptRestore
+		ipl@ KeIPLLower
 
 		auto flags
 
@@ -80,16 +72,22 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 			ZEROMUST MUSTSUCCEEDL2 | flags!
 		end
 
-		1 alloced!
-
+		ent@ // pte
 		flags@ // priority
-		MmPageAlloc ok! pt! pfdbe!
+		MmAnonymousPageAlloc ok! pt! pfdbe!
 
 		if (ok@)
 			return
 		end
 
+		pfdbe@ // pfdbe
+		0 // process
+		MmEvictablePageModify
+
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		pt@ 5 << PTE_V | ent@!
 
@@ -99,19 +97,15 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
 
-		rs@ HALCPUInterruptRestore
+		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
 	end
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
-
-	if (DEBUGCHECKS)
-		if (pteaddr@@)
-			alloced@ pteaddr@@ vaddr@ "MmPTECreate: 0x%08x already has a PTE (pte=0x%08x)! %d\n" KeCrash
-		end
-	end
 end
 
-fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
+fn MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 	// delete a PTE from the pagemap and dereference the page table.
 	// free the page table if its refcount hits 0.
 
@@ -131,8 +125,8 @@ fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
 	auto pfdbe
 	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	auto oldcount
 	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ oldcount!
@@ -145,8 +139,32 @@ fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
 
 	oldcount@ 1 - pfdbe@ MmPageFrameEntryPageTable_PTECount + !
 
+	if (deref@)
+		pfdbe@ MmEvictablePageDereference drop
+	end
+
 	if (oldcount@ 1 ==)
 		// last PTE. free the page table.
+
+		auto count
+		PAGESIZE 2 >> count!
+
+		auto ptr
+		pfn@ PAGESHIFT << IDENTITYSPACE | ptr!
+
+		if (DEBUGCHECKS)
+			while (count@)
+				auto pde
+				ptr@@ pde!
+
+				if (pde@)
+					pde@ "MmPTEDelete: broken %x\n" KeCrash
+				end
+
+				1 count -=
+				4 ptr +=
+			end
+		end
 
 		auto ent
 		vaddr@ 22 >> 2 << pagemap@ + ent!
@@ -154,16 +172,17 @@ fn MmPTEDelete { pteaddr vaddr pagemap -- ok }
 		// zero out the pde for the page table.
 		0 ent@!
 
-		rs@ HALCPUInterruptRestore
-
-		pfn@ MmPageFree
+		ipl@ // ipl
+		pfdbe@ // pfdbe
+		MmAnonymousPageDelete
 	end else
-		rs@ HALCPUInterruptRestore
+		ipl@ KeIPLLower
 	end
 end
 
-fn MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr ok }
-	// get the address of a PTE based on a vaddr and pagemap.
+fn MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
+	// works like MmVirtualToPTEAddress but will swap in PTEs that are swapped
+	// out and will return a referenced page table pfdbe.
 
 	// returns -1 if the PTE is known not to exist. may succeed erroneously
 	// if the PTE hasn't been Create'd if the related page table already
@@ -171,23 +190,127 @@ fn MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr ok }
 	// or not. to be sure, check that the returned PTE has the PTE_V flag with
 	// MmPTEInterpret.
 
+	if (DEBUGCHECKS)
+		if (vaddr@ MMHIGHESTUSERADDRESS >)
+			vaddr@ "MmPTEReference: used on system address 0x%08x\n" KeCrash
+		end
+	end
+
 	IDENTITYSPACE pagemap |=
 
 	0 ok!
 
-	auto ent
-	vaddr@ 22 >> 2 << pagemap@ + ent!
+	vaddr@ 22 >> 2 << pagemap@ + pteaddr!
 
 	auto pt
-	ent@@ 5 >> PAGESHIFT << pt!
 
-	auto pfdbe
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	if (pt@ 0 ==)
+	if (pteaddr@@ PTE_INSWAP &)
+		// swap in the PTE
+
+		ipl@ KeIPLLower
+
+		0 // pri
+		pteaddr@ // pte
+		pteaddr@@ PAGESHIFT >> // pno
+		MmAnonymousSwapIn ok! pt! pfdbe!
+
+		if (ok@)
+			return
+		end
+
+		pfdbe@ // pfdbe
+		0 // process
+		MmEvictablePageModify
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+		pteaddr@@ 2 >> 1023 & pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+
+		pt@ 5 << PTE_V | pteaddr@!
+
+		PAGESHIFT pt <<=
+	end elseif (pteaddr@@ ~~)
 		// no such PTE.
+		ipl@ KeIPLLower
 		-1 ok!
 		return
+	end else
+		pteaddr@@ 5 >> PAGESHIFT << pt!
+
+		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
 	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
+end
+
+fn MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
+	// fast path -- use only when you know FOR SURE that the PTE is present,
+	// i.e. in working set trimming.
+
+	if (DEBUGCHECKS)
+		if (vaddr@ MMHIGHESTUSERADDRESS >)
+			vaddr@ "MmVirtualtoPTEAddressUser: used on system address 0x%08x\n" KeCrash
+		end
+	end
+
+	IDENTITYSPACE pagemap |=
+
+	vaddr@ 22 >> 2 << pagemap@ + pteaddr!
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@ PTE_INSWAP &)
+			"MmVirtualtoPTEAddressUser: PTE swapped out\n" KeCrash
+		end
+	end
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@ ~~)
+			"MmVirtualtoPTEAddressUser: no PTE\n" KeCrash
+		end
+	end
+
+	auto pt
+	pteaddr@@ 5 >> PAGESHIFT << pt!
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
+end
+
+fn MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }
+	// get the address of a PTE based on a vaddr and pagemap.
+
+	if (DEBUGCHECKS)
+		if (vaddr@ MMLOWESTSYSTEMADDRESS <)
+			vaddr@ "MmVirtualtoPTEAddress: used on user address 0x%08x\n" KeCrash
+		end
+	end
+
+	IDENTITYSPACE pagemap |=
+
+	vaddr@ 22 >> 2 << pagemap@ + pteaddr!
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@ PTE_INSWAP &)
+			"MmVirtualtoPTEAddress: PTE was swapped out\n" KeCrash
+			return
+		end
+	end
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@ ~~)
+			"MmVirtualtoPTEAddress: no PTE\n" KeCrash
+		end
+	end
+
+	auto pt
+	pteaddr@@ 5 >> PAGESHIFT << pt!
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
 end
@@ -219,11 +342,7 @@ fn MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflag
 
 	vaddr@ // vaddr
 	pagemap@ // pagemap
-	MmVirtualtoPTEAddress ok! pteaddr!
-
-	if (ok@)
-		return
-	end
+	MmVirtualtoPTEAddress pteaddr!
 
 	phyaddr@ // phyaddr
 	flags@ // flags
@@ -271,4 +390,13 @@ end
 
 fn MmPTEValid { pteaddr -- valid }
 	pteaddr@@ PTE_V & valid!
+end
+
+fn MmPTECountSave { pfdbe pde -- }
+	// save the PTE count for a page table in the pde itself.
+	// this is sort of black magic and works by storing the 10-bit PTE count
+	// shifted left by 2 bits to avoid the PTE_INSWAP and PTE_V bits, and just
+	// barely reaching up to the 20-bit swap page number.
+
+	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ 2 << pde@ |=
 end

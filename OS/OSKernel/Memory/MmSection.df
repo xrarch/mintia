@@ -116,6 +116,22 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	object@ MmSectionPPTUnlock
 end
 
+fn MmAnonymousPageDelete { ipl pfdbe -- }
+	pfdbe@ MmEvictablePageReference drop
+	pfdbe@ MmEvictablePageDelete
+
+	1 MmAnonymousPageCount -=
+
+	ipl@ KeIPLLower
+
+	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
+		// free in swap
+		pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
+end
+
 fn MmSectionDeletePPT { ppt count -- }
 	while (count@)
 		auto ipl
@@ -127,21 +143,9 @@ fn MmSectionDeletePPT { ppt count -- }
 		if (ppte@ PTE_V &)
 			// free in RAM
 
-			auto pfdbe
-			ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-			pfdbe@ MmEvictablePageReference drop
-			pfdbe@ MmEvictablePageDelete
-
-			1 MmAnonymousPageCount -=
-
-			ipl@ KeIPLLower
-
-			if (pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ 0 s>=)
-				// free in swap
-				pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + @ IOSwapPageFree
-			end
-
-			pfdbe@ MmEvictablePageDereference drop
+			ipl@ // ipl
+			ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
+			MmAnonymousPageDelete
 		end elseif (ppte@ PTE_INSWAP &)
 			ipl@ KeIPLLower
 
@@ -290,6 +294,19 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 		0 ppte@!
 	end else
 		pno@ PAGESHIFT << PTE_INSWAP | ppte@!
+	end
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
+		// dereference the page table.
+
+		auto ptpfdbe
+		ppte@ IDENTITYSPACEMASK & PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
+
+		ptpfdbe@ MmEvictablePageDereference drop
+	end elseif (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE &)
+		pfdbe@ // pfdbe
+		ppte@ // pde
+		MmPTECountSave
 	end
 
 	1 MmAnonymousPageCount -=

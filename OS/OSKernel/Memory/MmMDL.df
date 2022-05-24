@@ -169,13 +169,7 @@ fn MmMDLFill { mdl -- }
 		auto pte
 		buffer@ // vaddr
 		kdir@ // pagemap
-		MmVirtualtoPTEAddress ok! pte!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"MmMDLFill: invalid system space\n" KeCrash
-			end
-		end
+		MmVirtualtoPTEAddress pte!
 
 		auto pfdbe
 		pte@ // pteaddr
@@ -369,6 +363,11 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			end
 		end
 
+		auto pte
+
+		auto ptpfdbe
+		0 ptpfdbe!
+
 		while (1)
 			// poke the buffer page to make sure it is resident.
 			buffer@ KeSafeGetByte ok! drop
@@ -376,25 +375,37 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			if (ok@)
 				process@ MmVADListUnlock
 
+				if (ptpfdbe@)
+					ptpfdbe@ MmEvictablePageDereference drop
+				end
+
 				mdl@ MmMDLUnpin
 
 				return
 			end
 
+			if (ptpfdbe@ ~~)
+				buffer@ // vaddr
+				process@ KeProcess_PageDirectory + @ // pagemap
+				MmPTEReference ok! pte! ptpfdbe!
+
+				if (ok@)
+					if (ok@ -1 ~=)
+						process@ MmVADListUnlock
+
+						mdl@ MmMDLUnpin
+
+						return
+					end
+
+					0 ptpfdbe!
+
+					continue
+				end
+			end
+
 			auto ipl
 			IPLDPC KeIPLRaise ipl!
-
-			auto pte
-			buffer@ // vaddr
-			process@ KeProcess_PageDirectory + @ // pagemap
-			MmVirtualtoPTEAddress ok! pte!
-
-			if (ok@)
-				// not resident, loop, re-poke, and try again.
-				ipl@ KeIPLLower
-
-				continue
-			end
 
 			auto pfdbe
 			pte@ // pteaddr
@@ -420,6 +431,8 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 			break
 		end
+
+		ptpfdbe@ MmEvictablePageDereference drop
 
 		4 mdlpos +=
 		1 pages -=

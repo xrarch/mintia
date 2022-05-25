@@ -267,21 +267,19 @@ fn MmSwapOutStacks { -- }
 					end
 
 					if (process@ KeProcess_ResidentStackCount + @ ~~)
-						MmProcessSwapOutListHead@ process@ PsProcess_SwapOutNext + !
+						0 process@ PsProcess_SwappedOut + !
+
+						auto h
+						MmProcessSwapOutListHead@ h!
+
+						h@ process@ PsProcess_SwapOutNext + !
+						0 process@ PsProcess_SwapOutPrev + !
+
+						if (h@)
+							process@ h@ PsProcess_SwapOutPrev + !
+						end
+
 						process@ MmProcessSwapOutListHead!
-
-						// prevent the process object from being deleted while
-						// on the swapout list. this could happen if it gets
-						// closed while we are blocked swapping in a kernel
-						// stack, or if a higher priority kernel thread
-						// decides to dereference it.
-
-						// XXX this is broken -- instead the process should be
-						// removed from the swapout list when any of its
-						// kernel stacks get swapped back in. this is coming
-						// up shortly on the TODO list.
-
-						process@ ObObjectReferenceByPointer drop
 					end
 				end
 			end
@@ -309,6 +307,32 @@ fn MmSwapInStacks { -- }
 
 		1 process@ KeProcess_ResidentStackCount + +=
 
+		if (process@ KeProcess_ResidentStackCount + @ 1 ==)
+			if (process@ PsProcess_SwappedOut + @ ~~)
+				// process had no resident stacks but wasn't swapped out which
+				// means it is on the swap-out queue. we need to remove it or
+				// terrible things will happen.
+
+				auto ls
+				process@ PsProcess_SwapOutPrev + @ ls!
+
+				auto ns
+				process@ PsProcess_SwapOutNext + @ ns!
+
+				if (ls@)
+					ns@ ls@ PsProcess_SwapOutNext + !
+				end else
+					ns@ MmProcessSwapOutListHead!
+				end
+
+				if (ns@)
+					ls@ ns@ PsProcess_SwapOutPrev + !
+				end
+			end else
+				process@ MmProcessSwapIn
+			end
+		end
+
 		IPLLOW KeIPLLower
 
 		thread@ MmKernelStackSwapIn
@@ -331,11 +355,15 @@ fn MmSwapOutProcesses { -- }
 
 		process@ PsProcess_SwapOutNext + @ MmProcessSwapOutListHead!
 
+		if (MmProcessSwapOutListHead@)
+			0 MmProcessSwapOutListHead@ PsProcess_SwapOutPrev + !
+		end
+
+		1 process@ PsProcess_SwappedOut + !
+
 		IPLLOW KeIPLLower
 
 		process@ MmProcessSwapOut
-
-		process@ ObObjectDereferenceByPointer drop
 
 		IPLDPC KeIPLRaise drop
 	end

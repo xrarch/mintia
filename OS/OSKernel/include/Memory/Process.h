@@ -2,6 +2,7 @@ extern MmProcessInitialize { sectionobject process -- ok }
 extern MmProcessUninitialize { process -- ok }
 
 extern MmProcessSwapOut { process -- }
+extern MmProcessSwapIn { process -- }
 
 extern MmProcessChargePageTables { startva endva process -- ok }
 extern MmProcessUnchargePageTables { process -- }

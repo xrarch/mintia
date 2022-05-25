@@ -41,6 +41,8 @@ struct PsProcess
 	// virtual memory information
 
 	4 SwapOutNext
+	4 SwapOutPrev
+	4 SwappedOut
 
 	4 MappedMMIOCount
 

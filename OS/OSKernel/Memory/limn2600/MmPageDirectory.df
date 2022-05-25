@@ -15,39 +15,93 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
 #include "<ll>/OSDLL/OSStatus.h"
 
-fn MmPageDirectoryDestroy { pagemap -- }
-	auto count
-	PAGESIZE 3 >> count!
+fn MmPageDirectoryDestroy { process -- }
+	PAGESIZE // charge
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockUnchargeVM
 
-	auto ptr
-	pagemap@ IDENTITYSPACE | ptr!
+	PAGESIZE // charge
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockUncharge
+
+	auto pagemap
+	process@ KeProcess_PageDirectory + @ pagemap!
+
+	auto pfdbe
+	pagemap@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	// MmAnonymousPageDelete wants to be entered at IPLDPC...
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pfdbe@ MmEvictablePageDereference drop
 
 	if (DEBUGCHECKS)
-		while (count@)
-			auto pde
-			ptr@@ pde!
-
-			if (pde@)
-				"MmPageDirectoryDestroy: broken\n" KeCrash
-			end
-
-			1 count -=
-			4 ptr +=
+		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi)
+			"MmPageDirectoryDestroy: page directory had references\n" KeCrash
 		end
 	end
 
-	pagemap@ PAGESHIFT >> MmPageFree
+	ipl@ // ipl
+	pfdbe@ // pfdbe
+	MmAnonymousPageDelete
+
+	// ...but it leaves at the provided IPL
 end
 
-fn MmPageDirectoryAlloc { -- pdir ok }
-	ZEROMUST CANBLOCK | // priority
-	MmPageAlloc ok! pdir! drop
+fn MmPageDirectoryAlloc { process -- pdir ok }
+	PAGESIZE // charge
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockChargeVM ok!
 
 	if (ok@)
 		return
 	end
+
+	PAGESIZE // charge
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		PAGESIZE // charge
+		process@ PsProcess_QuotaBlock + @ // quotablock
+		MmQuotaBlockUnchargeVM
+
+		return
+	end
+
+	auto pfdbe
+	process@ KeProcess_PageDirectory + // pte
+	ZEROMUST CANBLOCK | // priority
+	MmAnonymousPageAlloc ok! pdir! pfdbe!
+
+	if (ok@)
+		PAGESIZE // charge
+		process@ PsProcess_QuotaBlock + @ // quotablock
+		MmQuotaBlockUnchargeVM
+
+		PAGESIZE // charge
+		process@ PsProcess_QuotaBlock + @ // quotablock
+		MmQuotaBlockUncharge
+
+		return
+	end
+
+	0 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+	pfdbe@ // pfdbe
+	0 // process
+	MmEvictablePageModify
 
 	PAGESHIFT pdir <<=
 
@@ -55,4 +109,28 @@ fn MmPageDirectoryAlloc { -- pdir ok }
 	HALPlatformKernelPageDirectory@ IDENTITYSPACE | 2048 + // src
 	2048 // size
 	memcpy
+end
+
+fn MmPageDirectorySwapIn { process -- }
+	auto ok
+	auto pt
+	auto pfdbe
+
+	0 // priority
+	process@ KeProcess_PageDirectory + // pte
+	process@ KeProcess_PageDirectory + @ PAGESHIFT >> // pno
+	MmAnonymousSwapIn ok! pt! pfdbe!
+
+	if (ok@)
+		ok@ "MmPageDirectorySwapIn: failed (%i)\n" KeCrash
+	end
+
+	pfdbe@ // pfdbe
+	0 // process
+	MmEvictablePageModify
+
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+	pt@ PAGESHIFT << process@ KeProcess_PageDirectory + !
 end

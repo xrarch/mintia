@@ -28,6 +28,8 @@ fn MmProcessInitialize { sectionobject process -- ok }
 	// initialize virtual memory related fields
 
 	0 process@ PsProcess_SwapOutNext + !
+	0 process@ PsProcess_SwapOutPrev + !
+	0 process@ PsProcess_SwappedOut + !
 
 	0 process@ PsProcess_MappedMMIOCount + !
 
@@ -205,7 +207,7 @@ fn MmProcessInitialize { sectionobject process -- ok }
 
 	// create process page directory
 	auto pdir
-	MmPageDirectoryAlloc ok! pdir!
+	process@ MmPageDirectoryAlloc ok! pdir!
 
 	if (ok@)
 		info@ PsOSDLLInfo_TextSize + @ // length
@@ -307,14 +309,36 @@ end
 fn MmProcessSwapOut { process -- }
 	// invalidate and free the process's working set structures.
 
-	// TODO dereference page directory
-
 	process@ MmWorkingSetLock drop
 
 	process@ MmWorkingSetPurge
 	process@ MmWorkingSetListFree
 
 	process@ MmWorkingSetUnlock
+
+	// dereference the page directory so it can get swapped out.
+
+	process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+	MmEvictablePageDereference drop
+end
+
+fn MmProcessSwapIn { process -- }
+	// entered at IPLDPC. must leave at IPLDPC.
+
+	0 process@ PsProcess_SwappedOut + !
+
+	// make the page directory resident again if it was swapped out.
+
+	if (process@ KeProcess_PageDirectory + @ PTE_INSWAP &)
+		IPLLOW KeIPLLower
+
+		process@ MmPageDirectorySwapIn
+
+		IPLDPC KeIPLRaise drop
+	end else
+		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+		MmEvictablePageReference drop
+	end
 end
 
 fn MmProcessChargePageTables { startva endva process -- ok }

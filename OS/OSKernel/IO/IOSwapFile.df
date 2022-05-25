@@ -368,6 +368,12 @@ fn IOSwapFileWriteMDL { pagecount mdl -- ok }
 	pagecount@ IOSwapFileReserve ok! offset!
 
 	if (ok@)
+		// failed to reserve space for the entire MDL, try half-size chunks.
+
+		pagecount@ // pagecount
+		mdl@ // mdl
+		IOSwapFileWriteHalfMDL ok!
+
 		return
 	end
 
@@ -394,6 +400,193 @@ fn IOSwapFileWriteMDL { pagecount mdl -- ok }
 		return
 	end
 
+	pagecount@ // pagecount
+	offset@ // offset
+	mdl@ // mdl
+	IOSwapPageWriteMDLComplete
+
+	1 IOSwapPagesWritten += // misnomer: counts transfers, not pages
+end
+
+fn IOSwapFileWriteHalfMDL { pagecount mdl -- ok }
+	auto halfcount
+	pagecount@ 1 >> halfcount!
+
+	auto otherhalfcount
+	pagecount@ halfcount@ - otherhalfcount!
+
+	auto offset
+	halfcount@ IOSwapFileReserve ok! offset!
+
+	if (ok@)
+		// swapfile is too fragmented to even write half, fall back to page
+		// writes.
+
+		pagecount@ // pagecount
+		mdl@ // mdl
+		IOSwapFileWritePagesMDL ok!
+
+		return
+	end
+
+	auto halfmdl
+	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT 1 + >> 1 + 4 * + alloc halfmdl!
+
+	0 // vaddr
+	halfcount@ PAGESHIFT << // length
+	mdl@ // srcmdl
+	halfmdl@ // destmdl
+	MmMDLSplit
+
+	auto fcb
+	IOSwapFileObject@ IOFile_FileControlBlock + @ fcb!
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	// perform the write operation
+
+	0 // flags
+	IOKFLAG_SWAPOUT // kflags
+	offset@ PAGESHIFT << // offset
+	halfmdl@ // mdl
+	fcb@ // fcb
+	writefunc@ IODispatchWriteFunction ok! drop
+
+	if (ok@)
+		halfcount@ // pages
+		offset@ // offset
+		IOSwapFileRelease
+
+		return
+	end
+
+	halfcount@ // pagecount
+	offset@ // offset
+	halfmdl@ // mdl
+	IOSwapPageWriteMDLComplete
+
+	// do the other half now
+
+	if (otherhalfcount@ ~~)
+		return
+	end
+
+	halfcount@ PAGESHIFT << // vaddr
+	otherhalfcount@ PAGESHIFT << // length
+	mdl@ // srcmdl
+	halfmdl@ // destmdl
+	MmMDLSplit
+
+	otherhalfcount@ IOSwapFileReserve ok! offset!
+
+	if (ok@)
+		// swapfile is too fragmented to write other half, fall back to page
+		// writes.
+
+		otherhalfcount@ // pagecount
+		halfmdl@ // mdl
+		IOSwapFileWritePagesMDL ok!
+
+		return
+	end
+
+	0 // flags
+	IOKFLAG_SWAPOUT // kflags
+	offset@ PAGESHIFT << // offset
+	halfmdl@ // mdl
+	fcb@ // fcb
+	writefunc@ IODispatchWriteFunction ok! drop
+
+	if (ok@)
+		otherhalfcount@ // pages
+		offset@ // offset
+		IOSwapFileRelease
+
+		return
+	end
+
+	otherhalfcount@ // pagecount
+	offset@ // offset
+	halfmdl@ // mdl
+	IOSwapPageWriteMDLComplete
+end
+
+fn IOSwapFileWritePagesMDL { pagecount mdl -- ok }
+	// write the pages in the MDL one at a time.
+	// this isn't preferred but must be resorted to sometimes.
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	auto writemdl
+	MmMDLHeader_SIZEOF 8 + alloc writemdl!
+
+	KERNELMODE // mode
+	PAGESIZE // length
+	0 // vaddr
+	writemdl@ // mdl
+	MmMDLInitialize
+
+	1 writemdl@ MmMDLHeader_PinCount + !
+
+	-1 writemdl@ MmMDLHeader_SIZEOF + 4 + !
+
+	auto fcb
+	IOSwapFileObject@ IOFile_FileControlBlock + @ fcb!
+
+	auto writefunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	while (pagecount@)
+		auto pfdbe
+		mdlpos@@ pfdbe!
+
+		pfdbe@ writemdl@ MmMDLHeader_SIZEOF + !
+
+		auto offset
+		1 IOSwapFileReserve ok! offset!
+
+		if (ok@)
+			return
+		end
+
+		// perform the write operation
+
+		0 // flags
+		IOKFLAG_SWAPOUT // kflags
+		offset@ PAGESHIFT << // offset
+		writemdl@ // mdl
+		fcb@ // fcb
+		writefunc@ IODispatchWriteFunction ok! drop
+
+		if (ok@)
+			offset@ IOSwapPageFree
+			return
+		end
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
+			MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
+			// modified or deleted, free the swap page :(
+
+			offset@ IOSwapPageFree
+		end else
+			offset@ pfdbe@ MmPageFrameEntryAnonymous_SwapPageNumber + !
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		ipl@ KeIPLLower
+
+		1 pagecount -=
+		4 mdlpos +=
+	end
+end
+
+fn IOSwapPageWriteMDLComplete { pagecount offset mdl -- }
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
@@ -421,6 +614,4 @@ fn IOSwapFileWriteMDL { pagecount mdl -- ok }
 	end
 
 	ipl@ KeIPLLower
-
-	1 IOSwapPagesWritten += // misnomer: counts transfers, not pages
 end

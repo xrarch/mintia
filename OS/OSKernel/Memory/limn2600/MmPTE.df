@@ -31,7 +31,7 @@ end
 // pagemap addresses are given as physical addresses.
 // synchronization regarding the pagemap is a responsibility of the caller.
 
-fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
+fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 	// create an empty PTE for the vaddr in the given pagemap.
 	// if the page table exists, it is referenced. otherwise it is created and
 	// initialized with a refcount of 1.
@@ -59,21 +59,11 @@ fn MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
 
 	if (pt@ 0 ==)
 		// need to allocate this page table.
-		// dip into MUSTSUCCEEDL2 pool to increase odds of successfully
-		// satisfying a page fault in high memory pressure conditions.
 
 		ipl@ KeIPLLower
 
-		auto flags
-
-		if (canblock@)
-			ZEROMUST CANBLOCK | flags!
-		end else
-			ZEROMUST MUSTSUCCEEDL2 | flags!
-		end
-
 		ent@ // pte
-		flags@ // priority
+		ZEROMUST // priority
 		MmAnonymousPageAlloc ok! pt! pfdbe!
 
 		if (ok@)
@@ -149,19 +139,24 @@ fn MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 	if (oldcount@ 1 ==)
 		// last PTE. free the page table.
 
-		auto count
-		PAGESIZE 2 >> count!
-
-		auto ptr
-		pfn@ PAGESHIFT << IDENTITYSPACE | ptr!
-
 		if (DEBUGCHECKS)
+			auto count
+			PAGESIZE 2 >> count!
+
+			auto ptr
+			pfn@ PAGESHIFT << IDENTITYSPACE | ptr!
+
 			while (count@)
 				auto pde
 				ptr@@ pde!
 
 				if (pde@)
-					pde@ "MmPTEDelete: broken %x\n" KeCrash
+					auto ptaddr
+					ptr@ 2 >> 1023 & PAGESHIFT << ptaddr!
+
+					pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ 2 >> 1023 & 22 << ptaddr |=
+
+					deref@ pde@ ptaddr@ "MmPTEDelete: %x: broken %x %d\n" KeCrash
 				end
 
 				1 count -=
@@ -195,6 +190,8 @@ fn MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
 	// exists, because it's simply based here on whether the page table exists
 	// or not. to be sure, check that the returned PTE has the PTE_V flag with
 	// MmPTEInterpret.
+
+	// MUST have VAD list mutex held.
 
 	if (DEBUGCHECKS)
 		if (vaddr@ MMHIGHESTUSERADDRESS >)
@@ -234,7 +231,7 @@ fn MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-		pteaddr@@ 2 >> 1023 & pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+		pteaddr@@ 2 >> 1023 & 1 + pfdbe@ MmPageFrameEntryPageTable_PTECount + !
 
 		pt@ 5 << PTE_V | pteaddr@!
 
@@ -407,5 +404,11 @@ fn MmPTECountSave { pfdbe pde -- }
 	// shifted left by 2 bits to avoid the PTE_INSWAP and PTE_V bits, and just
 	// barely reaching up to the 20-bit swap page number.
 
-	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ 2 << pde@ |=
+	if (DEBUGCHECKS)
+		if (pfdbe@ MmPageFrameEntryPageTable_PTECount + @ ~~)
+			"MmPTECountSave: PTE count == 0\n" KeCrash
+		end
+	end
+
+	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ 1 - 2 << pde@ |=
 end

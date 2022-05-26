@@ -1,4 +1,4 @@
-extern MmPTECreate { vaddr pagemap canblock -- pteaddr ok }
+extern MmPTECreate { vaddr pagemap -- pteaddr ok }
 extern MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 
 extern MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }

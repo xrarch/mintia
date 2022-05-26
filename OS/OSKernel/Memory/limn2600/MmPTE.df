@@ -70,10 +70,6 @@ fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 			return
 		end
 
-		pfdbe@ // pfdbe
-		0 // process
-		MmEvictablePageModify
-
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
@@ -87,6 +83,12 @@ fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 		PAGESHIFT pt <<=
 	end else
 		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		if (DEBUGCHECKS)
+			if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi ~~)
+				"MmPTECreate: page table had no references\n" KeCrash
+			end
+		end
 
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
 
@@ -210,7 +212,15 @@ fn MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (pteaddr@@ PTE_INSWAP &)
+	if (pteaddr@@ PTE_V &)
+		pteaddr@@ 5 >> PAGESHIFT << pt!
+
+		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
+	end elseif (pteaddr@@ PTE_INSWAP &)
 		// swap in the PTE
 
 		ipl@ KeIPLLower
@@ -223,10 +233,6 @@ fn MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
 		if (ok@)
 			return
 		end
-
-		pfdbe@ // pfdbe
-		0 // process
-		MmEvictablePageModify
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
@@ -245,14 +251,12 @@ fn MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
 		-1 ok!
 		return
 	end else
-		pteaddr@@ 5 >> PAGESHIFT << pt!
-
-		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-		pfdbe@ MmEvictablePageReference drop
-
-		ipl@ KeIPLLower
+		"MmPTEReference: weird state\n" KeCrash
 	end
+
+	pfdbe@ // pfdbe
+	0 // process
+	MmEvictablePageModify
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
 end

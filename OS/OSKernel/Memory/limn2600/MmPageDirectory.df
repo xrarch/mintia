@@ -22,14 +22,6 @@
 #include "<ll>/OSDLL/OSStatus.h"
 
 fn MmPageDirectoryDestroy { process -- }
-	PAGESIZE // charge
-	process@ PsProcess_QuotaBlock + @ // quotablock
-	MmQuotaBlockUnchargeVM
-
-	PAGESIZE // charge
-	process@ PsProcess_QuotaBlock + @ // quotablock
-	MmQuotaBlockUncharge
-
 	auto pagemap
 	process@ KeProcess_PageDirectory + @ pagemap!
 
@@ -55,7 +47,29 @@ fn MmPageDirectoryDestroy { process -- }
 			ptr@@ pde!
 
 			if (pde@)
-				pde@ ptr@ 2 >> 1023 & 22 << "MmPageDirectoryDestroy: %x: broken %x\n" KeCrash
+				auto ptpfdbe
+				pde@ 5 >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
+
+				PAGESIZE 2 >> count!
+				pde@ 5 >> PAGESHIFT << IDENTITYSPACE | ptr!
+
+				while (count@)
+					if (ptr@@)
+						ptr@@
+						ptpfdbe@ MmPageFrameEntryPageTable_PTECount + @
+						ptpfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
+						pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
+						pde@ ptr@ 2 >> 1023 & 22 << "MmPageDirectoryDestroy: %x: broken %x (%d, %d, %d) %x\n" KeCrash
+					end
+
+					1 count -=
+					4 ptr +=
+				end
+
+				ptpfdbe@ MmPageFrameEntryPageTable_PTECount + @
+				ptpfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
+				pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
+				pde@ ptr@ 2 >> 1023 & 22 << "MmPageDirectoryDestroy: %x: broken %x (%d, %d, %d)\n" KeCrash
 			end
 
 			1 count -=
@@ -75,6 +89,14 @@ fn MmPageDirectoryDestroy { process -- }
 	MmAnonymousPageDelete
 
 	// ...but it leaves at the provided IPL
+
+	PAGESIZE // charge
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockUnchargeVM
+
+	PAGESIZE // charge
+	process@ PsProcess_QuotaBlock + @ // quotablock
+	MmQuotaBlockUncharge
 end
 
 fn MmPageDirectoryAlloc { process -- pdir ok }
@@ -154,7 +176,9 @@ fn MmPageDirectorySwapIn { process -- }
 		pfdbe@ MmEvictablePageReference drop
 	end
 
-	pfdbe@ // pfdbe
-	0 // process
-	MmEvictablePageModify
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+		pfdbe@ // pfdbe
+		0 // process
+		MmEvictablePageModify
+	end
 end

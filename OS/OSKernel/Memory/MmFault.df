@@ -148,124 +148,107 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 
 	MmThrottle
 
-	vaddr@ // vaddr
-	process@ KeProcess_PageDirectory + @ // pagemap
-	MmPTEReference ok! pteaddr! ptpfdbe!
+	while (1)
+		if (ptpfdbe@ ~~)
+			vaddr@ // vaddr
+			process@ KeProcess_PageDirectory + @ // pagemap
+			MmPTEReference ok! pteaddr! ptpfdbe!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+			if (ok@)
+				0 ptpfdbe!
+			end
+		end
 
-	if (ok@ ~~)
-		pteaddr@ // pteaddr
-		MmPTEInterpret ok! flags! phyaddr!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
 		if (ok@ ~~)
-			ipl@ KeIPLLower
+			pteaddr@ // pteaddr
+			MmPTEInterpret ok! flags! phyaddr!
 
-			// valid
+			if (ok@ ~~)
+				ipl@ KeIPLLower
 
-			if (flags@ PTE_W &)
-				// no work to do
+				// valid
 
-				process@ MmVADListUnlock
-				ptpfdbe@ MmEvictablePageDereference drop
+				if (flags@ PTE_W &)
+					// no work to do
 
-				return
-			end elseif (writing@)
-				pteaddr@ // pteaddr
-				vaddr@ // vaddr
-				process@ // process
-				MmWriteFault signal!
-
-				if (signal@ -1 ~=)
 					process@ MmVADListUnlock
 					ptpfdbe@ MmEvictablePageDereference drop
 
 					return
+				end elseif (writing@)
+					pteaddr@ // pteaddr
+					vaddr@ // vaddr
+					process@ // process
+					MmWriteFault signal!
+
+					if (signal@ -1 ~=)
+						process@ MmVADListUnlock
+						ptpfdbe@ MmEvictablePageDereference drop
+
+						return
+					end else
+						0 signal!
+
+						// recheck everything
+
+						continue
+					end
 				end else
-					0 signal!
+					// no work to do
+
+					process@ MmVADListUnlock
+					ptpfdbe@ MmEvictablePageDereference drop
+
+					return
 				end
 			end else
-				// no work to do
+				// hold PTE contents in flags temporarily
+				pteaddr@@ flags!
 
-				process@ MmVADListUnlock
-				ptpfdbe@ MmEvictablePageDereference drop
+				if (flags@ PTE_TRANSITION PTE_INSWAP | &)
+					// private page. we need to do work here
 
-				return
-			end
-		end else
-			// hold PTE contents in flags temporarily
-			pteaddr@@ flags!
+					flags@ PAGENUMBERMASK & phyaddr!
 
-			if (flags@ PTE_TRANSITION PTE_INSWAP | &)
-				// private page. we need to do work here
+					if (flags@ PTE_TRANSITION &)
+						// reference it now so we can drop IPL
 
-				flags@ PAGENUMBERMASK & phyaddr!
+						phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-				if (flags@ PTE_TRANSITION &)
-					// reference it now so we can drop IPL
+						if (DEBUGCHECKS)
+							if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
+								flags@ vaddr@ "MmSatisfyFault: %x: transition PTE (%x) wasn't COW \n" KeCrash
+							end
+						end
 
-					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+						pfdbe@ MmEvictablePageReference drop
+					end
+
+					ipl@ KeIPLLower
+
+					auto vad
+					vaddr@ // vaddr
+					process@ // process
+					MmFaultParameters ok! vad! drop drop
 
 					if (DEBUGCHECKS)
-						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
-							flags@ vaddr@ "MmSatisfyFault: %x: transition PTE (%x) wasn't COW \n" KeCrash
+						if (ok@)
+							ok@ "MmSatisfyFault: couldn't find VAD for private page (%i)\n" KeCrash
 						end
 					end
 
-					pfdbe@ MmEvictablePageReference drop
-				end
+					process@ MmWorkingSetLock drop // will NEVER fail
 
-				ipl@ KeIPLLower
-
-				auto vad
-				vaddr@ // vaddr
-				process@ // process
-				MmFaultParameters ok! vad! drop drop
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						ok@ "MmSatisfyFault: couldn't find VAD for private page (%i)\n" KeCrash
-					end
-				end
-
-				process@ MmWorkingSetLock drop // will NEVER fail
-
-				process@ // process
-				MmWorkingSetEntryReserve ok! wsleptr! wsli!
-
-				if (ok@)
-					if (flags@ PTE_TRANSITION &)
-						pfdbe@ MmEvictablePageDereference drop
-					end
-
-					process@ MmWorkingSetUnlock
-					process@ MmVADListUnlock
-					ptpfdbe@ MmEvictablePageDereference drop
-
-					OSSIGNAL_KILL signal!
-
-					return
-				end
-
-				if (flags@ PTE_INSWAP &)
-					// swap it in. unlock and relock the working set to avoid
-					// deadlock.
-
-					process@ MmWorkingSetUnlock
-
-					0 // pri
-					pteaddr@ // pte
-					phyaddr@ PAGESHIFT >> // pno
-					MmAnonymousSwapIn ok! phyaddr! pfdbe!
-
-					process@ MmWorkingSetLock drop
+					process@ // process
+					MmWorkingSetEntryReserve ok! wsleptr! wsli!
 
 					if (ok@)
-						wsli@ // wsli
-						wsleptr@ // wsleptr
-						process@ // process
-						MmWorkingSetEntryFree
+						if (flags@ PTE_TRANSITION &)
+							pfdbe@ MmEvictablePageDereference drop
+						end
 
 						process@ MmWorkingSetUnlock
 						process@ MmVADListUnlock
@@ -276,52 +259,83 @@ fn MmSatisfyFault { writing vaddr trapframe -- signal }
 						return
 					end
 
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+					if (flags@ PTE_INSWAP &)
+						// swap it in. unlock and relock the working set to avoid
+						// deadlock.
 
-					PAGESHIFT phyaddr <<=
+						process@ MmWorkingSetUnlock
 
-					0 ptpfdbe!
-				end
+						0 // pri
+						pteaddr@ // pte
+						phyaddr@ PAGESHIFT >> // pno
+						MmAnonymousSwapIn ok! phyaddr! pfdbe!
 
-				PTE_V flags!
+						process@ MmWorkingSetLock drop
 
-				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-					if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
-						PTE_W flags |=
+						if (ok@)
+							wsli@ // wsli
+							wsleptr@ // wsleptr
+							process@ // process
+							MmWorkingSetEntryFree
+
+							process@ MmWorkingSetUnlock
+							process@ MmVADListUnlock
+							ptpfdbe@ MmEvictablePageDereference drop
+
+							OSSIGNAL_KILL signal!
+
+							return
+						end
+
+						pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
+						pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+						PAGESHIFT phyaddr <<=
+
+						0 ptpfdbe!
 					end
+
+					PTE_V flags!
+
+					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+						if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
+							PTE_W flags |=
+						end
+					end
+
+					phyaddr@ // phyaddr
+					flags@ // flags
+					vaddr@ // vaddr
+					pteaddr@ // pteaddr
+					process@ KeProcess_ASID + @ // asid
+					MmPTEUpdate drop drop drop
+
+					vaddr@ PAGENUMBERMASK & // vaddr
+					wsleptr@ // wsleptr
+					process@ // process
+					MmWorkingSetEntryInsert
+
+					process@ MmWorkingSetUnlock
+					process@ MmVADListUnlock
+
+					if (ptpfdbe@)
+						ptpfdbe@ MmEvictablePageDereference drop
+					end
+
+					return
+				end else
+					ipl@ KeIPLLower
+
+					break
 				end
-
-				phyaddr@ // phyaddr
-				flags@ // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate drop drop drop
-
-				vaddr@ PAGENUMBERMASK & // vaddr
-				wsleptr@ // wsleptr
-				process@ // process
-				MmWorkingSetEntryInsert
-
-				process@ MmWorkingSetUnlock
-				process@ MmVADListUnlock
-
-				if (ptpfdbe@)
-					ptpfdbe@ MmEvictablePageDereference drop
-				end
-
-				return
-			end else
-				ipl@ KeIPLLower
 			end
-		end
-	end elseif (ok@ -1 ~=)
-		ok@ "MmSatisfyFault: failed to reference PTE (%i)\n" KeCrash
-	end else
-		ipl@ KeIPLLower
+		end elseif (ok@ -1 ~=)
+			ok@ "MmSatisfyFault: failed to reference PTE (%i)\n" KeCrash
+		end else
+			ipl@ KeIPLLower
 
-		0 ptpfdbe!
+			break
+		end
 	end
 
 	vaddr@ // vaddr

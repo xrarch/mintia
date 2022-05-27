@@ -603,6 +603,8 @@ fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
 			last@ process@ PsProcess_WorkingSetMaximumIndex + !
 			last@ process@ PsProcess_WorkingSetFreeListHead + !
 
+			0 wsleptr@!
+
 			return
 		end
 
@@ -739,13 +741,6 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 
 	// unmap
 
-	0 // phyaddr
-	0 // flags
-	vaddr@ // vaddr
-	pteaddr@ // pteaddr
-	process@ PsProcess_PCB + KeProcess_ASID + @ // asid
-	MmPTEUpdate drop drop drop
-
 	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
@@ -760,12 +755,26 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 		end
 	end
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	0 // phyaddr
+	0 // flags
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	process@ PsProcess_PCB + KeProcess_ASID + @ // asid
+	MmPTEUpdate drop drop drop
+
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
 		// private page. create transition PTE so we can soft-fault it back in
 		// later.
 
 		phyaddr@ PTE_TRANSITION | pteaddr@!
+
+		ipl@ KeIPLLower
 	end else
+		ipl@ KeIPLLower
+
 		1 // deref
 		pteaddr@ // pteaddr
 		vaddr@ // vaddr

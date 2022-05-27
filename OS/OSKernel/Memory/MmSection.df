@@ -340,13 +340,22 @@ end
 
 fn MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 	pte@ // pte
-	pri@ FREEFIRST | TRYFOREVER | // pri
+	pri@ FREEFIRST | // pri
 	MmAnonymousPageAlloc ok! pfn! pfdbe!
 
 	if (ok@)
 		return
 	end
 
+	auto kflags
+
+	if (pri@ TRYFOREVER &)
+		IOKFLAG_SWAPIN kflags!
+	end else
+		0 kflags!
+	end
+
+	kflags@ // kflags
 	pfn@ PAGESHIFT << IDENTITYSPACE | // pageframe
 	pno@ // pno
 	IOSwapPageRead ok!
@@ -363,7 +372,7 @@ fn MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 end
 
-fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
+fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 	// get specified page frame from section. will read it in if in swap, or
 	// demand zero if non-existent, or just return if resident.
 
@@ -398,7 +407,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		// needs to be created
 
 		if (multilevel@)
-			ZEROMUST CANBLOCK | // priority
+			ZEROMUST CANBLOCK | pri@ | // priority
 			MmPageAlloc ok! ppt! drop
 
 			if (ok@)
@@ -412,7 +421,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 			// create linearly
 			anonsize@ PAGESHIFT >> 2 << // bytes
 			'lPPT' // tag
-			CANBLOCK POOLALLOC | // flags
+			CANBLOCK POOLALLOC | pri@ | // flags
 			MmAllocWithTag ok! ppt!
 
 			if (ok@)
@@ -434,7 +443,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		sectionoffset@ PDSHIFT >> 2 << ppt@ + pde!
 
 		if (pde@@ ~~)
-			ZEROMUST CANBLOCK | // priority
+			ZEROMUST CANBLOCK | pri@ | // priority
 			MmPageAlloc ok! ppt! drop
 
 			if (ok@)
@@ -474,7 +483,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 		// non-existent, demand zero
 
 		ppt@ // pte
-		ZEROMUST TRYFOREVER | // pri
+		ZEROMUST pri@ | // pri
 		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
 
 		if (ok@)
@@ -490,7 +499,7 @@ fn MmSectionPageGet { sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		// swapped out, bring back in
 
-		0 // pri
+		pri@ // pri
 		ppt@ // pte
 		ppte@ PAGESHIFT >> // pno
 		MmAnonymousSwapIn ok! phyaddr! pfdbe!

@@ -125,3 +125,5 @@ extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }
 
 externptr IOBootDevice
+
+externptr IOFileControlBlockCacheSize

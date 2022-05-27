@@ -113,8 +113,22 @@ fn MmQuotaBlockCharge { charge quotablock -- ok }
 
 	0 ok!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto commitlimit
+	MmNonpageableCommitLimit@ commitlimit!
+
+	auto commitused
+	MmNonpageableCommitUsage@ commitused!
+
+	if (commitused@ charge@ PAGESHIFT >> + commitlimit@ >)
+		ipl@ KeIPLLower
+
+		STATUS_NONPAGE_COMMIT_EXCEEDED ok!
+
+		return
+	end
 
 	auto heapmax
 	quotablock@ MmQuotaBlock_HeapMax + @ heapmax!
@@ -123,7 +137,7 @@ fn MmQuotaBlockCharge { charge quotablock -- ok }
 	quotablock@ MmQuotaBlock_HeapUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ + heapmax@ >)
-		rs@ HALCPUInterruptRestore
+		ipl@ KeIPLLower
 
 		STATUS_QUOTA_EXCEEDED ok!
 
@@ -131,8 +145,9 @@ fn MmQuotaBlockCharge { charge quotablock -- ok }
 	end
 
 	oldcharge@ charge@ + quotablock@ MmQuotaBlock_HeapUsed + !
+	commitused@ charge@ + MmNonpageableCommitUsage!
 
-	rs@ HALCPUInterruptRestore
+	ipl@ KeIPLLower
 end
 
 fn MmQuotaBlockUncharge { charge quotablock -- }
@@ -142,15 +157,25 @@ fn MmQuotaBlockUncharge { charge quotablock -- }
 	auto oldcharge
 	quotablock@ MmQuotaBlock_HeapUsed + @ oldcharge!
 
+	auto commitused
+	MmNonpageableCommitUsage@ commitused!
+
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
 			charge@
 			oldcharge@
 			"MmQuotaBlockUncharge: attempt to uncharge more than was charged (oldcharge=%d charge=%d)\n" KeCrash
 		end
+
+		if (charge@ PAGESHIFT >> commitused@ >)
+			commitused@
+			charge@ PAGESHIFT >>
+			"MmQuotaBlockUncharge: attempt to uncharge more commit than was charged %d > %d\n" KeCrash
+		end
 	end
 
 	oldcharge@ charge@ - quotablock@ MmQuotaBlock_HeapUsed + !
+	commitused@ charge@ - MmNonpageableCommitUsage!
 
 	rs@ HALCPUInterruptRestore
 end

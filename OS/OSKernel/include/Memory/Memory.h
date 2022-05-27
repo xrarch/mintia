@@ -39,6 +39,7 @@ extern MmUsageDump { -- }
 
 extern MmInitPhase0 { -- }
 extern MmInitPhase1 { -- }
+extern MmInitNonpageableCommit { -- }
 
 extern MmQuery { query -- ok }
 
@@ -92,6 +93,9 @@ externptr MmPeakWorkingSetSize
 externptr MmCommitLimit
 externptr MmCommitUsage
 
+externptr MmNonpageableCommitLimit
+externptr MmNonpageableCommitUsage
+
 // free page count thresholds at which various types/priorities of page
 // allocation will block or fail.
 
@@ -114,6 +118,11 @@ const MMWORKINGSETDEFAULTMAXIMUM 64
 // what kind of load the system is undergoing.
 
 const MMPROCESSPINGUARANTEE 8
+
+// default nonpageable commit heuristics
+
+const MMSYSTEMPROMISE (128 1024 *)
+const MMNONPAGECOMMITMINIMUM (256 1024 *)
 
 // page allocation priorities
 

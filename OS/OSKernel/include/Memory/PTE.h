@@ -1,7 +1,7 @@
 extern MmPTECreate { vaddr pagemap -- pteaddr ok }
 extern MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 
-extern MmPTEReference { vaddr pagemap -- pfdbe pteaddr ok }
+extern MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 extern MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
 extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }
 

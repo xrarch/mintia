@@ -121,7 +121,7 @@ const MMPROCESSPINGUARANTEE 8
 
 // default nonpageable commit heuristics
 
-const MMSYSTEMPROMISE (128 1024 *)
+const MMSYSTEMPROMISE (64 1024 *)
 const MMNONPAGECOMMITMINIMUM (256 1024 *)
 
 // page allocation priorities

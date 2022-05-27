@@ -30,6 +30,9 @@ struct OSMemoryInformation
 	4 CommitLimit
 	4 CommitUsage
 
+	4 NonpageableCommitLimit
+	4 NonpageableCommitUsage
+
 	48 Reserved
 endstruct
 

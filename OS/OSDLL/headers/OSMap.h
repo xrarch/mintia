@@ -3,12 +3,12 @@ const OSPAGEOFFSETMASK (OSPAGESIZE 1 -)
 const OSPAGENUMBERMASK (OSPAGEOFFSETMASK ~)
 const OSPAGESHIFT 12
 
-const OSPEB     0x7FFE0000
+const OSPEB     0x7FF00000
 const OSPEBSIZE OSPAGESIZE
 
 const OSDLLHEAD 0x7FE00000
 
-const USTACKS   0x7FC00000 // preferred, to keep them out of the way
+const USTACKS   0x7FD00000 // preferred, to keep them out of the way
 const USTACKSZ  16384
 
 const HEAPSTART 0x70000000

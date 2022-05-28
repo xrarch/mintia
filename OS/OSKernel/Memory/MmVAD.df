@@ -466,99 +466,101 @@ fn MmVADUnmap { vad processobject -- }
 
 	auto pfdbe
 
-	if (vad@ MmVAD_ChargeVMQuota + @ commitcharge@ ~~ ||)
-		// this means that the VAD is or was mapped COW. we need to traverse
-		// the page tables to find transition and swap PTEs to free.
+	if (max@)
+		if (vad@ MmVAD_ChargeVMQuota + @ commitcharge@ ~~ ||)
+			// this means that the VAD is or was mapped COW. we need to traverse
+			// the page tables to find transition and swap PTEs to free.
 
-		// also we need to traverse the page tables when its a mapped
-		// character device.
+			// also we need to traverse the page tables when its a mapped
+			// character device.
 
-		auto ptpfdbe
-		0 ptpfdbe!
+			auto ptpfdbe
+			0 ptpfdbe!
 
-		while (vaddr@ max@ <=)
-			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
-				if (ptpfdbe@)
-					ptpfdbe@ MmPTEDereference
-				end
-
-				TRYFOREVER // pri
-				vaddr@ // vaddr
-				pdir@ // pagemap
-				MmPTEReference ok! pteaddr! ptpfdbe!
-
-				if (ok@)
-					if (ok@ -1 ~=)
-						ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
+			while (vaddr@ max@ <=)
+				if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
+					if (ptpfdbe@)
+						ptpfdbe@ MmPTEDereference
 					end
 
-					0 ptpfdbe!
-					PERPAGETABLE vaddr +=
-					continue
-				end
-			end
+					TRYFOREVER // pri
+					vaddr@ // vaddr
+					pdir@ // pagemap
+					MmPTEReference ok! pteaddr! ptpfdbe!
 
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
-
-			pteaddr@@ pte!
-
-			if (pte@)
-				0 // phyaddr
-				0 // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				asid@ // asid
-				MmPTEUpdate drop drop drop
-
-				auto deref
-				1 deref!
-
-				if (vad@ MmVAD_ChargeVMQuota + @)
-					if (DEBUGCHECKS)
-						if (pte@ PTE_V &)
-							"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
+					if (ok@)
+						if (ok@ -1 ~=)
+							ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
 						end
+
+						0 ptpfdbe!
+						PERPAGETABLE vaddr +=
+						continue
 					end
+				end
 
-					if (pte@ PTE_INSWAP &)
-						// free private page in swap
+				auto ipl
+				IPLDPC KeIPLRaise ipl!
 
-						ipl@ KeIPLLower
+				pteaddr@@ pte!
 
-						0 deref!
+				if (pte@)
+					0 // phyaddr
+					0 // flags
+					vaddr@ // vaddr
+					pteaddr@ // pteaddr
+					asid@ // asid
+					MmPTEUpdate drop drop drop
 
-						pte@ PAGESHIFT >> IOSwapPageFree
-					end elseif (pte@ PTE_TRANSITION &)
-						// free private page
+					auto deref
+					1 deref!
 
-						ipl@ // ipl
-						pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
-						MmAnonymousPageDelete
+					if (vad@ MmVAD_ChargeVMQuota + @)
+						if (DEBUGCHECKS)
+							if (pte@ PTE_V &)
+								"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
+							end
+						end
+
+						if (pte@ PTE_INSWAP &)
+							// free private page in swap
+
+							ipl@ KeIPLLower
+
+							0 deref!
+
+							pte@ PAGESHIFT >> IOSwapPageFree
+						end elseif (pte@ PTE_TRANSITION &)
+							// free private page
+
+							ipl@ // ipl
+							pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
+							MmAnonymousPageDelete
+						end else
+							pte@ "MmVADUnmap: strange PTE %08x\n" KeCrash
+						end
 					end else
-						pte@ "MmVADUnmap: strange PTE %08x\n" KeCrash
+						ipl@ KeIPLLower
 					end
+
+					// there was a PTE containing some information, so delete it.
+
+					deref@ // deref
+					pteaddr@ // pteaddr
+					vaddr@ // vaddr
+					pdir@ // pagemap
+					MmPTEDelete drop
 				end else
 					ipl@ KeIPLLower
 				end
 
-				// there was a PTE containing some information, so delete it.
-
-				deref@ // deref
-				pteaddr@ // pteaddr
-				vaddr@ // vaddr
-				pdir@ // pagemap
-				MmPTEDelete drop
-			end else
-				ipl@ KeIPLLower
+				4 pteaddr +=
+				PAGESIZE vaddr +=
 			end
 
-			4 pteaddr +=
-			PAGESIZE vaddr +=
-		end
-
-		if (ptpfdbe@)
-			ptpfdbe@ MmPTEDereference
+			if (ptpfdbe@)
+				ptpfdbe@ MmPTEDereference
+			end
 		end
 	end
 

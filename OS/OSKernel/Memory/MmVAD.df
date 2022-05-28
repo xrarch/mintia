@@ -466,101 +466,99 @@ fn MmVADUnmap { vad processobject -- }
 
 	auto pfdbe
 
-	if (max@)
-		if (vad@ MmVAD_ChargeVMQuota + @ commitcharge@ ~~ ||)
-			// this means that the VAD is or was mapped COW. we need to traverse
-			// the page tables to find transition and swap PTEs to free.
+	if (vad@ MmVAD_ChargeVMQuota + @ commitcharge@ ~~ || max@ &&)
+		// this means that the VAD is or was mapped COW. we need to traverse
+		// the page tables to find transition and swap PTEs to free.
 
-			// also we need to traverse the page tables when its a mapped
-			// character device.
+		// also we need to traverse the page tables when its a mapped
+		// character device.
 
-			auto ptpfdbe
-			0 ptpfdbe!
+		auto ptpfdbe
+		0 ptpfdbe!
 
-			while (vaddr@ max@ <=)
-				if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
-					if (ptpfdbe@)
-						ptpfdbe@ MmPTEDereference
-					end
-
-					TRYFOREVER // pri
-					vaddr@ // vaddr
-					pdir@ // pagemap
-					MmPTEReference ok! pteaddr! ptpfdbe!
-
-					if (ok@)
-						if (ok@ -1 ~=)
-							ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
-						end
-
-						0 ptpfdbe!
-						PERPAGETABLE vaddr +=
-						continue
-					end
+		while (vaddr@ max@ <=)
+			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
+				if (ptpfdbe@)
+					ptpfdbe@ MmPTEDereference
 				end
 
-				auto ipl
-				IPLDPC KeIPLRaise ipl!
+				TRYFOREVER // pri
+				vaddr@ // vaddr
+				pdir@ // pagemap
+				MmPTEReference ok! pteaddr! ptpfdbe!
 
-				pteaddr@@ pte!
-
-				if (pte@)
-					0 // phyaddr
-					0 // flags
-					vaddr@ // vaddr
-					pteaddr@ // pteaddr
-					asid@ // asid
-					MmPTEUpdate drop drop drop
-
-					auto deref
-					1 deref!
-
-					if (vad@ MmVAD_ChargeVMQuota + @)
-						if (DEBUGCHECKS)
-							if (pte@ PTE_V &)
-								"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
-							end
-						end
-
-						if (pte@ PTE_INSWAP &)
-							// free private page in swap
-
-							ipl@ KeIPLLower
-
-							0 deref!
-
-							pte@ PAGESHIFT >> IOSwapPageFree
-						end elseif (pte@ PTE_TRANSITION &)
-							// free private page
-
-							ipl@ // ipl
-							pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
-							MmAnonymousPageDelete
-						end else
-							pte@ "MmVADUnmap: strange PTE %08x\n" KeCrash
-						end
-					end else
-						ipl@ KeIPLLower
+				if (ok@)
+					if (ok@ -1 ~=)
+						ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
 					end
 
-					// there was a PTE containing some information, so delete it.
+					0 ptpfdbe!
+					PERPAGETABLE vaddr +=
+					continue
+				end
+			end
 
-					deref@ // deref
-					pteaddr@ // pteaddr
-					vaddr@ // vaddr
-					pdir@ // pagemap
-					MmPTEDelete drop
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			pteaddr@@ pte!
+
+			if (pte@)
+				0 // phyaddr
+				0 // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				asid@ // asid
+				MmPTEUpdate drop drop drop
+
+				auto deref
+				1 deref!
+
+				if (vad@ MmVAD_ChargeVMQuota + @)
+					if (DEBUGCHECKS)
+						if (pte@ PTE_V &)
+							"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
+						end
+					end
+
+					if (pte@ PTE_INSWAP &)
+						// free private page in swap
+
+						ipl@ KeIPLLower
+
+						0 deref!
+
+						pte@ PAGESHIFT >> IOSwapPageFree
+					end elseif (pte@ PTE_TRANSITION &)
+						// free private page
+
+						ipl@ // ipl
+						pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
+						MmAnonymousPageDelete
+					end else
+						pte@ "MmVADUnmap: strange PTE %08x\n" KeCrash
+					end
 				end else
 					ipl@ KeIPLLower
 				end
 
-				4 pteaddr +=
-				PAGESIZE vaddr +=
+				// there was a PTE containing some information, so delete it.
+
+				deref@ // deref
+				pteaddr@ // pteaddr
+				vaddr@ // vaddr
+				pdir@ // pagemap
+				MmPTEDelete drop
+			end else
+				ipl@ KeIPLLower
 			end
 
-			if (ptpfdbe@)
-				ptpfdbe@ MmPTEDereference
-			end
+			4 pteaddr +=
+			PAGESIZE vaddr +=
+		end
+
+		if (ptpfdbe@)
+			ptpfdbe@ MmPTEDereference
 		end
 	end
 

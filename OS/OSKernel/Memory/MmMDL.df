@@ -350,6 +350,9 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 	-1 mdlpos@!
 
+	auto ptpfdbe
+	0 ptpfdbe!
+
 	while (pages@)
 		if (lockforwrite@)
 			// force any COWs and discover any read-only violations.
@@ -367,9 +370,6 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 		auto pte
 
-		auto ptpfdbe
-		0 ptpfdbe!
-
 		while (1)
 			// poke the buffer page to make sure it is resident.
 			buffer@ KeSafeGetByte ok! drop
@@ -378,7 +378,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				process@ MmVADListUnlock
 
 				if (ptpfdbe@)
-					ptpfdbe@ MmEvictablePageDereference drop
+					ptpfdbe@ MmPTEDereference
 				end
 
 				mdl@ MmMDLUnpin
@@ -386,7 +386,11 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				return
 			end
 
-			if (ptpfdbe@ ~~)
+			if (buffer@ PAGENUMBERMASK & PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
+				if (ptpfdbe@)
+					ptpfdbe@ MmPTEDereference
+				end
+
 				0 // pri
 				buffer@ // vaddr
 				process@ KeProcess_PageDirectory + @ // pagemap
@@ -435,11 +439,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			break
 		end
 
-		ptpfdbe@ MmEvictablePageDereference drop
-
 		4 mdlpos +=
 		1 pages -=
 		PAGESIZE buffer +=
+		4 pte +=
 
 		// this is so that we probe at the start of each subsequent page after
 		// the first one. the reason for this is that KeSafeProbeWrite works
@@ -450,6 +453,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		// beyond the buffer because it will cause satanic race conditions
 		// with any other threads in this process.
 		PAGENUMBERMASK buffer &=
+	end
+
+	if (ptpfdbe@)
+		ptpfdbe@ MmPTEDereference
 	end
 
 	process@ MmVADListUnlock

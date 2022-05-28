@@ -42,7 +42,7 @@ struct MmPageFrameEntryPageTable
 	4 SwapPageNumber
 	4 PrototypePTE
 	4 PTECount
-	4 Context2
+	4 HoldCount
 	4 Context3
 endstruct
 

@@ -475,76 +475,90 @@ fn MmVADUnmap { vad processobject -- }
 		// also we need to traverse the page tables when its a mapped
 		// character device.
 
-		while (vaddr@ max@ <=)
-			auto ptpfdbe
+		auto ptpfdbe
+		0 ptpfdbe!
 
-			TRYFOREVER // pri
-			vaddr@ // vaddr
-			pdir@ // pagemap
-			MmPTEReference ok! pteaddr! ptpfdbe!
+		while (vaddr@ max@ <=)
+			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
+				if (ptpfdbe@)
+					ptpfdbe@ MmPTEDereference
+				end
+
+				TRYFOREVER // pri
+				vaddr@ // vaddr
+				pdir@ // pagemap
+				MmPTEReference ok! pteaddr! ptpfdbe!
+
+				if (ok@)
+					if (ok@ -1 ~=)
+						ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
+					end
+
+					0 ptpfdbe!
+					PERPAGETABLE vaddr +=
+					continue
+				end
+			end
 
 			auto ipl
 			IPLDPC KeIPLRaise ipl!
 
-			if (ok@ ~~)
-				pteaddr@@ pte!
+			pteaddr@@ pte!
 
-				0 // phyaddr
-				0 // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				asid@ // asid
-				MmPTEUpdate ok! flags! phyaddr!
+			0 // phyaddr
+			0 // flags
+			vaddr@ // vaddr
+			pteaddr@ // pteaddr
+			asid@ // asid
+			MmPTEUpdate ok! flags! phyaddr!
 
-				auto deref
-				1 deref!
+			auto deref
+			1 deref!
 
-				if (vad@ MmVAD_ChargeVMQuota + @)
-					if (DEBUGCHECKS)
-						if (flags@ PTE_V &)
-							"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
-						end
+			if (vad@ MmVAD_ChargeVMQuota + @)
+				if (DEBUGCHECKS)
+					if (flags@ PTE_V &)
+						"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
 					end
+				end
 
-					if (pte@ PTE_INSWAP &)
-						// free private page in swap
+				if (pte@ PTE_INSWAP &)
+					// free private page in swap
 
-						ipl@ KeIPLLower
+					ipl@ KeIPLLower
 
-						0 deref!
+					0 deref!
 
-						pte@ PAGESHIFT >> IOSwapPageFree
-					end elseif (pte@ PTE_TRANSITION &)
-						// free private page
+					pte@ PAGESHIFT >> IOSwapPageFree
+				end elseif (pte@ PTE_TRANSITION &)
+					// free private page
 
-						ipl@ // ipl
-						pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
-						MmAnonymousPageDelete
-					end else
-						ipl@ KeIPLLower
-					end
+					ipl@ // ipl
+					pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
+					MmAnonymousPageDelete
 				end else
 					ipl@ KeIPLLower
 				end
-
-				if (pte@)
-					// there was a PTE containing some information, so delete it.
-
-					deref@ // deref
-					pteaddr@ // pteaddr
-					vaddr@ // vaddr
-					pdir@ // pagemap
-					MmPTEDelete drop
-				end
-
-				ptpfdbe@ MmEvictablePageDereference drop
-			end elseif (ok@ -1 ~=)
-				ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
 			end else
 				ipl@ KeIPLLower
 			end
 
+			if (pte@)
+				// there was a PTE containing some information, so delete it.
+
+				deref@ // deref
+				pteaddr@ // pteaddr
+				vaddr@ // vaddr
+				pdir@ // pagemap
+				MmPTEDelete drop
+			end
+
+			4 pteaddr +=
 			PAGESIZE vaddr +=
+		end
+
+		if (ptpfdbe@)
+			ptpfdbe@ MmPTEDereference
 		end
 	end
 

@@ -71,6 +71,7 @@ fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 		end
 
 		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+		0 pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
@@ -166,18 +167,22 @@ fn MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 			end
 		end
 
-		auto ent
-		vaddr@ 22 >> 2 << pagemap@ + ent!
+		if (pfdbe@ MmPageFrameEntryPageTable_HoldCount + @ ~~)
+			auto ent
+			vaddr@ 22 >> 2 << pagemap@ + ent!
 
-		// zero out the pde for the page table.
-		0 ent@!
+			// zero out the pde for the page table.
+			0 ent@!
 
-		ipl@ // ipl
-		pfdbe@ // pfdbe
-		MmAnonymousPageDelete
+			ipl@ // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
 
-		pagemap@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
-		MmEvictablePageDereference drop
+			pagemap@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+			MmEvictablePageDereference drop
+		end else
+			ipl@ KeIPLLower
+		end
 	end else
 		ipl@ KeIPLLower
 	end
@@ -218,6 +223,7 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 		pt@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 		pfdbe@ MmEvictablePageReference drop
+		1 pfdbe@ MmPageFrameEntryPageTable_HoldCount + +=
 
 		ipl@ KeIPLLower
 	end elseif (pteaddr@@ PTE_INSWAP &)
@@ -238,6 +244,7 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		pteaddr@@ 2 >> 1023 & 1 + pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+		1 pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
 
 		pt@ 5 << PTE_V | pteaddr@!
 
@@ -261,6 +268,50 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 	end
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
+end
+
+fn MmPTEDereference { pfdbe -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto oldcount
+	pfdbe@ MmPageFrameEntryPageTable_HoldCount + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ ~~)
+			"MmPTEDereference: underflow\n" KeCrash
+		end
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
+
+	oldcount@ 1 - pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
+
+	if (oldcount@ 1 ==)
+		if (pfdbe@ MmPageFrameEntryPageTable_PTECount + @ ~~)
+			// perform deferred deletion of page table
+
+			auto pde
+			pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ pde!
+
+			// zero out the pde for the page table.
+			0 pde@!
+
+			auto pagemap
+			pde@ PAGENUMBERMASK & pagemap!
+
+			ipl@ // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
+
+			pagemap@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+			MmEvictablePageDereference drop
+
+			return
+		end
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }

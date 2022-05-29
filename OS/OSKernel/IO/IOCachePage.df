@@ -132,80 +132,52 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	filesize@ offset@ - PAGESIZE <
 	kflags@ IOKFLAG_ZEROES & || zeroes!
 
-	if (zeroes@)
-		// not a full page -- get zeroes because this might leak data
-
-		MMEVICTFLAG_WORKINGSET // flags
-		MMEVICTTYPE_FILE // evictablefuncs
-		ZEROMUST CACHEALLOC | // priority
-		MmEvictablePageAlloc ok! drop pfdbe!
-	end else
-		// full page, get any random page that may or may not be zeroed
-
-		MMEVICTFLAG_WORKINGSET // flags
-		MMEVICTTYPE_FILE // evictablefuncs
-		FREEFIRST CACHEALLOC | // priority
-		MmEvictablePageAlloc ok! drop pfdbe!
-	end
-
 	auto rs
 
+	if (kflags@ IOKFLAG_SWAPOUT &)
+		// this IOCachePageGet is needed for a swap-out operation
+		// (i.e., the filesystem driver is using it to cache disk
+		// structures and needs whatever is going to be read into
+		// this page to know where to swap the page out to).
+
+		MUSTSUCCEED CANBLOCK | kflags!
+	end elseif (kflags@ IOKFLAG_URGENT &)
+		MUSTSUCCEEDL2 CANBLOCK | kflags!
+	end elseif (kflags@ IOKFLAG_SWAPIN &)
+		CANBLOCK TRYFOREVER | kflags!
+	end else
+		CANBLOCK kflags!
+	end
+
+	if (zeroes@)
+		ZEROMUST kflags |=
+	end else
+		FREEFIRST kflags |=
+	end
+
+	MMEVICTFLAG_WORKINGSET // flags
+	MMEVICTTYPE_FILE // evictablefuncs
+	kflags@ // priority
+	MmEvictablePageAlloc ok! drop pfdbe!
+
 	if (ok@)
-		if (DEBUGCHECKS)
-			if (ok@ STATUS_NO_MEMORY ~=)
-				ok@ "IOCachePageGet: weird return value from MmEvictablePageAlloc (%i)\n" KeCrash
-			end
+		if (kflags@ 0xFF & MUSTSUCCEED ==)
+			// we needed this page for a swapout, system detonates.
+			// this flag is also used for certain other situations
+			// where an IO operation must succeed.
+			"IOCachePageGet: failed to allocate page needed for swapout!\n" KeCrash
 		end
 
-		// weren't able to find a reusable page. try to allocate again,
-		// but this time we can block.
+		if (locked@ ~~)
+			bucket@ // bucket
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockUnlockBucket
 
-		if (kflags@ IOKFLAG_SWAPOUT &)
-			// this IOCachePageGet is needed for a swap-out operation
-			// (i.e., the filesystem driver is using it to cache disk
-			// structures and needs whatever is going to be read into
-			// this page to know where to swap the page out to).
-
-			MUSTSUCCEED CANBLOCK | kflags!
-		end elseif (kflags@ IOKFLAG_URGENT &)
-			MUSTSUCCEEDL2 CANBLOCK | kflags!
-		end elseif (kflags@ IOKFLAG_SWAPIN &)
-			CANBLOCK TRYFOREVER | kflags!
-		end else
-			CANBLOCK kflags!
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockUnlock
 		end
 
-		if (zeroes@)
-			MMEVICTFLAG_WORKINGSET // flags
-			MMEVICTTYPE_FILE // evictablefuncs
-			ZEROMUST kflags@ | // priority
-			MmEvictablePageAlloc ok! drop pfdbe!
-		end else
-			MMEVICTFLAG_WORKINGSET // flags
-			MMEVICTTYPE_FILE // evictablefuncs
-			FREEFIRST kflags@ | // priority
-			MmEvictablePageAlloc ok! drop pfdbe!
-		end
-
-		if (ok@)
-			if (kflags@ 0xFF & MUSTSUCCEED ==)
-				// we needed this page for a swapout, system detonates.
-				// this flag is also used for certain other situations
-				// where an IO operation must succeed.
-				"IOCachePageGet: failed to allocate page needed for swapout!\n" KeCrash
-			end
-
-			if (locked@ ~~)
-				bucket@ // bucket
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockUnlockBucket
-
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockUnlock
-			end
-
-			return
-		end
+		return
 	end
 
 	offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !

@@ -152,31 +152,43 @@ fn MmPageDirectoryAlloc { process -- pdir ok }
 	memcpy
 end
 
-fn MmPageDirectorySwapIn { process -- }
+fn MmPageDirectoryReference { pri process -- ok }
+	if (DEBUGCHECKS)
+		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
+			"MmPageDirectoryReference: thread could be killed\n" KeCrash
+		end
+	end
+
+	0 ok!
+
 	auto pfdbe
 
-	if (process@ KeProcess_PageDirectory + @ PTE_INSWAP &)
-		IPLLOW KeIPLLower
+	process@ MmWorkingSetLock drop
 
-		auto ok
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (process@ KeProcess_PageDirectory + @ PTE_INSWAP &)
+		ipl@ KeIPLLower
+
 		auto pt
 
-		TRYFOREVER // priority
+		pri@ // priority
 		process@ KeProcess_PageDirectory + // pte
 		process@ KeProcess_PageDirectory + @ PAGESHIFT >> // pno
 		MmAnonymousSwapIn ok! pt! pfdbe!
 
 		if (ok@)
-			ok@ "MmPageDirectorySwapIn: failed (%i)\n" KeCrash
+			return
 		end
 
 		pt@ PAGESHIFT << process@ KeProcess_PageDirectory + !
-
-		IPLDPC KeIPLRaise drop
 	end else
 		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 		
 		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
 	end
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
@@ -184,4 +196,11 @@ fn MmPageDirectorySwapIn { process -- }
 		0 // process
 		MmEvictablePageModify
 	end
+
+	process@ MmWorkingSetUnlock
+end
+
+fn MmPageDirectoryDereference { process -- }
+	process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+	MmEvictablePageDereference drop
 end

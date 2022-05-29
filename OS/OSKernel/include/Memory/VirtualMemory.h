@@ -2,4 +2,5 @@ extern MmFlushUserTLBAll { -- }
 
 extern MmPageDirectoryDestroy { process -- }
 extern MmPageDirectoryAlloc { process -- pdir ok }
-extern MmPageDirectorySwapIn { process -- }
+extern MmPageDirectoryReference { pri process -- ok }
+extern MmPageDirectoryDereference { process -- }

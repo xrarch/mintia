@@ -31,12 +31,14 @@ const KEYBDCMDREAD 1
 const KEYBD_SHIFT 1
 const KEYBD_CTRL  2
 const KEYBD_CAPS  4
+const KEYBD_ARROW 8
 
 struct Keyboard
 	4 ID
 	4 ScanCodeBuffer
 	4 RawBuffer
 	4 States
+	4 PendingArrowKey
 	KeDPC_SIZEOF DPC
 endstruct
 
@@ -130,6 +132,7 @@ fn (HALLIMNstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
 	id@ keyboard@ Keyboard_ID + !
 
 	0 keyboard@ Keyboard_States + !
+	0 keyboard@ Keyboard_PendingArrowKey + !
 
 	if (CoVideoConsoleRawBuffer@ ~~)
 		// no device specified as video console input buffer, allocate it and
@@ -274,17 +277,19 @@ fn (HALInterruptHandler) DriverKeyboardInterrupt { int -- }
 			break
 		end
 
-		if (scan@ 0x8000 &)
-			scan@ 0xFF & 0x80 | scan!
-		end
+		if (scan@ -2 ~=)
+			if (scan@ 0x8000 &)
+				scan@ 0xFF & 0x80 | scan!
+			end
 
-		scan@ // value
-		1  // overwrite
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonfull
-		scanbuf@ // ringbuffer
-		ExRingBufferWriteValue drop drop
+			scan@ // value
+			1  // overwrite
+			0 // timeout
+			KERNELMODE // lastmode
+			EXRINGDONTWAIT // waitonfull
+			scanbuf@ // ringbuffer
+			ExRingBufferWriteValue drop drop
+		end
 
 		if (rawbuf@)
 			if (c@ -1 ~=)
@@ -315,6 +320,18 @@ fn (HALInterruptHandler) DriverKeyboardInterrupt { int -- }
 end
 
 fn KeyboardRead { keyboard -- scan c }
+	if (keyboard@ Keyboard_States + @ KEYBD_ARROW &)
+		KEYBD_ARROW ~ keyboard@ Keyboard_States + &=
+		-2 scan!
+		'[' c!
+		return
+	end elseif (keyboard@ Keyboard_PendingArrowKey + @)
+		-2 scan!
+		keyboard@ Keyboard_PendingArrowKey + @ c!
+		0 keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end
+
 	auto id
 	keyboard@ Keyboard_ID + @ id!
 
@@ -359,6 +376,10 @@ fn KeyboardRead { keyboard -- scan c }
 			'\n' c!
 		end elseif (scan@ 51 ==)
 			'\b' c!
+		end elseif (scan@ 54 >= scan@ 57 <= &&)
+			'\b' c!
+			KEYBD_ARROW keyboard@ Keyboard_States + |=
+			3 scan@ 54 - - 'A' + keyboard@ Keyboard_PendingArrowKey + !
 		end else
 			-1 c!
 		end

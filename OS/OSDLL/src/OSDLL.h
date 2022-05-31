@@ -59,12 +59,25 @@ const DLLHEAPBLOCKSIZEMASK  (DLLHEAPBLOCKMINSIZE 1 -)
 
 const DLLHEAPBLOCKBUCKETS (OSPAGESIZE DLLHEAPBLOCKMINSIZE /)
 
-struct DLLHeapBlock
-	2 Magic
+struct DLLAllocatedHeapBlock
 	1 BucketIndex
 	1 LastBucketIndex
-	4 NextFree // stores length in page-aligned allocations
+	2 Magic
+endstruct
+
+struct DLLHeapBlock
+	1 BucketIndex
+	1 LastBucketIndex
+	2 Magic
+	4 NextFree
 	4 PrevFree
+endstruct
+
+struct DLLDirectHeapBlock
+	4 Size
+	1 BucketIndex
+	1 LastBucketIndex
+	2 Magic
 endstruct
 
 extern DLLHeapInit { -- }

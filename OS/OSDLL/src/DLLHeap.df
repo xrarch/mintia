@@ -38,10 +38,10 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	auto mutex
 	DLLHeapMutex mutex!
 
-	if (bytes@ DLLHeapBlock_SIZEOF + OSPAGESIZE DLLHEAPBLOCKMINSIZE - >=)
+	if (bytes@ DLLAllocatedHeapBlock_SIZEOF + OSPAGESIZE DLLHEAPBLOCKMINSIZE - >=)
 		// do a direct private memory allocation
 
-		bytes@ DLLHeapBlock_SIZEOF + // length
+		bytes@ DLLDirectHeapBlock_SIZEOF + // length
 		HEAPSTART // startva
 		OSCURRENTPROCESS // processhandle
 		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
@@ -52,15 +52,15 @@ fn OSHeapAllocate { bytes -- ptr ok }
 			return
 		end
 
-		DLLHEAPDIRECTMAGIC ptr@ DLLHeapBlock_Magic + si
-		bytes@ DLLHeapBlock_SIZEOF + OSPAGEOFFSETMASK + OSPAGENUMBERMASK & ptr@ DLLHeapBlock_NextFree + !
+		DLLHEAPDIRECTMAGIC ptr@ DLLDirectHeapBlock_SIZEOF + si
+		bytes@ DLLDirectHeapBlock_SIZEOF + OSPAGEOFFSETMASK + OSPAGENUMBERMASK & ptr@ DLLDirectHeapBlock_Size + !
 
-		DLLHeapBlock_SIZEOF ptr +=
+		DLLDirectHeapBlock_SIZEOF ptr +=
 
 		return
 	end
 
-	DLLHeapBlock_SIZEOF bytes +=
+	DLLAllocatedHeapBlock_SIZEOF bytes +=
 
 	auto n
 
@@ -99,7 +99,7 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		mutex@ OSFastMutexRelease
 
 		// return block
-		DLLHeapBlock_SIZEOF ptr +=
+		DLLAllocatedHeapBlock_SIZEOF ptr +=
 
 		0 ok!
 
@@ -176,7 +176,7 @@ fn OSHeapAllocate { bytes -- ptr ok }
 			mutex@ OSFastMutexRelease
 
 			// return block
-			DLLHeapBlock_SIZEOF ptr +=
+			DLLAllocatedHeapBlock_SIZEOF ptr +=
 
 			0 ok!
 
@@ -254,7 +254,7 @@ fn OSHeapAllocate { bytes -- ptr ok }
 
 	mutex@ OSFastMutexRelease
 
-	DLLHeapBlock_SIZEOF ptr +=
+	DLLAllocatedHeapBlock_SIZEOF ptr +=
 
 	0 ok!
 end
@@ -263,20 +263,20 @@ fn OSHeapFree { ptr -- }
 	auto mutex
 	DLLHeapMutex mutex!
 
-	DLLHeapBlock_SIZEOF ptr -=
-
-	if (ptr@ DLLHeapBlock_Magic + gi DLLHEAPDIRECTMAGIC ==)
+	if (ptr@ 2 - gi DLLHEAPDIRECTMAGIC ==)
 		// directly unmap.
 
-		DLLHeapBlock_SIZEOF ptr -=
+		DLLDirectHeapBlock_SIZEOF ptr -=
 
-		ptr@ DLLHeapBlock_NextFree + @ // length
+		ptr@ DLLDirectHeapBlock_Size + @ // length
 		ptr@ // vaddr
 		OSCURRENTPROCESS // processhandle
 		OSUnmapView drop
 
 		return
 	end
+
+	DLLAllocatedHeapBlock_SIZEOF ptr -=
 
 	// check if the block has free blocks physically to its left or right.
 	// if so, merge.

@@ -18,10 +18,6 @@
 
 buffer DLLHeapMutex OSFastMutex_SIZEOF
 
-// TODO maybe free backend allocations when all heap blocks within have been
-// freed (though that would be hard because it would involve unlinking those
-// blocks from the free lists unless I restructure things a bit)
-
 table DLLHeapBucketListHeads[(DLLHEAPBLOCKBUCKETS 1 +)]
 
 var DLLHeapExtensionSize 1 // in units of pages
@@ -32,45 +28,6 @@ fn DLLHeapInit { -- }
 	"DLLHeapMutex" // name
 	DLLHeapMutex // fastmutex
 	OSFastMutexInitialize
-end
-
-fn DLLHeapExtensionAllocate { -- pages ptr ok }
-	DLLHeapExtensionSize@ OSPAGESHIFT << // length
-	HEAPSTART // startva
-	OSCURRENTPROCESS // processhandle
-	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
-	0 // flags
-	OSAllocate ok! ptr!
-
-	if (ok@)
-		while (ok@ STATUS_VM_QUOTA_EXCEEDED == ok@ STATUS_COMMIT_EXCEEDED == ||)
-			1 DLLHeapExtensionSize -=
-
-			if (DLLHeapExtensionSize@ ~~)
-				1 DLLHeapExtensionSize!
-				return
-			end
-
-			DLLHeapExtensionSize@ OSPAGESHIFT << // length
-			HEAPSTART // startva
-			OSCURRENTPROCESS // processhandle
-			PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
-			0 // flags
-			OSAllocate ok! ptr!
-		end
-
-		if (ok@)
-			return
-		end
-	end
-
-	DLLHeapExtensionSize@ pages!
-
-	1 DLLHeapExtensionSize +=
-
-	if (DLLHeapExtensionSize@ DLLHEAPEXTENSIONMAXIMUM >)
-		DLLHEAPEXTENSIONMAXIMUM DLLHeapExtensionSize!
-	end
 end
 
 fn OSHeapAllocate { bytes -- ptr ok }
@@ -244,7 +201,7 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	end
 
 	// set bucketindex in our block header
-	0 ptr@ DLLHeapBlock_LastBucketIndex + sb
+	pages@ ptr@ DLLHeapBlock_LastBucketIndex + sb
 	bucketindex@ ptr@ DLLHeapBlock_BucketIndex + sb
 	DLLHEAPSWIFTMAGIC ptr@ DLLHeapBlock_Magic + si
 
@@ -446,7 +403,125 @@ fn OSHeapFree { ptr -- }
 
 	ptr@ [bucketindex@]DLLHeapBucketListHeads!
 
+	if (ptr@ OSPAGEOFFSETMASK & ~~)
+		// this free created a page-sized block, see if we can free the heap
+		// extension.
+		ptr@ DLLHeapExtensionFree
+	end
+
 	mutex@ OSFastMutexRelease
+end
+
+fn DLLHeapExtensionAllocate { -- pages ptr ok }
+	DLLHeapExtensionSize@ pages!
+
+	pages@ OSPAGESHIFT << // length
+	HEAPSTART // startva
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSAllocate ok! ptr!
+
+	if (ok@)
+		if (ok@ STATUS_VM_QUOTA_EXCEEDED ~= ok@ STATUS_COMMIT_EXCEEDED ~= &&)
+			return
+		end
+
+		1 DLLHeapExtensionSize!
+
+		if (pages@ 1 ==)
+			return
+		end
+
+		1 pages!
+
+		OSPAGESIZE // length
+		HEAPSTART // startva
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		0 // flags
+		OSAllocate ok! ptr!
+
+		if (ok@)
+			return
+		end
+	end else
+		1 DLLHeapExtensionSize +=
+
+		if (DLLHeapExtensionSize@ DLLHEAPEXTENSIONMAXIMUM >)
+			DLLHEAPEXTENSIONMAXIMUM DLLHeapExtensionSize!
+		end
+	end
+end
+
+fn DLLHeapExtensionFree { ptr -- }
+	// try to free the heap extension this pointer to a page-aligned heap
+	// block is part of. this is done through a series of extremely cursed
+	// tricks to verify that the entire extension is free.
+
+	// first, seek to the page at the start of the extension.
+
+	while (ptr@ DLLHeapBlock_LastBucketIndex + gb ~~)
+		OSPAGESIZE ptr -=
+	end
+
+	// now remember this.
+
+	auto extensionstart
+	ptr@ extensionstart!
+
+	auto extensionsize
+	extensionstart@ DLLHeapBlock_LastBucketIndex + gb extensionsize!
+
+	// now go forward thru the extension to verify that all of the pages are
+	// empty.
+
+	while (extensionsize@)
+		if (ptr@ DLLHeapBlock_BucketIndex + gb DLLHEAPBLOCKBUCKETS ~=)
+			// not empty. can't free.
+			return
+		end
+
+		if (ptr@ DLLHeapBlock_Magic + gi DLLHEAPFREEMAGIC ~=)
+			return
+		end
+
+		1 extensionsize -=
+		OSPAGESIZE ptr +=
+	end
+
+	// all of the pages are verified to be empty. now we need to unlink them
+	// from the free list.
+
+	extensionstart@ ptr!
+	extensionstart@ DLLHeapBlock_LastBucketIndex + gb extensionsize!
+
+	while (extensionsize@)
+		auto p
+		ptr@ DLLHeapBlock_PrevFree + @ p!
+
+		if (p@)
+			ptr@ DLLHeapBlock_NextFree + @ p@ DLLHeapBlock_NextFree + !
+		end else
+			ptr@ DLLHeapBlock_NextFree + @ [DLLHEAPBLOCKBUCKETS]DLLHeapBucketListHeads!
+		end
+
+		ptr@ DLLHeapBlock_NextFree + @ p!
+
+		if (p@)
+			ptr@ DLLHeapBlock_PrevFree + @ p@ DLLHeapBlock_PrevFree + !
+		end
+
+		1 extensionsize -=
+		OSPAGESIZE ptr +=
+	end
+
+	// now we can unmap the extension.
+
+	extensionstart@ DLLHeapBlock_LastBucketIndex + gb OSPAGESHIFT << // length
+	extensionstart@ // vaddr
+	OSCURRENTPROCESS // processhandle
+	OSUnmapView drop
 end
 
 fn Malloc { size -- ptr }

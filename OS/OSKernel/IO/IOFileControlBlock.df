@@ -45,16 +45,11 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	dispatchtable@ fcb@ IOFileControlBlock_DispatchTable + !
 	0 fcb@ IOFileControlBlock_FSContext + !
 	0 fcb@ IOFileControlBlock_Mount + !
-	0 fcb@ IOFileControlBlock_Busy + !
 	0 fcb@ IOFileControlBlock_ParseCount + !
 	0 fcb@ IOFileControlBlock_UncachedIOCount + !
-	0 fcb@ IOFileControlBlock_SystemFile + !
 
 	0 fcb@ IOFileControlBlock_ReusableListNext + !
 	0 fcb@ IOFileControlBlock_ReusableListPrev + !
-	0 fcb@ IOFileControlBlock_ReusableInserted + !
-
-	0 fcb@ IOFileControlBlock_DeleteLastReference + !
 
 	"FCBRwLock" // name
 	fcb@ IOFileControlBlock_RwLock + // rwlock
@@ -216,7 +211,7 @@ fn IOFileControlBlockDelete { writeout fcb -- }
 	// it also should have removed it from the reusable list by now.
 
 	if (DEBUGCHECKS)
-		if (fcb@ IOFileControlBlock_ReusableInserted + @)
+		if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_REUSABLEINSERTED &)
 			"IOFileControlBlockDelete: FCB was reusable\n" KeCrash
 		end
 	end
@@ -283,11 +278,17 @@ fn IOFileControlBlockUnlock { fcb -- }
 end
 
 fn IOFileControlBlockDeleteLastReference { fcb -- }
-	1 fcb@ IOFileControlBlock_DeleteLastReference + !
+	auto rs
+	HALCPUInterruptDisable rs!
+	IOFCBFLAG_DELETELASTREFERENCE fcb@ IOFileControlBlock_Flags + |=
+	rs@ HALCPUInterruptRestore
 end
 
 fn IOFileControlBlockRescue { fcb -- }
-	0 fcb@ IOFileControlBlock_DeleteLastReference + !
+	auto rs
+	HALCPUInterruptDisable rs!
+	IOFCBFLAG_DELETELASTREFERENCE ~ fcb@ IOFileControlBlock_Flags + &=
+	rs@ HALCPUInterruptRestore
 end
 
 fn IOFileControlBlockReference { fcb -- oldcount }
@@ -301,8 +302,8 @@ fn IOFileControlBlockReference { fcb -- oldcount }
 	oldcount@ 1 + fcb@ IOFileControlBlock_References + !
 
 	if (oldcount@ ~~)
-		if (fcb@ IOFileControlBlock_ReusableInserted + @)
-			0 fcb@ IOFileControlBlock_ReusableInserted + !
+		if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_REUSABLEINSERTED &)
+			IOFCBFLAG_REUSABLEINSERTED ~ fcb@ IOFileControlBlock_Flags + &=
 			fcb@ IOFileControlBlockRemove
 		end
 	end
@@ -327,7 +328,7 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 	oldcount@ 1 - fcb@ IOFileControlBlock_References + !
 
 	if (oldcount@ 1 ==)
-		if (fcb@ IOFileControlBlock_DeleteLastReference + @)
+		if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_DELETELASTREFERENCE &)
 			ipl@ KeIPLLower
 
 			KeThreadCurrent@ KeThreadIgnoreKill drop
@@ -381,7 +382,7 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 				end
 			end
 
-			1 fcb@ IOFileControlBlock_ReusableInserted + !
+			IOFCBFLAG_REUSABLEINSERTED fcb@ IOFileControlBlock_Flags + |=
 			fcb@ IOFileControlBlockInsert
 		end
 	end
@@ -513,7 +514,7 @@ fn IOFileControlBlockTruncate { newsize growing keeplocked zero fcb -- oldsize o
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_SystemFile + @)
+	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
 		fcb@ IOFileControlBlockUnlock
 
 		STATUS_FORBIDDEN_OPERATION ok!
@@ -646,5 +647,5 @@ fn IOFileControlBlockGetSizeof { -- sizeof }
 end
 
 fn IOFileControlBlockIsDoomed { fcb -- doomed }
-	fcb@ IOFileControlBlock_DeleteLastReference + @ doomed!
+	fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_DELETELASTREFERENCE & doomed!
 end

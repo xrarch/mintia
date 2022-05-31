@@ -12,6 +12,7 @@
 #include "<inc>/OSAbort.h"
 #include "<inc>/OSFastMutex.h"
 #include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
 
 #include "OSDLL.h"
 
@@ -23,12 +24,53 @@ buffer DLLHeapMutex OSFastMutex_SIZEOF
 
 table DLLHeapBucketListHeads[(DLLHEAPBLOCKBUCKETS 1 +)]
 
-const DLLHEAPEXTENSIONSIZE 2 // in units of pages
+var DLLHeapExtensionSize 1 // in units of pages
+
+const DLLHEAPEXTENSIONMAXIMUM 8
 
 fn DLLHeapInit { -- }
 	"DLLHeapMutex" // name
 	DLLHeapMutex // fastmutex
 	OSFastMutexInitialize
+end
+
+fn DLLHeapExtensionAllocate { -- pages ptr ok }
+	DLLHeapExtensionSize@ OSPAGESHIFT << // length
+	HEAPSTART // startva
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSAllocate ok! ptr!
+
+	if (ok@)
+		while (ok@ STATUS_VM_QUOTA_EXCEEDED == ok@ STATUS_COMMIT_EXCEEDED == ||)
+			1 DLLHeapExtensionSize -=
+
+			if (DLLHeapExtensionSize@ ~~)
+				1 DLLHeapExtensionSize!
+				return
+			end
+
+			DLLHeapExtensionSize@ OSPAGESHIFT << // length
+			HEAPSTART // startva
+			OSCURRENTPROCESS // processhandle
+			PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+			0 // flags
+			OSAllocate ok! ptr!
+		end
+
+		if (ok@)
+			return
+		end
+	end
+
+	DLLHeapExtensionSize@ pages!
+
+	1 DLLHeapExtensionSize +=
+
+	if (DLLHeapExtensionSize@ DLLHEAPEXTENSIONMAXIMUM >)
+		DLLHEAPEXTENSIONMAXIMUM DLLHeapExtensionSize!
+	end
 end
 
 fn OSHeapAllocate { bytes -- ptr ok }
@@ -45,7 +87,7 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		bytes@ DLLHeapBlock_SIZEOF + // length
 		HEAPSTART // startva
 		OSCURRENTPROCESS // processhandle
-		ACCESS_READ ACCESS_WRITE | // pageprotection
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
 		0 // flags
 		OSAllocate ok! ptr!
 
@@ -192,12 +234,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	// highest free list, except for the first page, who we will yoink our
 	// requested block from.
 
-	DLLHEAPEXTENSIONSIZE OSPAGESHIFT << // length
-	HEAPSTART // startva
-	OSCURRENTPROCESS // processhandle
-	ACCESS_READ ACCESS_WRITE | // pageprotection
-	0 // flags
-	OSAllocate ok! ptr!
+	auto pages
+	DLLHeapExtensionAllocate ok! ptr! pages!
 
 	if (ok@)
 		mutex@ OSFastMutexRelease
@@ -237,7 +275,7 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	1 i!
 	ptr@ OSPAGESIZE + newblock!
 
-	while (i@ DLLHEAPEXTENSIONSIZE <)
+	while (i@ pages@ <)
 		0 newblock@ DLLHeapBlock_LastBucketIndex + sb
 		DLLHEAPBLOCKBUCKETS newblock@ DLLHeapBlock_BucketIndex + sb
 		DLLHEAPFREEMAGIC newblock@ DLLHeapBlock_Magic + si

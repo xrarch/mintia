@@ -11,6 +11,7 @@
 #include "<inc>/OSFile.h"
 #include "<inc>/OSAbort.h"
 #include "<inc>/OSFastMutex.h"
+#include "<inc>/OSObject.h"
 
 #include "OSDLL.h"
 
@@ -39,11 +40,23 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	DLLHeapMutex mutex!
 
 	if (bytes@ DLLHeapBlock_SIZEOF + OSPAGESIZE DLLHEAPBLOCKMINSIZE - >=)
-		mutex@ OSFastMutexAcquire
+		// do a direct private memory allocation
 
-		bytes@ OSPAGESIZE max DLLPagePoolAlloc ok! ptr!
+		bytes@ DLLHeapBlock_SIZEOF + // length
+		HEAPSTART // startva
+		OSCURRENTPROCESS // processhandle
+		ACCESS_READ ACCESS_WRITE | // pageprotection
+		0 // flags
+		OSAllocate ok! ptr!
 
-		mutex@ OSFastMutexRelease
+		if (ok@)
+			return
+		end
+
+		DLLHEAPDIRECTMAGIC ptr@ DLLHeapBlock_Magic + si
+		bytes@ DLLHeapBlock_SIZEOF + OSPAGEOFFSETMASK + OSPAGENUMBERMASK & ptr@ DLLHeapBlock_NextFree + !
+
+		DLLHeapBlock_SIZEOF ptr +=
 
 		return
 	end
@@ -180,7 +193,11 @@ fn OSHeapAllocate { bytes -- ptr ok }
 	// requested block from.
 
 	DLLHEAPEXTENSIONSIZE OSPAGESHIFT << // length
-	DLLPagePoolAlloc ok! ptr!
+	HEAPSTART // startva
+	OSCURRENTPROCESS // processhandle
+	ACCESS_READ ACCESS_WRITE | // pageprotection
+	0 // flags
+	OSAllocate ok! ptr!
 
 	if (ok@)
 		mutex@ OSFastMutexRelease
@@ -251,12 +268,17 @@ fn OSHeapFree { ptr -- }
 	auto mutex
 	DLLHeapMutex mutex!
 
-	if (ptr@ OSPAGEOFFSETMASK & ~~)
-		mutex@ OSFastMutexAcquire
+	DLLHeapBlock_SIZEOF ptr -=
 
-		ptr@ DLLPagePoolFree
+	if (ptr@ DLLHeapBlock_Magic + gi DLLHEAPDIRECTMAGIC ==)
+		// directly unmap.
 
-		mutex@ OSFastMutexRelease
+		DLLHeapBlock_SIZEOF ptr -=
+
+		ptr@ DLLHeapBlock_NextFree + @ // length
+		ptr@ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
 
 		return
 	end
@@ -271,8 +293,6 @@ fn OSHeapFree { ptr -- }
 	auto nb
 	auto next
 	auto prev
-
-	DLLHeapBlock_SIZEOF ptr -=
 
 	ptr@ DLLHeapBlock_BucketIndex + gb bucketindex!
 

@@ -1,0 +1,106 @@
+//
+// Implements the free-list allocator for the kernel pool.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+// heap allocation functions. should be called only through MmAllocWithTag and
+// MmFree. manages free-list allocations within pages.
+
+// we allocate in multiple "levels" in the interest of stability during tight
+// memory situations. the levels are as follows:
+//
+// - NORMAL
+// - MUSTSUCCEEDL2
+// - MUSTSUCCEED
+//
+// the allocation request will begin by searching the NORMAL free lists for a
+// block to return or split. if they are empty, and the MUSTSUCCEEDL2 or
+// MUSTSUCCEED flag has been specified, it will search those lists in that
+// order until it either finds an appropriate block or reaches the last level
+// it may allocate from. if it reaches this level without having found a
+// block, it will allocate a page from the corresponding MmPageAlloc level
+// and split it into blocks to place on that level's free lists. as an extra
+// guarantee, the MUSTSUCCEED and MUSTSUCCEEDL2 levels are initialized with
+// one permanent page-sized block each, which in normal operation should never
+// be exhausted.
+
+const MMHEAPBLOCKSIZESHIFT 6
+const MMHEAPBLOCKMINSIZE   (1 MMHEAPBLOCKSIZESHIFT <<)
+const MMHEAPBLOCKSIZEMASK  (MMHEAPBLOCKMINSIZE 1 -)
+
+const MMHEAPBLOCKBUCKETS (PAGESIZE MMHEAPBLOCKMINSIZE /)
+
+table MmHeapNormalListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
+table MmHeapMSL2ListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
+table MmHeapMustSucceedListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
+
+table MmHeapListHeads
+	pointerof MmHeapNormalListHeads
+	pointerof MmHeapMSL2ListHeads
+	pointerof MmHeapMustSucceedListHeads
+endtable
+
+fn MmHeapInit { -- }
+	// initialize the MUSTSUCCEEDL2 and MUSTSUCCEED levels with one page-sized
+	// block.
+
+	auto ok
+	auto pfn
+	auto pfdbe
+
+	FREEFIRST MUSTSUCCEED | // priority
+	MmPageAlloc ok! pfn! pfdbe!
+
+	if (ok@)
+		"MmHeapInit: failed to allocate initial page 1\n" KeCrash
+	end
+
+	// initialize pool page
+	pfdbe@ MmPoolPageInsert
+	1 pfdbe@ MmPageFrameEntryHeap_Permanent + !
+	MUSTSUCCEEDL2 pfdbe@ MmPageFrameEntryHeap_Level + !
+
+	// initialize permanent block
+	pfn@ PAGESHIFT << IDENTITYSPACE | pfn!
+	MMHEAPBLOCKBUCKETS pfn@ MmHeapBlock_BucketIndex + sb
+	0 pfn@ MmHeapBlock_LastBucketIndex + sb
+	MMHEAPSWIFTMAGIC MMHEAPMSL2 | pfn@ MmHeapBlock_Magic + si
+	0 pfn@ MmHeapBlock_NextFree + !
+	0 pfn@ MmHeapBlock_PrevFree + !
+	pfn@ [0]MmHeapMSL2ListHeads!
+
+	FREEFIRST MUSTSUCCEED | // priority
+	MmPageAlloc ok! pfn! pfdbe!
+
+	if (ok@)
+		"MmHeapInit: failed to allocate initial page 2\n" KeCrash
+	end
+
+	// initialize pool page
+	pfdbe@ MmPoolPageInsert
+	1 pfdbe@ MmPageFrameEntryHeap_Permanent + !
+	MUSTSUCCEED pfdbe@ MmPageFrameEntryHeap_Level + !
+
+	// initialize permanent block
+	pfn@ PAGESHIFT << IDENTITYSPACE | pfn!
+	MMHEAPBLOCKBUCKETS pfn@ MmHeapBlock_BucketIndex + sb
+	0 pfn@ MmHeapBlock_LastBucketIndex + sb
+	MMHEAPSWIFTMAGIC MMHEAPMS | pfn@ MmHeapBlock_Magic + si
+	0 pfn@ MmHeapBlock_NextFree + !
+	0 pfn@ MmHeapBlock_PrevFree + !
+	pfn@ [0]MmHeapMustSucceedListHeads!
+end

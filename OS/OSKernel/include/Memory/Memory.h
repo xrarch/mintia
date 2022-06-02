@@ -30,7 +30,18 @@ struct MmPageFrameEntryPool
 	4 VirtualAddress
 	4 Context3
 	4 Context4
-	4 BucketIndex
+	4 Level
+	4 PoolListNext
+	4 PoolListPrev
+endstruct
+
+struct MmPageFrameEntryHeap
+	4 Context1
+	4 Context2
+	4 Context3
+	4 Context4
+	4 Permanent
+	4 Level
 	4 PoolListNext
 	4 PoolListPrev
 endstruct

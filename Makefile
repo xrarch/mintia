@@ -1,11 +1,18 @@
-DISTIMAGE  := ./build/mintia-dist.img
-DISTIMGSZ  := 112640 # 52MB
-FST        := ../sdk/fstool.sh
-OBJTOOL    := ../sdk/link.sh
-SYSTOOL    := ../sdk/gensyscalls.sh
+ifndef SMALLDIST
+	export DISTIMAGE  := ./build/mintia-dist.img
+	export DISTIMGSZ  := 112640 # 52MB
+	export DISKLABEL  := ./build/default.disklabel
+else
+	export DISTIMAGE  := ./build/mintia-small.img
+	export DISTIMGSZ  := 20480 # 10MB
+	export DISKLABEL  := ./build/small.disklabel
+endif
 
-DISKLABEL  := ./build/defaultdisklabel
-OFFSET     := 4
+export FST        := ../sdk/fstool.sh
+export OBJTOOL    := ../sdk/link.sh
+export SYSTOOL    := ../sdk/gensyscalls.sh
+
+export OFFSET     := 4
 
 OS_DIR     := ./OS
 LOAD_DIR   := $(OS_DIR)/OSLoader
@@ -76,5 +83,5 @@ $(DISTIMAGE):
 
 cleanup:
 	make -C $(OS_DIR) cleanup
-	rm -f $(DISTIMAGE)
+	rm -f build/*.img
 	rm -f $(SYSBIN_DIR)/*.dll $(SYSBIN_DIR)/*.exe

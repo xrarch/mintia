@@ -45,7 +45,11 @@ sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
 	make -C $(HAL_DIR)
 	$(FSTOOL) u /mintia/BootResources.txt $(OS_DIR)/BootResources.txt
 	$(FSTOOL) u /mintia/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
+ifndef SMALLDIST
 	$(FSTOOL) u /mintia/SystemInit.cfg $(OS_DIR)/SystemInit.cfg
+else
+	$(FSTOOL) u /mintia/SystemInit.cfg $(OS_DIR)/SystemInit.cfg.small
+endif
 	$(FSTOOL) u /mintia/users.cfg $(OS_DIR)/users.cfg
 	$(FSTOOL) u /mintia/groups.cfg $(OS_DIR)/groups.cfg
 

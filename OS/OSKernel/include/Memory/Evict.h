@@ -13,17 +13,6 @@ struct MmPageFrameEntryEvictable
 	4 Context4
 endstruct
 
-struct MmPageFrameEntrySlab
-	4 Next
-	4 Prev
-	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
-	4 Context1
-	4 Context2
-	4 BucketIndex
-	4 PoolListNext
-	4 PoolListPrev
-endstruct
-
 struct MmPageFrameEntryAnonymous
 	4 Next
 	4 Prev
@@ -59,7 +48,6 @@ const MMEVICTFLAG_PAGETABLE  64 // page table (reused bit from filecache
 
 const MMEVICTTYPE_FILE       0
 const MMEVICTTYPE_ANON       1
-const MMEVICTTYPE_SLAB       2
 
 extern MmEvictablePageAlloc { flags evictabletype priority -- pfdbe pfn ok }
 extern MmEvictablePageDelete { pfdbe -- }

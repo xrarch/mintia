@@ -72,41 +72,23 @@ fn MmHeapDumpBlockInfo { block -- }
 
 end
 
+extern MmHeapDumpPage { page -- }
+
 fn MmPoolDump { -- }
 	auto pfdbe
 	MmPoolPageListHead@ pfdbe!
 
 	while (pfdbe@)
-		auto bucketindex
-		pfdbe@ MmPageFrameEntryPool_Level + @ bucketindex!
-
-		if (bucketindex@ -1 ==)
+		if (pfdbe@ MmPageFrameEntryPool_Level + @ -1 ==)
 			// page-aligned
 			pfdbe@ MmPageFrameEntryPool_Tag + @ MmHeapPrintTag
 			pfdbe@ MmPageFrameEntryPool_VirtualAddress + @
 			" %08x\n" Printf
 		end else
-			// slab
+			// heap
 
-			auto slab
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | slab!
-
-			auto sz
-			1 MMSLABPO2START bucketindex@ + << sz!
-
-			auto slabsperpage
-			PAGESIZE bucketindex@ MMSLABPO2START + >> slabsperpage!
-
-			while (slabsperpage@)
-				if (slab@ MmPoolSlab_Magic + gi MMSLABSWIFTMAGIC ==)
-					slab@ MmPoolSlab_TagOrNextFree + @ MmHeapPrintTag
-					slab@ MmPoolSlab_SIZEOF +
-					" %08x\n" Printf
-				end
-
-				sz@ slab +=
-				1 slabsperpage -=
-			end
+			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+			MmHeapDumpPage
 		end
 
 		pfdbe@ MmPageFrameEntryPool_PoolListNext + @ pfdbe!
@@ -135,7 +117,7 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 	// round up to nearest long
 	bytes@ 3 + 3 ~ & bytes!
 
-	if (bytes@ MmPoolSlab_SIZEOF + PAGESIZE 2 / >=)
+	if (bytes@ MmAllocatedHeapBlock_SIZEOF + PAGESIZE 2 / >=)
 		bytes@ // bytes
 		tag@ // tag
 		flags@ // flags
@@ -147,7 +129,7 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 	bytes@ // bytes
 	tag@ // tag
 	flags@ // flags
-	MmSlabAlloc ok! ptr!
+	MmHeapAlloc ok! ptr!
 end
 
 fn MmFree { ptr -- }
@@ -178,7 +160,7 @@ fn MmFree { ptr -- }
 		return
 	end
 
-	ptr@ MmSlabFree
+	ptr@ MmHeapFree
 end
 
 var MmPoolPageHint 0
@@ -407,15 +389,10 @@ fn MmChargeBytesGet { bytes -- charge }
 	// round up to nearest long
 	bytes@ 3 + 3 ~ & bytes!
 
-	if (bytes@ MmPoolSlab_SIZEOF + PAGESIZE 2 / >=)
+	if (bytes@ MmAllocatedHeapBlock_SIZEOF + PAGESIZE 2 / >=)
 		bytes@ PAGEOFFSETMASK + PAGENUMBERMASK & charge!
 	end else
-		MmPoolSlab_SIZEOF bytes +=
-		1 MMSLABPO2START << charge!
-
-		while (charge@ bytes@ <)
-			1 charge <<=
-		end
+		bytes@ MmHeapChargeBytesGet charge!
 	end
 end
 
@@ -449,14 +426,7 @@ fn MmBlockChargeGet { block -- charge }
 
 	// not page aligned. charge is defined by pool header.
 
-	MmPoolSlab_SIZEOF block -=
-
-	if (block@ MmPoolSlab_Magic + gi MMSLABSWIFTMAGIC ~=)
-		block@ MmPoolSlab_Magic + gi
-		block@ "MmBlockChargeGet: ptr 0x%08x had bad magic 0x%08x\n" KeCrash
-	end
-
-	1 MMSLABPO2START block@ MmPoolSlab_BucketIndex + gb + << charge!
+	block@ MmHeapChargeGet charge!
 end
 
 fn MmPoolPageGetPhysical { ptr -- pfn pfdbe }

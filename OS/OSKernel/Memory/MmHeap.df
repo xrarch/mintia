@@ -38,7 +38,7 @@
 // one permanent page-sized block each, which in normal operation should never
 // be exhausted.
 
-const MMHEAPBLOCKSIZESHIFT 6
+const MMHEAPBLOCKSIZESHIFT 5
 const MMHEAPBLOCKMINSIZE   (1 MMHEAPBLOCKSIZESHIFT <<)
 const MMHEAPBLOCKSIZEMASK  (MMHEAPBLOCKMINSIZE 1 -)
 
@@ -53,6 +53,18 @@ table MmHeapListHeads
 	pointerof MmHeapMSL2ListHeads
 	pointerof MmHeapMustSucceedListHeads
 endtable
+
+table MmHeapLevelPriorities
+	0
+	MUSTSUCCEEDL2
+	MUSTSUCCEED
+endtable
+
+var MmHeapBytesUsedInternally 0
+public MmHeapBytesUsedInternally
+
+var MmHeapBytesUsedExternally 0
+public MmHeapBytesUsedExternally
 
 fn MmHeapInit { -- }
 	// initialize the MUSTSUCCEEDL2 and MUSTSUCCEED levels with one page-sized
@@ -72,13 +84,13 @@ fn MmHeapInit { -- }
 	// initialize pool page
 	pfdbe@ MmPoolPageInsert
 	1 pfdbe@ MmPageFrameEntryHeap_Permanent + !
-	MUSTSUCCEEDL2 pfdbe@ MmPageFrameEntryHeap_Level + !
+	MMHEAPMSL2 pfdbe@ MmPageFrameEntryHeap_Level + !
 
 	// initialize permanent block
 	pfn@ PAGESHIFT << IDENTITYSPACE | pfn!
 	MMHEAPBLOCKBUCKETS pfn@ MmHeapBlock_BucketIndex + sb
 	0 pfn@ MmHeapBlock_LastBucketIndex + sb
-	MMHEAPSWIFTMAGIC MMHEAPMSL2 | pfn@ MmHeapBlock_Magic + si
+	MMHEAPFREEMAGIC pfn@ MmHeapBlock_Magic + si
 	0 pfn@ MmHeapBlock_NextFree + !
 	0 pfn@ MmHeapBlock_PrevFree + !
 	pfn@ [0]MmHeapMSL2ListHeads!
@@ -93,14 +105,457 @@ fn MmHeapInit { -- }
 	// initialize pool page
 	pfdbe@ MmPoolPageInsert
 	1 pfdbe@ MmPageFrameEntryHeap_Permanent + !
-	MUSTSUCCEED pfdbe@ MmPageFrameEntryHeap_Level + !
+	MMHEAPMS pfdbe@ MmPageFrameEntryHeap_Level + !
 
 	// initialize permanent block
 	pfn@ PAGESHIFT << IDENTITYSPACE | pfn!
 	MMHEAPBLOCKBUCKETS pfn@ MmHeapBlock_BucketIndex + sb
 	0 pfn@ MmHeapBlock_LastBucketIndex + sb
-	MMHEAPSWIFTMAGIC MMHEAPMS | pfn@ MmHeapBlock_Magic + si
+	MMHEAPFREEMAGIC pfn@ MmHeapBlock_Magic + si
 	0 pfn@ MmHeapBlock_NextFree + !
 	0 pfn@ MmHeapBlock_PrevFree + !
 	pfn@ [0]MmHeapMustSucceedListHeads!
+
+	PAGESIZE 2 * MmHeapBytesUsedExternally!
+end
+
+fn MmHeapAlloc { bytes tag flags -- ptr ok }
+	auto maxlevel
+
+	if (flags@ MUSTSUCCEED &)
+		MMHEAPMS maxlevel!
+	end elseif (flags@ MUSTSUCCEEDL2 &)
+		MMHEAPMSL2 maxlevel!
+	end else
+		MMHEAPNORMAL maxlevel!
+	end
+
+	auto level
+	MMHEAPNORMAL level!
+
+	while (level@ maxlevel@ <=)
+		if (level@ maxlevel@ ==)
+			bytes@ // bytes
+			tag@ // tag
+			level@ // level
+			flags@ // flags
+			MmHeapAllocateLevel ok! ptr!
+		end else
+			bytes@ // bytes
+			tag@ // tag
+			level@ // level
+			[level@]MmHeapLevelPriorities@ // flags
+			MmHeapAllocateLevel ok! ptr!
+		end
+
+		if (ok@ ~~)
+			return
+		end
+
+		1 level +=
+	end
+end
+
+fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
+	MmAllocatedHeapBlock_SIZEOF bytes +=
+
+	auto n
+
+	auto bucketindex
+	bytes@ MMHEAPBLOCKSIZEMASK + MMHEAPBLOCKSIZESHIFT >> bucketindex!
+
+	bucketindex@ MMHEAPBLOCKSIZESHIFT << bytes!
+
+	auto listheads
+	[level@]MmHeapListHeads@ listheads!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	listheads@ bucketindex@ 2 << + @ ptr!
+
+	if (ptr@)
+		// there's a properly sized block already
+
+		if (ptr@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ~=)
+			ptr@ MmHeapBlock_Magic + gi "MmHeapAllocate: bad magic 0x%04x\n" KeCrash
+		end
+
+		if (ptr@ MmHeapBlock_BucketIndex + gb bucketindex@ ~=)
+			bucketindex@ ptr@ MmHeapBlock_BucketIndex + gb "MmHeapAllocate: bad bucketindex %d (expected %d)\n" KeCrash
+		end
+
+		// set magic to indicate allocated
+		MMHEAPSWIFTMAGIC level@ | ptr@ MmHeapBlock_Magic + si
+
+		// unlink from free list
+		ptr@ MmHeapBlock_NextFree + @ n!
+
+		if (n@)
+			0 n@ MmHeapBlock_PrevFree + !
+		end
+
+		n@ listheads@ bucketindex@ 2 << + !
+
+		bytes@ MmHeapBytesUsedInternally +=
+
+		ipl@ KeIPLLower
+
+		tag@ ptr@ MmAllocatedHeapBlock_Tag + !
+
+		// return block
+		MmAllocatedHeapBlock_SIZEOF ptr +=
+
+		0 ok!
+
+		return
+	end
+
+	// try to find a bigger block that can be split
+
+	auto newbucketindex
+
+	auto newblock
+
+	auto i
+	MMHEAPBLOCKBUCKETS i!
+
+	while (i@ bucketindex@ >)
+		listheads@ i@ 2 << + @ ptr!
+
+		if (ptr@)
+			// found one to split, do that
+
+			if (ptr@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ~=)
+				ptr@ MmHeapBlock_Magic + gi "MmHeapAllocate: bad magic 2 0x%04x\n" KeCrash
+			end
+
+			if (ptr@ MmHeapBlock_BucketIndex + gb i@ ~=)
+				i@ ptr@ MmHeapBlock_BucketIndex + gb "MmHeapAllocate: bad bucketindex 2 %d (expected %d)\n" KeCrash
+			end
+
+			// remove from free list
+			ptr@ MmHeapBlock_NextFree + @ n!
+
+			if (n@)
+				0 n@ MmHeapBlock_PrevFree + !
+			end
+
+			n@ listheads@ i@ 2 << + !
+
+			// set new bucketindex in old block header
+			// already has correct lastbucketindex
+			bucketindex@ ptr@ MmHeapBlock_BucketIndex + sb
+			MMHEAPSWIFTMAGIC level@ | ptr@ MmHeapBlock_Magic + si
+
+			// calculate index of bucket to place split block in
+			i@ bucketindex@ - newbucketindex!
+
+			ptr@ bytes@ + newblock!
+
+			// create new block header
+			bucketindex@ newblock@ MmHeapBlock_LastBucketIndex + sb
+			newbucketindex@ newblock@ MmHeapBlock_BucketIndex + sb
+			MMHEAPFREEMAGIC newblock@ MmHeapBlock_Magic + si
+
+			// update next block to point to new block unless it is page
+			// -aligned which means theres no next block
+			newblock@ newbucketindex@ MMHEAPBLOCKSIZESHIFT << + n!
+
+			if (n@ PAGEOFFSETMASK &)
+				newbucketindex@ n@ MmHeapBlock_LastBucketIndex + sb
+			end
+
+			// insert in new bucket list
+			listheads@ newbucketindex@ 2 << + @ n!
+
+			if (n@)
+				newblock@ n@ MmHeapBlock_PrevFree + !
+			end
+
+			n@ newblock@ MmHeapBlock_NextFree + !
+			0 newblock@ MmHeapBlock_PrevFree + !
+
+			newblock@ listheads@ newbucketindex@ 2 << + !
+
+			bytes@ MmHeapBytesUsedInternally +=
+
+			ipl@ KeIPLLower
+
+			// set tag
+			tag@ ptr@ MmAllocatedHeapBlock_Tag + !
+
+			// return block
+			MmAllocatedHeapBlock_SIZEOF ptr +=
+
+			0 ok!
+
+			return
+		end
+
+		1 i -=
+	end
+
+	// no sufficient block! allocate a page.
+	// store pfdbe in n.
+
+	if (flags@ CANBLOCK &)
+		ipl@ KeIPLLower
+	end
+
+	FREEFIRST flags@ | // priority
+	MmPageAlloc ok! ptr! n!
+
+	if (ok@)
+		if (flags@ CANBLOCK & ~~)
+			ipl@ KeIPLLower
+		end
+
+		return
+	end
+
+	if (flags@ CANBLOCK &)
+		IPLDPC KeIPLRaise ipl!
+	end
+
+	// initialize the pfdbe
+	level@ n@ MmPageFrameEntryHeap_Level + !
+	0 n@ MmPageFrameEntryHeap_Permanent + !
+	n@ MmPoolPageInsert
+
+	ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
+
+	// set bucketindex in our block header
+	0 ptr@ MmHeapBlock_LastBucketIndex + sb
+	bucketindex@ ptr@ MmHeapBlock_BucketIndex + sb
+	MMHEAPSWIFTMAGIC level@ | ptr@ MmHeapBlock_Magic + si
+
+	// calculate index of bucket to place split block in
+	PAGESIZE MMHEAPBLOCKSIZESHIFT >> bucketindex@ - newbucketindex!
+
+	ptr@ bytes@ + newblock!
+
+	// create free block header
+	bucketindex@ newblock@ MmHeapBlock_LastBucketIndex + sb
+	newbucketindex@ newblock@ MmHeapBlock_BucketIndex + sb
+	MMHEAPFREEMAGIC newblock@ MmHeapBlock_Magic + si
+
+	// insert in free list
+	listheads@ newbucketindex@ 2 << + @ n!
+
+	if (n@)
+		newblock@ n@ MmHeapBlock_PrevFree + !
+	end
+
+	n@ newblock@ MmHeapBlock_NextFree + !
+	0 newblock@ MmHeapBlock_PrevFree + !
+
+	newblock@ listheads@ newbucketindex@ 2 << + !
+
+	PAGESIZE MmHeapBytesUsedExternally +=
+	bytes@ MmHeapBytesUsedInternally +=
+
+	ipl@ KeIPLLower
+
+	// set tag
+	tag@ ptr@ MmAllocatedHeapBlock_Tag + !
+
+	MmAllocatedHeapBlock_SIZEOF ptr +=
+
+	0 ok!
+end
+
+fn MmHeapFree { ptr -- }
+	MmAllocatedHeapBlock_SIZEOF ptr -=
+
+	// check if the block has free blocks physically to its left or right.
+	// if so, merge.
+
+	// then, place the resulting block on the relevant free list.
+
+	auto bucketindex
+	auto lastbucketindex
+	auto nb
+	auto next
+	auto prev
+
+	ptr@ MmHeapBlock_BucketIndex + gb bucketindex!
+
+	if (ptr@ MmHeapBlock_Magic + gi 15 ~ & MMHEAPSWIFTMAGIC ~=)
+		ptr@ MmHeapBlock_Magic + gi "MmHeapFree: bad magic %x\n" KeCrash
+	end
+
+	auto listheads
+	[ptr@ MmHeapBlock_Magic + gi 15 &]MmHeapListHeads@ listheads!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	bucketindex@ MMHEAPBLOCKSIZESHIFT << MmHeapBytesUsedInternally -=
+
+	if (ptr@ PAGEOFFSETMASK &)
+		// we're not at the start of the page, check left
+
+		ptr@ MmHeapBlock_LastBucketIndex + gb lastbucketindex!
+
+		ptr@ lastbucketindex@ MMHEAPBLOCKSIZESHIFT << - nb!
+
+		if (nb@ MmHeapBlock_BucketIndex + gb lastbucketindex@ ~=)
+			lastbucketindex@ nb@ MmHeapBlock_BucketIndex + gb "MmHeapFree: bad bucketindex %d (expected %d)\n" KeCrash
+		end
+
+		if (nb@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ==)
+			// free! merge left.
+
+			// remove from old free list
+			nb@ MmHeapBlock_PrevFree + @ prev!
+
+			nb@ MmHeapBlock_NextFree + @ next!
+
+			if (prev@)
+				next@ prev@ MmHeapBlock_NextFree + !
+			end else
+				next@ listheads@ lastbucketindex@ 2 << + !
+			end
+
+			if (next@)
+				prev@ next@ MmHeapBlock_PrevFree + !
+			end
+
+			// turn block into bigger block
+			lastbucketindex@ bucketindex +=
+
+			bucketindex@ nb@ MmHeapBlock_BucketIndex + sb
+
+			// invalidate magic number of old block
+			0 ptr@ MmHeapBlock_Magic + si
+
+			// set block pointer to last block
+			nb@ ptr!
+
+			// set right block lastbucketindex to our new one.
+			// we might be about to merge with it but its easier to just do
+			// this anyway.
+
+			ptr@ bucketindex@ MMHEAPBLOCKSIZESHIFT << + nb!
+
+			if (nb@ PAGEOFFSETMASK &)
+				bucketindex@ nb@ MmHeapBlock_LastBucketIndex + sb
+			end
+		end
+	end
+
+	ptr@ bucketindex@ MMHEAPBLOCKSIZESHIFT << + nb!
+
+	if (nb@ PAGEOFFSETMASK &)
+		// next block exists, see if it can be merged
+
+		nb@ MmHeapBlock_BucketIndex + gb lastbucketindex!
+
+		if (nb@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ==)
+			// free! merge right
+
+			// remove from old free list
+			nb@ MmHeapBlock_PrevFree + @ prev!
+
+			nb@ MmHeapBlock_NextFree + @ next!
+
+			if (prev@)
+				next@ prev@ MmHeapBlock_NextFree + !
+			end else
+				next@ listheads@ lastbucketindex@ 2 << + !
+			end
+
+			if (next@)
+				prev@ next@ MmHeapBlock_PrevFree + !
+			end
+
+			// turn block into bigger block
+			lastbucketindex@ bucketindex +=
+
+			bucketindex@ ptr@ MmHeapBlock_BucketIndex + sb
+
+			// invalidate magic number of old block
+			0 nb@ MmHeapBlock_Magic + si
+
+			// set right block lastbucketindex to our new one.
+
+			ptr@ bucketindex@ MMHEAPBLOCKSIZESHIFT << + nb!
+
+			if (nb@ PAGEOFFSETMASK &)
+				bucketindex@ nb@ MmHeapBlock_LastBucketIndex + sb
+			end
+		end
+	end
+
+	if (bucketindex@ MMHEAPBLOCKBUCKETS ==)
+		// free this heap page.
+
+		ptr@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + nb!
+
+		if (nb@ MmPageFrameEntryHeap_Permanent + @ ~~)
+			nb@ MmPoolPageRemove
+			nb@ MmPageFreeByEntry
+
+			PAGESIZE MmHeapBytesUsedExternally -=
+
+			ipl@ KeIPLLower
+			return
+		end
+	end
+
+	// set free magic
+	MMHEAPFREEMAGIC ptr@ MmHeapBlock_Magic + si
+
+	// put on relevant free list
+	listheads@ bucketindex@ 2 << + @ nb!
+
+	if (nb@)
+		ptr@ nb@ MmHeapBlock_PrevFree + !
+	end
+
+	nb@ ptr@ MmHeapBlock_NextFree + !
+	0 ptr@ MmHeapBlock_PrevFree + !
+
+	ptr@ listheads@ bucketindex@ 2 << + !
+
+	ipl@ KeIPLLower
+end
+
+fn MmHeapChargeBytesGet { bytes -- charge }
+	MmAllocatedHeapBlock_SIZEOF bytes +=
+
+	auto bucketindex
+	bytes@ MMHEAPBLOCKSIZEMASK + MMHEAPBLOCKSIZESHIFT >> bucketindex!
+
+	bucketindex@ MMHEAPBLOCKSIZESHIFT << charge!
+end
+
+fn MmHeapChargeGet { block -- charge }
+	MmAllocatedHeapBlock_SIZEOF block -=
+
+	if (block@ MmAllocatedHeapBlock_Magic + gi 15 ~ & MMHEAPSWIFTMAGIC ~=)
+		block@ MmAllocatedHeapBlock_Magic + gi
+		block@ "MmHeapChargeGet: ptr 0x%08x had bad magic 0x%08x\n" KeCrash
+	end
+
+	block@ MmAllocatedHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << charge!
+end
+
+extern MmHeapPrintTag { tag -- }
+
+fn MmHeapDumpPage { page -- }
+	while (1)
+		if (page@ MmHeapBlock_Magic + gi MMHEAPSWIFTMAGIC ==)
+			page@ MmAllocatedHeapBlock_Tag + @ MmHeapPrintTag
+			page@ MmAllocatedHeapBlock_SIZEOF +
+			" %08x\n" Printf
+		end
+
+		page@ MmHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << page +=
+
+		if (page@ PAGEOFFSETMASK & ~~)
+			return
+		end
+	end
 end

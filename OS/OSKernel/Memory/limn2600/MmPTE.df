@@ -15,6 +15,10 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
 #include "<ll>/OSDLL/OSStatus.h"
 
 extern HALLimn2500TLBFlush { vpn asid -- }
@@ -31,12 +35,16 @@ end
 // pagemap addresses are given as physical addresses.
 // synchronization regarding the pagemap is a responsibility of the caller.
 
-fn MmPTECreate { vaddr pagemap -- pteaddr ok }
+fn MmPTECreate { vaddr process -- pteaddr ok }
 	// create an empty PTE for the vaddr in the given pagemap.
 	// if the page table exists, it is referenced. otherwise it is created and
 	// initialized with a refcount of 1.
 
-	IDENTITYSPACE pagemap |=
+	auto pagemap
+	process@ KeProcess_PageDirectory + @ IDENTITYSPACE | pagemap!
+
+	auto ptecount
+	process@ PsProcess_PageTableEntryCounts + vaddr@ 22 >> 1 << + ptecount!
 
 	0 ok!
 
@@ -70,8 +78,9 @@ fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 			return
 		end
 
-		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+		1 ptecount@ si
 		0 pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
+		vaddr@ 22 >> pfdbe@ MmPageFrameEntryPageTable_PDENumber + !
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
@@ -91,7 +100,7 @@ fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 			end
 		end
 
-		1 pfdbe@ MmPageFrameEntryPageTable_PTECount + +=
+		ptecount@ gi 1 + ptecount@ si
 
 		pfdbe@ MmEvictablePageReference drop
 
@@ -101,11 +110,15 @@ fn MmPTECreate { vaddr pagemap -- pteaddr ok }
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
 end
 
-fn MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
+fn MmPTEDelete { deref pteaddr vaddr process -- ok }
 	// delete a PTE from the pagemap and dereference the page table.
 	// free the page table if its refcount hits 0.
 
-	IDENTITYSPACE pagemap |=
+	auto pagemap
+	process@ KeProcess_PageDirectory + @ IDENTITYSPACE | pagemap!
+
+	auto ptecount
+	process@ PsProcess_PageTableEntryCounts + vaddr@ 22 >> 1 << + ptecount!
 
 	0 ok!
 
@@ -125,7 +138,7 @@ fn MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 	IPLDPC KeIPLRaise ipl!
 
 	auto oldcount
-	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ oldcount!
+	ptecount@ gi oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ ~~)
@@ -133,7 +146,7 @@ fn MmPTEDelete { deref pteaddr vaddr pagemap -- ok }
 		end
 	end
 
-	oldcount@ 1 - pfdbe@ MmPageFrameEntryPageTable_PTECount + !
+	oldcount@ 1 - ptecount@ si
 
 	if (deref@)
 		pfdbe@ MmEvictablePageDereference drop
@@ -218,8 +231,8 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-		pde@ 2 >> 1023 & 1 + pfdbe@ MmPageFrameEntryPageTable_PTECount + !
 		1 pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
+		vaddr@ 22 >> pfdbe@ MmPageFrameEntryPageTable_PDENumber + !
 
 		pt@ 5 << PTE_V | pteaddr@!
 
@@ -245,7 +258,7 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
 end
 
-fn MmPTEDereference { pfdbe -- }
+fn MmPTEDereference { pfdbe process -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -263,7 +276,10 @@ fn MmPTEDereference { pfdbe -- }
 	oldcount@ 1 - pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
 
 	if (oldcount@ 1 ==)
-		if (pfdbe@ MmPageFrameEntryPageTable_PTECount + @ ~~)
+		auto ptecount
+		process@ PsProcess_PageTableEntryCounts + pfdbe@ MmPageFrameEntryPageTable_PDENumber + @ 1 << + ptecount!
+
+		if (ptecount@ gi ~~)
 			// perform deferred deletion of page table
 
 			auto pde
@@ -428,19 +444,4 @@ end
 
 fn MmPTEValid { pteaddr -- valid }
 	pteaddr@@ PTE_V & valid!
-end
-
-fn MmPTECountSave { pfdbe pde -- }
-	// save the PTE count for a page table in the pde itself.
-	// this is sort of black magic and works by storing the 10-bit PTE count
-	// shifted left by 2 bits to avoid the PTE_INSWAP and PTE_V bits, and just
-	// barely reaching up to the 20-bit swap page number.
-
-	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryPageTable_PTECount + @ ~~)
-			"MmPTECountSave: PTE count == 0\n" KeCrash
-		end
-	end
-
-	pfdbe@ MmPageFrameEntryPageTable_PTECount + @ 1 - 2 << pde@ |=
 end

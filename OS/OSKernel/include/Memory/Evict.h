@@ -30,9 +30,9 @@ struct MmPageFrameEntryPageTable
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 SwapPageNumber
 	4 PrototypePTE
-	4 PTECount
+	4 Context1
 	4 HoldCount
-	4 Context3
+	4 PDENumber
 endstruct
 
 const MMEVICTFLAG_MODIFIED   1

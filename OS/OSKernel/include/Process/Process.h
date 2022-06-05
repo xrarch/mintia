@@ -74,8 +74,9 @@ struct PsProcess
 	(WORKINGSETLISTCOUNT 4 *) WorkingSetListPointers
 
 	64 CommittedPageTablesBitmap // assumes 32-bit but this will have to change completely if we ever do a 64-bit port anyway
-
 	4 CommittedPageTablesCount
+
+	1024 PageTableEntryCounts
 endstruct
 
 struct PsThread

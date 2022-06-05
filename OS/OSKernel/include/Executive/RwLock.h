@@ -25,6 +25,7 @@ struct ExRwLock
 endstruct
 
 extern ExRwLockInitialize { name rwlock -- }
+extern ExRwLockUninitialize { rwlock -- }
 extern ExRwLockRelease { rwlock -- }
 extern ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 extern ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }

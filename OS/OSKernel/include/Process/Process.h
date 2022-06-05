@@ -11,7 +11,7 @@ struct PsProcess
 
 	4 CleanedUp
 
-	ExRwLock_SIZEOF ThreadCreateDeleteRwLock
+	KeMutex_SIZEOF ThreadCreateDeleteMutex
 
 	KeEvent_SIZEOF TerminationEvent
 
@@ -162,7 +162,6 @@ extern PsProcessWaitForActivationObject { timeout processobject -- activationsta
 extern PsProcessWaitForActivation { timeout processhandle -- activationstatus ok }
 
 extern PsProcessCreateDeleteLock { processobject -- ok }
-extern PsProcessCreateDeleteLockShared { processobject -- ok }
 extern PsProcessCreateDeleteAcquireCheck { needsthread processobject -- ok }
 extern PsProcessCreateDeleteUnlock { processobject -- }
 

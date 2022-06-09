@@ -57,7 +57,7 @@ extern OSDirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 extern OSDirectoryUnlink { name filehandle -- ok }
 extern OSDirectoryRead { dirent filehandle -- ok }
 
-extern OSSwapFileCreate { filehandle -- sizeinpages ok }
+extern OSSwapFileCreate { minpages maxpages pri path -- ok }
 
 extern OSIOControl { arg2 arg1 filehandle -- ret ok }
 

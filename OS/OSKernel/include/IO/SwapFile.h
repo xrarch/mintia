@@ -1,10 +1,8 @@
-extern IOSwapFileCreate { filehandle -- sizeinpages ok }
+extern IOSwapFileCreate { minpages maxpages pri path -- ok }
 
-extern IOSwapFileReserve { pagesneeded -- offset ok }
-extern IOSwapFileRelease { pages offset -- }
-
-extern IOSwapPageFree { pno -- }
-extern IOSwapPageRead { kflags pageframe pno -- ok }
+extern IOSwapPageFree { pno swapfile -- }
+extern IOSwapPageFreePTE { pte -- }
+extern IOSwapPageReadPTE { kflags pageframe pte -- ok }
 
 extern IOSwapFileWriteMDL { pagecount mdl -- ok }
 

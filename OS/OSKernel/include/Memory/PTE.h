@@ -22,4 +22,7 @@ const PTE_G  16 // global
 const PTE_INSWAP     2
 const PTE_TRANSITION 4
 
+const PTE_SWAPFILE_SHIFT 4
+const PTE_SWAPFILE_MASK  15
+
 const MMGUARDPTE 0xFFFF0000

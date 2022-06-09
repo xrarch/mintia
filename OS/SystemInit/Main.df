@@ -53,81 +53,88 @@ fn TrySystemConsole { -- ok }
 	SetSystemConsole ok!
 end
 
-fn SetSwapFile { config -- ok }
-	auto section
-	"SwapFile" // sectionname
-	config@ // config
-	OSConfigGetSection ok! section!
-
-	if (ok@)
-		STATUS_INVALID_CONFIG_FILE ok!
-		return
-	end
-
+fn SetSwapFile { section -- }
+	auto ok
+	auto key
 	auto path
-	"name" // keyname
-	section@ // section
-	OSConfigGetKey ok! path!
+	auto maxsize
+	auto minsize
+	auto priority
+
+	"name" section@ OSConfigGetKey ok! key!
 
 	if (ok@)
-		"/mintia/SwapFile.sys" path!
-	end else
-		path@ OSConfigGetKeyValue path!
-	end
-
-	auto size
-	"size" // keyname
-	section@ // section
-	OSConfigGetKey ok! size!
-
-	if (ok@)
-		1024 1024 * size!
-	end else
-		size@ OSConfigGetKeyValue atoi size!
-	end
-
-	auto handle
-	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-	0 // flags
-	ACCESS_READ ACCESS_WRITE | // access
-	path@ // path
-	OSFileCreate ok! handle!
-
-	if (ok@)
+		"* Bad swapfile specification: no path\n" Printf
 		return
 	end
 
-	size@ // newsize
-	0 // growing
-	handle@ // handle
-	OSFileTruncate ok! drop
+	key@ OSConfigGetKeyValue path!
+
+	"minsize" section@ OSConfigGetKey ok! key!
 
 	if (ok@)
-		if (ok@ STATUS_NOT_SUPPORTED ~=)
-			handle@ OSClose drop
+		"* Bad swapfile specification: no minsize\n" Printf
+		return
+	end
 
-			return
+	key@ OSConfigGetKeyValue atoi minsize!
+
+	"maxsize" section@ OSConfigGetKey ok! key!
+
+	if (ok@)
+		"* Bad swapfile specification: no maxsize\n" Printf
+		return
+	end
+
+	key@ OSConfigGetKeyValue atoi maxsize!
+
+	"priority" section@ OSConfigGetKey ok! key!
+
+	if (ok@)
+		"* Bad swapfile specification: no priority\n" Printf
+		return
+	end
+
+	key@ OSConfigGetKeyValue atoi priority!
+
+	minsize@ OSPAGESHIFT >> // minpages
+	maxsize@ OSPAGESHIFT >> // maxpages
+	priority@ // pri
+	path@ // path
+	OSSwapFileCreate ok!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "* Failed to create %s: %s\n" Printf
+		return
+	end
+
+	maxsize@ 1024 /
+	minsize@ 1024 /
+	priority@
+	path@
+	"* %s: pri=%d, %dKB -> %dKB\n" Printf
+end
+
+fn SetSwapFiles { config -- ok }
+	"Creating swapfiles:\n" Printf
+
+	auto iterator
+	config@ OSConfigGetSectionIterator ok! iterator!
+
+	while (1)
+		auto section
+		iterator@ config@ OSConfigNextSection ok! iterator! section!
+
+		if (ok@)
+			break
+		end
+
+		if (section@ OSConfigGetSectionName "SwapFile" strcmp)
+			section@ SetSwapFile
 		end
 	end
 
-	auto sizeinpages
-	handle@ // filehandle
-	OSSwapFileCreate ok! sizeinpages!
-
-	if (ok@)
-		handle@ OSClose drop
-
-		return
-	end
-
-	handle@ OSClose drop
-
-	sizeinpages@
-	sizeinpages@ OSPAGESHIFT << 1024 /
-	path@
-	"Swapfile is %s (%dKB; %d pages)\n" Printf
-
-	OSFlushModifiedPages drop
+	0 ok!
 end
 
 extern LotsOfTests { -- }
@@ -226,7 +233,7 @@ fn Main { ... -- ret }
 		OSConfigFileLoad ret! config!
 
 		if (ret@ ~~)
-			config@ SetSwapFile ret!
+			config@ SetSwapFiles ret!
 
 			if (ret@)
 				ret@ OSStatusGetName "Failed to establish swapfile: %s\n" Printf

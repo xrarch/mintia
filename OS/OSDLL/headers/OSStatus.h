@@ -1,5 +1,5 @@
 const STATUS_SUCCESS                  0
-const STATUS_ROLE_ALREADY_HELD       -1
+const STATUS_MINUS_ONE               -1 // reserved
 const STATUS_NO_MEMORY               -2
 const STATUS_QUOTA_EXCEEDED          -3
 const STATUS_KERNEL_APC              -4
@@ -66,5 +66,6 @@ const STATUS_NO_SUCH_GROUP           -64
 const STATUS_NOT_A_CONSOLE           -65
 const STATUS_OVERLAPS_MMIO           -66
 const STATUS_NONPAGE_COMMIT_EXCEEDED -67
+const STATUS_TOO_MANY_SWAPFILES      -68
 
 extern OSStatusGetName { status -- name }

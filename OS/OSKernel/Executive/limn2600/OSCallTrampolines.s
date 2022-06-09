@@ -747,11 +747,13 @@ OSTOSSwapFileCreate:
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s18 + 4] ;t1
+	mov  a1, long [s18 + 8] ;t2
+	mov  a2, long [s18 + 12] ;t3
+	mov  a3, long [s18 + 16] ;t4
 
 	jal  OSSwapFileCreate
 
 	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

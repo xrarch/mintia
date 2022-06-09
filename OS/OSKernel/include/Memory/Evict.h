@@ -17,7 +17,7 @@ struct MmPageFrameEntryAnonymous
 	4 Next
 	4 Prev
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
-	4 SwapPageNumber
+	4 SwapPTE
 	4 PrototypePTE
 	4 Context1
 	4 Context2
@@ -28,7 +28,7 @@ struct MmPageFrameEntryPageTable
 	4 Next
 	4 Prev
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
-	4 SwapPageNumber
+	4 SwapPTE
 	4 PrototypePTE
 	4 Context1
 	4 HoldCount

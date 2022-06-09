@@ -1,4 +1,5 @@
 extern IOSwapFileCreate { minpages maxpages pri path -- ok }
+extern IOSwapFileQuery { query id -- ok }
 
 extern IOSwapPageFree { pno swapfile -- }
 extern IOSwapPageFreePTE { pte -- }

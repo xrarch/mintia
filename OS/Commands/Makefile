@@ -27,6 +27,8 @@ all:
 	make -C crypt
 	make -C whoami
 	make -C quota
+	make -C swapon
+
 	make -C mousedemo
 
 	make -C launchtty
@@ -61,6 +63,8 @@ cleanup:
 	make -C crypt cleanup
 	make -C whoami cleanup
 	make -C quota cleanup
+	make -C swapon cleanup
+
 	make -C mousedemo cleanup
 
 	make -C launchtty cleanup

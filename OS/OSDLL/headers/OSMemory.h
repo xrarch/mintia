@@ -57,4 +57,17 @@ struct OSQuota
 	48 Reserved
 endstruct
 
+const OSSWAPFILEMAX 16
+
+struct OSSwapFileInformation
+	OSFILEPATHMAX Name
+
+	4 MinimumSize
+	4 MaximumSize
+	4 CurrentSize
+	4 UsedCount
+	4 Priority
+endstruct
+
 extern OSMemoryInformationDump { query -- }
+extern OSSwapFileInformationDump { -- }

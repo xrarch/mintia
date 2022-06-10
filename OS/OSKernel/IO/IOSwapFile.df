@@ -135,12 +135,12 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 
 	416 KeThreadCurrent@ PsThread_FileCreationPermissions + !
 
-	auto fileobject
+	auto handle
 	OSFILEFLAG_CREATE // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	OSNONE // initialobjecthandle
 	path@ // path
-	0 // initialobject
-	KeProcessCurrent // process
-	ObObjectReferenceByPath ok! fileobject!
+	ObObjectOpenByPath ok! handle!
 
 	if (ok@)
 		IOSwapFileCreateUnlock
@@ -148,12 +148,26 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
-	if (fileobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ~=)
+	auto fileobject
+	auto access
+	IOFileTypeObject@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	handle@ ObObjectClose drop
+
+	if (ok@)
+		IOSwapFileCreateUnlock
+
+		return
+	end
+
+	access@ ACCESS_WRITE ACCESS_READ | SeCheckAccess ok!
+
+	if (ok@)
 		IOSwapFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
-
-		STATUS_INVALID_OBJECT_TYPE ok!
 
 		return
 	end
@@ -343,10 +357,10 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	pri@ swapfile@ IOSwapFile_Priority + !
 	IOSwapFileCount@ swapfile@ IOSwapFile_Number + !
 
+	HALCPUInterruptDisable rs!
+
 	swapfile@ [IOSwapFileCount@]IOSwapFiles!
 	minpages@ IOSwapPagesCount +=
-
-	HALCPUInterruptDisable rs!
 
 	auto h
 	[pri@]IOSwapFilePriorityListHeads@ h!

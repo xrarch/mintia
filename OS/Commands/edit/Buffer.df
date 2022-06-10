@@ -1,0 +1,122 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "Edit.h"
+
+struct Piece
+	4 Prev
+	4 Next
+	4 Flags
+	4 Offset
+	4 Length
+endstruct
+
+struct Buffer
+	4 OriginalBuffer
+	4 OriginalBufferSize
+
+	4 AddBuffer
+	4 AddOffset
+	4 AddSize
+
+	4 PieceListHead
+	4 PieceListTail
+
+	Piece_SIZEOF OriginalPiece
+endstruct
+
+const PIECEFLAG_ADDBUFFER 1
+
+fn BufferCreate { -- buffer ok }
+	Buffer_SIZEOF OSHeapAllocate ok! buffer!
+
+	if (ok@)
+		return
+	end
+
+	0 buffer@ Buffer_OriginalBuffer + !
+	0 buffer@ Buffer_OriginalBufferSize + !
+
+	0 buffer@ Buffer_AddBuffer + !
+	0 buffer@ Buffer_AddOffset + !
+	0 buffer@ Buffer_AddSize + !
+
+	0 buffer@ Buffer_PieceListHead + !
+	0 buffer@ Buffer_PieceListTail + !
+end
+
+fn BufferDelete { buffer -- }
+	if (buffer@ Buffer_AddBuffer + @)
+		buffer@ Buffer_AddBuffer + @ OSHeapFree
+	end
+
+	if (buffer@ Buffer_OriginalBuffer + @)
+		buffer@ Buffer_OriginalBufferSize + @ // length
+		buffer@ Buffer_OriginalBuffer + @ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+	end
+
+	auto piece
+	buffer@ Buffer_PieceListHead + @ piece!
+
+	while (piece@)
+		auto npiece
+		piece@ Piece_Next + @ npiece!
+
+		piece@ OSHeapFree
+
+		npiece@ piece!
+	end
+
+	buffer@ OSHeapFree
+end
+
+fn BufferPopulate { filehandle buffer -- ok }
+	// populate a buffer using the given filehandle.
+
+	auto query
+	OSFileInformation_SIZEOF alloc query!
+
+	filehandle@ // filehandle
+	query@ // query
+	OSFileQuery ok!
+
+	if (ok@)
+		return
+	end
+
+	if (query@ OSFileInformation_Size + @ 0 ==)
+		return
+	end
+
+	auto vaddr
+	query@ OSFileInformation_Size + @ // length
+	0x10000000 // startva (randomly selected to be out of the way)
+	0 // sectionoffset
+	filehandle@ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ // pageprotection
+	0 // flags
+	OSMapView ok! vaddr!
+
+	if (ok@)
+		return
+	end
+
+	vaddr@ buffer@ Buffer_OriginalBuffer + !
+	query@ OSFileInformation_Size + @ buffer@ Buffer_OriginalBufferSize + !
+
+	auto piece
+	buffer@ Buffer_OriginalPiece + piece!
+
+	0 piece@ Piece_Prev + !
+	0 piece@ Piece_Next + !
+	0 piece@ Piece_Flags + !
+	0 piece@ Piece_Offset + !
+	query@ OSFileInformation_Size + @ piece@ Piece_Length + !
+
+	piece@ buffer@ Buffer_PieceListHead + !
+	piece@ buffer@ Buffer_PieceListTail + !
+end

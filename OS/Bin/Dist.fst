@@ -29,5 +29,6 @@ crypt.exe crypt.exe 493
 whoami.exe whoami.exe 493
 quota.exe quota.exe 493
 swapon.exe swapon.exe 493
+edit.exe edit.exe 493
 
 mousedemo.exe mousedemo.exe 493

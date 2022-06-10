@@ -28,6 +28,7 @@ all:
 	make -C whoami
 	make -C quota
 	make -C swapon
+	make -C edit
 
 	make -C mousedemo
 
@@ -64,6 +65,7 @@ cleanup:
 	make -C whoami cleanup
 	make -C quota cleanup
 	make -C swapon cleanup
+	make -C edit cleanup
 
 	make -C mousedemo cleanup
 

@@ -9,6 +9,11 @@ extern IOSwapFileWriteMDL { pagecount mdl -- ok }
 
 extern IOSwapFileAwaitCreation { -- }
 
+extern IOSwapFileRequestExpansion { pages -- ok }
+extern IOSwapFileExtend { -- }
+
+externptr IOSwapFileExtendEvent
+
 externptr IOSwapPagesUsed
 externptr IOSwapPagesCount
 externptr IOSwapPagesUsedPeak

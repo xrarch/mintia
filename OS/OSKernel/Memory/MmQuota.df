@@ -16,6 +16,8 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/IO.h"
+
 #include "<inc>/Process.h"
 
 #include "<ll>/OSDLL/OS.h"
@@ -193,24 +195,12 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 		return
 	end
 
+	PAGESHIFT charge >>=
+
 	0 ok!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
-
-	auto commitlimit
-	MmCommitLimit@ commitlimit!
-
-	auto commitused
-	MmCommitUsage@ commitused!
-
-	if (commitused@ charge@ PAGESHIFT >> + commitlimit@ >)
-		ipl@ KeIPLLower
-
-		STATUS_COMMIT_EXCEEDED ok!
-
-		return
-	end
 
 	auto vmmax
 	quotablock@ MmQuotaBlock_VMMax + @ vmmax!
@@ -218,7 +208,7 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 	auto oldcharge
 	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
 
-	if (oldcharge@ charge@ + vmmax@ >)
+	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
 		ipl@ KeIPLLower
 
 		STATUS_VM_QUOTA_EXCEEDED ok!
@@ -226,8 +216,31 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ + quotablock@ MmQuotaBlock_VMUsed + !
-	commitused@ charge@ PAGESHIFT >> + MmCommitUsage!
+	oldcharge@ charge@ PAGESHIFT << + quotablock@ MmQuotaBlock_VMUsed + !
+
+	auto commitlimit
+	MmCommitLimit@ commitlimit!
+
+	auto commitused
+	MmCommitUsage@ commitused!
+
+	while (commitused@ charge@ + commitlimit@ >)
+		charge@ IOSwapFileRequestExpansion ok!
+
+		if (ok@)
+			// uncharge quota
+			charge@ PAGESHIFT << quotablock@ MmQuotaBlock_VMUsed + -=
+
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		MmCommitLimit@ commitlimit!
+		MmCommitUsage@ commitused!
+	end
+
+	commitused@ charge@ + MmCommitUsage!
 
 	ipl@ KeIPLLower
 end

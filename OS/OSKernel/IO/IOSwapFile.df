@@ -45,6 +45,9 @@ buffer IOSwapFileCreationMutex KeMutex_SIZEOF
 buffer IOSwapFileCreationEvent KeEvent_SIZEOF
 public IOSwapFileCreationEvent
 
+buffer IOSwapFileExtendEvent KeEvent_SIZEOF
+public IOSwapFileExtendEvent
+
 struct IOSwapFile
 	4 MinimumSize
 	4 MaximumSize
@@ -65,6 +68,8 @@ table IOSwapFiles[IOSWAPFILEMAX]
 
 table IOSwapFilePriorityListHeads[IOSWAPFILEMAXPRI]
 table IOSwapFilePriorityListTails[IOSWAPFILEMAXPRI]
+
+var IOSwapFileExtensionIndex 0
 
 var IOSwapFileCount 0
 
@@ -211,6 +216,21 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
+	auto qcharge
+	maxpages@ 7 + 3 >> IOSwapFile_SIZEOF + MmChargeBytesGet qcharge!
+
+	qcharge@ // charge
+	MmQuotaSystem // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		IOSwapFileCreateUnlock
+
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
 	auto bitmap
 	maxpages@ 7 + 3 >> // bytes
 	'SwBm' // tag
@@ -219,6 +239,10 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 
 	if (ok@)
 		IOSwapFileCreateUnlock
+
+		qcharge@ // charge
+		MmQuotaSystem // quotablock
+		MmQuotaBlockUncharge
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -237,6 +261,10 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		fileobject@ ObObjectDereferenceByPointer drop
 
 		bitmap@ MmFree
+
+		qcharge@ // charge
+		MmQuotaSystem // quotablock
+		MmQuotaBlockUncharge
 
 		return
 	end
@@ -257,6 +285,10 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		bitmap@ MmFree
 		swapfile@ MmFree
 
+		qcharge@ // charge
+		MmQuotaSystem // quotablock
+		MmQuotaBlockUncharge
+
 		return
 	end
 
@@ -267,6 +299,10 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 
 		bitmap@ MmFree
 		swapfile@ MmFree
+
+		qcharge@ // charge
+		MmQuotaSystem // quotablock
+		MmQuotaBlockUncharge
 
 		STATUS_TRY_AGAIN_LATER ok!
 
@@ -750,6 +786,299 @@ fn IOSwapPageWriteMDLComplete { pagecount offset mdl swapfile -- }
 		1 pagecount -=
 		4 mdlpos +=
 	end
+
+	ipl@ KeIPLLower
+end
+
+var IOSwapFileExtensionListHead 0
+var IOSwapFileExtensionListTail 0
+
+struct IOSwapFileExtension
+	4 Next
+	4 Pages
+	KeEvent_SIZEOF Event
+	4 Success
+endstruct
+
+fn IOSwapFileRequestExpansion { pages -- ok }
+	// entered and left at IPLDPC.
+
+	IPLLOW KeIPLLower
+
+	// quick check to make sure this can feasibly work before we go to the
+	// trouble of queuing a request and waking the worker thread.
+
+	auto i
+	0 i!
+
+	auto avail
+	0 avail!
+
+	while (i@ IOSwapFileCount@ <)
+		auto swapfile
+		[i@]IOSwapFiles@ swapfile!
+
+		swapfile@ IOSwapFile_MaximumSize + @ swapfile@ IOSwapFile_CurrentSize + @ - avail +=
+
+		if (avail@ pages@ >=)
+			break
+		end
+
+		1 i +=
+	end
+
+	if (avail@ pages@ <)
+		// not enough potential expansion left to satisfy this.
+		STATUS_COMMIT_EXCEEDED ok!
+		return
+	end
+
+	auto extension
+	IOSwapFileExtension_SIZEOF alloc extension!
+
+	0 extension@ IOSwapFileExtension_Next + !
+	pages@ extension@ IOSwapFileExtension_Pages + !
+	-1 extension@ IOSwapFileExtension_Success + !
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"IOSwapFileRequestExpansionEvent" // name
+	extension@ IOSwapFileExtension_Event + // event
+	KeEventInitialize
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto t
+	IOSwapFileExtensionListTail@ t!
+
+	if (t@ ~~)
+		extension@ IOSwapFileExtensionListHead!
+	end else
+		extension@ t@ IOSwapFileExtension_Next + !
+	end
+
+	extension@ IOSwapFileExtensionListTail!
+
+	rs@ HALCPUInterruptRestore
+
+	0 // priboost
+	IOSwapFileExtendEvent // event
+	KeEventSignal
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	extension@ IOSwapFileExtension_Event + // object
+	KeThreadWaitForObject drop
+
+	extension@ IOSwapFileExtension_Success + @ ok!
+
+	IPLDPC KeIPLRaise drop
+end
+
+fn IOSwapFileExtend { -- }
+	// called by worker thread.
+	// pops extension requests off the listhead and tries to satisfy them.
+	// satisfying a request is done by extending the pagefile, signaling the
+	// event to wake up the waiting thread, and atomically granting the
+	// requested commitment to the process. commitment may already be
+	// plentiful to grant it without extending the swapfile, in that case,
+	// just do that.
+
+	while (IOSwapFileExtensionListHead@)
+		auto extension
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		IOSwapFileExtensionListHead@ extension!
+		extension@ IOSwapFileExtension_Next + @ IOSwapFileExtensionListHead!
+
+		if (IOSwapFileExtensionListHead@ ~~)
+			0 IOSwapFileExtensionListTail!
+		end
+
+		rs@ HALCPUInterruptRestore
+
+		extension@ IOSwapFileSatisfyExtension
+	end
+end
+
+fn IOSwapFileSatisfyExtension { extension -- }
+	auto i
+	0 i!
+
+	auto avail
+	0 avail!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (extension@ IOSwapFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ <=)
+		// immediately succeed
+		ipl@ KeIPLLower
+
+		0 extension@ IOSwapFileExtension_Success + !
+
+		0 // priboost
+		extension@ IOSwapFileExtension_Event + // event
+		KeEventSignal
+
+		return
+	end
+
+	while (i@ IOSwapFileCount@ <)
+		auto swapfile
+		[i@]IOSwapFiles@ swapfile!
+
+		swapfile@ IOSwapFile_MaximumSize + @ swapfile@ IOSwapFile_CurrentSize + @ - avail +=
+
+		if (avail@ extension@ IOSwapFileExtension_Pages + @ >=)
+			break
+		end
+
+		1 i +=
+	end
+
+	if (avail@ extension@ IOSwapFileExtension_Pages + @ <)
+		// immediately fail
+		ipl@ KeIPLLower
+
+		STATUS_COMMIT_EXCEEDED extension@ IOSwapFileExtension_Success + !
+
+		0 // priboost
+		extension@ IOSwapFileExtension_Event + // event
+		KeEventSignal
+
+		return
+	end
+
+	auto requiredextension
+	extension@ IOSwapFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ - requiredextension!
+
+	ipl@ KeIPLLower
+
+	requiredextension@ IOSwapFileTryExtendAll extension@ IOSwapFileExtension_Success + !
+
+	0 // priboost
+	extension@ IOSwapFileExtension_Event + // event
+	KeEventSignal
+end
+
+fn IOSwapFileTryExtendAll { extension -- ok }
+	if (IOSwapFileExtensionIndex@ IOSwapFileCount@ >=)
+		0 IOSwapFileExtensionIndex!
+	end
+
+	0 ok!
+
+	auto i
+	0 i!
+
+	while (i@ 2 <)
+		auto max
+		auto j
+
+		if (i@ 0 ==)
+			IOSwapFileCount@ max!
+			IOSwapFileExtensionIndex@ j!
+		end else
+			IOSwapFileExtensionIndex@ max!
+			0 j!
+		end
+
+		while (j@ max@ <)
+			auto realextension
+			extension@ // extension
+			[j@]IOSwapFiles@ // swapfile
+			IOSwapFileTryExtend realextension!
+
+			if (realextension@ extension@ >)
+				0 extension!
+			end else
+				realextension@ extension -=
+			end
+
+			if (extension@ ~~)
+				j@ 1 + IOSwapFileExtensionIndex!
+				break
+			end
+
+			1 j +=
+		end
+
+		1 i +=
+	end
+
+	if (extension@)
+		STATUS_COMMIT_EXCEEDED ok!
+	end
+end
+
+const IOSWAPFILEMINIMUMEXTENSION 128
+
+fn IOSwapFileTryExtend { extension swapfile -- realextension }
+	auto maxextend
+	swapfile@ IOSwapFile_MaximumSize + @ swapfile@ IOSwapFile_CurrentSize + @ - maxextend!
+
+	auto i
+	0 i!
+
+	auto tryextension
+	extension@ tryextension!
+
+	if (tryextension@ IOSWAPFILEMINIMUMEXTENSION <)
+		IOSWAPFILEMINIMUMEXTENSION tryextension!
+	end
+
+	if (maxextend@ tryextension@ <)
+		maxextend@ tryextension!
+	end
+
+	while (i@ 2 <)
+		auto ok
+		swapfile@ IOSwapFile_CurrentSize + @ tryextension@ + PAGESHIFT << // newsize
+		1 // growing
+		0 // keeplocked
+		0 // zero
+		swapfile@ IOSwapFile_FileObject + @ IOFile_FileControlBlock + @ // fcb
+		IOFileControlBlockTruncate ok! drop
+
+		if (ok@ ~~)
+			break
+		end else
+			if (ok@ STATUS_END_OF_DISK ~=)
+				0 realextension!
+				return
+			end
+
+			if (i@ 1 ==)
+				0 realextension!
+				return
+			end
+
+			extension@ tryextension!
+		end
+
+		1 i +=
+	end
+
+	tryextension@ realextension!
+
+	// growing the swapfile succeeded. update the structures.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	realextension@ // runlength
+	swapfile@ IOSwapFile_CurrentSize + @ // index
+	swapfile@ IOSwapFile_BitmapHeader + // header
+	ExBitmapClearBits
+
+	realextension@ swapfile@ IOSwapFile_CurrentSize + +=
+	realextension@ IOSwapPagesCount +=
+	realextension@ MmCommitLimit +=
 
 	ipl@ KeIPLLower
 end

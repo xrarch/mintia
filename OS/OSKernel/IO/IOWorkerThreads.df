@@ -27,6 +27,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+buffer IOFilesystemSyncTimer KeTimer_SIZEOF
+
 fn IOFilesystemSyncWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME // priority
 	KeThreadCurrent@ // thread
@@ -34,27 +36,60 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
+	"IOFilesystemSyncTimer" // name
+	0 // function
+	IOFilesystemSyncTimer // timer
+	KeTimerInitialize
+
+	auto objecttable
+	8 alloc objecttable!
+
+	IOFilesystemSyncTimer objecttable@!
+	IOSwapFileExtendEvent objecttable@ 4 + !
+
+	0 // context1
+	0 // context2
+	5000 // interval
+	IOFilesystemSyncTimer // timer
+	KeTimerEnqueue
+
 	auto ok
 
 	while (1)
 		// iterate all mounted filesystems every 5 seconds and ask them
 		// to flush any internal state.
 
-		5000 // interval
+		auto reason
 		KERNELMODE // waitmode
 		0 // alertable
-		KeThreadSleep ok!
+		OSWAITANY // waittype
+		OSWAIT_TIMEOUTINFINITE // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		KeThreadWaitForMultipleObjects reason!
 
 		if (DEBUGCHECKS)
-			if (ok@ STATUS_WAIT_TIMEOUT ~=)
-				ok@ "IOFilesystemSyncWorker: wait failed (%i)\n" KeCrash
+			if (reason@ 0 s<)
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "MmBalanceSetManager: failed to wait on low memory event (%i)\n" KeCrash
+				end
 			end
 		end
 
-		IOFilesystemSyncAll ok!
+		if (reason@ 0 ==)
+			IOFilesystemSyncAll ok!
 
-		if (ok@)
-			ok@ "IOFilesystemSyncWorker: failed to sync (%i)\n" KeCrash
+			if (ok@)
+				ok@ "IOFilesystemSyncWorker: failed to sync (%i)\n" KeCrash
+			end
+
+			0 // context1
+			0 // context2
+			5000 // interval
+			IOFilesystemSyncTimer // timer
+			KeTimerEnqueue
+		end elseif (reason@ 1 ==)
+			IOSwapFileExtend
 		end
 	end
 end

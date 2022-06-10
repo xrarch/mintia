@@ -1,0 +1,161 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "Edit.h"
+
+// manages a cached screen line buffer
+
+var ScreenLineTable 0
+public ScreenLineTable
+
+var ScreenHeight 0
+public ScreenHeight
+
+var ScreenCursorX 0
+public ScreenCursorX
+
+var ScreenCursorY 0
+public ScreenCursorY
+
+var ScreenCursorPosition 0 // position within the file
+public ScreenCursorPosition
+
+var ScreenLinePosition 0 // line start position
+public ScreenLinePosition
+
+var ScreenStartPosition 0
+public ScreenStartPosition
+
+fn ScreenInit { -- }
+	TermHeight@ SCREENMARGIN - ScreenHeight!
+
+	auto ok
+	ScreenHeight@ ScreenLine_SIZEOF * OSHeapAllocate ok! ScreenLineTable!
+
+	if (ok@)
+		ok@ OSStatusGetName "edit: couldn't create screen line table: %s\n" OSError
+	end
+
+	ScreenLineTable@ // ptr
+	ScreenHeight@ ScreenLine_SIZEOF * // size
+	0 // word
+	memset
+
+	ScreenPopulate
+
+	auto rows
+	ScreenHeight@ rows!
+
+	auto line
+	ScreenLineTable@ line!
+
+	while (rows@)
+		auto piece
+		line@ ScreenLine_StartPiece + @ piece!
+
+		if (piece@ ~~)
+			break
+		end
+
+		auto length
+		line@ ScreenLine_Length + @ length!
+
+		auto pclength
+		piece@ Piece_Length + @ line@ ScreenLine_OffsetInPiece + @ - pclength!
+
+		auto ptr
+
+		line@ ScreenLine_OffsetInPiece + @
+		piece@
+		EditorBuffer@
+		BufferGetPointer ptr!
+
+		while (length@)
+			if (pclength@ ~~)
+				piece@ Piece_Next + @ piece!
+
+				0
+				piece@
+				EditorBuffer@
+				BufferGetPointer ptr!
+			end
+
+			ptr@ gb Putc
+
+			1 ptr +=
+			1 pclength -=
+			1 length -=
+		end
+
+		ScreenLine_SIZEOF line +=
+		1 rows -=
+	end
+end
+
+fn ScreenPopulate { -- }
+	auto rows
+	ScreenHeight@ rows!
+
+	auto line
+	ScreenLineTable@ line!
+
+	auto pos
+	ScreenStartPosition@ pos!
+
+	auto buffer
+	EditorBuffer@ buffer!
+
+	auto startofline
+	auto runlength
+
+	while (rows@)
+		1 startofline!
+		0 runlength!
+
+		auto ok
+		0 ok!
+
+		while (1)
+			auto piece
+			auto offsetinpiece
+			auto ptr
+			pos@ buffer@ BufferFindOffset ok! piece! offsetinpiece! ptr!
+
+			if (ok@)
+				break
+			end
+
+			1 runlength +=
+
+			if (startofline@)
+				piece@ line@ ScreenLine_StartPiece + !
+				offsetinpiece@ line@ ScreenLine_OffsetInPiece + !
+
+				0 startofline!
+			end
+
+			1 pos +=
+
+			if (ptr@ gb '\n' ==)
+				break
+			end
+		end
+
+		runlength@ line@ ScreenLine_Length + !
+
+		if (ok@)
+			break
+		end
+
+		1 rows -=
+		ScreenLine_SIZEOF line +=
+	end
+
+	if (rows@)
+		line@ // ptr
+		rows@ ScreenLine_SIZEOF * // size
+		0 // word
+		memset
+	end
+end

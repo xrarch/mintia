@@ -4,29 +4,7 @@
 
 #include "Edit.h"
 
-struct Piece
-	4 Prev
-	4 Next
-	4 Flags
-	4 Offset
-	4 Length
-endstruct
-
-struct Buffer
-	4 OriginalBuffer
-	4 OriginalBufferSize
-
-	4 AddBuffer
-	4 AddOffset
-	4 AddSize
-
-	4 PieceListHead
-	4 PieceListTail
-
-	Piece_SIZEOF OriginalPiece
-endstruct
-
-const PIECEFLAG_ADDBUFFER 1
+// manages a piece table for the file contents
 
 fn BufferCreate { -- buffer ok }
 	Buffer_SIZEOF OSHeapAllocate ok! buffer!
@@ -42,8 +20,13 @@ fn BufferCreate { -- buffer ok }
 	0 buffer@ Buffer_AddOffset + !
 	0 buffer@ Buffer_AddSize + !
 
+	0 buffer@ Buffer_Size + !
+
 	0 buffer@ Buffer_PieceListHead + !
 	0 buffer@ Buffer_PieceListTail + !
+
+	0 buffer@ Buffer_CachedPiece + !
+	0 buffer@ Buffer_CachedPieceOffset + !
 end
 
 fn BufferDelete { buffer -- }
@@ -107,6 +90,7 @@ fn BufferPopulate { filehandle buffer -- ok }
 
 	vaddr@ buffer@ Buffer_OriginalBuffer + !
 	query@ OSFileInformation_Size + @ buffer@ Buffer_OriginalBufferSize + !
+	query@ OSFileInformation_Size + @ buffer@ Buffer_Size + !
 
 	auto piece
 	buffer@ Buffer_OriginalPiece + piece!
@@ -119,4 +103,100 @@ fn BufferPopulate { filehandle buffer -- ok }
 
 	piece@ buffer@ Buffer_PieceListHead + !
 	piece@ buffer@ Buffer_PieceListTail + !
+
+	piece@ buffer@ Buffer_CachedPiece + !
+	0 buffer@ Buffer_CachedPieceOffset + !
+end
+
+fn BufferFindOffset { offset buffer -- ptr offsetinpiece piece ok }
+	if (offset@ buffer@ Buffer_Size + @ >=)
+		-1 ok!
+		return
+	end
+
+	0 ok!
+
+	buffer@ Buffer_CachedPiece + @ piece!
+
+	auto pcoffset
+	buffer@ Buffer_CachedPieceOffset + @ pcoffset!
+
+	if (offset@ pcoffset@ >=)
+		if (offset@ pcoffset@ piece@ Piece_Length + @ + <)
+			// found it immediately
+
+			if (piece@ Piece_Flags + @ PIECEFLAG_ADDBUFFER & ~~)
+				buffer@ Buffer_OriginalBuffer + @ piece@ Piece_Offset + @ + ptr!
+			end else
+				buffer@ Buffer_AddBuffer + @ piece@ Piece_Offset + @ + ptr!
+			end
+
+			offset@ pcoffset@ - offsetinpiece!
+			offsetinpiece@ ptr +=
+
+			return
+		end
+	end
+
+	if (offset@ pcoffset@ <)
+		// search backwards
+
+		piece@ Piece_Length + @ pcoffset -=
+		piece@ Piece_Prev + @ piece!
+
+		while (piece@)
+			if (offset@ pcoffset@ >=)
+				if (offset@ pcoffset@ piece@ Piece_Length + @ + <)
+					// found it
+					break
+				end
+			end
+
+			piece@ Piece_Length + @ pcoffset -=
+			piece@ Piece_Prev + @ piece!
+		end
+	end else
+		// search forwards
+
+		piece@ Piece_Length + @ pcoffset +=
+		piece@ Piece_Next + @ piece!
+
+		while (piece@)
+			if (offset@ pcoffset@ >=)
+				if (offset@ pcoffset@ piece@ Piece_Length + @ + <)
+					// found it
+					break
+				end
+			end
+
+			piece@ Piece_Length + @ pcoffset +=
+			piece@ Piece_Next + @ piece!
+		end
+	end
+
+	if (piece@ ~~)
+		"BufferFindOffset\n" OSError
+	end
+
+	if (piece@ Piece_Flags + @ PIECEFLAG_ADDBUFFER & ~~)
+		buffer@ Buffer_OriginalBuffer + @ piece@ Piece_Offset + @ + ptr!
+	end else
+		buffer@ Buffer_AddBuffer + @ piece@ Piece_Offset + @ + ptr!
+	end
+
+	offset@ pcoffset@ - offsetinpiece!
+	offsetinpiece@ ptr +=
+
+	piece@ buffer@ Buffer_CachedPiece + !
+	pcoffset@ buffer@ Buffer_CachedPieceOffset + !
+end
+
+fn BufferGetPointer { offset piece buffer -- ptr }
+	if (piece@ Piece_Flags + @ PIECEFLAG_ADDBUFFER & ~~)
+		buffer@ Buffer_OriginalBuffer + @ piece@ Piece_Offset + @ + ptr!
+	end else
+		buffer@ Buffer_AddBuffer + @ piece@ Piece_Offset + @ + ptr!
+	end
+
+	offset@ ptr +=
 end

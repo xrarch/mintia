@@ -19,6 +19,9 @@ extern MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
 extern MmQuotaBlockReference { quotablock -- }
 extern MmQuotaBlockDereference { quotablock -- }
 
+extern MmQuotaChargeBuffer { buffersize -- ok }
+extern MmQuotaUnchargeBuffer { buffersize -- }
+
 extern MmQuotaBlockCharge { charge quotablock -- ok }
 extern MmQuotaBlockUncharge { charge quotablock -- }
 extern MmQuotaBlockChargeVM { charge quotablock -- ok }

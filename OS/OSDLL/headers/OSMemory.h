@@ -27,6 +27,7 @@ struct OSMemoryInformation
 
 	4 PageFaultCount
 
+	4 TheoreticalCommitLimit
 	4 CommitLimit
 	4 CommitUsage
 

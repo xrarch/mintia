@@ -88,6 +88,8 @@ externptr ScreenLinePosition
 
 extern ScreenInit { -- }
 
+extern ScreenNavigate { x y -- }
+
 // draw
 
 extern DrawAll { -- }

@@ -34,6 +34,7 @@ externptr TermHeight
 
 struct Buffer
 	4 VirtualBuffer
+	4 VirtualBufferOriginal
 	4 VirtualBufferSize
 
 	4 GapOffset

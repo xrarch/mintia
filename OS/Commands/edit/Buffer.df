@@ -15,24 +15,14 @@ fn BufferCreate { -- buffer ok }
 		return
 	end
 
-	auto va
-	OSPAGESIZE // length
-	NextVirtualBuffer@ // startva
-	OSCURRENTPROCESS // processhandle
-	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
-	0 // flags
-	OSAllocate ok! va!
+	NextVirtualBuffer@ buffer@ Buffer_VirtualBuffer + !
+	0 buffer@ Buffer_VirtualBufferSize + !
 
-	if (ok@)
-		buffer@ OSHeapFree
-		return
-	end
-
-	va@ buffer@ Buffer_VirtualBuffer + !
-	OSPAGESIZE buffer@ Buffer_VirtualBufferSize + !
+	0 buffer@ Buffer_FileMap + !
+	0 buffer@ Buffer_FileMapSize + !
 
 	0 buffer@ Buffer_GapOffset + !
-	OSPAGESIZE buffer@ Buffer_GapSize + !
+	0 buffer@ Buffer_GapSize + !
 
 	0 buffer@ Buffer_Size + !
 
@@ -61,7 +51,7 @@ fn BufferPopulate { filehandle buffer -- ok }
 
 	auto vaddr
 	query@ OSFileInformation_Size + @ // length
-	buffer@ Buffer_VirtualBuffer + @ OSPAGESIZE + // startva
+	buffer@ Buffer_VirtualBuffer + @ // startva
 	0 // sectionoffset
 	filehandle@ // mappedhandle
 	OSCURRENTPROCESS // processhandle
@@ -73,8 +63,118 @@ fn BufferPopulate { filehandle buffer -- ok }
 		return
 	end
 
-	query@ OSFileInformation_Size + @ OSPAGEOFFSETMASK + OSPAGENUMBERMASK & buffer@ Buffer_VirtualBufferSize + +=
+	query@ OSFileInformation_Size + @ OSPAGEOFFSETMASK + OSPAGENUMBERMASK & OSPAGESIZE + buffer@ Buffer_VirtualBufferSize + !
 	query@ OSFileInformation_Size + @ buffer@ Buffer_Size + !
+
+	vaddr@ buffer@ Buffer_FileMap + !
+	query@ OSFileInformation_Size + @ OSPAGEOFFSETMASK + OSPAGENUMBERMASK & buffer@ Buffer_FileMapSize + !
+
+	0 buffer@ Buffer_GapOffset + !
+	0 buffer@ Buffer_GapSize + !
+end
+
+fn BufferSave { filehandle path buffer -- ok }
+	0 ok!
+
+	if (EditorFileModified@ ~~)
+		0 ok!
+		return
+	end
+
+	if (filehandle@ OSNONE ==)
+		OSDEFAULTFILEPERMISSIONS // permissions
+		0 // flags
+		ACCESS_READ ACCESS_WRITE | // access
+		path@ // path
+		OSFileCreate ok! filehandle!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 // offset
+	filehandle@ // handle
+	OSSEEK_SET // mode
+	OSFileSeek drop drop
+
+	if (buffer@ Buffer_GapOffset + @ buffer@ Buffer_Size + @ ==)
+		// write entire extent in one call
+
+		0 // flags
+		buffer@ Buffer_Size + @ // length
+		buffer@ Buffer_VirtualBuffer + @ // buffer
+		filehandle@ // handle
+		OSFileWrite ok! drop
+	end else
+		// write in two calls
+
+		0 // flags
+		buffer@ Buffer_GapOffset + @ // length
+		buffer@ Buffer_VirtualBuffer + @ // buffer
+		filehandle@ // handle
+		OSFileWrite ok! drop
+
+		if (ok@)
+			return
+		end
+
+		0 // flags
+		buffer@ Buffer_Size + @ buffer@ Buffer_GapOffset + @ - // length
+		buffer@ Buffer_VirtualBuffer + @ buffer@ Buffer_GapOffset + @ + buffer@ Buffer_GapSize + @ + // buffer
+		filehandle@ // handle
+		OSFileWrite ok! drop
+	end
+
+	if (ok@)
+		return
+	end
+
+	// unmap the buffer so we can truncate and repopulate
+
+	buffer@ BufferUnmap
+
+	buffer@ Buffer_Size + @ // newsize
+	0 // growing
+	filehandle@ // handle
+	OSFileTruncate ok! drop
+
+	if (ok@)
+		return
+	end
+
+	filehandle@ buffer@ BufferPopulate ok!
+
+	filehandle@ EditorFileHandle!
+
+	0 EditorFileModified!
+	DrawUI
+end
+
+fn BufferUnmap { buffer -- }
+	auto va
+	buffer@ Buffer_VirtualBuffer + @ va!
+
+	auto max
+	va@ buffer@ Buffer_VirtualBufferSize + @ + max!
+
+	while (va@ max@ <)
+		if (va@ buffer@ Buffer_FileMap + @ ==)
+			buffer@ Buffer_FileMapSize + @ // length
+			va@ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+
+			buffer@ Buffer_FileMapSize + @ va +=
+		end else
+			OSPAGESIZE // length
+			va@ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+
+			OSPAGESIZE va +=
+		end
+	end
 end
 
 fn BufferGetChar { location buffer -- char ok }
@@ -91,4 +191,115 @@ fn BufferGetChar { location buffer -- char ok }
 	end
 
 	buffer@ Buffer_VirtualBuffer + @ buffer@ Buffer_GapSize + @ + location@ + gb char!
+end
+
+fn BufferMoveGap { offset buffer -- }
+	auto goff
+	buffer@ Buffer_GapOffset + @ goff!
+
+	if (goff@ offset@ ==)
+		return
+	end
+
+	if (offset@ goff@ <)
+		offset@ buffer@ Buffer_GapSize + @ + buffer@ Buffer_VirtualBuffer + @ + // dest
+		offset@ buffer@ Buffer_VirtualBuffer + @ + // src
+		goff@ offset@ - // sz
+		memmove
+	end else
+		goff@ buffer@ Buffer_VirtualBuffer + @ + // dest
+		goff@ buffer@ Buffer_GapSize + @ + buffer@ Buffer_VirtualBuffer + @ + // src
+		offset@ goff@ - // sz
+		memmove
+	end
+
+	offset@ buffer@ Buffer_GapOffset + !
+end
+
+fn BufferDeleteCharacter { offset buffer -- c }
+	offset@ buffer@ BufferMoveGap
+
+	offset@ 1 - buffer@ Buffer_VirtualBuffer + @ + gb c!
+
+	1 buffer@ Buffer_GapOffset + -=
+	1 buffer@ Buffer_GapSize + +=
+	1 buffer@ Buffer_Size + -=
+
+	if (EditorFileModified@ ~~)
+		1 EditorFileModified!
+		DrawUI
+	end
+end
+
+fn BufferInsertCharacter { c offset buffer -- }
+	offset@ buffer@ BufferMoveGap
+
+	if (buffer@ Buffer_GapSize + @ ~~)
+		buffer@ BufferExtend
+	end
+
+	c@ buffer@ Buffer_GapOffset + @ buffer@ Buffer_VirtualBuffer + @ + sb
+	1 buffer@ Buffer_GapOffset + +=
+	1 buffer@ Buffer_GapSize + -=
+	1 buffer@ Buffer_Size + +=
+
+	if (EditorFileModified@ ~~)
+		1 EditorFileModified!
+		DrawUI
+	end
+end
+
+fn BufferExtend { buffer -- }
+	// determine whether to extend to the left or to the right.
+	// one will incur less copying.
+
+	auto goff
+	buffer@ Buffer_GapOffset + @ goff!
+
+	auto ok
+
+	if (buffer@ Buffer_Size + @ goff@ - goff@ >)
+		// extend to the left
+
+		OSPAGESIZE // length
+		buffer@ Buffer_VirtualBuffer + @ OSPAGESIZE - // startva
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		OSMAPFLAG_FIXEDADDRESS // flags
+		OSAllocate ok! drop
+
+		if (ok@)
+			// TODO crash more gently here (save buffer)
+			ok@ OSStatusGetName "edit: couldn't extend buffer to left: %s\n" OSError
+		end
+
+		OSPAGESIZE buffer@ Buffer_VirtualBuffer + -=
+
+		buffer@ Buffer_VirtualBuffer + @ // dest
+		buffer@ Buffer_VirtualBuffer + @ OSPAGESIZE + // src
+		goff@ // sz
+		memmove
+	end else
+		// extend to the right
+
+		OSPAGESIZE // length
+		buffer@ Buffer_VirtualBuffer + @ buffer@ Buffer_VirtualBufferSize + @ + // startva
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		OSMAPFLAG_FIXEDADDRESS // flags
+		OSAllocate ok! drop
+
+		if (ok@)
+			// TODO crash more gently here (save buffer)
+			ok@ OSStatusGetName "edit: couldn't extend buffer to right: %s\n" OSError
+		end
+
+		buffer@ Buffer_VirtualBuffer + @ goff@ + OSPAGESIZE + // dest
+		buffer@ Buffer_VirtualBuffer + @ goff@ + // src
+		buffer@ Buffer_Size + @ goff@ - // sz
+		memmove
+	end
+
+	OSPAGESIZE buffer@ Buffer_GapSize + !
+	OSPAGESIZE buffer@ Buffer_VirtualBufferSize + +=
 end

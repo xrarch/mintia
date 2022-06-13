@@ -13,6 +13,9 @@ public EditorFileHandle
 var EditorFileAccess 0
 public EditorFileAccess
 
+var EditorFileModified 0
+public EditorFileModified
+
 var EditorBuffer 0
 public EditorBuffer
 
@@ -84,11 +87,43 @@ const INPUTMODE_ESC1   2
 var InputMode INPUTMODE_NORMAL
 
 fn InputCharacter { c -- }
+	auto update
+	0 update!
+
 	if (InputMode@ INPUTMODE_NORMAL ==)
 		if (c@ 0x03 ==) // ^C
-			0 EditorRunning!
+			if (EditorFileModified@ ~~ UIMode@ UIMODIFIED == ||)
+				0 EditorRunning!
+			end else
+				UIMODIFIED SetUIMode
+			end
 		end elseif (c@ 0x1B ==) // ^[
 			INPUTMODE_ESC0 InputMode!
+		end elseif (EditorFileAccess@ ACCESS_WRITE &)
+			if (c@ '\b' ==)
+				ScreenBackspace update!
+				UINORMAL SetUIMode
+			end elseif (c@ '\n' ==)
+				'\n' ScreenInsert update!
+				UINORMAL SetUIMode
+			end elseif (c@ 0x20 >= c@ 0x7F <= &&)
+				c@ ScreenInsert update!
+				UINORMAL SetUIMode
+			end elseif (c@ 19 ==)
+				auto ok
+
+				EditorFileHandle@ // filehandle
+				EditorFileName@ // path
+				EditorBuffer@ // buffer
+				BufferSave ok!
+
+				if (ok@)
+					ok@ OSStatusGetName UISaveMessage!
+					UISAVEFAIL SetUIMode
+				end else
+					UINORMAL SetUIMode
+				end
+			end
 		end
 	end elseif (InputMode@ INPUTMODE_ESC0 ==)
 		if (c@ '[' ==)
@@ -98,12 +133,19 @@ fn InputCharacter { c -- }
 		end
 	end elseif (InputMode@ INPUTMODE_ESC1 ==)
 		INPUTMODE_NORMAL InputMode!
-		c@ InputNavigationalKey
+		c@ InputNavigationalKey update!
+	end
+
+	if (update@)
+		ScreenCursorX@
+		ScreenCursorY@ SCREENROW +
+		TermSetCursorPosition
+
+		TermFinishDrawing
 	end
 end
 
-fn InputNavigationalKey { c -- }
-	auto update
+fn InputNavigationalKey { c -- update }
 	0 update!
 
 	if (c@ 'D' ==)
@@ -114,13 +156,5 @@ fn InputNavigationalKey { c -- }
 		1 0 ScreenNavigateY update!
 	end elseif (c@ 'A' ==)
 		0 0 ScreenNavigateY update!
-	end
-
-	if (update@)
-		ScreenCursorX@
-		ScreenCursorY@ SCREENROW +
-		TermSetCursorPosition
-
-		TermFinishDrawing
 	end
 end

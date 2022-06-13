@@ -49,6 +49,9 @@ extern BufferGetChar { location buffer -- char ok }
 
 // screen
 
+const SCREENROW 0
+const UINORMAL 0
+
 const SCREENMARGIN 2 // how many rows to leave for UI
 
 struct ScreenLine
@@ -66,8 +69,11 @@ externptr ScreenLinePosition
 
 extern ScreenInit { -- }
 
-extern ScreenNavigate { x y -- }
+extern ScreenNavigateX { x -- }
+extern ScreenNavigateY { y -- }
 
 // draw
 
 extern DrawAll { -- }
+
+extern DrawScreen { startrow endrow -- }

@@ -31,50 +31,28 @@ externptr TermHeight
 
 // buffer
 
-struct Piece
-	4 Prev
-	4 Next
-	4 Flags
-	4 Offset
-	4 Length
-endstruct
-
 struct Buffer
-	4 OriginalBuffer
-	4 OriginalBufferSize
+	4 VirtualBuffer
+	4 VirtualBufferSize
 
-	4 AddBuffer
-	4 AddOffset
-	4 AddSize
+	4 GapOffset
+	4 GapSize
 
 	4 Size
-
-	4 PieceListHead
-	4 PieceListTail
-
-	4 CachedPiece
-	4 CachedPieceOffset
-
-	Piece_SIZEOF OriginalPiece
 endstruct
 
-const PIECEFLAG_ADDBUFFER 1
-
 extern BufferCreate { -- buffer ok }
-extern BufferDelete { buffer -- }
 
 extern BufferPopulate { filehandle buffer -- ok }
 
-extern BufferFindOffset { offset buffer -- ptr offsetinpiece piece ok }
-extern BufferGetPointer { offset piece buffer -- ptr }
+extern BufferGetChar { location buffer -- char ok }
 
 // screen
 
 const SCREENMARGIN 2 // how many rows to leave for UI
 
 struct ScreenLine
-	4 StartPiece
-	4 OffsetInPiece
+	4 Offset
 	4 Length
 endstruct
 

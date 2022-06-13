@@ -54,6 +54,35 @@ fn ScreenInit { -- }
 	ScreenPopulate
 end
 
+fn ScreenLineOverflowCheck { offset line -- overflow }
+	auto buffer
+	EditorBuffer@ buffer!
+
+	auto endchar
+	if (line@ ScreenLine_Length + @ ~~)
+		0 endchar!
+	end else
+		line@ ScreenLine_Offset + @ line@ ScreenLine_Length + @ 1 - + buffer@ BufferGetChar drop endchar!
+	end
+
+	if (endchar@ '\n' ==)
+		offset@ line@ ScreenLine_Length + @ >= overflow!
+	end else
+		offset@ line@ ScreenLine_Length + @ > overflow!
+	end
+end
+
+fn ScreenLineLastChar { line -- endchar }
+	auto buffer
+	EditorBuffer@ buffer!
+
+	if (line@ ScreenLine_Length + @ ~~)
+		0 endchar!
+	end else
+		line@ ScreenLine_Offset + @ line@ ScreenLine_Length + @ 1 - + buffer@ BufferGetChar drop endchar!
+	end
+end
+
 fn ScreenNavigateX { right -- update }
 	auto oldslp
 	ScreenLinePosition@ oldslp!
@@ -77,7 +106,7 @@ fn ScreenNavigateX { right -- update }
 		auto line
 		ScreenLineTable@ ScreenCursorY@ ScreenLine_SIZEOF * + line!
 
-		if (ScreenLinePosition@ line@ ScreenLine_Length + @ >=)
+		if (ScreenLinePosition@ line@ ScreenLineOverflowCheck)
 			1 ScreenCursorPosition -=
 			1 ScreenLinePosition -=
 
@@ -116,7 +145,7 @@ fn ScreenNavigateY { down cancellinepos -- update }
 
 		ScreenLineTable@ ScreenCursorY@ ScreenLine_SIZEOF * + newline!
 
-		if (newline@ ScreenLine_Length + @ ~~ curline@ ScreenLine_Length + @ ~~ &&)
+		if (curline@ ScreenLineLastChar '\n' ~=)
 			// EOF
 			1 ScreenCursorY -=
 			return
@@ -137,10 +166,6 @@ fn ScreenNavigateY { down cancellinepos -- update }
 
 	if (down@)
 		curline@ ScreenLine_Length + @ ScreenCursorPosition +=
-
-		if (newline@ ScreenLine_Length + @ ~~)
-			1 cancellinepos!
-		end
 	end else
 		newline@ ScreenLine_Length + @ ScreenCursorPosition -=
 	end
@@ -151,12 +176,18 @@ fn ScreenNavigateY { down cancellinepos -- update }
 		0 ScreenCursorX!
 
 		if (down@ ~~)
-			newline@ ScreenLine_Length + @ 1 - ScreenCursorPosition +=
-			newline@ ScreenLine_Length + @ 1 - ScreenLinePosition!
+			if (newline@ ScreenLineLastChar '\n' ==)
+				newline@ ScreenLine_Length + @ 1 - ScreenCursorPosition +=
+				newline@ ScreenLine_Length + @ 1 - ScreenLinePosition!
+			end else
+				newline@ ScreenLine_Length + @ ScreenCursorPosition +=
+				newline@ ScreenLine_Length + @ ScreenLinePosition!
+			end
+
 			ScreenLinePosition@ TermWidth@ % ScreenCursorX!
 		end
 	end else
-		if (ScreenLinePosition@ newline@ ScreenLine_Length + @ >=)
+		if (ScreenLinePosition@ newline@ ScreenLineOverflowCheck)
 			auto diff
 			ScreenLinePosition@ newline@ ScreenLine_Length + @ - 1 + diff!
 
@@ -343,12 +374,14 @@ fn ScreenPopulate { -- }
 
 		runlength@ line@ ScreenLine_Length + !
 
+		if (runlength@)
+			1 rows -=
+			ScreenLine_SIZEOF line +=
+		end
+
 		if (ok@)
 			break
 		end
-
-		1 rows -=
-		ScreenLine_SIZEOF line +=
 	end
 
 	if (rows@)

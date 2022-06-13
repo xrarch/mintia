@@ -69,8 +69,8 @@ externptr ScreenLinePosition
 
 extern ScreenInit { -- }
 
-extern ScreenNavigateX { x -- }
-extern ScreenNavigateY { y -- }
+extern ScreenNavigateX { right -- update }
+extern ScreenNavigateY { down cancellinepos -- update }
 
 // draw
 

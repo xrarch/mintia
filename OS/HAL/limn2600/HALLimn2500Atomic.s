@@ -4,7 +4,8 @@
 HALCPUAtomicIncrement:
 .global HALCPUAtomicIncrement
 	mfcr t0, rs
-	andi t1, t0, 0xFFFD ; disable interrupts
+	subi t1, zero, 3
+	and  t1, t0, t1 ; disable interrupts
 	mtcr rs, t1
 
 	mov  t1, long [a0]
@@ -21,7 +22,8 @@ HALCPUAtomicIncrement:
 HALCPUAtomicDecrement:
 .global HALCPUAtomicDecrement
 	mfcr t0, rs
-	andi t1, t0, 0xFFFD ; disable interrupts
+	subi t1, zero, 3
+	and  t1, t0, t1 ; disable interrupts
 	mtcr rs, t1
 
 	mov  t1, long [a0]

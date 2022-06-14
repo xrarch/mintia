@@ -56,9 +56,9 @@ KeLimn2600ExceptionVector:
 	mtcr k2, sp ; save stack pointer
 	mtcr k3, sp ; save trace link
 
-	mfcr t0, ers
+	mfcr t0, rs
 
-	andi t1, t0, LIMN2600_RS_USER
+	andi t1, t0, LIMN2600_ERS_USER
 	beq  t1, .waskernel
 
 	la   t1, KeThreadCurrentStackTop
@@ -83,8 +83,8 @@ KeLimn2600ExceptionVector:
 	mov  long [sp + OSContext_sp],  t1
 	mov  long [sp + OSContext_ers], t0 ; ers was still in t0
 
-	mfcr t0, epc
-	mov  long [sp + OSContext_epc], t0
+	mfcr t1, epc
+	mov  long [sp + OSContext_epc], t1
 
 	mfcr t1, k0
 	mov  long [sp + OSContext_t0],  t1
@@ -121,7 +121,8 @@ KeLimn2600ExceptionVector:
 	mov  long [sp + OSContext_s18], s18
 	mov  long [sp + OSContext_lr],  lr
 
-	mfcr a1, ecause
+	rshi a1, t0, 28
+	andi a1, a1, 15
 	mfcr a2, ebadaddr
 	mov  a0, sp ; give KeLimn2600Exception our context
 
@@ -136,7 +137,7 @@ KeLimn2600ExceptionVector:
 	addi sp, sp, 8
 
 	mov  t0, long [sp + OSContext_ers]
-	mtcr ers, t0
+	mtcr rs, t0
 
 	mov  t0, long [sp + OSContext_epc]
 	mtcr epc, t0
@@ -194,7 +195,7 @@ KeLimn2600ExceptionVector:
 LoadInitialContext:
 .global LoadInitialContext
 	mov  t0, long [sp + OSContext_ers]
-	mtcr ers, t0
+	mtcr rs, t0
 
 	mov  t0, long [sp + OSContext_epc]
 	mtcr epc, t0
@@ -343,7 +344,7 @@ fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 	trapframe@ OSContext_sp + @ usp!
 
 	if (DEBUGCHECKS)
-		if (trapframe@ OSContext_ers + @ LIMN2600_RS_USER & ~~)
+		if (trapframe@ OSContext_ers + @ LIMN2600_ERS_USER & ~~)
 			trapframe@ "KeCopySignalFrame: not usermode trapframe %x\n" KeCrash
 		end
 	end
@@ -391,7 +392,7 @@ fn KeThreadContinue { context thread -- }
 	tf@ OSContext_ers + @ ers!
 
 	if (DEBUGCHECKS)
-		if (ers@ LIMN2600_RS_USER & ~~)
+		if (ers@ LIMN2600_ERS_USER & ~~)
 			tf@ "KeThreadContinue: not usermode trapframe %x\n" KeCrash
 		end
 	end
@@ -416,7 +417,7 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 
 	badaddr@ tf@ OSContext_badaddr + !
 
-	if (tf@ OSContext_ers + @ LIMN2600_RS_USER &)
+	if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
 		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
 	end
 
@@ -450,7 +451,7 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 	end
 
 	if (signal@)
-		if (tf@ OSContext_ers + @ LIMN2600_RS_USER &)
+		if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
 			4 tf@ OSContext_epc + -=
 
 			signal@ // signal
@@ -492,7 +493,7 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 		"Fault: ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s (%d)\n" KeCrash
 	end
 
-	if (tf@ OSContext_ers + @ LIMN2600_RS_USER &)
+	if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
 		// we interrupted usermode code
 
 		tf@ PsPrepareUsermode
@@ -502,14 +503,14 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 end
 
 fn HALCPUIsUserTrapFrame { tf -- user }
-	tf@ OSContext_ers + @ LIMN2600_RS_USER & user!
+	tf@ OSContext_ers + @ LIMN2600_ERS_USER & user!
 end
 
 fn HALCPUTrapFrameAbort { abort tf -- }
 	abort@ tf@ OSContext_epc + !
 end
 
-fn HALCPUContextInit { context1 context2 startfunc kstack -- ctx }
+fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 	8 kstack -=
 
 	0 kstack@!
@@ -523,13 +524,19 @@ fn HALCPUContextInit { context1 context2 startfunc kstack -- ctx }
 	context2@ ctx@ OSContext_a0 + !
 
 	// enable interrupts and paging in the thread's context
-	LIMN2600_RS_KTHREAD ctx@ OSContext_ers + !
+	LIMN2600_ERS_KTHREAD LIMN2600_RS_MMU | ctx@ OSContext_ers + !
+
+	if (process@ KeProcess_ASID + @)
+		process@ KeProcess_ASID + @ 255 & 1 + 16 << ctx@ OSContext_ers + |=
+	end
 
 	startfunc@ ctx@ OSContext_epc + !
 
 	kstack@ ctx@ OSContext_sp + !
 
 	OSContext_SIZEOF ctx -=
+
+	LIMN2600_RS_MMU ctx@ OSContext_ers + !
 
 	pointerof LoadInitialContext ctx@ OSContext_lr + !
 end

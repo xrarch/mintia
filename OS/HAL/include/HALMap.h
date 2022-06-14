@@ -1,6 +1,3 @@
-extern HALPlatformMapKernelSwitch { -- asid oldpgtb }
-extern HALPlatformMapRestore { asid oldpgtb -- }
-
 externptr HALPlatformKernelPageDirectory
 
 const KERNELSPACE   0x80000000

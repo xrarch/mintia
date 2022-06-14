@@ -4,7 +4,7 @@ extern HALCPUInterruptDisable { -- rs }
 extern HALCPUInterruptRestore { rs -- }
 extern HALCPUInterruptEnable { -- }
 
-extern HALCPUContextInit { context1 context2 startfunc kstack -- ctx }
+extern HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 extern HALCPUContextSwitch { old new -- }
 extern HALCPURunInContext { int handler stack -- }
 extern HALCPUMapSwitch { asid pgtb -- oldasid oldpgtb }

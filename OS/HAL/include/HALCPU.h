@@ -7,7 +7,7 @@ extern HALCPUInterruptEnable { -- }
 extern HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 extern HALCPUContextSwitch { old new -- }
 extern HALCPURunInContext { int handler stack -- }
-extern HALCPUMapSwitch { asid pgtb -- oldasid oldpgtb }
+extern HALCPUMapSwitch { asid pgtb -- }
 extern HALCPURunInContextNoInterrupts { handler stack arg1 arg0 -- ret0 ret1 }
 extern HALCPUEnterUserMode { exitfunc context ustack entryfunc -- }
 extern HALCPUIsUserTrapFrame { tf -- user }

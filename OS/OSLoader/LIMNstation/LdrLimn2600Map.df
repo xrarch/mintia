@@ -10,7 +10,9 @@
 var LdrPlatformKernelPageDirectory 0
 public LdrPlatformKernelPageDirectory
 
-extern LdrLimn2600MapEnablePaging { -- }
+const TLBSIZE 64
+
+extern LdrLimn2600MapEnablePaging { missroutine -- }
 
 fn LdrLimn2600MapInit { -- }
 	// create page directory
@@ -90,14 +92,67 @@ fn LdrLimn2600MapInit { -- }
 		1 i +=
 	end
 
+	// allocate physical page for the TLB miss routine and copy it there
+
+	1 // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrLimn2600MapInit: failed to allocate TLBMISS page (%i)\n" LdrCrash
+	end
+
+	auto missroutine
+	pointerof LdrLimn2600MapTLBMissRoutine missroutine!
+
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // dest
+	missroutine@ // src
+	pointerof LdrLimn2600MapTLBMissRoutineEnd missroutine@ - // sz
+	memcpy
+
 	// enable paging
 
-	LdrLimn2600MapEnablePaging
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << LdrLimn2600MapEnablePaging
 end
 
 const RS_MMU 4
 
 asm "
+
+LdrLimn2600MapTLBMissRoutine:
+	mtcr tbscratch, t0
+
+	mfcr t0, pgtb
+	mov  t0, long [t0]
+	mtcr tblo, t0
+
+	tbld ;conditionally load PTE
+
+	tbwr ;write TLB entry
+
+	mfcr t0, tbscratch
+	rfe
+LdrLimn2600MapTLBMissRoutineEnd:
+
+LdrLimn2600MapFlushTLBAll:
+.global LdrLimn2600MapFlushTLBAll
+	mfcr t1, tbhi
+
+	mtcr tblo, zero
+	mtcr tbhi, zero
+
+	li   t2, TLBSIZE
+
+.loop:
+	subi t2, t2, 1	
+
+	mtcr tbindex, t2
+	tbwr
+
+	bne  t2, .loop
+
+	mtcr tbhi, t1
+	ret
 
 LdrLimn2600MapExit:
 .global LdrLimn2600MapExit
@@ -105,10 +160,12 @@ LdrLimn2600MapExit:
 	ret
 
 LdrLimn2600MapEnablePaging:
-	subi t0, zero, 1
-	ftlb t0, t0
-
 	mtcr rs, zero
+	mtcr tbvec, a0
+
+	mtcr k0, lr ;lazy and stupid way to save link register since we're in kernel mode right now
+	jal  LdrLimn2600MapFlushTLBAll
+	mfcr lr, k0
 
 	la   t0, LdrPlatformKernelPageDirectory
 	mov  t0, long [t0]

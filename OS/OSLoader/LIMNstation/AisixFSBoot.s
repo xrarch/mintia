@@ -196,6 +196,10 @@ AisixFSBoot:
 	sub  t1, t1, t2
 	bne  t1, .invalid
 
+;invalidate icache, writeback dcache
+
+	cachei 3
+
 ;jump to the entrypoint
 
 	mov  t0, long [t0 + 4]

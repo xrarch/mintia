@@ -85,6 +85,8 @@ extern OSWorkingSetPurge { -- ok }
 
 extern OSFlushModifiedPages { -- ok }
 
+extern OSSynchronizeIcache { -- }
+
 // Ps
 extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
 extern OSProcessSignal { signal processhandle -- ok }

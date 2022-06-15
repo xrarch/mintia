@@ -20,6 +20,9 @@ extern HALCPUASIDRegister { asid -- }
 extern HALCPUASIDUnregister { asid -- }
 extern HALCPUAddressSpaceSwitch { asid pdir -- }
 
+extern HALDcacheExpunge { -- }
+extern HALIcacheSynchronize { -- }
+
 externptr HALCPUModel
 externptr HALPlatformModel
 externptr HALBusModel

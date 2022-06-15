@@ -28,5 +28,7 @@ extern MmMDLUnpin { mdl -- }
 extern MmMDLMap { mdl -- ok }
 extern MmMDLUnmap { mdl -- }
 
+extern MmMDLFlush { kflags dma mdl -- }
+
 externptr MmPinnedPagesLimit
 externptr MmPinnedPagesCount

@@ -56,6 +56,7 @@
 .extern OSMemoryQuery
 .extern OSWorkingSetPurge
 .extern OSFlushModifiedPages
+.extern OSSynchronizeIcache
 .extern OSProcessCreate
 .extern OSProcessSignal
 .extern OSProcessOpenByPID
@@ -88,7 +89,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 83
+	.dl 84
 
 OSCallTable:
 .global OSCallTable
@@ -147,35 +148,36 @@ OSCallTable:
 	.dl OSTOSMemoryQuery                                 ;52
 	.dl OSTOSWorkingSetPurge                             ;53
 	.dl OSTOSFlushModifiedPages                          ;54
-	.dl OSTOSProcessCreate                               ;55
-	.dl OSTOSProcessSignal                               ;56
-	.dl OSTOSProcessOpenByPID                            ;57
-	.dl OSTOSProcessQuery                                ;58
-	.dl OSTOSProcessQueryByPID                           ;59
-	.dl OSTOSProcessReadStatus                           ;60
-	.dl OSTOSProcessMaskSignal                           ;61
-	.dl OSTOSProcessUnmaskSignal                         ;62
-	.dl OSTOSProcessSetConsoleGroup                      ;63
-	.dl OSTOSProcessClearConsoleGroup                    ;64
-	.dl OSTOSProcessSignalActivation                     ;65
-	.dl OSTOSProcessWaitForActivation                    ;66
-	.dl OSTOSProcessExit                                 ;67
-	.dl OSTOSProcessCountQuery                           ;68
-	.dl OSTOSProcessQueryAll                             ;69
-	.dl OSTOSSetQuota                                    ;70
-	.dl OSTOSQuotaQuery                                  ;71
-	.dl OSTOSThreadException                             ;72
-	.dl OSTOSThreadSetFilePermissions                    ;73
-	.dl OSTOSThreadSleep                                 ;74
-	.dl OSTOSThreadCreate                                ;75
-	.dl OSTOSThreadTerminate                             ;76
-	.dl OSTOSThreadSuspend                               ;77
-	.dl OSTOSThreadResume                                ;78
-	.dl OSTOSThreadReadStatus                            ;79
-	.dl OSTOSThreadQuery                                 ;80
-	.dl OSTOSSetSystemConsole                            ;81
-	.dl OSTOSConsoleSignal                               ;82
-	.dl OSTOSAmIAdmin                                    ;83
+	.dl OSTOSSynchronizeIcache                           ;55
+	.dl OSTOSProcessCreate                               ;56
+	.dl OSTOSProcessSignal                               ;57
+	.dl OSTOSProcessOpenByPID                            ;58
+	.dl OSTOSProcessQuery                                ;59
+	.dl OSTOSProcessQueryByPID                           ;60
+	.dl OSTOSProcessReadStatus                           ;61
+	.dl OSTOSProcessMaskSignal                           ;62
+	.dl OSTOSProcessUnmaskSignal                         ;63
+	.dl OSTOSProcessSetConsoleGroup                      ;64
+	.dl OSTOSProcessClearConsoleGroup                    ;65
+	.dl OSTOSProcessSignalActivation                     ;66
+	.dl OSTOSProcessWaitForActivation                    ;67
+	.dl OSTOSProcessExit                                 ;68
+	.dl OSTOSProcessCountQuery                           ;69
+	.dl OSTOSProcessQueryAll                             ;70
+	.dl OSTOSSetQuota                                    ;71
+	.dl OSTOSQuotaQuery                                  ;72
+	.dl OSTOSThreadException                             ;73
+	.dl OSTOSThreadSetFilePermissions                    ;74
+	.dl OSTOSThreadSleep                                 ;75
+	.dl OSTOSThreadCreate                                ;76
+	.dl OSTOSThreadTerminate                             ;77
+	.dl OSTOSThreadSuspend                               ;78
+	.dl OSTOSThreadResume                                ;79
+	.dl OSTOSThreadReadStatus                            ;80
+	.dl OSTOSThreadQuery                                 ;81
+	.dl OSTOSSetSystemConsole                            ;82
+	.dl OSTOSConsoleSignal                               ;83
+	.dl OSTOSAmIAdmin                                    ;84
 
 
 OSTOSConsolePutCharacter:
@@ -1031,6 +1033,18 @@ OSTOSFlushModifiedPages:
 	jal  OSFlushModifiedPages
 
 	mov  long [s18 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSSynchronizeIcache:
+.global OSTOSSynchronizeIcache
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSSynchronizeIcache
+
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

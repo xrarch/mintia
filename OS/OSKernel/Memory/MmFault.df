@@ -210,6 +210,23 @@ fn MmSatisfyFault { writing vaddr -- signal }
 				if (flags@ PTE_TRANSITION &)
 					// reference it now so we can drop IPL
 
+					auto waited
+					CANBLOCK MmPageWait ok! waited!
+
+					if (ok@)
+						ipl@ KeIPLLower
+						ptpfdbe@ process@ MmPTEDereference
+						OSSIGNAL_KILL signal!
+						return
+					end
+
+					if (waited@)
+						ipl@ KeIPLLower
+						ptpfdbe@ process@ MmPTEDereference
+						REFAULT signal!
+						return
+					end
+
 					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 					if (DEBUGCHECKS)
@@ -257,6 +274,28 @@ fn MmSatisfyFault { writing vaddr -- signal }
 					// deadlock.
 
 					process@ MmWorkingSetUnlock
+
+					IPLDPC KeIPLRaise ipl!
+
+					CANBLOCK MmPageWait ok! drop
+
+					if (ok@)
+						ipl@ KeIPLLower
+
+						process@ MmWorkingSetLock drop
+
+						wsli@ // wsli
+						wsleptr@ // wsleptr
+						process@ // process
+						MmWorkingSetEntryFree
+
+						process@ MmWorkingSetUnlock
+						ptpfdbe@ process@ MmPTEDereference
+
+						OSSIGNAL_KILL signal!
+
+						return
+					end
 
 					0 // pri
 					pteaddr@ // pte

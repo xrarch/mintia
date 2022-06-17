@@ -39,6 +39,7 @@ extern MmAllocate { length startva processhandle pageprotection flags -- realva 
 extern MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 
 extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
+extern MmAnonymousPageGet { pte pri -- pfdbe pfn ok }
 extern MmAnonymousPageDelete { ipl pfdbe -- }
 extern MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 

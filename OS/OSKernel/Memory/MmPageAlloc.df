@@ -25,33 +25,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmPageGet { priority threshold -- pfdbe pfn ok }
-	STATUS_NO_MEMORY ok!
-
-	if (DEBUGCHECKS)
-		if (MmInited@ ~~)
-			"MmPageGet: used before MmInit called\n" KeCrash
-		end
-	end
-
+fn MmPageGet { priority -- pfdbe pfn ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
-
-	if (MmPageFreeCount@ MmEvictablePageCount@ + threshold@ <)
-		if (priority@ CACHEALLOC & ~~)
-			0 // priboost
-			MmEventLowMemory // event
-			KeEventSignal
-
-			0 // priboost
-			MmModifiedPageEvent // event
-			KeEventSignal
-		end
-
-		ipl@ KeIPLLower
-
-		return
-	end
 
 	if (priority@ 0xFF & FREEFIRST ==)
 		// attempt to get a page from the free list first.
@@ -167,83 +143,107 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 		end
 	end
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	priority@ MmPageWait ok! drop
+
+	if (ok@)
+		ipl@ KeIPLLower
+		return
+	end
+
+	priority@ MmPageGet ok! pfn! pfdbe!
+
+	ipl@ KeIPLLower
+end
+
+fn MmPageWait { priority -- waited ok }
+	// wait until the appropriate available page threshold is reached.
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmPageWait: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	0 waited!
+
 	auto blockon
 	auto alertable
 	auto tries
 
-	if (priority@ MUSTSUCCEED &)
-		// CANBLOCK page allocations have different wait rules if MUSTSUCCEED
-		// is also specified:
+	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
+		if (priority@ MUSTSUCCEED &)
+			// CANBLOCK page allocations have different wait rules if MUSTSUCCEED
+			// is also specified:
 
-		MMMUSTSUCCEEDTHRESH blockon! // can dip into MUSTSUCCEED page pool
-		0 alertable! // wait can't be interrupted
-		-1 tries! // try forever for a page
-	end elseif (priority@ MUSTSUCCEEDL2 &)
-		MMMUSTSUCCEEDL2THRESH blockon! // can dip into MUSTSUCCEEDL2 page pool
-		0 alertable! // wait can't be interrupted
-		-1 tries! // try forever for a page
-	end elseif (priority@ POOLALLOC &)
-		MMPOOLTHRESH blockon! // can dip into reserved pool pages
-		0 alertable! // wait can't be interrupted
-		-1 tries! // try forever for a page
-	end else
-		// normal rules:
-
-		if (priority@ CACHEALLOC &)
-			MmPageFreeCountLow@ blockon! // don't go below low watermark
+			MMMUSTSUCCEEDTHRESH blockon! // can dip into MUSTSUCCEED page pool
+			0 alertable! // wait can't be interrupted
+			-1 tries! // try forever for a page
+		end elseif (priority@ MUSTSUCCEEDL2 &)
+			MMMUSTSUCCEEDL2THRESH blockon! // can dip into MUSTSUCCEEDL2 page pool
+			0 alertable! // wait can't be interrupted
+			-1 tries! // try forever for a page
+		end elseif (priority@ POOLALLOC &)
+			MMPOOLTHRESH blockon! // can dip into reserved pool pages
+			0 alertable! // wait can't be interrupted
+			-1 tries! // try forever for a page
 		end else
+			// normal rules:
 			MMNORMALTHRESH blockon! // don't dip into MUSTSUCCEED page pool
+			1 alertable! // wait can be interrupted
+			50 tries! // try 50 times to get a page (about 5 seconds)
 		end
 
-		1 alertable! // wait can be interrupted
-		200 tries! // try 200 times to get a page (about 10 seconds)
-	end
-
-	if (priority@ TRYFOREVER &)
-		-1 tries!
-	end
-
-	while (1)
-		priority@ // priority
-		blockon@ // threshold
-		MmPageGet ok! pfn! pfdbe!
-
-		auto ipl
-
-		if (ok@ ~~)
-			return
-		end
-
-		if (DEBUGCHECKS)
-			if (ok@ STATUS_NO_MEMORY ~=)
-				ok@ "MmPageAlloc: MmPageGet returned weird status (%i)\n" KeCrash
-			end
+		if (priority@ TRYFOREVER &)
+			-1 tries!
 		end
 
 		if (priority@ CANBLOCK & ~~)
-			return
+			if (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
+				STATUS_NO_MEMORY ok!
+				return
+			end
 		end
 
-		KERNELMODE // waitmode
-		alertable@ // alertable
-		50 // timeout
-		MmEventPageAvailable // object
-		KeThreadWaitForObject ok!
+		while (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
+			0 // priboost
+			MmEventLowMemory // event
+			KeEventSignal
 
-		if (ok@ STATUS_WAIT_TIMEOUT ==)
-			if (tries@ -1 ~=)
-				1 tries -=
+			0 // priboost
+			MmModifiedPageEvent // event
+			KeEventSignal
 
-				if (tries@ ~~)
-					STATUS_NO_MEMORY ok!
+			IPLLOW KeIPLLower
 
-					return
+			1 waited!
+
+			KERNELMODE // waitmode
+			alertable@ // alertable
+			100 // timeout
+			MmEventPageAvailable // object
+			KeThreadWaitForObject ok!
+
+			IPLDPC KeIPLRaise drop
+
+			if (ok@ STATUS_WAIT_TIMEOUT ==)
+				if (tries@ -1 ~=)
+					1 tries -=
+
+					if (tries@ ~~)
+						STATUS_NO_MEMORY ok!
+						return
+					end
 				end
+			end elseif (ok@)
+				return
 			end
-		end elseif (ok@)
-			return
 		end
 	end
+
+	0 ok!
 end
 
 fn MmPageFreeByEntry { pfdbe -- }

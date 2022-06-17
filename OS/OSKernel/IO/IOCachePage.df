@@ -80,8 +80,42 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	auto buckettail
 	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + 4 + buckettail!
 
+	auto pri
+
+	if (kflags@ IOKFLAG_SWAPOUT &)
+		// this IOCachePageGet is needed for a swap-out operation
+		// (i.e., the filesystem driver is using it to cache disk
+		// structures and needs whatever is going to be read into
+		// this page to know where to swap the page out to).
+
+		MUSTSUCCEED CANBLOCK | pri!
+	end elseif (pri@ IOKFLAG_URGENT &)
+		MUSTSUCCEEDL2 CANBLOCK | pri!
+	end elseif (pri@ IOKFLAG_SWAPIN &)
+		CANBLOCK TRYFOREVER | pri!
+	end else
+		CANBLOCK pri!
+	end
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	pri@ MmPageWait ok! drop
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		if (locked@ ~~)
+			bucket@ // bucket
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockUnlockBucket
+
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockUnlock
+		end
+
+		return
+	end
 
 	buckethead@@ pfdbe!
 
@@ -124,44 +158,27 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
 	end
 
-	ipl@ KeIPLLower
-
 	// not in the cache -- allocate a page for it.
 
 	auto zeroes
 	filesize@ offset@ - PAGESIZE <
 	kflags@ IOKFLAG_ZEROES & || zeroes!
 
-	auto rs
-
-	if (kflags@ IOKFLAG_SWAPOUT &)
-		// this IOCachePageGet is needed for a swap-out operation
-		// (i.e., the filesystem driver is using it to cache disk
-		// structures and needs whatever is going to be read into
-		// this page to know where to swap the page out to).
-
-		MUSTSUCCEED CANBLOCK | kflags!
-	end elseif (kflags@ IOKFLAG_URGENT &)
-		MUSTSUCCEEDL2 CANBLOCK | kflags!
-	end elseif (kflags@ IOKFLAG_SWAPIN &)
-		CANBLOCK TRYFOREVER | kflags!
-	end else
-		CANBLOCK kflags!
-	end
-
 	if (zeroes@)
-		ZEROMUST kflags |=
+		ZEROMUST pri |=
 	end else
-		FREEFIRST kflags |=
+		FREEFIRST pri |=
 	end
 
 	MMEVICTFLAG_WORKINGSET // flags
 	MMEVICTTYPE_FILE // evictablefuncs
-	kflags@ // priority
-	MmEvictablePageAlloc ok! drop pfdbe!
+	pri@ // priority
+	MmEvictablePageGet ok! drop pfdbe!
+
+	ipl@ KeIPLLower
 
 	if (ok@)
-		if (kflags@ 0xFF & MUSTSUCCEED ==)
+		if (pri@ TRYFOREVER &)
 			// we needed this page for a swapout, system detonates.
 			// this flag is also used for certain other situations
 			// where an IO operation must succeed.

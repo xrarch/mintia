@@ -58,6 +58,8 @@ extern MmResourceJettison { -- }
 
 extern MmPoolInit { -- }
 
+extern MmPageWait { priority -- waited ok }
+extern MmPageGet { priority -- pfdbe pfn ok }
 extern MmPageAlloc { priority -- pfdbe pfn ok }
 extern MmPageFree { pfn -- }
 extern MmPageFreeByEntry { pfdbe -- }
@@ -143,7 +145,6 @@ const FREEFIRST   2
 
 const MUSTSUCCEED   0x8000
 const CANBLOCK      0x10000
-const CACHEALLOC    0x20000
 const MUSTSUCCEEDL2 0x40000
 const TRYFOREVER    0x80000
 const POOLALLOC     0x100000

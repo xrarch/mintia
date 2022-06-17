@@ -315,7 +315,13 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 	1 MmAnonymousPageCount -=
 end
 
-fn MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
+fn MmAnonymousPageGet { pte pri -- pfdbe pfn ok }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmAnonymousPageGet: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	// caller must set COW flag in pfdbe if applicable.
 
 	// caller must also set MMEVICTFLAG_MODIFIED and set SwapPageNumber to
@@ -323,8 +329,8 @@ fn MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 
 	MMEVICTFLAG_WORKINGSET // flags
 	MMEVICTTYPE_ANON // evictabletype
-	pri@ CANBLOCK | // priority
-	MmEvictablePageAlloc ok! pfn! pfdbe!
+	pri@ // priority
+	MmEvictablePageGet ok! pfn! pfdbe!
 
 	if (ok@)
 		return
@@ -339,10 +345,35 @@ fn MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 	rs@ HALCPUInterruptRestore
 end
 
+fn MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pri@ CANBLOCK |
+	MmPageWait ok! drop
+
+	if (ok@)
+		ipl@ KeIPLLower
+		return
+	end
+
+	pte@ pri@ MmAnonymousPageGet ok! pfn! pfdbe!
+
+	ipl@ KeIPLLower
+end
+
 fn MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmAnonymousSwapIn: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	pte@ // pte
 	pri@ FREEFIRST | // pri
-	MmAnonymousPageAlloc ok! pfn! pfdbe!
+	MmAnonymousPageGet ok! pfn! pfdbe!
+
+	IPLLOW KeIPLLower
 
 	if (ok@)
 		return
@@ -472,6 +503,17 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
+	// ensure that referencing this page won't starve the system.
+
+	pri@ CANBLOCK |
+	MmPageWait ok! drop
+
+	if (ok@)
+		ipl@ KeIPLLower
+		sectionobject@ MmSectionPPTUnlock
+		return
+	end
+
 	auto ppte
 	ppt@@ ppte!
 
@@ -485,13 +527,13 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		ipl@ KeIPLLower
 	end elseif (ppte@ ~~)
-		ipl@ KeIPLLower
-
 		// non-existent, demand zero
 
 		ppt@ // pte
 		ZEROMUST pri@ | // pri
-		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+		MmAnonymousPageGet ok! phyaddr! pfdbe!
+
+		ipl@ KeIPLLower
 
 		if (ok@)
 			sectionobject@ MmSectionPPTUnlock
@@ -502,8 +544,6 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		phyaddr@ PTE_V | ppt@!
 	end elseif (ppte@ PTE_INSWAP &)
-		ipl@ KeIPLLower
-
 		// swapped out, bring back in
 
 		pri@ // pri

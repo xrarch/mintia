@@ -49,7 +49,7 @@ const MMEVICTFLAG_PAGETABLE  64 // page table (reused bit from filecache
 const MMEVICTTYPE_FILE       0
 const MMEVICTTYPE_ANON       1
 
-extern MmEvictablePageAlloc { flags evictabletype priority -- pfdbe pfn ok }
+extern MmEvictablePageGet { flags evictabletype priority -- pfdbe pfn ok }
 extern MmEvictablePageDelete { pfdbe -- }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }

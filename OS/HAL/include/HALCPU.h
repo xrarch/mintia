@@ -22,6 +22,7 @@ extern HALCPUAddressSpaceSwitch { asid pdir -- }
 
 extern HALDcacheExpunge { -- }
 extern HALIcacheSynchronize { -- }
+extern HALCPUFence { -- }
 
 externptr HALCPUModel
 externptr HALPlatformModel

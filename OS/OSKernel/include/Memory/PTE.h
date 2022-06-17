@@ -17,6 +17,7 @@ const PTE_W  2  // writable
 const PTE_K  4  // kernel
 const PTE_NC 8  // non-cacheable
 const PTE_G  16 // global
+const PTE_WC 32 // writecombine
 
 // XXX platform specific insofar as it needs to NOT overlap with the valid bit
 const PTE_INSWAP     2

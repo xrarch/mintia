@@ -22,7 +22,7 @@ const IOCACHEBLOCKFLAG_TRUNCATING 1
 
 // should be kept in sync with MmPageFrameEntryEvictable
 struct IOPageFrameEntryCache
-	4 Event // actually Evictable Next, used to store event pointer here
+	4 Event // actually Evictable Next, store event pointer here
 	4 Prev
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 FCB

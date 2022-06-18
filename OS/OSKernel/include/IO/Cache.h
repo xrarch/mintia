@@ -15,7 +15,6 @@ struct IOCacheInfoBlock
 	4 MapCount
 	4 Flags
 
-	(IOCACHEPAGEBUCKETS KeMutex_SIZEOF *) PageBucketMutexes
 	(IOCACHEPAGEBUCKETS 8 *) PageBucketListHeads
 endstruct
 
@@ -23,7 +22,7 @@ const IOCACHEBLOCKFLAG_TRUNCATING 1
 
 // should be kept in sync with MmPageFrameEntryEvictable
 struct IOPageFrameEntryCache
-	4 Next
+	4 Event // actually Evictable Next, used to store event pointer here
 	4 Prev
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 FCB
@@ -46,10 +45,6 @@ extern IOCacheInfoBlockTryLock { cacheblock -- ok }
 extern IOCacheInfoBlockTryLockShared { cacheblock -- ok }
 extern IOCacheInfoBlockUnlock { cacheblock -- }
 
-extern IOCacheInfoBlockLockBucket { bucket cacheblock -- ok }
-extern IOCacheInfoBlockTryLockBucket { bucket cacheblock -- locked }
-extern IOCacheInfoBlockUnlockBucket { bucket cacheblock -- }
-
 extern IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
 extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 
@@ -60,7 +55,7 @@ extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 extern IOCachePageRemove { pfdbe buckethead -- }
 extern IOCachePageInsert { pfdbe buckethead -- }
 
-extern IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
+extern IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
 extern IOCachePageWrite { kflags pfdbe -- ok }

@@ -30,7 +30,95 @@
 var IOCachePagesUsed 0
 public IOCachePagesUsed
 
-fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
+struct IOCachePageEvent
+	KeEvent_SIZEOF Event
+	4 References
+endstruct
+
+fn IOCachePageWait { pri pfdbe -- ok }
+	// wait for IO to complete on a cache page.
+
+	// entered at IPLDPC
+
+	0 ok!
+
+	auto eventblock
+	pfdbe@ IOPageFrameEntryCache_Event + @ eventblock!
+
+	if (eventblock@ ~~)
+		// allocate an event block
+
+		IPLLOW KeIPLLower
+
+		IOCachePageEvent_SIZEOF // bytes
+		'IOCE' // tag
+		pri@ // flags
+		MmAllocWithTag ok! eventblock!
+
+		IPLDPC KeIPLRaise drop
+
+		if (ok@)
+			return
+		end
+
+		if (pfdbe@ IOPageFrameEntryCache_Event + @)
+			// awkward, someone allocated one while we were trying to.
+			// free ours and use theirs.
+
+			eventblock@ MmFree
+			pfdbe@ IOPageFrameEntryCache_Event + @ eventblock!
+		end else
+			eventblock@ pfdbe@ IOPageFrameEntryCache_Event + !
+
+			0 // signaled
+			OSEVENT_NOTIF // type
+			"IOCachePageWaitEvent" // name
+			eventblock@ IOCachePageEvent_Event + // event
+			KeEventInitialize
+
+			0 eventblock@ IOCachePageEvent_References + !
+		end
+	end
+
+	1 eventblock@ IOCachePageEvent_References + +=
+
+	IPLLOW KeIPLLower
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	eventblock@ IOCachePageEvent_Event + // object
+	KeThreadWaitForObject drop
+
+	IPLDPC KeIPLRaise drop
+
+	1 eventblock@ IOCachePageEvent_References + -=
+
+	if (eventblock@ IOCachePageEvent_References + @ ~~)
+		eventblock@ MmFree
+	end
+end
+
+fn IOCachePageSatisfy { pfdbe -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS ~ &
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+	auto eventblock
+	pfdbe@ IOPageFrameEntryCache_Event + @ eventblock!
+
+	if (eventblock@)
+		0 // priboost
+		eventblock@ IOCachePageEvent_Event + // event
+		KeEventSignal
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 	if (DEBUGCHECKS)
 		if (offset@ PAGEOFFSETMASK &)
 			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
@@ -60,16 +148,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		IOCacheInfoBlockLockShared ok!
 
 		if (ok@)
-			return
-		end
-
-		bucket@ // bucket
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockLockBucket ok!
-
-		if (ok@)
-			cacheblock@ IOCacheInfoBlockUnlock
-
 			return
 		end
 	end
@@ -106,10 +184,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		ipl@ KeIPLLower
 
 		if (locked@ ~~)
-			bucket@ // bucket
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockUnlockBucket
-
 			cacheblock@ // cacheblock
 			IOCacheInfoBlockUnlock
 		end
@@ -142,15 +216,23 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 			ipl@ KeIPLLower
 
 			if (locked@ ~~)
-				bucket@ // bucket
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockUnlockBucket
-
 				cacheblock@ // cacheblock
 				IOCacheInfoBlockUnlock
 			end
 
 			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
+
+			IPLDPC KeIPLRaise ipl!
+
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+				pri@ pfdbe@ IOCachePageWait ok!
+
+				if (ok@)
+					pfdbe@ MmEvictablePageDereference drop
+				end
+			end
+
+			ipl@ KeIPLLower
 
 			return
 		end
@@ -175,6 +257,13 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	pri@ // priority
 	MmEvictablePageGet ok! drop pfdbe!
 
+	if (iointent@)
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+		0 pfdbe@ IOPageFrameEntryCache_Event + !
+	end
+
 	ipl@ KeIPLLower
 
 	if (ok@)
@@ -186,10 +275,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 		end
 
 		if (locked@ ~~)
-			bucket@ // bucket
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockUnlockBucket
-
 			cacheblock@ // cacheblock
 			IOCacheInfoBlockUnlock
 		end
@@ -215,10 +300,6 @@ fn IOCachePageGet { kflags locked offset fcb -- pageframe pfdbe ok }
 	// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 
 	if (locked@ ~~)
-		bucket@ // bucket
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockUnlockBucket
-
 		cacheblock@ // cacheblock
 		IOCacheInfoBlockUnlock
 	end
@@ -472,19 +553,7 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		return
 	end
 
-	auto bucket
-	offset@ PAGESHIFT >> IOCACHEPAGEHASHSHIFT >> IOCACHEPAGEMASK & bucket!
-
-	bucket@ // bucket
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockLockBucket ok!
-
-	if (ok@)
-		cacheblock@ IOCacheInfoBlockUnlock
-
-		return
-	end
-
+	1 // iointent
 	kflags@ // kflags
 	1 // locked
 	offset@ // offset
@@ -492,10 +561,6 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 	IOCachePageGet ok! pfdbe! pageframe!
 
 	if (ok@)
-		bucket@ // bucket
-		cacheblock@ // cacheblock
-		IOCacheInfoBlockUnlockBucket
-
 		cacheblock@ IOCacheInfoBlockUnlock
 
 		return
@@ -535,11 +600,9 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		if (ok@)
 			// read failed
 
-			pfdbe@ MmEvictablePageDereference drop
+			pfdbe@ IOCachePageSatisfy
 
-			bucket@ // bucket
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockUnlockBucket
+			pfdbe@ MmEvictablePageDereference drop
 
 			cacheblock@ IOCacheInfoBlockUnlock
 
@@ -553,11 +616,9 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 		rs@ HALCPUInterruptRestore
-	end
 
-	bucket@ // bucket
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockUnlockBucket
+		pfdbe@ IOCachePageSatisfy
+	end
 
 	cacheblock@ IOCacheInfoBlockUnlock
 end

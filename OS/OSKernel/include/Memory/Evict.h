@@ -45,6 +45,7 @@ const MMEVICTFLAG_VALID      64 // file cache
 const MMEVICTFLAG_PAGETABLE  64 // page table (reused bit from filecache
                                 // because that bit will NEVER be on in an
                                 // anonymous page unless it is a pagetable.)
+const MMEVICTFLAG_IOINPROGRESS 128
 
 const MMEVICTTYPE_FILE       0
 const MMEVICTTYPE_ANON       1

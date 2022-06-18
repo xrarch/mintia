@@ -17,6 +17,8 @@
 
 #include "<inc>/Security.h"
 
+#include "<inc>/IO.h"
+
 #include "<inc>/Process.h"
 
 #include "<ll>/OSDLL/OSStatus.h"
@@ -30,25 +32,80 @@ fn MmPageDirectoryDestroy { process -- }
 
 	// MmAnonymousPageDelete wants to be entered at IPLDPC...
 
+	auto count
+	PAGESIZE 3 >> count!
+
+	auto ptr
+	pagemap@ IDENTITYSPACE | ptr!
+
+	while (count@)
+		// this is ALL WRONG and is a workaround to a horrible longstanding
+		// bug that I spent a full week on at one point.
+
+		auto pde
+		ptr@@ pde!
+
+		if (pde@ PTE_V &)
+			auto ptpfdbe
+			pde@ 5 >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
+
+			IPLDPC KeIPLRaise ipl!
+
+			// debug prints intentionally left here
+			"freeing " Printf
+
+			if (ptpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
+				"PTE " Printf
+				ptpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ IOSwapPageFreePTE
+			end
+
+			while (ptpfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi)
+				"ref " Printf
+				ptpfdbe@ MmEvictablePageDereference drop
+			end
+
+			"\n" Printf
+
+			ipl@ // ipl
+			ptpfdbe@ // pfdbe
+			MmAnonymousPageDelete
+		end elseif (pde@ PTE_INSWAP &)
+			IPLDPC KeIPLRaise ipl!
+
+			"freept\n" Printf
+
+			ipl@ KeIPLLower
+
+			pde@ IOSwapPageFreePTE
+		end elseif (pde@)
+			IPLDPC KeIPLRaise ipl!
+
+			pde@ "hmm %x\n" Printf
+
+			ipl@ KeIPLLower
+		end
+
+		1 count -=
+		4 ptr +=
+	end
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	pfdbe@ MmEvictablePageDereference drop
+	while (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi)
+		// WRONG, it should have only ONE reference by this point
+		pfdbe@ MmEvictablePageDereference drop
+	end
 
 	if (0)
 		if (DEBUGCHECKS)
-			auto count
 			PAGESIZE 3 >> count!
-
-			auto ptr
 			pagemap@ IDENTITYSPACE | ptr!
 		
 			while (count@)
-				auto pde
 				ptr@@ pde!
 
 				if (pde@)
-					auto ptpfdbe
 					pde@ 5 >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
 
 					PAGESIZE 2 >> count!
@@ -82,10 +139,12 @@ fn MmPageDirectoryDestroy { process -- }
 		end
 	end
 
-	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi)
-			pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
-			"MmPageDirectoryDestroy: page directory had %d references\n" KeCrash
+	if (0)
+		if (DEBUGCHECKS)
+			if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi)
+				pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
+				"MmPageDirectoryDestroy: page directory had %d references\n" KeCrash
+			end
 		end
 	end
 

@@ -125,8 +125,8 @@ const MMDIREPAGES           (MMNORMALTHRESH 1 -)
 
 // default working set heuristics
 
-const MMWORKINGSETDEFAULTMINIMUM 16
-const MMWORKINGSETDEFAULTMAXIMUM 64
+const MMWORKINGSETDEFAULTMINIMUM 8
+const MMWORKINGSETDEFAULTMAXIMUM 48
 
 // a process will always be able to pin at least this many pages, no matter
 // what kind of load the system is undergoing.

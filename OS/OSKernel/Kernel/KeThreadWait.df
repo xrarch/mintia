@@ -103,20 +103,60 @@ fn KeDispatchWaitBlockEnqueue { waitindex waittype waitblock object -- }
 		end
 	end
 
+	object@ waitblock@ KeDispatchWaitBlock_Object + !
+	waittype@ waitblock@ KeDispatchWaitBlock_WaitType + !
+	waitindex@ waitblock@ KeDispatchWaitBlock_WaitIndex + !
+
 	auto t
 	object@ KeDispatchHeader_WaitBlockListTail + @ t!
 
 	if (t@ ~~)
 		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
-	end else
-		waitblock@ t@ KeDispatchWaitBlock_Next + !
-		t@ waitblock@ KeDispatchWaitBlock_Prev + !
+		waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
+		return
 	end
 
-	waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
-	object@ waitblock@ KeDispatchWaitBlock_Object + !
-	waittype@ waitblock@ KeDispatchWaitBlock_WaitType + !
-	waitindex@ waitblock@ KeDispatchWaitBlock_WaitIndex + !
+	// seek to the appropriate place to put this waitblock based on priority.
+
+	auto pri
+	waitblock@ KeDispatchWaitBlock_Thread + @ KeThread_Priority + @ pri!
+
+	while (t@)
+		if (t@ KeDispatchWaitBlock_Thread + @ KeThread_Priority + @ pri@ >=)
+			break
+		end
+
+		t@ KeDispatchWaitBlock_Prev + @ t!
+	end
+
+	// insert after t.
+
+	if (t@ ~~)
+		// nobody was higher priority, place at head
+
+		object@ KeDispatchHeader_WaitBlockListHead + @ t!
+
+		waitblock@ t@ KeDispatchWaitBlock_Prev + !
+		t@ waitblock@ KeDispatchWaitBlock_Next + !
+
+		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
+
+		return
+	end
+
+	auto n
+	t@ KeDispatchWaitBlock_Next + @ n!
+
+	if (n@)
+		waitblock@ n@ KeDispatchWaitBlock_Prev + !
+		n@ waitblock@ KeDispatchWaitBlock_Next + !
+	end else
+		waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
+	end
+
+	waitblock@ t@ KeDispatchWaitBlock_Next + !
+
+	t@ waitblock@ KeDispatchWaitBlock_Prev + !
 end
 
 // satisfies a WaitBlock
@@ -178,12 +218,8 @@ fn KeDispatchSatisfyAll { waitstatus priboost object -- count }
 	ipl@ KeIPLLower
 end
 
-// satisfies the earliest wait on a dispatch object.
+// satisfies the highest priority, earliest wait on a dispatch object.
 // this signals the object if no thread was awoken and signal is 1.
-
-// XXX maybe this should wake up the *highest priority* earliest waiter?
-// that would require keeping the waitblock list insertion sorted to do
-// efficiently which I don't feel like working on right now.
 
 fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
 	auto ipl

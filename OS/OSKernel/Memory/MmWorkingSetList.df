@@ -843,81 +843,93 @@ end
 // memory is low.
 
 fn MmManageWorkingSets { -- success }
-	auto pagecount
-	auto dire
+	while (1)
+		auto pagecount
+		auto dire
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-	if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
-		MmEventLowMemory // event
-		KeEventReset drop
+		if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
+			MmEventLowMemory // event
+			KeEventReset drop
+
+			ipl@ KeIPLLower
+
+			1 success!
+
+			return
+		end
+
+		MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - pagecount!
+		MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
 
 		ipl@ KeIPLLower
 
-		1 success!
+		0 success!
 
-		return
-	end
+		PsProcessListLock drop
 
-	MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - pagecount!
-	MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
+		auto process
+		PsProcessListHead@ process!
 
-	ipl@ KeIPLLower
+		auto count
+		PsActiveProcessCount@ count!
 
-	0 success!
+		auto nprocess
 
-	PsProcessListLock drop
+		auto totaltrimmed
+		0 totaltrimmed!
 
-	auto process
-	PsProcessListHead@ process!
+		while (process@ count@ &&)
+			process@ PsProcess_GlobalListNext + @ nprocess!
 
-	auto count
-	PsActiveProcessCount@ count!
+			if (process@ PsProcess_WorkingSetSize + @)
+				auto ok
 
-	auto nprocess
+				10 // timeout
+				process@ // processobject
+				MmWorkingSetLockTimeout ok!
 
-	while (process@ count@ &&)
-		process@ PsProcess_GlobalListNext + @ nprocess!
+				if (ok@ ~~)
+					auto trimmed
 
-		if (process@ PsProcess_WorkingSetSize + @)
-			auto ok
+					dire@ // dire
+					pagecount@ // pages
+					process@ // process
+					MmWorkingSetTrim trimmed!
 
-			10 // timeout
-			process@ // processobject
-			MmWorkingSetLockTimeout ok!
+					process@ MmWorkingSetUnlock
 
-			if (ok@ ~~)
-				auto trimmed
+					if (process@ PsProcessListTail@ ~=)
+						process@ PsProcessRemove
+						process@ PsProcessInsert
+					end
 
-				dire@ // dire
-				pagecount@ // pages
-				process@ // process
-				MmWorkingSetTrim trimmed!
+					if (trimmed@ pagecount@ >=)
+						0 pagecount!
+						break
+					end
 
-				process@ MmWorkingSetUnlock
+					trimmed@ totaltrimmed +=
 
-				if (process@ PsProcessListTail@ ~=)
-					process@ PsProcessRemove
-					process@ PsProcessInsert
+					trimmed@ pagecount -=
 				end
-
-				if (trimmed@ pagecount@ >=)
-					0 pagecount!
-					break
-				end
-
-				trimmed@ pagecount -=
 			end
+
+			1 count -=
+			nprocess@ process!
 		end
 
-		1 count -=
-		nprocess@ process!
-	end
+		PsProcessListUnlock
 
-	PsProcessListUnlock
+		if (pagecount@ ~~)
+			1 success!
+			break
+		end
 
-	if (pagecount@ ~~)
-		1 success!
+		if (totaltrimmed@ ~~)
+			return
+		end
 	end
 end

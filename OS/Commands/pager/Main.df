@@ -1,0 +1,458 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "Pager.h"
+
+fn private Usage { -- }
+	"usage: pager [file]\n" OSGetStdErr FPrintf
+end
+
+var VirtualBuffer 0
+var BufferLength 0
+
+fn Main { ... -- ret }
+	0 ret!
+
+	if (argc@ 2 >)
+		Usage
+		-1 OSExit
+	end
+
+	if (argc@ 1 ==)
+		BuildStdinBuffer
+	end else
+		auto filehandle
+
+		0 // flags
+		ACCESS_READ // access
+		[1]argv@ // path
+		OSFILETYPE_FILE // ftype
+		OSFileOpen ret! filehandle!
+
+		if (ret@)
+			ret@ OSStatusGetName [1]argv@ "pager: %s: %s\n" OSError
+		end
+
+		filehandle@ BuildFileBuffer
+	end
+
+	TermInit
+
+	TermSetMode
+
+	1 TermSetCursorHidden
+
+	0 DrawScreen
+	DrawUI
+
+	InputLoop
+
+	0 TermSetCursorHidden
+
+	TermResetMode
+
+	"\[[0m\[[1;1H\[[2J" Printf
+	OSFlushLine
+end
+
+var PagerRunning 1
+
+fn InputLoop { -- }
+	auto charbuf
+	4 alloc charbuf!
+
+	while (PagerRunning@)
+		auto ok
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		1 // length
+		charbuf@ // buffer
+		OSGetStdIn // filehandle
+		OSFileRead ok! drop
+
+		if (ok@)
+			ok@ OSStatusGetName "pager: failed to read stdin: %s\n" OSError
+		end
+
+		charbuf@ gb InputCharacter
+	end
+end
+
+const INPUTMODE_NORMAL 0
+const INPUTMODE_ESC0   1
+const INPUTMODE_ESC1   2
+
+var InputMode INPUTMODE_NORMAL
+
+fn InputCharacter { c -- }
+	if (InputMode@ INPUTMODE_NORMAL ==)
+		if (c@ 0x03 ==) // ^C
+			0 PagerRunning!
+		end elseif (c@ '\[' ==)
+			INPUTMODE_ESC0 InputMode!
+		end else
+			0 SetUIMode
+		end
+	end elseif (InputMode@ INPUTMODE_ESC0 ==)
+		if (c@ '[' ==)
+			INPUTMODE_ESC1 InputMode!
+		end else
+			INPUTMODE_NORMAL InputMode!
+		end
+	end elseif (InputMode@ INPUTMODE_ESC1 ==)
+		INPUTMODE_NORMAL InputMode!
+		c@ InputNavigationalKey
+	end
+end
+
+fn InputNavigationalKey { c -- }
+	if (c@ 'B' ==)
+		NavigateDown
+	end elseif (c@ 'A' ==)
+		NavigateUp
+	end
+end
+
+fn NavigateDown { -- }
+	if (DrawEnd@ BufferLength@ ==)
+		1 SetUIMode
+
+		return
+	end
+
+	0 SetUIMode
+
+	while (VirtualBuffer@ DrawStart@ + gb '\n' ~=)
+		1 DrawStart +=
+	end
+
+	if (VirtualBuffer@ DrawStart@ + gb '\n' ==)
+		1 DrawStart +=
+	end
+
+	0 TermHeight@ 2 - TermSetScrollMargin
+	TermScrollUp
+	TermResetScrollMargin
+
+	1 DrawScreen
+end
+
+fn NavigateUp { -- }
+	0 SetUIMode
+
+	if (DrawStart@ ~~)
+		return
+	end
+
+	1 DrawStart -=
+
+	while (DrawStart@)
+		1 DrawStart -=
+
+		if (VirtualBuffer@ DrawStart@ + gb '\n' ==)
+			1 DrawStart +=
+			break
+		end
+	end
+
+	0 TermHeight@ 2 - TermSetScrollMargin
+	TermScrollDown
+	TermResetScrollMargin
+
+	2 DrawScreen
+end
+
+var DrawStart 0
+var DrawEnd 0
+
+fn DrawScreen { which -- }
+	0 0 TermSetCursorPosition
+
+	auto buffer
+	VirtualBuffer@ DrawStart@ + buffer!
+
+	auto i
+	0 i!
+
+	auto rows
+	TermHeight@ 1 - rows!
+
+	auto totallength
+	BufferLength@ DrawStart@ - totallength!
+
+	auto drawrow
+
+	if (which@ 1 ==)
+		TermHeight@ 2 - drawrow!
+	end elseif (which@ 2 ==)
+		0 drawrow!
+	end else
+		-1 drawrow!
+	end
+
+	while (i@ rows@ <)
+		auto long
+		0 long!
+
+		auto length
+		0 length!
+
+		auto inesc
+		0 inesc!
+
+		if (i@ drawrow@ ==)
+			0 i@ TermSetCursorPosition
+		end
+
+		while (totallength@)
+			auto char
+			buffer@ gb char!
+
+			if (i@ drawrow@ == drawrow@ -1 == ||)
+				if (inesc@ 1 ==)
+					if (char@ '[' ==)
+						2 inesc!
+						'[' Putc
+					end else
+						0 inesc!
+					end
+				end elseif (inesc@ 2 ==)
+					char@ Putc
+
+					if (char@ '0' >= char@ '9' <= &&)
+						// don't care
+					end elseif (char@ ';' ==)
+						// don't care
+					end else
+						0 inesc!
+					end
+				end elseif (char@ '\[' ==)
+					1 inesc!
+					'\[' Putc
+				end else
+					if (char@ '\n' ~=)
+						if (long@ ~~)
+							if (char@ '\t' ==)
+								' ' char!
+							end elseif (char@ 0x20 < char@ 0x7F >= ||)
+								'?' char!
+							end
+
+							char@ Putc
+						end
+
+						1 length +=
+					end
+				end
+			end
+
+			1 totallength -=
+			1 buffer +=
+
+			if (length@ TermWidth@ >=)
+				1 long!
+			end
+
+			if (char@ '\n' ==)
+				break
+			end
+		end
+
+		if (i@ drawrow@ == drawrow@ -1 == ||)
+			if (long@ ~~)
+				TermClearLine
+				'\n' Putc
+			end
+		end
+
+		1 i +=
+	end
+
+	buffer@ VirtualBuffer@ - DrawEnd!
+end
+
+var UIMode 0
+
+fn SetUIMode { mode -- }
+	if (mode@ UIMode@ ==)
+		return
+	end
+
+	mode@ UIMode!
+
+	DrawUI
+end
+
+fn DrawUI { -- }
+	0 TermHeight@ 1 - TermSetCursorPosition
+
+	TermInvertColor
+
+	if (UIMode@ ~~)
+		auto left
+		"^C to Exit. Navigate with UP and DOWN arrow keys." DrawTextCentered left!
+
+		if (left@)
+			1 left -=
+		end
+
+		while (left@)
+			' ' Putc
+			1 left -=
+		end
+	end elseif (UIMode@ 1 ==)
+		"END OF FILE" DrawTextCentered left!
+
+		if (left@)
+			1 left -=
+		end
+
+		while (left@)
+			' ' Putc
+			1 left -=
+		end
+	end
+
+	TermResetColor
+
+	TermFinishDrawing
+end
+
+fn DrawTextCentered { text -- left }
+	auto len
+	text@ strlen len!
+
+	auto toolong
+	auto pad
+
+	if (len@ 5 + TermWidth@ >)
+		1 toolong!
+		1 pad!
+		TermWidth@ 5 - len!
+	end else
+		0 toolong!
+		TermWidth@ 2 / len@ 2 / - pad!
+	end
+
+	TermWidth@ pad@ - len@ - left!
+
+	while (pad@)
+		' ' Putc
+		1 pad -=
+	end
+
+	if (toolong@ ~~)
+		text@ Puts
+	end else
+		while (len@)
+			text@ gb Putc
+
+			1 text +=
+			1 len -=
+		end
+
+		"..." Puts
+	end
+end
+
+fn BuildFileBuffer { filehandle -- }
+	// mmap the whole file
+
+	auto query
+	OSFileInformation_SIZEOF alloc query!
+
+	auto ok
+	filehandle@ // filehandle
+	query@ // query
+	OSFileQuery ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "pager: %s\n" OSError
+	end
+
+	if (query@ OSFileInformation_Size + @ 0 ==)
+		return
+	end
+
+	// map file
+
+	auto vaddr
+	query@ OSFileInformation_Size + @ // length
+	0x10000000 // startva
+	0 // sectionoffset
+	filehandle@ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ // pageprotection
+	0 // flags
+	OSMapView ok! vaddr!
+
+	if (ok@)
+		ok@ OSStatusGetName "pager: %s\n" OSError
+	end
+
+	vaddr@ VirtualBuffer!
+	query@ OSFileInformation_Size + @ BufferLength!
+end
+
+const BUFFEREXTENDUNIT OSPAGESIZE
+
+fn BuildStdinBuffer { -- }
+	// construct a virtual buffer from stdin
+
+	auto bufleft
+	BUFFEREXTENDUNIT bufleft!
+
+	auto ok
+	auto vaddr
+	BUFFEREXTENDUNIT // length
+	0x10000000 // startva
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSAllocate ok! vaddr!
+
+	if (ok@)
+		ok@ OSStatusGetName "pager: %s\n" OSError
+	end
+
+	vaddr@ VirtualBuffer!
+
+	while (1)
+		auto bytesread
+
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		bufleft@ // length
+		vaddr@ // buffer
+		OSGetStdIn // filehandle
+		OSFileRead ok! bytesread!
+
+		if (ok@)
+			ok@ OSStatusGetName "pager: %s\n" OSError
+		end
+
+		if (bytesread@ ~~)
+			break
+		end
+
+		bytesread@ BufferLength +=
+		bytesread@ bufleft -=
+		bytesread@ vaddr +=
+
+		if (bufleft@ ~~)
+			BUFFEREXTENDUNIT // length
+			vaddr@ // startva
+			OSCURRENTPROCESS // processhandle
+			PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+			OSMAPFLAG_FIXEDADDRESS // flags
+			OSAllocate ok! vaddr!
+
+			if (ok@)
+				ok@ OSStatusGetName "pager: %s\n" OSError
+			end
+
+			BUFFEREXTENDUNIT bufleft!
+		end
+	end
+end

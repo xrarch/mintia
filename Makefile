@@ -26,6 +26,7 @@ RTL_DIR    := $(OS_DIR)/OSDLL
 SYSINIT_DIR:= $(OS_DIR)/SystemInit
 BIN_DIR    := $(OS_DIR)/Bin
 COMMANDS_DIR := $(OS_DIR)/Commands
+HELP_DIR   := $(OS_DIR)/Help
 
 FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
 
@@ -75,6 +76,8 @@ endif
 	make -C $(SYSBIN_DIR)
 	make -C $(BIN_DIR)
 	make -C $(BR_DIR)
+
+	make -C $(HELP_DIR)
 
 $(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
 	cp ../sdk/lib/dfrt/dfrt.f.o $(SYSBIN_DIR)/Dragonfruit.dll

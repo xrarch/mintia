@@ -68,6 +68,9 @@ var CoVideoConsoleUpdateCursorY 0
 var CoVideoConsoleOnScreenCursorX 0
 var CoVideoConsoleOnScreenCursorY 0
 
+var CoVideoConsoleScrollTop 0
+var CoVideoConsoleScrollBottom 0
+
 var CoVideoConsoleCursorHidden 0
 
 var CoVideoConsoleIsDirty 0
@@ -204,6 +207,9 @@ fn CoVideoConsoleInit { -- }
 
 	CoVideoConsoleScreenWidth@ CoVideoConsoleFontWidth@ / 80 min CoVideoConsoleColumns!
 	CoVideoConsoleScreenHeight@ CoVideoConsoleFontHeight@ / 30 min CoVideoConsoleRows!
+
+	0 CoVideoConsoleScrollTop!
+	CoVideoConsoleRows@ 1 - CoVideoConsoleScrollBottom!
 
 	auto buf
 	CoVideoConsoleRows@ CoVideoConsoleColumns@ * 4 * // bytes
@@ -532,16 +538,48 @@ fn CoVideoConsoleClear { -- }
 		CoVideoConsoleRows@ 1 - CoVideoConsoleDirtyY2!
 
 		CoVideoConsoleMakeDirty
+
+		0 CoVideoConsoleCursorHidden!
+
+		0 CoVideoConsoleScrollTop!
+		CoVideoConsoleRows@ 1 - CoVideoConsoleScrollBottom!
 	end
 end
 
-fn CoVideoConsoleScroll { -- }
-	CoVideoConsoleUpdateBuffer@ // dest
-	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ 1 << + // src
-	CoVideoConsoleColumns@ CoVideoConsoleRows@ 1 - * 1 << // size
+fn CoVideoConsoleScrollUp { -- }
+	auto base
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleScrollTop@ CoVideoConsoleColumns@ * 1 << + base!
+
+	base@ // dest
+	base@ CoVideoConsoleColumns@ 1 << + // src
+	CoVideoConsoleColumns@ CoVideoConsoleScrollBottom@ CoVideoConsoleScrollTop@ - * 1 << // size
 	memcpy
 
-	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ CoVideoConsoleRows@ 1 - * 1 << + // ptr
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleColumns@ CoVideoConsoleScrollBottom@ * 1 << + // ptr
+	CoVideoConsoleColumns@ 1 << // size
+	CoVideoConsoleDefaultBG@ 28 << CoVideoConsoleDefaultFG@ 24 << |
+	CoVideoConsoleDefaultBG@ 12 << CoVideoConsoleDefaultFG@ 8 << | | // word
+	memset
+
+	0 CoVideoConsoleDirtyX1!
+	0 CoVideoConsoleDirtyY1!
+
+	CoVideoConsoleColumns@ 1 - CoVideoConsoleDirtyX2!
+	CoVideoConsoleRows@ 1 - CoVideoConsoleDirtyY2!
+
+	CoVideoConsoleMakeDirty
+end
+
+fn CoVideoConsoleScrollDown { -- }
+	auto base
+	CoVideoConsoleUpdateBuffer@ CoVideoConsoleScrollTop@ CoVideoConsoleColumns@ * 1 << + base!
+
+	base@ CoVideoConsoleColumns@ 1 << + // dest
+	base@ // src
+	CoVideoConsoleColumns@ CoVideoConsoleScrollBottom@ CoVideoConsoleScrollTop@ - * 1 << // size
+	memmove
+
+	base@ // ptr
 	CoVideoConsoleColumns@ 1 << // size
 	CoVideoConsoleDefaultBG@ 28 << CoVideoConsoleDefaultFG@ 24 << |
 	CoVideoConsoleDefaultBG@ 12 << CoVideoConsoleDefaultFG@ 8 << | | // word
@@ -560,9 +598,9 @@ fn CoVideoConsoleNewline { -- }
 	0 CoVideoConsoleUpdateCursorX!
 	1 CoVideoConsoleUpdateCursorY +=
 
-	if (CoVideoConsoleUpdateCursorY@ CoVideoConsoleRows@ >=)
-		CoVideoConsoleRows@ 1 - CoVideoConsoleUpdateCursorY!
-		CoVideoConsoleScroll
+	if (CoVideoConsoleUpdateCursorY@ CoVideoConsoleScrollBottom@ >)
+		CoVideoConsoleScrollBottom@ CoVideoConsoleUpdateCursorY!
+		CoVideoConsoleScrollUp
 	end
 
 	CoVideoConsoleMakeDirty
@@ -606,7 +644,6 @@ fn CoVideoConsoleSetColor { -- }
 		CoVideoConsoleDefaultBG@ CoVideoConsoleBG!
 
 		0 CoVideoConsoleInverted!
-		0 CoVideoConsoleCursorHidden!
 
 		return
 	end elseif (param0@ 7 ==)
@@ -688,13 +725,35 @@ fn CoVideoConsoleClearLine { -- }
 	end
 
 	while (count@)
-		0 bufp@ sb
+		CoVideoConsoleDefaultBG@ 12 << CoVideoConsoleDefaultFG@ 8 << | bufp@ si
 
 		2 bufp +=
 		1 count -=
 	end
 
 	CoVideoConsoleMakeDirty
+end
+
+fn CoVideoConsoleSetScrollMargins { -- }
+	if ([0]CoVideoConsoleEscapeParameters@ 0 ==)
+		0 CoVideoConsoleScrollTop!
+	end else
+		[0]CoVideoConsoleEscapeParameters@ 1 - CoVideoConsoleScrollTop!
+
+		if (CoVideoConsoleScrollTop@ CoVideoConsoleRows@ >=)
+			0 CoVideoConsoleScrollTop!
+		end
+	end
+
+	if ([1]CoVideoConsoleEscapeParameters@ 0 ==)
+		CoVideoConsoleRows@ 1 - CoVideoConsoleScrollBottom!
+	end else
+		[1]CoVideoConsoleEscapeParameters@ 1 - CoVideoConsoleScrollBottom!
+
+		if (CoVideoConsoleScrollBottom@ CoVideoConsoleRows@ >=)
+			CoVideoConsoleRows@ 1 - CoVideoConsoleScrollBottom!
+		end
+	end
 end
 
 fn CoVideoConsoleParseEscape { c -- }
@@ -734,6 +793,16 @@ fn CoVideoConsoleParseEscape { c -- }
 			CoVideoConsoleClearLine
 		end elseif (c@ '?' ==)
 			2 CoVideoConsoleEscape!
+		end elseif (c@ 'r' ==)
+			CoVideoConsoleSetScrollMargins
+		end elseif (c@ 'S' ==)
+			if ([0]CoVideoConsoleEscapeParameters@ 1 ==)
+				CoVideoConsoleScrollUp
+			end
+		end elseif (c@ 'T' ==)
+			if ([0]CoVideoConsoleEscapeParameters@ 1 ==)
+				CoVideoConsoleScrollDown
+			end
 		end
 	end elseif (CoVideoConsoleEscape@ 2 ==)
 		0 CoVideoConsoleEscape!

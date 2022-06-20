@@ -29,6 +29,8 @@ all:
 	make -C quota
 	make -C swapon
 	make -C edit
+	make -C pager
+	make -C help
 
 	make -C mousedemo
 
@@ -66,6 +68,8 @@ cleanup:
 	make -C quota cleanup
 	make -C swapon cleanup
 	make -C edit cleanup
+	make -C pager cleanup
+	make -C help cleanup
 
 	make -C mousedemo cleanup
 

@@ -1,0 +1,210 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn private Usage { -- }
+	"usage: help [chapter] topic\n" OSGetStdErr FPrintf
+end
+
+fn ToLower { str -- }
+	while (str@ gb)
+		if (str@ gb 'A' >= str@ gb 'Z' <= &&)
+			str@ gb 0x20 + str@ sb
+		end
+
+		1 str +=
+	end
+end
+
+fn Main { ... -- ret }
+	0 ret!
+
+	if (argc@ 3 >)
+		Usage
+		-1 OSExit
+	end
+
+	auto chapter
+	-1 chapter!
+
+	auto name
+
+	if (argc@ 1 ==)
+		"0" chapter!
+		"help" name!
+	end elseif (argc@ 2 ==)
+		[1]argv@ name!
+	end else
+		[1]argv@ chapter!
+		[2]argv@ name!
+	end
+
+	if (chapter@ -1 ==)
+		name@ HelpTopic
+	end else
+		chapter@ name@ Help drop
+	end
+end
+
+fn HelpTopic { name -- }
+	name@ ToLower
+
+	// search all chapters in numerical order
+
+	auto pathbuf
+	OSFILEPATHMAX alloc pathbuf!
+
+	pathbuf@ // dest
+	"/mintia/help/" // src
+	strcpy
+
+	auto len
+	pathbuf@ strlen len!
+
+	auto i
+	0 i!
+
+	while (i@ 1024 <)
+		i@ pathbuf@ len@ + itoa
+
+		auto ok
+		auto chapterhandle
+		0 // flags
+		ACCESS_READ // access
+		pathbuf@ // path
+		OSFILETYPE_DIRECTORY // ftype
+		OSFileOpen ok! chapterhandle!
+
+		if (ok@)
+			break
+		end
+
+		auto topichandle
+		0 // flags
+		ACCESS_READ // access
+		chapterhandle@ // initialobjecthandle
+		name@ // path
+		OSObjectOpen ok! topichandle!
+
+		chapterhandle@ OSClose drop
+
+		if (ok@)
+			1 i +=
+			continue
+		end
+
+		pathbuf@ pathbuf@ strlen + // dest
+		"/" // src
+		strcpy
+
+		pathbuf@ pathbuf@ strlen + // dest
+		name@ // src
+		strcpy
+
+		auto phandle
+		auto thandle
+
+		pathbuf@
+		"/mintia/bin/pager.exe" // path
+		0 // creationflags
+		0 // creationparams
+		ACCESS_OWNER_ALL // permissions
+		"pager" // name
+		OSSpawn ok! phandle! thandle!
+
+		if (ok@)
+			ok@ OSStatusGetName "help: couldn't spawn pager: %s\n" OSError
+		end
+
+		thandle@ OSClose drop
+
+		1 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		phandle@ // objecthandle
+		OSWaitForObject drop
+
+		phandle@ OSClose drop
+
+		return
+	end
+
+	name@ "help: no page for topic '%s'\n" OSError
+end
+
+fn Help { chapter name -- ok }
+	chapter@ ToLower
+	name@ ToLower
+
+	auto pathbuf
+	OSFILEPATHMAX alloc pathbuf!
+
+	pathbuf@ // dest
+	"/mintia/help/" // src
+	strcpy
+
+	pathbuf@ pathbuf@ strlen + // dest
+	chapter@ // src
+	strcpy
+
+	auto chapterhandle
+	0 // flags
+	ACCESS_READ // access
+	pathbuf@ // path
+	OSFILETYPE_DIRECTORY // ftype
+	OSFileOpen ok! chapterhandle!
+
+	if (ok@ STATUS_NOT_FOUND ==)
+		chapter@ "help: no chapter '%s' found!\n" OSError
+	end elseif (ok@)
+		ok@ OSStatusGetName chapter@ "help: %s: %s\n" OSError
+	end
+
+	auto topichandle
+	0 // flags
+	ACCESS_READ // access
+	chapterhandle@ // initialobjecthandle
+	name@ // path
+	OSObjectOpen ok! topichandle!
+
+	chapterhandle@ OSClose drop
+
+	if (ok@ STATUS_NOT_FOUND ==)
+		chapter@ name@ "help: no topic '%s' found in chapter '%s'!\n" OSError
+	end elseif (ok@)
+		ok@ OSStatusGetName name@ "help: %s: %s\n" OSError
+	end
+
+	topichandle@ OSClose drop
+
+	pathbuf@ pathbuf@ strlen + // dest
+	"/" // src
+	strcpy
+
+	pathbuf@ pathbuf@ strlen + // dest
+	name@ // src
+	strcpy
+
+	auto phandle
+	auto thandle
+
+	pathbuf@
+	"/mintia/bin/pager.exe" // path
+	0 // creationflags
+	0 // creationparams
+	ACCESS_OWNER_ALL // permissions
+	"pager" // name
+	OSSpawn ok! phandle! thandle!
+
+	if (ok@)
+		ok@ OSStatusGetName "help: couldn't spawn pager: %s\n" OSError
+	end
+
+	thandle@ OSClose drop
+
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	phandle@ // objecthandle
+	OSWaitForObject drop
+
+	phandle@ OSClose drop
+end

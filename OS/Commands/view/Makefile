@@ -1,3 +1,3 @@
-CMDNAME = pager
+CMDNAME = view
 
 include ../Command.mk

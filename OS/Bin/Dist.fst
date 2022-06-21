@@ -30,7 +30,7 @@ whoami.exe whoami.exe 493
 quota.exe quota.exe 493
 swapon.exe swapon.exe 493
 edit.exe edit.exe 493
-pager.exe pager.exe 493
+view.exe view.exe 493
 help.exe help.exe 493
 
 mousedemo.exe mousedemo.exe 493

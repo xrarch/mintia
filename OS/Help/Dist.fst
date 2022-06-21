@@ -24,7 +24,7 @@
 1/mount 1/mount
 1/mousedemo 1/mousedemo
 1/mv 1/mv
-1/pager 1/pager
+1/view 1/view
 1/ps 1/ps
 1/pwd 1/pwd
 1/quota 1/quota

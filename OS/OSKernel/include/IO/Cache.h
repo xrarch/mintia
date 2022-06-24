@@ -27,9 +27,9 @@ struct IOPageFrameEntryCache
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 FCB
 	4 Context1
-	4 OffsetInFile
 	4 NextCachePage
 	4 PrevCachePage
+	4 OffsetInFile
 endstruct
 
 extern IOWritebehindWorker { context1 context2 -- }

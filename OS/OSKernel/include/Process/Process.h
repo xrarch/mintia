@@ -50,10 +50,7 @@ struct PsProcess
 
 	4 ModifiedPages
 
-	4 VADListHead
-	4 VADListTail
-
-	4 VADListLRUHead
+	4 VADTreeRoot
 
 	4 PinnedPageCount
 

@@ -1,13 +1,4 @@
 struct MmVAD
-	4 Next
-	4 Prev
-
-	4 LRUNext
-	4 LRUPrev
-
-	4 StartVA
-	4 EndVA
-
 	4 Flags
 
 	4 FurthestExtentMapped
@@ -22,6 +13,12 @@ struct MmVAD
 	4 ChargeVMQuota
 
 	4 COWCount
+
+	4 Parent
+	4 LeftChild
+	4 RightChild
+	4 StartVA
+	4 EndVA
 endstruct
 
 const MMVADFLAG_FILE     1

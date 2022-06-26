@@ -100,12 +100,6 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 	mappedobject@ vad@ MmVAD_MappedObject + !
 	offset@ vad@ MmVAD_OffsetInSection + !
 
-	0 vad@ MmVAD_Next + !
-	0 vad@ MmVAD_Prev + !
-
-	0 vad@ MmVAD_LRUNext + !
-	0 vad@ MmVAD_LRUPrev + !
-
 	0 vad@ MmVAD_Flags + !
 
 	startva@ vad@ MmVAD_StartVA + !
@@ -170,67 +164,16 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 
 	0 ok!
 
-	processobject@ PsProcess_VADListLRUHead + @ vad!
+	vaddr@ // value
+	processobject@ PsProcess_VADTreeRoot + // rootptr
+	ExSplayTreeFindNodeByValueRange vad!
 
-	auto searches
-	0 searches!
-
-	while (vad@)
-		if (vaddr@ vad@ MmVAD_StartVA + @ >=)
-			if (vaddr@ vad@ MmVAD_EndVA + @ <)
-				// found it
-
-				if (mustbestart@)
-					if (vad@ MmVAD_StartVA + @ vaddr@ ~=)
-						STATUS_BAD_ADDRESS ok!
-
-						return
-					end
-
-					if (vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - length@ ~=)
-						STATUS_BAD_ADDRESS ok!
-
-						return
-					end
-				end
-
-				if (processobject@ PsProcess_VADListLRUHead + @ vad@ ~=)
-					// remove from LRU list
-
-					auto n
-					vad@ MmVAD_LRUNext + @ n!
-
-					if (n@)
-						vad@ MmVAD_LRUPrev + @ n@ MmVAD_LRUPrev + !
-					end
-
-					vad@ MmVAD_LRUPrev + @ n!
-
-					if (n@)
-						vad@ MmVAD_LRUNext + @ n@ MmVAD_LRUNext + !
-					end
-
-					// reinsert at head of LRU list
-
-					processobject@ PsProcess_VADListLRUHead + @ n!
-
-					if (n@)
-						vad@ n@ MmVAD_LRUPrev + !
-					end
-
-					0 vad@ MmVAD_LRUPrev + !
-					n@ vad@ MmVAD_LRUNext + !
-					vad@ processobject@ PsProcess_VADListLRUHead + !
-				end
-
-				return
-			end
-		end
-
-		vad@ MmVAD_LRUNext + @ vad!
+	if (vad@ ~~)
+		STATUS_BAD_ADDRESS ok!
+		return
 	end
 
-	STATUS_BAD_ADDRESS ok!
+	MmVAD_Parent vad -=
 end
 
 fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset mappedobject processobject -- realva ok }
@@ -243,18 +186,10 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	// no overflow check, caller should have done that
 	startva@ viewsize@ + endva!
 
-	// stores last VAD that can hold the view after it.
-	// -1 means no space available, 0 means very start
-	auto lastsufficientvad
-	-1 lastsufficientvad!
-
-	auto lastvad
-	0 lastvad!
-
-	auto lastend
-	PAGESIZE lastend!
-
 	0 realva!
+
+	auto vad
+	0 vad!
 
 	processobject@ MmVADListLock ok!
 
@@ -262,84 +197,84 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 		return
 	end
 
-	auto vad
-	processobject@ PsProcess_VADListHead + @ vad!
-
-	while (vad@)
-		if (fixedva@ ~~)
-			if (vad@ MmVAD_StartVA + @ lastend@ - viewsize@ >=)
-				// the last space is big enough
-
-				lastend@ realva!
-				lastvad@ lastsufficientvad!
-
-				if (startva@ ~~)
-					// no startva preference, use it
-					break
-				end elseif (lastend@ startva@ >=)
-					// there's a startva preference but we already went past it
-					// so just roll with this
-					break
-				end
-			end
-		end
-
-		if (vad@ MmVAD_StartVA + @ endva@ >=)
-			if (startva@ lastend@ >=)
-				// found our preferred address!
-				startva@ realva!
-				lastvad@ lastsufficientvad!
-				break
-			end elseif (fixedva@)
-				// this VAD begins after our requested region, which means it
-				// either lies directly behind this VAD or doesn't exist.
-				// this startva was mandatory...
-
+	if (startva@)
+		if (startva@ PAGESIZE <)
+			if (fixedva@)
 				processobject@ MmVADListUnlock
 
 				STATUS_UNAVAILABLE_ADDRESS ok!
 
 				return
 			end
+
+			PAGESIZE startva!
 		end
 
-		vad@ MmVAD_EndVA + @ lastend!
-		vad@ lastvad!
-		vad@ MmVAD_Next + @ vad!
+		startva@ // value
+		endva@ // endvalue
+		processobject@ PsProcess_VADTreeRoot + @ // root
+		ExSplayTreeFindFirstContainingNode vad!
+
+		if (vad@)
+			if (fixedva@)
+				processobject@ MmVADListUnlock
+
+				STATUS_UNAVAILABLE_ADDRESS ok!
+
+				return
+			end
+
+			MmVAD_Parent vad -=
+
+			while (1)
+				auto nextvad
+				vad@ MmVAD_Parent + // node
+				ExSplayTreeNodeNext nextvad!
+
+				if (nextvad@ ~~)
+					break
+				end
+
+				MmVAD_Parent nextvad -=
+
+				if (nextvad@ MmVAD_StartVA + @ vad@ MmVAD_EndVA + @ - viewsize@ >=)
+					vad@ MmVAD_EndVA + @ realva!
+					break
+				end
+
+				nextvad@ vad!
+			end
+		end else
+			startva@ realva!
+		end
 	end
 
-	if (lastsufficientvad@ -1 ==)
-		// see if it can fit in the end
+	if (realva@ ~~)
+		viewsize@ // size
+		processobject@ PsProcess_VADTreeRoot + @ // root
+		ExSplayTreeFindEmptyRange realva! vad!
 
-		if (fixedva@)
-			// skip a check against MMHIGHESTUSERADDRESS because endva should
-			// have been sanity checked against it already by the caller
-
-			if (startva@ lastend@ >=)
-				// found a space!
-				startva@ realva!
-				lastvad@ lastsufficientvad!
-			end
-		end elseif (MMHIGHESTUSERADDRESS 1 + lastend@ - viewsize@ >=)
-			// fits!
-			lastend@ realva!
-			lastvad@ lastsufficientvad!
-		end
-
-		if (lastsufficientvad@ -1 ==)
+		if (realva@ ~~)
 			processobject@ MmVADListUnlock
-
-			// still -1, didn't fit anywhere!
 
 			STATUS_UNAVAILABLE_ADDRESS ok!
 
 			return
 		end
+
+		if (vad@)
+			MmVAD_Parent vad -=
+		end
 	end
 
-	// create the VAD for this mapping and insert it in the list just after
-	// lastsufficientvad (or before the head of the list if lastsufficientvad
-	// is 0)
+	auto hintvad
+	vad@ hintvad!
+
+	if (hintvad@)
+		MmVAD_Parent hintvad +=
+	end
+
+	// create the VAD for this mapping and insert it in the tree
 
 	realva@ // startva
 	realva@ viewsize@ + // endva
@@ -356,47 +291,10 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 		return
 	end
 
-	auto h
-
-	if (lastsufficientvad@ ~~)
-		// insert at head
-
-		processobject@ PsProcess_VADListHead + @ h!
-
-		if (h@)
-			vad@ h@ MmVAD_Prev + !
-			h@ vad@ MmVAD_Next + !
-		end else
-			vad@ processobject@ PsProcess_VADListTail + !
-		end
-
-		vad@ processobject@ PsProcess_VADListHead + !
-	end else
-		// insert ahead of given VAD
-
-		lastsufficientvad@ MmVAD_Next + @ h!
-
-		if (h@)
-			vad@ h@ MmVAD_Prev + !
-			h@ vad@ MmVAD_Next + !
-		end else
-			vad@ processobject@ PsProcess_VADListTail + !
-		end
-
-		lastsufficientvad@ vad@ MmVAD_Prev + !
-		vad@ lastsufficientvad@ MmVAD_Next + !
-	end
-
-	// insert at head of LRU list
-
-	processobject@ PsProcess_VADListLRUHead + @ h!
-
-	if (h@)
-		vad@ h@ MmVAD_LRUPrev + !
-		h@ vad@ MmVAD_LRUNext + !
-	end
-
-	vad@ processobject@ PsProcess_VADListLRUHead + !
+	hintvad@ // insertat
+	vad@ MmVAD_Parent + // node
+	processobject@ PsProcess_VADTreeRoot + // rootptr
+	ExSplayTreeInsert
 
 	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		1 processobject@ PsProcess_MappedMMIOCount + +=
@@ -571,41 +469,11 @@ fn MmVADUnmap { vad processobject -- }
 
 	processobject@ MmPageDirectoryDereference
 
-	// remove from VAD list
+	// remove from VAD tree
 
-	auto n
-	vad@ MmVAD_Next + @ n!
-
-	if (n@)
-		vad@ MmVAD_Prev + @ n@ MmVAD_Prev + !
-	end else // no next means we were the tail
-		vad@ MmVAD_Prev + @ processobject@ PsProcess_VADListTail + !
-	end
-
-	vad@ MmVAD_Prev + @ n!
-
-	if (n@)
-		vad@ MmVAD_Next + @ n@ MmVAD_Next + !
-	end else // no prev means we were the head
-		vad@ MmVAD_Next + @ processobject@ PsProcess_VADListHead + !
-	end
-
-	// remove from LRU list
-
-	vad@ MmVAD_LRUNext + @ n!
-
-	if (n@)
-		vad@ MmVAD_LRUPrev + @ n@ MmVAD_LRUPrev + !
-	end
-
-	vad@ MmVAD_LRUPrev + @ n!
-
-	if (n@)
-		vad@ MmVAD_LRUNext + @ n@ MmVAD_LRUNext + !
-	end else
-		// no prev means we were the head
-		vad@ MmVAD_LRUNext + @ processobject@ PsProcess_VADListLRUHead + !
-	end
+	vad@ MmVAD_Parent + // node
+	processobject@ PsProcess_VADTreeRoot + // rootptr
+	ExSplayTreeRemove
 
 	// uncharge quota
 
@@ -647,9 +515,14 @@ fn MmVADListCheckRange { startva endva process -- ok }
 	// -mapped devices overlapping the given range.
 
 	auto vad
-	process@ PsProcess_VADListHead + @ vad!
+	startva@ // value
+	endva@ // endvalue
+	process@ PsProcess_VADTreeRoot + @ // root
+	ExSplayTreeFindFirstContainingNode vad!
 
 	while (vad@)
+		MmVAD_Parent vad -=
+
 		if (vad@ MmVAD_StartVA + @ endva@ >=)
 			// we're at the end of the range, no more to check.
 
@@ -671,7 +544,8 @@ fn MmVADListCheckRange { startva endva process -- ok }
 			end
 		end
 
-		vad@ MmVAD_Next + @ vad!
+		vad@ MmVAD_Parent + // node
+		ExSplayTreeNodeNext vad!
 	end
 
 	0 ok!

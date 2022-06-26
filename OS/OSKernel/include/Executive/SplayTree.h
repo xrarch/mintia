@@ -11,7 +11,7 @@ struct ExSplayTreeNode
 	4 EndValue // only used for some things
 endstruct
 
-extern ExSplayTreeInsert { node rootptr -- }
+extern ExSplayTreeInsert { insertat node rootptr -- }
 extern ExSplayTreeRemove { node rootptr -- }
 
 extern ExSplayTreeSplay { node rootptr -- }
@@ -21,7 +21,7 @@ extern ExSplayTreeNodePrevious { node -- prevnode }
 
 extern ExSplayTreeNodeFirst { root -- first }
 
-extern ExSplayTreeFindNodeByValue { value rootptr -- node }
+extern ExSplayTreeFindNodeByValue { value rootptr -- lastnode node }
 extern ExSplayTreeFindNodeByValueRange { value rootptr -- node }
 
 extern ExSplayTreeFindFirstContainingNode { value endvalue root -- node }

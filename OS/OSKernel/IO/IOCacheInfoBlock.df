@@ -41,15 +41,11 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 
 	0 cacheblock@ IOCacheInfoBlock_MapCount + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
+	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
 
 	"IOCacheInfoBlockRwLock" // name
 	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
 	ExRwLockInitialize
-
-	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + // ptr
-	IOCACHEPAGEBUCKETS 8 * // size
-	0 // word
-	memset
 end
 
 fn IOCacheInfoBlockLock { cacheblock -- ok }
@@ -143,49 +139,35 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 		return
 	end
 
-	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
-	// for each bucket, iterate all pages. if a page if dirty, write it
-	// out to disk.
+	auto pfdbe
 
-	auto i
-	0 i!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	while (i@ IOCACHEPAGEBUCKETS <)
-		auto buckethead
-		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + @ ExSplayTreeNodeFirst pfdbe!
 
-		auto pfdbe
+	while (pfdbe@)
+		IOPageFrameEntryCache_Parent pfdbe -=
 
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+			pfdbe@ MmEvictablePageReference drop
 
-		// get the tail so that we can go backwards thru the bucket.
-		// reason for this is that LRU -> MRU is the most likely
-		// order to go "in order" on the disk surface
-		buckethead@ 4 + @ pfdbe!
+			ipl@ KeIPLLower
 
-		while (pfdbe@)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-				pfdbe@ MmEvictablePageReference drop
+			0 // kflags
+			pfdbe@ // pfdbe
+			IOCachePageWrite drop
 
-				ipl@ KeIPLLower
+			IPLDPC KeIPLRaise ipl!
 
-				0 // kflags
-				pfdbe@ // pfdbe
-				IOCachePageWrite drop
-
-				IPLDPC KeIPLRaise ipl!
-
-				pfdbe@ MmEvictablePageDereference drop
-			end
-
-			pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
+			pfdbe@ MmEvictablePageDereference drop
 		end
 
-		ipl@ KeIPLLower
-
-		1 i +=
+		pfdbe@ IOPageFrameEntryCache_Parent + // node
+		ExSplayTreeNodeNext pfdbe!
 	end
+
+	ipl@ KeIPLLower
 
 	cacheblock@ // cacheblock
 	IOCacheInfoBlockUnlock
@@ -225,98 +207,85 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 	rs@ HALCPUInterruptRestore
 
-	// iterate each bucket from 0 to IOCACHEPAGEBUCKETS-1.
-	// for each bucket, free all cached pages. if a page is dirty,
-	// and caller wanted us to write out dirty pages (writeout==1),
-	// write the page out first.
+	auto pfdbe
 
-	auto i
-	0 i!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	while (i@ IOCACHEPAGEBUCKETS <)
-		auto buckethead
-		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
+	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + @ ExSplayTreeNodeFirst pfdbe!
 
-		auto pfdbe
+	while (pfdbe@)
+		IOPageFrameEntryCache_Parent pfdbe -=
 
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
+		if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ newsize@ >=)
+			pfdbe@ MmEvictablePageReference drop
 
-		// get the tail so that we can go backwards thru the bucket.
-		// reason for this is that LRU -> MRU is the most likely
-		// order to go "in order" on the disk surface
-		buckethead@ 4 + @ pfdbe!
-
-		while (pfdbe@)
-			if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ newsize@ >=)
-				pfdbe@ MmEvictablePageReference drop
-
-				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-					if (writeout@)
-						// this is a dirty page, and caller wants us to
-						// write them out to disk. the alternative is
-						// writeout==0, which means the caller says its fine
-						// to ignore and throw them out.
-
-						ipl@ KeIPLLower
-
-						0 // kflags
-						pfdbe@ // pfdbe
-						IOCachePageWrite drop
-
-						IPLDPC KeIPLRaise ipl!
-					end
-				end
-
-				auto npfdbe
-				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ npfdbe!
-
-				pfdbe@ // pfdbe
-				buckethead@ // buckethead
-				IOCachePageRemove
-
-				pfdbe@ MmEvictablePageDelete
-
-				pfdbe@ MmEvictablePageDereference drop
-
-				npfdbe@ pfdbe!
-
-				1 IOCachePagesUsed -=
-			end elseif (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ ==)
-				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID &)
-					// zero out the end of the page
-
-					pfdbe@ MmEvictablePageReference drop
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+				if (writeout@)
+					// this is a dirty page, and caller wants us to
+					// write them out to disk. the alternative is
+					// writeout==0, which means the caller says its fine
+					// to ignore and throw them out.
 
 					ipl@ KeIPLLower
 
-					auto pageframe
-					pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
-
-					pageframe@ newsize@ PAGEOFFSETMASK & + // ptr
-					PAGESIZE newsize@ PAGEOFFSETMASK & - // size
-					0 // word
-					memset
-
+					0 // kflags
 					pfdbe@ // pfdbe
-					0 // process
-					MmEvictablePageModify
+					IOCachePageWrite drop
 
 					IPLDPC KeIPLRaise ipl!
-
-					pfdbe@ MmEvictablePageDereference drop
 				end
-
-				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
-			end else
-				pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
 			end
+
+			auto npfdbe
+			pfdbe@ IOPageFrameEntryCache_Parent + // node
+			ExSplayTreeNodeNext npfdbe!
+
+			pfdbe@ IOPageFrameEntryCache_Parent + // node
+			cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
+			ExSplayTreeRemove
+
+			pfdbe@ MmEvictablePageDelete
+
+			pfdbe@ MmEvictablePageDereference drop
+
+			npfdbe@ pfdbe!
+
+			1 IOCachePagesUsed -=
+		end elseif (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ maxpage@ ==)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID &)
+				// zero out the end of the page
+
+				pfdbe@ MmEvictablePageReference drop
+
+				ipl@ KeIPLLower
+
+				auto pageframe
+				pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
+
+				pageframe@ newsize@ PAGEOFFSETMASK & + // ptr
+				PAGESIZE newsize@ PAGEOFFSETMASK & - // size
+				0 // word
+				memset
+
+				pfdbe@ // pfdbe
+				0 // process
+				MmEvictablePageModify
+
+				IPLDPC KeIPLRaise ipl!
+
+				pfdbe@ MmEvictablePageDereference drop
+			end
+
+			pfdbe@ IOPageFrameEntryCache_Parent + // node
+			ExSplayTreeNodeNext pfdbe!
+		end else
+			pfdbe@ IOPageFrameEntryCache_Parent + // node
+			ExSplayTreeNodeNext pfdbe!
 		end
-
-		ipl@ KeIPLLower
-
-		1 i +=
 	end
+
+	ipl@ KeIPLLower
 
 	HALCPUInterruptDisable rs!
 	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=

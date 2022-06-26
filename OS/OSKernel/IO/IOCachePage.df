@@ -128,7 +128,6 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 	0 ok!
 
 	auto cacheblock
-
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 	auto filesize
@@ -140,9 +139,6 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 		end
 	end
 
-	auto bucket
-	offset@ PAGESHIFT >> IOCACHEPAGEHASHSHIFT >> IOCACHEPAGEMASK & bucket!
-
 	if (locked@ ~~)
 		cacheblock@ // cacheblock
 		IOCacheInfoBlockLockShared ok!
@@ -151,12 +147,6 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 			return
 		end
 	end
-
-	auto buckethead
-	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
-
-	auto buckettail
-	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + 4 + buckettail!
 
 	auto pri
 
@@ -191,53 +181,55 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 		return
 	end
 
-	buckethead@@ pfdbe!
+	offset@ // value
+	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
+	ExSplayTreeFindNodeByValue pfdbe!
 
-	while (pfdbe@)
-		if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset@ ==)
-			// found the page, it was in the cache already!
+	if (pfdbe@)
+		IOPageFrameEntryCache_Parent pfdbe -=
 
-			// ref it so it doesn't get evicted while caller is using it
+		// found the page, it was in the cache already!
 
-			pfdbe@ MmEvictablePageReference drop
+		// ref it so it doesn't get evicted while caller is using it
 
-			// remove from hash list so that it can be reinserted on the recently-used end
+		pfdbe@ MmEvictablePageReference drop
 
-			if (pfdbe@ buckethead@@ ~=)
-				pfdbe@ // pfdbe
-				buckethead@ // buckethead
-				IOCachePageRemove
+		auto shouldwait
+		0 shouldwait!
 
-				pfdbe@ // pfdbe
-				buckethead@ // buckethead
-				IOCachePageInsert
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+			1 shouldwait!
+		end elseif (iointent@)
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
+				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
+				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+				0 pfdbe@ IOPageFrameEntryCache_Event + !
 			end
-
-			ipl@ KeIPLLower
-
-			if (locked@ ~~)
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockUnlock
-			end
-
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
-
-			IPLDPC KeIPLRaise ipl!
-
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
-				pri@ pfdbe@ IOCachePageWait ok!
-
-				if (ok@)
-					pfdbe@ MmEvictablePageDereference drop
-				end
-			end
-
-			ipl@ KeIPLLower
-
-			return
 		end
 
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
+		ipl@ KeIPLLower
+
+		if (locked@ ~~)
+			cacheblock@ // cacheblock
+			IOCacheInfoBlockUnlock
+		end
+
+		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
+
+		IPLDPC KeIPLRaise ipl!
+
+		if (shouldwait@)
+			pri@ pfdbe@ IOCachePageWait ok!
+
+			if (ok@)
+				pfdbe@ MmEvictablePageDereference drop
+			end
+		end
+
+		ipl@ KeIPLLower
+
+		return
 	end
 
 	// not in the cache -- allocate a page for it.
@@ -284,16 +276,14 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 
 	offset@ pfdbe@ IOPageFrameEntryCache_OffsetInFile + !
 	fcb@ pfdbe@ IOPageFrameEntryCache_FCB + !
-	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
-	0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
 
 	IPLDPC KeIPLRaise ipl!
 
 	1 IOCachePagesUsed +=
 
-	pfdbe@ // pfdbe
-	buckethead@ // buckethead
-	IOCachePageInsert
+	pfdbe@ IOPageFrameEntryCache_Parent + // node
+	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
+	ExSplayTreeInsert
 
 	ipl@ KeIPLLower
 
@@ -307,76 +297,6 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 	pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
 end
 
-fn IOCacheDumpInfo { cacheblock -- }
-	auto i
-	0 i!
-
-	while (i@ IOCACHEPAGEBUCKETS <)
-		auto buckethead
-		cacheblock@ IOCacheInfoBlock_PageBucketListHeads + i@ 3 << + buckethead!
-
-		auto pfdbe
-		buckethead@@ pfdbe!
-
-		buckethead@ 4 + @ buckethead@@ i@ "%d h=%x t=%x: " Printf
-
-		while (pfdbe@)
-			pfdbe@ IOPageFrameEntryCache_ReferencesI + gi "%d " Printf
-
-			pfdbe@ IOPageFrameEntryCache_NextCachePage + @ pfdbe!
-		end
-
-		"\n" Printf
-
-		1 i +=
-	end
-end
-
-fn IOCachePageRemove { pfdbe buckethead -- }
-	// remove from hash list.
-	// assumes IPLDPC or equivalent.
-
-	auto n
-	pfdbe@ IOPageFrameEntryCache_NextCachePage + @ n!
-
-	if (n@)
-		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ n@ IOPageFrameEntryCache_PrevCachePage + !
-	end else // no next means we were the tail
-		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ buckethead@ 4 + !
-	end
-
-	auto p
-	pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ p!
-
-	if (p@)
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ p@ IOPageFrameEntryCache_NextCachePage + !
-	end else // no prev means we were the head
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ buckethead@!
-	end
-
-	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
-	0 pfdbe@ IOPageFrameEntryCache_NextCachePage + !
-end
-
-fn IOCachePageInsert { pfdbe buckethead -- }
-	// insert into hash list on the recently-used end.
-	// assumes IPLDPC or equivalent.
-
-	auto n
-	buckethead@@ n!
-
-	0 pfdbe@ IOPageFrameEntryCache_PrevCachePage + !
-	n@ pfdbe@ IOPageFrameEntryCache_NextCachePage + !
-
-	if (n@)
-		pfdbe@ n@ IOPageFrameEntryCache_PrevCachePage + !
-	end else // no head, set tail
-		pfdbe@ buckethead@ 4 + !
-	end
-
-	pfdbe@ buckethead@!
-end
-
 fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 	auto cacheblock
 	pfdbe@ IOPageFrameEntryCache_FCB + @ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
@@ -387,20 +307,11 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 		end
 	end
 
-	auto offset
-	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ offset!
-
-	auto bucket
-	offset@ PAGESHIFT >> IOCACHEPAGEHASHSHIFT >> IOCACHEPAGEMASK & bucket!
-
-	auto buckethead
-	cacheblock@ IOCacheInfoBlock_PageBucketListHeads + bucket@ 3 << + buckethead!
-
-	// remove from hash list
-
-	pfdbe@ // pfdbe
-	buckethead@ // buckethead
-	IOCachePageRemove
+	// remove from splay tree
+	
+	pfdbe@ IOPageFrameEntryCache_Parent + // node
+	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
+	ExSplayTreeRemove
 
 	1 IOCachePagesUsed -=
 end
@@ -430,14 +341,21 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	auto off
 	pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
-	// search "backward" in the bucket for more modified pages
-	while (pagecount@ IOCACHEPAGECLUSTERMAX 1 - <)
+	// search backward for more modified pages
+	while (pagecount@ IOTRANSFERMAX PAGESHIFT >> 1 - <)
+		if (off@ ~~)
+			break
+		end
+
 		auto spfdbe
-		pfdbe@ IOPageFrameEntryCache_NextCachePage + @ spfdbe!
+		pfdbe@ IOPageFrameEntryCache_Parent + // node
+		ExSplayTreeNodePrevious spfdbe!
 
 		if (spfdbe@ ~~)
 			break
 		end
+
+		IOPageFrameEntryCache_Parent spfdbe -=
 
 		if (spfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
 			break
@@ -459,16 +377,9 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	off@ startoffset!
 	-1 off!
 
-	// now go "forward" to build the MDL
-	while (pagecount@ IOCACHEPAGECLUSTERMAX <)
-		if (pagecount@ IOTRANSFERMAX PAGESHIFT >> >=)
-			break
-		end
+	// now go forward to build the MDL
 
-		if (pfdbe@ ~~)
-			break
-		end
-
+	while (pagecount@ IOTRANSFERMAX PAGESHIFT >> <)
 		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
 			break
 		end
@@ -487,10 +398,18 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 		pfdbe@ mdlpos@!
 
 		pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
-		pfdbe@ IOPageFrameEntryCache_PrevCachePage + @ pfdbe!
+
+		pfdbe@ IOPageFrameEntryCache_Parent + // node
+		ExSplayTreeNodeNext pfdbe!
 
 		4 mdlpos +=
 		1 pagecount +=
+
+		if (pfdbe@ ~~)
+			break
+		end
+
+		IOPageFrameEntryCache_Parent pfdbe -=
 	end
 
 	ipl@ KeIPLLower

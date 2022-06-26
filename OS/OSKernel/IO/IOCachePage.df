@@ -228,6 +228,17 @@ fn IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
 
 	// not in the cache -- allocate a page for it.
 
+	if (MmPageFreeListHead@ ~~)
+		if (MmPageZeroListHead@ ~~)
+			// can't use this hint since it might get reclaimed.
+			
+			// XXX this won't be synchronized properly in SMP unless we hold a
+			// big PFDB spinlock this entire time.
+
+			0 lastnode!
+		end
+	end
+
 	auto zeroes
 	filesize@ offset@ - PAGESIZE <
 	kflags@ IOKFLAG_ZEROES & || zeroes!
@@ -371,7 +382,6 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	-1 off!
 
 	// now go forward to build the MDL
-
 	while (pagecount@ IOTRANSFERMAX PAGESHIFT >> <)
 		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
 			break
@@ -392,11 +402,11 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 
 		pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
 
-		pfdbe@ IOPageFrameEntryCache_Parent + // node
-		ExSplayTreeNodeNext pfdbe!
-
 		4 mdlpos +=
 		1 pagecount +=
+
+		pfdbe@ IOPageFrameEntryCache_Parent + // node
+		ExSplayTreeNodeNext pfdbe!
 
 		if (pfdbe@ ~~)
 			break
@@ -412,6 +422,8 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 		0 ok!
 		return
 	end
+
+	-1 mdlpos@!
 
 	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length

@@ -16,8 +16,8 @@ extern ExSplayTreeRemove { node rootptr -- }
 
 extern ExSplayTreeSplay { node rootptr -- }
 
-extern ExSplayTreeNodeNext { max node -- nextnode }
-extern ExSplayTreeNodePrevious { min node -- prevnode }
+extern ExSplayTreeNodeNext { node -- nextnode }
+extern ExSplayTreeNodePrevious { node -- prevnode }
 
 extern ExSplayTreeNodeFirst { root -- first }
 

@@ -60,8 +60,8 @@ endif
 	$(FSTOOL) u /mintia/motd.txt $(OS_DIR)/motd.txt
 
 	$(FSTOOL) u /home/guest/README $(OS_DIR)/README
-	$(FSTOOL) chown /home/guest 100
-	$(FSTOOL) chown /home/guest/README 100
+	$(FSTOOL) chown /home/guest 50
+	$(FSTOOL) chown /home/guest/README 50
 
 	make -C $(KERN_DIR)
 	make -C $(DBG_DIR)

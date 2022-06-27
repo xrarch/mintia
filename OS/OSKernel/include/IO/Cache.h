@@ -1,6 +1,4 @@
 struct IOCacheInfoBlock
-	ExRwLock_SIZEOF RwLock
-
 	4 MapCount
 	4 Flags
 
@@ -28,12 +26,6 @@ extern IOCacheDumpInfo { cacheblock -- }
 
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
 
-extern IOCacheInfoBlockLock { cacheblock -- ok }
-extern IOCacheInfoBlockLockShared { cacheblock -- ok }
-extern IOCacheInfoBlockTryLock { cacheblock -- ok }
-extern IOCacheInfoBlockTryLockShared { cacheblock -- ok }
-extern IOCacheInfoBlockUnlock { cacheblock -- }
-
 extern IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
 extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 
@@ -41,7 +33,9 @@ extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
-extern IOCachePageGet { iointent kflags locked offset fcb -- pageframe pfdbe ok }
+extern IOCachePageWait { pri pfdbe -- ok }
+
+extern IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
 extern IOCachePageWrite { kflags pfdbe -- ok }

@@ -42,53 +42,6 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	0 cacheblock@ IOCacheInfoBlock_MapCount + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
 	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
-
-	"IOCacheInfoBlockRwLock" // name
-	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
-	ExRwLockInitialize
-end
-
-fn IOCacheInfoBlockLock { cacheblock -- ok }
-	1 // alertable
-	0 // nowait
-	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
-	ExRwLockAcquireExclusive ok!
-end
-
-fn IOCacheInfoBlockTryLock { cacheblock -- ok }
-	0 // alertable
-	1 // nowait
-	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
-	ExRwLockAcquireExclusive ok!
-
-	if (ok@ 0 s<)
-		0 ok!
-	end
-end
-
-fn IOCacheInfoBlockLockShared { cacheblock -- ok }
-	1 // alertable
-	0 // nowait
-	0 // canstarve
-	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
-	ExRwLockAcquireShared ok!
-end
-
-fn IOCacheInfoBlockTryLockShared { cacheblock -- ok }
-	0 // alertable
-	1 // nowait
-	0 // canstarve
-	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
-	ExRwLockAcquireShared ok!
-
-	if (ok@ 0 s<)
-		0 ok!
-	end
-end
-
-fn IOCacheInfoBlockUnlock { cacheblock -- }
-	cacheblock@ IOCacheInfoBlock_RwLock + // rwlock
-	ExRwLockRelease
 end
 
 fn IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
@@ -132,13 +85,6 @@ end
 fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	// flush all of the cacheblock's dirty pages.
 
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockLock ok!
-
-	if (ok@)
-		return
-	end
-
 	auto pfdbe
 
 	auto ipl
@@ -152,13 +98,9 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			pfdbe@ MmEvictablePageReference drop
 
-			ipl@ KeIPLLower
-
-			0 // kflags
+			IOKFLAG_URGENT // kflags
 			pfdbe@ // pfdbe
 			IOCachePageWrite drop
-
-			IPLDPC KeIPLRaise ipl!
 
 			pfdbe@ MmEvictablePageDereference drop
 		end
@@ -168,9 +110,6 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	end
 
 	ipl@ KeIPLLower
-
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockUnlock
 end
 
 fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
@@ -181,13 +120,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	auto maxpage
 	newsize@ PAGENUMBERMASK & maxpage!
 
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockLock ok!
-
-	if (ok@)
-		return
-	end
-
 	auto rs
 	HALCPUInterruptDisable rs!
 
@@ -195,8 +127,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		// this file is currently mapped. truncation isn't allowed.
 
 		rs@ HALCPUInterruptRestore
-
-		cacheblock@ IOCacheInfoBlockUnlock
 
 		STATUS_TRY_AGAIN_LATER ok!
 
@@ -206,6 +136,8 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
 
 	rs@ HALCPUInterruptRestore
+
+	0 ok!
 
 	auto pfdbe
 
@@ -220,6 +152,12 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ newsize@ >=)
 			pfdbe@ MmEvictablePageReference drop
 
+			while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+				MUSTSUCCEEDL2 CANBLOCK | // pri
+				pfdbe@ // pfdbe
+				IOCachePageWait drop
+			end
+
 			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 				if (writeout@)
 					// this is a dirty page, and caller wants us to
@@ -227,13 +165,9 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 					// writeout==0, which means the caller says its fine
 					// to ignore and throw them out.
 
-					ipl@ KeIPLLower
-
-					0 // kflags
+					IOKFLAG_URGENT // kflags
 					pfdbe@ // pfdbe
 					IOCachePageWrite drop
-
-					IPLDPC KeIPLRaise ipl!
 				end
 			end
 
@@ -256,10 +190,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID &)
 				// zero out the end of the page
 
-				pfdbe@ MmEvictablePageReference drop
-
-				ipl@ KeIPLLower
-
 				auto pageframe
 				pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
 
@@ -271,10 +201,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 				pfdbe@ // pfdbe
 				0 // process
 				MmEvictablePageModify
-
-				IPLDPC KeIPLRaise ipl!
-
-				pfdbe@ MmEvictablePageDereference drop
 			end
 
 			pfdbe@ IOPageFrameEntryCache_Parent + // node
@@ -290,9 +216,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	HALCPUInterruptDisable rs!
 	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=
 	rs@ HALCPUInterruptRestore
-
-	cacheblock@ // cacheblock
-	IOCacheInfoBlockUnlock
 end
 
 fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
@@ -307,8 +230,6 @@ fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 	IOCacheInfoBlockTruncate ok!
 
 	if (ok@ ~~)
-		cacheblock@ IOCacheInfoBlock_RwLock + ExRwLockUninitialize
-
 		cacheblock@ MmFree
 	end
 

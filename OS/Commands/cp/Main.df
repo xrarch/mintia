@@ -3,9 +3,10 @@
 #include "<ll>/OSDLL/OS.h"
 
 var RecursiveFlag 0
+var NoncachedFlag 0
 
 fn Usage { -- }
-	"usage: cp [-r] source target\n" OSGetStdErr FPrintf
+	"usage: cp [-ru] source target\n" OSGetStdErr FPrintf
 end
 
 buffer FileInformation OSFileInformation_SIZEOF
@@ -30,6 +31,8 @@ fn Main { ... -- ret }
 			while (fl@ gb)
 				if (fl@ gb 'r' ==)
 					1 RecursiveFlag!
+				end elseif (fl@ gb 'u' ==)
+					1 NoncachedFlag!
 				end else
 					Usage
 					-1 OSExit
@@ -45,8 +48,16 @@ fn Main { ... -- ret }
 		end
 	end
 
+	auto flags
+
+	if (NoncachedFlag@)
+		OSFILEFLAG_NOCACHE flags!
+	end else
+		0 flags!
+	end
+
 	auto srchandle
-	0 // flags
+	OSFILEFLAG_NOCACHE // flags
 	ACCESS_READ // access
 	[i@]argv@ // path
 	0 // ftype
@@ -137,7 +148,7 @@ fn Main { ... -- ret }
 		CopyDirectory
 	end else
 		ObjectQuery OSObjectQuery_Permissions + @ // permissions
-		0 // flags
+		flags@ // flags
 		ACCESS_WRITE // access
 		destpath@ // path
 		OSFileCreate ret! desthandle!
@@ -273,14 +284,13 @@ fn CopyFile { srchandle desthandle srcname destname -- }
 	auto bytes
 	auto ok
 
+	auto totalwritten
+	0 totalwritten!
+
 	0 // newsize
 	0 // growing
 	desthandle@ // handle
-	OSFileTruncate ok! drop
-
-	if (ok@)
-		ok@ OSStatusGetName destname@ "cp: couldn't truncate %s: %s\n" OSError
-	end
+	OSFileTruncate drop drop
 
 	OSWAIT_TIMEOUTINFINITE // timeout
 	0 // flags
@@ -295,6 +305,15 @@ fn CopyFile { srchandle desthandle srcname destname -- }
 	end
 
 	while (bytes@)
+		if (NoncachedFlag@)
+			// have to explicitly grow the file
+
+			totalwritten@ bytes@ + // newsize
+			1 // growing
+			desthandle@ // handle
+			OSFileTruncate drop drop
+		end
+
 		auto byteswritten
 		0 // flags
 		bytes@ // length
@@ -307,6 +326,7 @@ fn CopyFile { srchandle desthandle srcname destname -- }
 		end
 
 		byteswritten@ bytes -=
+		byteswritten@ totalwritten +=
 
 		if (bytes@ ~~)
 			OSWAIT_TIMEOUTINFINITE // timeout

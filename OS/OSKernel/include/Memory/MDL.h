@@ -10,9 +10,19 @@ struct MmMDLHeader
 	4 MapCount
 
 	4 MappedAddress
+
+	4 Status
+	4 PriorityBoost
+	4 Event
+	4 ParentMDL
+	4 IOCount
 endstruct
 
-const MMMDL_MODIFIED 4
+const MMMDL_MODIFIED   4
+const MMMDL_DELETE     8
+const MMMDL_ASYNC      32
+
+const MMMDL_FLAGS_NOT_TO_INHERIT MMMDL_DELETE
 
 extern MmMDLInitialize { mode length vaddr mdl -- }
 
@@ -29,6 +39,8 @@ extern MmMDLMap { mdl -- ok }
 extern MmMDLUnmap { mdl -- }
 
 extern MmMDLFlush { kflags write dma mdl -- }
+
+extern MmMDLComplete { status priboost mdl -- }
 
 externptr MmPinnedPagesLimit
 externptr MmPinnedPagesCount

@@ -40,8 +40,6 @@ fn IOCacheZeroData { size offset fcb -- ok }
 	//
 	// expects the FCB to be locked.
 
-	KeThreadCurrent@ KeThreadIgnoreKill drop
-
 	auto pagestozero
 	offset@ PAGEOFFSETMASK & size@ + PAGEOFFSETMASK + PAGESHIFT >> pagestozero!
 
@@ -56,8 +54,6 @@ fn IOCacheZeroData { size offset fcb -- ok }
 				IOCacheZeroInCache ok!
 
 				if (ok@ ~~)
-					KeThreadCurrent@ KeThreadAcceptKill drop
-
 					return
 				end
 			end
@@ -68,13 +64,13 @@ fn IOCacheZeroData { size offset fcb -- ok }
 	offset@ // offset
 	fcb@ // fcb
 	IOCacheZeroDirectIO ok!
-
-	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn IOCacheZeroDirectIO { size offset fcb -- ok }
 	// use direct IO with our funky constant zero page to obliterate the
 	// specified range.
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto mdl
 	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
@@ -83,6 +79,9 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	// initialize all the MDL page frames to point to the zero page.
+
+	auto event
+	KeEvent_SIZEOF alloc event!
 
 	auto pagecount
 	IOTRANSFERMAX PAGESHIFT >> pagecount!
@@ -94,10 +93,32 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 		1 pagecount -=
 	end
 
+	-1 mdlpos@!
+
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
 
 	while (size@ IOTRANSFERMAX >=)
+		KeThreadCurrent@ KeThreadAcceptKill drop
+
+		KERNELMODE // mode
+		1 // alertable
+		KeThreadCurrent@ // thread
+		KeThreadIsKilled ok!
+
+		KeThreadCurrent@ KeThreadIgnoreKill drop
+
+		if (ok@)
+			0 size!
+			break
+		end
+
+		0 // signaled
+		OSEVENT_NOTIF // type
+		"IOCacheZeroEvent" // name
+		event@ // event
+		KeEventInitialize
+
 		KERNELMODE // mode
 		IOTRANSFERMAX // length
 		offset@ PAGEOFFSETMASK & // vaddr
@@ -105,6 +126,7 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 		MmMDLInitialize
 
 		1 mdl@ MmMDLHeader_PinCount + !
+		event@ mdl@ MmMDLHeader_Event + !
 
 		0 // flags
 		IOKFLAG_URGENT // kflags
@@ -112,6 +134,21 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 		mdl@ // mdl
 		fcb@ // fcb
 		writefunc@ IODispatchWriteFunction ok! drop
+
+		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			KERNELMODE // waitmode
+			0 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			event@ // object
+			KeThreadWaitForObject drop
+		end
+
+		if (ok@)
+			0 size!
+			break
+		end
+
+		mdl@ MmMDLHeader_Status + @ ok!
 
 		if (ok@)
 			0 size!
@@ -123,6 +160,12 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 	end
 
 	if (size@)
+		0 // signaled
+		OSEVENT_NOTIF // type
+		"IOCacheZeroEvent" // name
+		event@ // event
+		KeEventInitialize
+
 		KERNELMODE // mode
 		size@ // length
 		offset@ PAGEOFFSETMASK & // vaddr
@@ -130,6 +173,7 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 		MmMDLInitialize
 
 		1 mdl@ MmMDLHeader_PinCount + !
+		event@ mdl@ MmMDLHeader_Event + !
 
 		0 // flags
 		IOKFLAG_URGENT // kflags
@@ -137,11 +181,27 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 		mdl@ // mdl
 		fcb@ // fcb
 		writefunc@ IODispatchWriteFunction ok! drop
+
+		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			KERNELMODE // waitmode
+			0 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			event@ // object
+			KeThreadWaitForObject drop
+		end
+
+		if (ok@ ~~)
+			mdl@ MmMDLHeader_Status + @ ok!
+		end
 	end
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn IOCacheZeroInCache { size offset fcb -- ok }
 	0 ok!
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto pagestozero
 	offset@ PAGEOFFSETMASK & size@ + PAGEOFFSETMASK + PAGESHIFT >> pagestozero!
@@ -157,6 +217,7 @@ fn IOCacheZeroInCache { size offset fcb -- ok }
 		IOCachePageGet ok! pfdbe! drop
 
 		if (ok@)
+			KeThreadCurrent@ KeThreadAcceptKill drop
 			return
 		end
 
@@ -169,4 +230,6 @@ fn IOCacheZeroInCache { size offset fcb -- ok }
 		1 pagestozero -=
 		PAGESIZE offset +=
 	end
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end

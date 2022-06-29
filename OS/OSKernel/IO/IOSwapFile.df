@@ -549,6 +549,15 @@ fn IOSwapPageReadPTE { kflags pageframe pte -- ok }
 
 	// perform the read operation
 
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"IOSwapPageReadEvent" // name
+	event@ // event
+	KeEventInitialize
+
 	auto mdl
 	MmMDLHeader_SIZEOF 4 2 * + alloc mdl!
 
@@ -558,6 +567,8 @@ fn IOSwapPageReadPTE { kflags pageframe pte -- ok }
 	mdl@ // mdl
 	MmMDLInitialize
 
+	event@ mdl@ MmMDLHeader_Event + !
+
 	OSWAIT_TIMEOUTINFINITE // timeout
 	0 // flags
 	kflags@ // kflags
@@ -565,6 +576,20 @@ fn IOSwapPageReadPTE { kflags pageframe pte -- ok }
 	mdl@ // mdl
 	fcb@ // fcb
 	readfunc@ IODispatchReadFunction ok! drop
+
+	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject drop
+	end
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLHeader_Status + @ ok!
 
 	if (ok@)
 		return
@@ -742,6 +767,17 @@ fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- ok }
 
 	// perform the write operation
 
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"IOSwapFileWriteEvent" // name
+	event@ // event
+	KeEventInitialize
+
+	event@ writemdl@ MmMDLHeader_Event + !
+
 	auto fcb
 	swapfile@ IOSwapFile_FileObject + @ IOFile_FileControlBlock + @ fcb!
 
@@ -755,7 +791,28 @@ fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- ok }
 	fcb@ // fcb
 	writefunc@ IODispatchWriteFunction ok! drop
 
+	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject drop
+	end
+
 	if (ok@)
+		pagecount@ // pages
+		offset@ // offset
+		swapfile@ // swapfile
+		IOSwapFileRelease
+
+		return
+	end
+
+	mdl@ MmMDLHeader_Status + @ ok!
+
+	if (ok@)
+		// write failed
+
 		pagecount@ // pages
 		offset@ // offset
 		swapfile@ // swapfile

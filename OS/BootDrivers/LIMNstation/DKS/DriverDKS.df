@@ -46,12 +46,14 @@ const REQWRITE 2
 struct DKSRequest
 	4 Next
 
+	4 WakeEvent
+
+	4 KFlags
 	4 Type
 	4 MDL
 	4 Buffer
 	4 BlockNumber
 	4 BlockCount
-	4 WakeEvent
 	4 Disk
 endstruct
 
@@ -311,12 +313,34 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 	if (ior@ DKSRequest_BlockCount + @ ~~)
 		// complete, start next one
 
-		IOBOOSTDISK // priboost
-		ior@ DKSRequest_WakeEvent + @ // event
-		KeEventSignal
+		if (ior@ DKSRequest_WakeEvent + @)
+			IOBOOSTDISK // priboost
+			ior@ DKSRequest_WakeEvent + @ // event
+			KeEventSignal
+		end
 
-		ior@ DKSRequest_Next + @ ior!
-		ior@ DKSRequestListHead!
+		if (mdl@)
+			if (ior@ DKSRequest_Type + @ REQREAD ==)
+				ior@ DKSRequest_KFlags + @ // kflags
+				0 // write
+				0 // dma
+				mdl@ // mdl
+				MmMDLFlush
+			end
+		
+			0 // status
+			IOBOOSTDISK // priboost
+			mdl@ // mdl
+			MmMDLComplete
+		end
+
+		auto nior
+		ior@ DKSRequest_Next + @ nior!
+
+		ior@ MmFree
+
+		nior@ ior!
+		nior@ DKSRequestListHead!
 
 		if (ior@ ~~)
 			0 DKSRequestListTail!
@@ -405,13 +429,22 @@ fn (HALInterruptHandler) DriverDKSInterrupt { int -- }
 	end
 end
 
-fn DKSBlockReadCommand { buf mdl blocks blockno disk event ior -- ok }
-	0 ok!
+fn DKSBlockReadCommand { kflags buf mdl blocks blockno disk event -- ok }
+	auto ior
+	DKSRequest_SIZEOF // bytes
+	'DKSR' // tag
+	kflags@ MmKflagToPriority CANBLOCK | // flags
+	MmAllocWithTag ok! ior!
+
+	if (ok@)
+		return
+	end
 
 	if (mdl@)
 		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
 	end
 
+	kflags@ ior@ DKSRequest_KFlags + !
 	REQREAD ior@ DKSRequest_Type + !
 	buf@ ior@ DKSRequest_Buffer + !
 	mdl@ ior@ DKSRequest_MDL + !
@@ -446,8 +479,16 @@ fn DKSBlockReadCommand { buf mdl blocks blockno disk event ior -- ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn DKSBlockWriteCommand { buf mdl blocks blockno disk event ior -- ok }
-	0 ok!
+fn DKSBlockWriteCommand { kflags buf mdl blocks blockno disk event -- ok }
+	auto ior
+	DKSRequest_SIZEOF // bytes
+	'DKSR' // tag
+	kflags@ MmKflagToPriority CANBLOCK | // flags
+	MmAllocWithTag ok! ior!
+
+	if (ok@)
+		return
+	end
 
 	if (mdl@)
 		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
@@ -531,12 +572,24 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	fcb@ IOFileControlBlockGetSize bytesread!
 
 	if (offset@ bytesread@ >=)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		0 bytesread!
+
 		return
 	end
 
 	if (offset@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
 
@@ -547,6 +600,12 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 
 	if (length@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
 
@@ -557,57 +616,33 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
 
-	auto event
-	KeEvent_SIZEOF alloc event!
+	mdl@ MmMDLHeader_Length + @ bytesread!
 
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"DKSReadEvent" // name
-	event@ // event
-	KeEventInitialize
-
-	auto ior
-	DKSRequest_SIZEOF alloc ior!
-
+	kflags@ // kflags
 	0 // buf
 	mdl@ // mdl
 	length@ DKSBLOCKSHIFT >> // blocks
 	offset@ DKSBLOCKSHIFT >> // blockno
 	disk@ // disk
-	event@ // event
-	ior@ // ior
+	0 // event
 	DKSBlockReadCommand ok!
 
 	if (ok@)
-		mdl@ MmMDLUnpin
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
 
 		return
 	end
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	event@ // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "DriverDKSRead: couldn't wait on event (%i)\n" KeCrash
-		end
-	end
-
-	kflags@ // kflags
-	0 // write
-	0 // dma
-	mdl@ // mdl
-	MmMDLFlush
-
-	mdl@ MmMDLUnpin
-
-	mdl@ MmMDLHeader_Length + @ bytesread!
 end
 
 fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byteswritten ok }
@@ -623,11 +658,23 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 
 	if (offset@ bytesize@ >=)
 		STATUS_END_OF_DISK ok!
+
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
 
 	if (offset@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
 
@@ -638,6 +685,12 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 
 	if (length@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
 
@@ -646,8 +699,15 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
 		return
 	end
+
+	mdl@ MmMDLHeader_Length + @ byteswritten!
 
 	kflags@ // kflags
 	1 // write
@@ -655,48 +715,23 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 	mdl@ // mdl
 	MmMDLFlush
 
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"DKSWriteEvent" // name
-	event@ // event
-	KeEventInitialize
-
-	auto ior
-	DKSRequest_SIZEOF alloc ior!
-
+	kflags@ // kflags
 	0 // buf
 	mdl@ // mdl
 	length@ DKSBLOCKSHIFT >> // blocks
 	offset@ DKSBLOCKSHIFT >> // blockno
 	disk@ // disk
-	event@ // event
-	ior@ // ior
+	0 // event
 	DKSBlockWriteCommand ok!
 
 	if (ok@)
-		mdl@ MmMDLUnpin
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
 
 		return
 	end
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	event@ // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "DriverDKSWrite: couldn't wait on event (%i)\n" KeCrash
-		end
-	end
-
-	mdl@ MmMDLUnpin
-
-	mdl@ MmMDLHeader_Length + @ byteswritten!
 end
 
 // routines for I/O by block offset, by device object. rarely called.
@@ -723,16 +758,13 @@ fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject
 	event@ // event
 	KeEventInitialize
 
-	auto ior
-	DKSRequest_SIZEOF alloc ior!
-
+	0 // kflags
 	buffer@ // buf
 	0 // mdl
 	1 // blocks
 	blockno@ // blockno
 	disk@ // disk
 	event@ // event
-	ior@ // ior
 	DKSBlockWriteCommand ok!
 
 	if (ok@)
@@ -773,16 +805,13 @@ fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -
 	event@ // event
 	KeEventInitialize
 
-	auto ior
-	DKSRequest_SIZEOF alloc ior!
-
+	0 // kflags
 	buffer@ // buf
 	0 // mdl
 	1 // blocks
 	blockno@ // blockno
 	disk@ // disk
 	event@ // event
-	ior@ // ior
 	DKSBlockReadCommand ok!
 
 	if (ok@)

@@ -150,21 +150,9 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 	end
 
 	auto pri
+	CANBLOCK pri!
 
-	if (kflags@ IOKFLAG_SWAPOUT &)
-		// this IOCachePageGet is needed for a swap-out operation
-		// (i.e., the filesystem driver is using it to cache disk
-		// structures and needs whatever is going to be read into
-		// this page to know where to swap the page out to).
-
-		MUSTSUCCEED CANBLOCK | pri!
-	end elseif (kflags@ IOKFLAG_URGENT &)
-		MUSTSUCCEEDL2 CANBLOCK | pri!
-	end elseif (kflags@ IOKFLAG_SWAPIN &)
-		CANBLOCK TRYFOREVER | pri!
-	end else
-		CANBLOCK pri!
-	end
+	kflags@ MmKflagToPriority pri |=
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -437,12 +425,22 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 
 	-1 mdlpos@!
 
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"IOCachePageWriteEvent" // name
+	event@ // event
+	KeEventInitialize
+
 	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length
 	0 // vaddr
 	mdl@ // mdl
 	MmMDLInitialize
 
+	event@ mdl@ MmMDLHeader_Event + !
 	1 mdl@ MmMDLHeader_PinCount + !
 
 	auto writefunc
@@ -456,6 +454,23 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	mdl@ // mdl
 	fcb@ // fcb
 	writefunc@ IODispatchWriteFunction ok! drop
+
+	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject drop
+	end
+
+	if (ok@ ~~)
+		mdl@ MmMDLHeader_Status + @ ok!
+	end
+
+	if (ok@)
+		// TODO handle properly
+		ok@ "IOCachePageWrite: failed to write (%i)\n" KeCrash
+	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
@@ -508,6 +523,15 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 
 		// perform the read operation
 
+		auto event
+		KeEvent_SIZEOF alloc event!
+
+		0 // signaled
+		OSEVENT_NOTIF // type
+		"IOCachePageReadEvent" // name
+		event@ // event
+		KeEventInitialize
+
 		auto mdl
 		MmMDLHeader_SIZEOF 4 2 * + alloc mdl!
 
@@ -517,6 +541,8 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		mdl@ // mdl
 		MmMDLInitialize
 
+		event@ mdl@ MmMDLHeader_Event + !
+
 		OSWAIT_TIMEOUTINFINITE // timeout
 		flags@ // flags
 		kflags@ IOKFLAG_PAGEIN | // kflags
@@ -524,6 +550,28 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		mdl@ // mdl
 		fcb@ // fcb
 		readfunc@ IODispatchReadFunction ok! drop
+
+		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			KERNELMODE // waitmode
+			0 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			event@ // object
+			KeThreadWaitForObject drop
+		end
+
+		if (ok@)
+			// read failed
+
+			IPLDPC KeIPLRaise ipl!
+			pfdbe@ IOCachePageSatisfy
+			ipl@ KeIPLLower
+
+			pfdbe@ MmEvictablePageDereference drop
+
+			return
+		end
+
+		mdl@ MmMDLHeader_Status + @ ok!
 
 		if (ok@)
 			// read failed

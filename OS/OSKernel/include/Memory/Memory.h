@@ -115,7 +115,7 @@ externptr MmNonpageableCommitUsage
 // allocation will block or fail.
 
 const MMNORMALTHRESH        15 // normal allocations
-const MMPOOLTHRESH          8  // pool/heap allocations
+const MMPOOLTHRESH          12  // pool/heap allocations
 const MMMUSTSUCCEEDL2THRESH 4  // mustsucceed level 2
 const MMMUSTSUCCEEDTHRESH   0  // mustsucceed
 

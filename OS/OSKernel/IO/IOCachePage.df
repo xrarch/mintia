@@ -25,6 +25,8 @@
 
 #include "<inc>/IO.h"
 
+#include "<inc>/Transfer.h"
+
 #include "<ll>/OSDLL/OS.h"
 
 var IOCachePagesUsed 0
@@ -285,7 +287,7 @@ fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
 	1 IOCachePagesUsed -=
 end
 
-fn IOCachePageWrite { kflags pfdbe -- ok }
+fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"IOCachePageWrite: ipl != IPLDPC\n" KeCrash
@@ -302,7 +304,12 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
 	auto mdl
-	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+
+	if (transfer@ ~~)
+		MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+	end else
+		transfer@ mdl!
+	end
 
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
@@ -311,17 +318,9 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	0 pagecount!
 
 	while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
-		auto pri
-
-		if (kflags@ IOKFLAG_SWAPOUT &)
-			MUSTSUCCEED CANBLOCK | pri!
-		end elseif (kflags@ IOKFLAG_URGENT &)
-			MUSTSUCCEEDL2 CANBLOCK | pri!
-		end else
-			CANBLOCK pri!
-		end
-
-		pri@ pfdbe@ IOCachePageWait ok!
+		kflags@ MmKflagToPriority // pri
+		pfdbe@ // pfdbe
+		IOCachePageWait ok!
 
 		if (ok@)
 			return
@@ -425,23 +424,30 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 
 	-1 mdlpos@!
 
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_NOTIF // type
-	"IOCachePageWriteEvent" // name
-	event@ // event
-	KeEventInitialize
-
 	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length
 	0 // vaddr
 	mdl@ // mdl
 	MmMDLInitialize
 
-	event@ mdl@ MmMDLHeader_Event + !
+	if (transfer@ ~~)
+		auto event
+		KeEvent_SIZEOF alloc event!
+
+		0 // signaled
+		OSEVENT_NOTIF // type
+		"IOCachePageWriteEvent" // name
+		event@ // event
+		KeEventInitialize
+
+		event@ mdl@ MmMDLHeader_Event + !
+	end else
+		pointerof IOCachePageMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
+	end
+
 	1 mdl@ MmMDLHeader_PinCount + !
+
+	transfer@ mdl@ MmMDLHeader_Context1 + !
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
@@ -455,16 +461,18 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 	fcb@ // fcb
 	writefunc@ IODispatchWriteFunction ok! drop
 
-	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-		KERNELMODE // waitmode
-		0 // alertable
-		OSWAIT_TIMEOUTINFINITE // timeout
-		event@ // object
-		KeThreadWaitForObject drop
-	end
+	if (transfer@ ~~)
+		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			KERNELMODE // waitmode
+			0 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			event@ // object
+			KeThreadWaitForObject drop
+		end
 
-	if (ok@ ~~)
-		mdl@ MmMDLHeader_Status + @ ok!
+		if (ok@ ~~)
+			mdl@ MmMDLHeader_Status + @ ok!
+		end
 	end
 
 	if (ok@)
@@ -474,9 +482,22 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
+	IPLDPC KeIPLRaise drop
+
+	if (transfer@ ~~)
+		mdl@ IOCachePageMDLComplete
+	end
+end
+
+fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
-	IPLDPC KeIPLRaise drop
+	auto pagecount
+	mdl@ MmMDLHeader_Length + @ PAGESHIFT >> pagecount!
 
 	while (pagecount@)
 		mdlpos@@ IOCachePageSatisfy
@@ -485,6 +506,12 @@ fn IOCachePageWrite { kflags pfdbe -- ok }
 		1 pagecount -=
 		4 mdlpos +=
 	end
+
+	if (mdl@ MmMDLHeader_Context1 + @)
+		mdl@ MmMDLHeader_Context1 + @ IOTransferComplete
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }

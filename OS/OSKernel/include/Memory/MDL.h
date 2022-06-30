@@ -20,6 +20,7 @@ struct MmMDLHeader
 	4 CompleteRoutine
 	4 Context1
 	4 Context2
+	4 Context3
 
 	32 DriverGoWild
 endstruct

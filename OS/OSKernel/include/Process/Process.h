@@ -128,6 +128,7 @@ externptr PsReaperEvent
 extern PsReaperWorker { context1 context2 -- }
 
 extern PsProcessListLock { -- ok }
+extern PsProcessListLockUnalertable { -- }
 extern PsProcessListTryLock { -- ok }
 extern PsProcessListIsLocked { -- locked }
 extern PsProcessListUnlock { -- }

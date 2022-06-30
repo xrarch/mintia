@@ -40,20 +40,19 @@ struct Disk
 	4 Blocks
 endstruct
 
-const REQREAD  1
-const REQWRITE 2
+const DKSKFLAG_READ 0x80000000
 
+// must be <=32 bytes to fit in the MDL DriverGoWild area
 struct DKSRequest
 	4 Next
 
-	4 WakeEvent
-
 	4 KFlags
-	4 Type
 	4 MDL
+	4 WakeEvent
 	4 Buffer
 	4 BlockNumber
 	4 BlockCount
+
 	4 Disk
 endstruct
 
@@ -285,7 +284,7 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 	auto mdl
 	ior@ DKSRequest_MDL + @ mdl!
 
-	if (ior@ DKSRequest_Type + @ REQREAD ==)
+	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
 		if (mdl@)
 			// there's an MDL, try to copy directly thru identityspace with
 			// the pinned pages described in the MDL.
@@ -319,28 +318,29 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 			KeEventSignal
 		end
 
+		auto nior
+		ior@ DKSRequest_Next + @ nior!
+
 		if (mdl@)
-			if (ior@ DKSRequest_Type + @ REQREAD ==)
+			if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
 				ior@ DKSRequest_KFlags + @ // kflags
 				0 // write
 				0 // dma
 				mdl@ // mdl
 				MmMDLFlush
 			end
-		
+
 			0 // status
 			IOBOOSTDISK // priboost
 			mdl@ // mdl
 			MmMDLComplete
+		end else
+			ior@ MmFree
 		end
 
-		auto nior
-		ior@ DKSRequest_Next + @ nior!
-
-		ior@ MmFree
-
 		nior@ ior!
-		nior@ DKSRequestListHead!
+
+		ior@ DKSRequestListHead!
 
 		if (ior@ ~~)
 			0 DKSRequestListTail!
@@ -357,7 +357,7 @@ fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
 
 	// start next one
 
-	if (ior@ DKSRequest_Type + @ REQREAD ==)
+	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
 		HALCPUInterruptDisable rs!
 
 		disk@ Disk_DKSID + @ DKSPORTA HALLIMNstationCitronOutl
@@ -431,21 +431,25 @@ end
 
 fn DKSBlockReadCommand { kflags buf mdl blocks blockno disk event -- ok }
 	auto ior
-	DKSRequest_SIZEOF // bytes
-	'DKSR' // tag
-	kflags@ MmKflagToPriority CANBLOCK | // flags
-	MmAllocWithTag ok! ior!
-
-	if (ok@)
-		return
-	end
 
 	if (mdl@)
+		mdl@ MmMDLHeader_DriverGoWild + ior!
+
 		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+	end else
+		DKSRequest_SIZEOF // bytes
+		'DKSR' // tag
+		kflags@ MmKflagToPriority CANBLOCK | // flags
+		MmAllocWithTag ok! ior!
+
+		if (ok@)
+			return
+		end
 	end
 
+	DKSKFLAG_READ kflags |=
+
 	kflags@ ior@ DKSRequest_KFlags + !
-	REQREAD ior@ DKSRequest_Type + !
 	buf@ ior@ DKSRequest_Buffer + !
 	mdl@ ior@ DKSRequest_MDL + !
 	blockno@ ior@ DKSRequest_BlockNumber + !
@@ -486,15 +490,22 @@ fn DKSBlockWriteCommand { kflags buf mdl blocks blockno disk event -- ok }
 	kflags@ MmKflagToPriority CANBLOCK | // flags
 	MmAllocWithTag ok! ior!
 
-	if (ok@)
-		return
-	end
-
 	if (mdl@)
+		mdl@ MmMDLHeader_DriverGoWild + ior!
+
 		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+	end else
+		DKSRequest_SIZEOF // bytes
+		'DKSR' // tag
+		kflags@ MmKflagToPriority CANBLOCK | // flags
+		MmAllocWithTag ok! ior!
+
+		if (ok@)
+			return
+		end
 	end
 
-	REQWRITE ior@ DKSRequest_Type + !
+	kflags@ ior@ DKSRequest_KFlags + !
 	buf@ ior@ DKSRequest_Buffer + !
 	mdl@ ior@ DKSRequest_MDL + !
 	blockno@ ior@ DKSRequest_BlockNumber + !

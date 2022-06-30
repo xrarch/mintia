@@ -23,7 +23,75 @@
 
 #include "<inc>/IO.h"
 
+#include "<inc>/Transfer.h"
+
 #include "<ll>/OSDLL/OS.h"
+
+const MPWTRANSFERCOUNT 4
+
+struct IOTransferTable
+	KeEvent_SIZEOF Event
+	4 FreeListHead
+
+	(IOTransfer_SIZEOF MPWTRANSFERCOUNT *) Transfers
+endstruct
+
+buffer MmMPWFileTransfers IOTransferTable_SIZEOF
+buffer MmMPWAnonTransfers IOTransferTable_SIZEOF
+
+fn IOTransferTableInitialize { transfertable -- }
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"IOTransferAvailableEvent" // name
+	transfertable@ IOTransferTable_Event + // event
+	KeEventInitialize
+
+	auto i
+	0 i!
+
+	auto transfer
+	transfertable@ IOTransferTable_Transfers + transfer!
+
+	while (i@ MPWTRANSFERCOUNT <)
+		transfertable@ transfer@ IOTransfer_TransferTable + !
+
+		transfertable@ IOTransferTable_FreeListHead + @ transfer@ IOTransfer_FileOrNext + !
+		transfer@ transfertable@ IOTransferTable_FreeListHead + !
+
+		IOTransfer_SIZEOF transfer +=
+		1 i +=
+	end
+end
+
+fn IOTransferComplete { transfer -- }
+	auto ttable
+	transfer@ IOTransfer_TransferTable + @ ttable!
+
+	ttable@ IOTransferTable_FreeListHead + @ transfer@ IOTransfer_FileOrNext + !
+	transfer@ ttable@ IOTransferTable_FreeListHead + !
+
+	0 // priboost
+	ttable@ IOTransferTable_Event + // event
+	KeEventSignal
+end
+
+fn MmMPWWaitForTransfer { transfertable -- }
+	// try to find an available transfer to use.
+	// if none are available, wait for one to complete and use that.
+
+	auto transfer
+	transfertable@ IOTransferTable_FreeListHead + @ transfer!
+
+	while (transfer@ ~~)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		transfertable@ IOTransferTable_Event + // object
+		KeThreadWaitForObject drop
+
+		transfertable@ IOTransferTable_FreeListHead + @ transfer!
+	end
+end
 
 fn MmModifiedPageWriter { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
@@ -36,11 +104,26 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 	IOSwapFileAwaitCreation
 
-	auto mdl
-	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+	auto anontransfers
+	MmMPWAnonTransfers anontransfers!
+
+	auto filetransfers
+	MmMPWFileTransfers filetransfers!
+
+	anontransfers@ // transfertable
+	IOTransferTableInitialize
+
+	filetransfers@ // transfertable
+	IOTransferTableInitialize
 
 	auto mdlpos
 	auto pagecount
+
+	auto transfer
+	0 transfer!
+
+	auto ftransfer
+	0 ftransfer!
 
 	// the page writer thread. writes out modified pages and slaps them on the
 	// evictable list. does this when it is asked to and also every 30 seconds
@@ -63,7 +146,6 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			end
 		end
 
-		mdl@ MmMDLHeader_SIZEOF + mdlpos!
 		0 pagecount!
 
 		auto modcount
@@ -88,6 +170,39 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			MmModifiedPageListHead@ pfdbe!
 
 			if (pfdbe@)
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+					if (transfer@ ~~)
+						anontransfers@ IOTransferTable_FreeListHead + @ transfer!
+
+						if (transfer@ ~~)
+							ipl@ KeIPLLower
+
+							anontransfers@ // transfertable
+							MmMPWWaitForTransfer
+
+							continue
+						end
+
+						transfer@ IOTransfer_FileOrNext + @ anontransfers@ IOTransferTable_FreeListHead + !
+						transfer@ MmMDLHeader_SIZEOF + mdlpos!
+					end
+				end elseif (0)
+					if (ftransfer@ ~~)
+						filetransfers@ IOTransferTable_FreeListHead + @ ftransfer!
+
+						if (ftransfer@ ~~)
+							ipl@ KeIPLLower
+
+							filetransfers@ // transfertable
+							MmMPWWaitForTransfer
+
+							continue
+						end
+
+						ftransfer@ IOTransfer_FileOrNext + @ filetransfers@ IOTransferTable_FreeListHead + !
+					end
+				end
+
 				pfdbe@ MmEvictablePageReference drop
 
 				if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
@@ -112,7 +227,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 						// maximum transfer has been clustered, do it
 
 						pagecount@ // pagecount
-						mdl@ // mdl
+						transfer@ // mdl
 						IOSwapFileWriteMDL ok!
 
 						if (ok@)
@@ -120,13 +235,11 @@ fn MmModifiedPageWriter { context1 context2 -- }
 						end
 
 						0 pagecount!
-						mdl@ MmMDLHeader_SIZEOF + mdlpos!
+						0 transfer!
 					end
 
 					IPLDPC KeIPLRaise ipl!
-				end elseif (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
-					// write out page
-
+				end else
 					IOKFLAG_SWAPOUT // kflags
 					pfdbe@ // pfdbe
 					IOCachePageWrite drop
@@ -146,7 +259,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 		if (pagecount@)
 			pagecount@ // pagecount
-			mdl@ // mdl
+			transfer@ // mdl
 			IOSwapFileWriteMDL ok!
 
 			if (ok@)
@@ -154,7 +267,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			end
 
 			0 pagecount!
-			mdl@ MmMDLHeader_SIZEOF + mdlpos!
+			0 transfer!
 		end
 	end
 end

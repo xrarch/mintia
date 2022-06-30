@@ -16,11 +16,18 @@ struct MmMDLHeader
 	4 Event
 	4 ParentMDL
 	4 IOCount
+
+	4 CompleteRoutine
+	4 Context1
+	4 Context2
 endstruct
+
+fnptr MmMDLCompleteRoutine { mdl -- }
 
 const MMMDL_MODIFIED   4
 const MMMDL_DELETE     8
-const MMMDL_ASYNC      32
+const MMMDL_COMPLETE   16
+const MMMDL_ROOT       32
 
 const MMMDL_FLAGS_NOT_TO_INHERIT MMMDL_DELETE
 

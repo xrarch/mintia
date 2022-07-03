@@ -16,3 +16,5 @@ extern HALLIMNstationCitronCommand { command port -- }
 
 // doesn't wait for the device to report the operation as completed before returning
 extern HALLIMNstationCitronCommandASync { command port -- }
+
+extern HALLIMNstationCitronCommandASyncIdle { command port -- }

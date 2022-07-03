@@ -76,7 +76,7 @@ const IOPOKE_READ  2
 //   3. should be large enough to allow things like console IO to occur w/o
 //      odd effects due to transfer fragmentation by the IO system.
 
-const IOTRANSFERMAX (128 1024 *)
+const IOTRANSFERMAX (16 1024 *)
 
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }

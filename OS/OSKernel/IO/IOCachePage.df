@@ -38,6 +38,12 @@ struct IOCachePageEvent
 endstruct
 
 fn IOCachePageWait { pri pfdbe -- ok }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IOCachePageWait: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	// wait for IO to complete on a cache page.
 
 	// entered at IPLDPC
@@ -183,18 +189,30 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 
 		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
 
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
-				pri@ pfdbe@ IOCachePageWait ok!
+		while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
+			MMEVICTFLAG_VALID MMEVICTFLAG_IOINPROGRESS | & MMEVICTFLAG_IOINPROGRESS ==)
+			// XXX there was a race condition here where when a page read
+			// failed and left the page invalid but satisfied, the wait here
+			// would be satisfied but then it wouldn't set the IOINPROGRESS
+			// flag because it was written as an if elseif. these kinds of
+			// subtle bugs are extremely important to be vigilant for...
 
-				if (ok@)
-					pfdbe@ MmEvictablePageDereference drop
+			pri@ pfdbe@ IOCachePageWait ok!
+
+			if (ok@)
+				pfdbe@ MmEvictablePageDereference drop
+				break
+			end
+		end
+
+		if (ok@ ~~)
+			if (iointent@)
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+					0 pfdbe@ IOPageFrameEntryCache_Event + !
 				end
-			end elseif (iointent@)
-				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
-				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-				0 pfdbe@ IOPageFrameEntryCache_Event + !
 			end
 		end
 

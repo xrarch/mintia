@@ -2,4 +2,200 @@
 // Implements Master Boot Record (MBR) partition table support.
 //
 
-// stub
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+table IOPartitionMBR
+	"MBR"                            // name
+	pointerof IOPartitionMBRDetect   // detect
+	0                                // reserved
+	0                                // reserved
+endtable
+public IOPartitionMBR
+
+struct MBR
+	446 Garbage
+	64  PartitionTable
+	2   Signature1
+endstruct
+
+struct MBR_PTE
+	1   Status
+	3   CHSStart
+	1   Type
+	3   CHSEnd
+
+	// these are aligned to 16 bits only
+	2   LBAStartLo
+	2   LBAStartHi
+
+	2   LBASizeLo
+	2   LBASizeHi
+endstruct
+
+const MBRSIGNATURE 0xAA55
+
+fn (IOPartitionDetectFunction) IOPartitionMBRDetect { devobject -- partitiontable ok }
+	// try to detect this disk as MBR-formatted.
+	// if it is, attempt to parse it into a heap-allocated partition table.
+	// freeing this partition table after use is the responsibility of the caller.
+
+	STATUS_NOT_AVAILABLE ok!
+
+	auto driver
+	devobject@ IODevice_Driver + @ driver!
+
+	if (driver@ IODriver_DeviceType + @ OSFILETYPE_BLOCKDEVICE ~=)
+		"IOPartitionMBRDetect: not a block device\n" KeCrash
+	end
+
+	auto readfunc
+	driver@ IODriver_DispatchTable + @ IODispatchTable_ReadBlock + @ readfunc!
+
+	if (readfunc@ ~~)
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	auto blockbuf
+
+	PAGESIZE
+	1 devobject@ IODevice_BlockLog + @ << max // bytes
+	'MBRb' // tag
+	0 // flags
+	MmAllocWithTag ok! blockbuf!
+
+	if (ok@)
+		return
+	end
+
+	0 // blockno (MBR)
+	blockbuf@ // buffer
+	devobject@
+	readfunc@ IODispatchReadBlockFunction ok!
+
+	if (ok@)
+		blockbuf@ MmFree
+
+		return
+	end
+
+	STATUS_NOT_AVAILABLE ok!
+
+	if (blockbuf@ MBR_Signature1 + gi MBRSIGNATURE ~=)
+		// signature is wrong, not MBR
+
+		blockbuf@ MmFree
+
+		return
+	end
+
+	// count the partitions
+
+	auto i
+	0 i!
+
+	auto pcount
+	0 pcount!
+
+	auto pte
+	blockbuf@ MBR_PartitionTable + pte!
+
+	while (i@ 4 <)
+		auto start
+		pte@ MBR_PTE_LBAStartHi + gi 16 <<
+		pte@ MBR_PTE_LBAStartLo + gi | start!
+
+		auto size
+		pte@ MBR_PTE_LBASizeHi + gi 16 <<
+		pte@ MBR_PTE_LBASizeLo + gi | size!
+
+		if (start@ size@ &&)
+			1 pcount +=
+		end
+
+		1 i +=
+		MBR_PTE_SIZEOF pte +=
+	end
+
+	// allocate partition table block
+
+	pcount@ IOPartitionEntry_SIZEOF * IOPartitionTable_SIZEOF + // bytes
+	'MBRt' // tag
+	0 // flags
+	MmAllocWithTag ok! partitiontable!
+
+	if (ok@)
+		// allocation failed, return
+
+		blockbuf@ MmFree
+
+		return
+	end
+
+	// fill in label and partition count
+
+	IOPartitionMBR partitiontable@ IOPartitionTable_Format + !
+
+	0 partitiontable@ IOPartitionTable_Label + sb
+
+	pcount@ partitiontable@ IOPartitionTable_PartitionCount + !
+
+	// fill in partition information
+
+	blockbuf@ MBR_PartitionTable + pte!
+
+	0 i!
+
+	0 pcount!
+
+	auto pbase
+	partitiontable@ IOPartitionTable_SIZEOF + pbase!
+
+	while (i@ 4 <)
+		pte@ MBR_PTE_LBAStartHi + gi 16 <<
+		pte@ MBR_PTE_LBAStartLo + gi | start!
+
+		pte@ MBR_PTE_LBASizeHi + gi 16 <<
+		pte@ MBR_PTE_LBASizeLo + gi | size!
+
+		if (start@ size@ &&)
+			0 pbase@ IOPartitionEntry_Label + sb
+
+			start@ pbase@ IOPartitionEntry_BlockOffset + !
+			size@ pbase@ IOPartitionEntry_SizeInBlocks + !
+			pcount@ pbase@ IOPartitionEntry_ID + !
+
+			IOPartitionEntry_SIZEOF pbase +=
+			1 pcount +=
+		end
+
+		MBR_PTE_SIZEOF pte +=
+		1 i +=
+	end
+
+	blockbuf@ MmFree
+end

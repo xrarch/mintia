@@ -660,16 +660,18 @@ fn IOSwapFileWriteMDL { pagecount mdl -- ok }
 
 					return
 				end
+			end else
+				break
 			end
-
-			0 ok!
 		end
 
 		1 pri +=
 	end
 
 	if (pagecount@)
-		STATUS_NO_SWAP ok!
+		if (ok@ ~~)
+			STATUS_NO_SWAP ok!
+		end
 
 		ok@ // status
 		0 // priboost
@@ -693,9 +695,7 @@ fn IOSwapFileWritePriorityLevel { pagecount offset mdl pri -- fragged writtenpag
 		[pri@]IOSwapFilePriorityListHeads@ swapfile!
 
 		while (swapfile@)
-			0 ok!
-
-			while (ok@ ~~)
+			while (1)
 				// try to write clusters of this size until we either run out of
 				// pages to write or we discover that this swapfile no longer has
 				// room for them.
@@ -704,9 +704,13 @@ fn IOSwapFileWritePriorityLevel { pagecount offset mdl pri -- fragged writtenpag
 				offset@ // mdloffset
 				mdl@ // mdl
 				swapfile@ // swapfile
-				IOSwapFileWritePages ok! fragged |=
+				IOSwapFileWritePages ok!
 
 				if (ok@ ~~)
+					if (mdl@ MmMDLHeader_Pages + @ pagestowrite@ ~=)
+						1 fragged!
+					end
+
 					pagestowrite@ pagecount -=
 					pagestowrite@ writtenpagecount +=
 					pagestowrite@ offset +=
@@ -720,13 +724,17 @@ fn IOSwapFileWritePriorityLevel { pagecount offset mdl pri -- fragged writtenpag
 					end
 				end else
 					if (ok@ STATUS_NO_SWAP ~=)
-						return
+						break
 					end
 
 					0 ok!
 
 					break
 				end
+			end
+
+			if (ok@)
+				break
 			end
 
 			if (pagecount@ pagestowrite@ <)
@@ -740,6 +748,10 @@ fn IOSwapFileWritePriorityLevel { pagecount offset mdl pri -- fragged writtenpag
 			swapfile@ IOSwapFile_Next + @ swapfile!
 		end
 
+		if (ok@)
+			break
+		end
+
 		if (pagecount@ ~~)
 			break
 		end
@@ -747,31 +759,29 @@ fn IOSwapFileWritePriorityLevel { pagecount offset mdl pri -- fragged writtenpag
 		1 pagestowrite >>=
 	end
 
-	if (writtenpagecount@)
-		auto rs
-		HALCPUInterruptDisable rs!
+	auto rs
+	HALCPUInterruptDisable rs!
 
-		auto h
-		[pri@]IOSwapFilePriorityListHeads@ h!
+	auto h
+	[pri@]IOSwapFilePriorityListHeads@ h!
 
-		auto t
-		[pri@]IOSwapFilePriorityListTails@ t!
+	auto t
+	[pri@]IOSwapFilePriorityListTails@ t!
 
-		if (h@ t@ ~=)
-			// move the first swapfile to the end of the priority queue so we
-			// fill them in a round-robin fashion to help avoid fragmentation.
+	if (h@ t@ ~=)
+		// move the first swapfile to the end of the priority queue so we
+		// fill them in a round-robin fashion to help avoid fragmentation.
 
-			h@ IOSwapFile_Next + @ [pri@]IOSwapFilePriorityListHeads!
-			0 h@ IOSwapFile_Next + !
-			h@ t@ IOSwapFile_Next + !
-			h@ [pri@]IOSwapFilePriorityListTails!
-		end
-
-		rs@ HALCPUInterruptRestore
+		h@ IOSwapFile_Next + @ [pri@]IOSwapFilePriorityListHeads!
+		0 h@ IOSwapFile_Next + !
+		h@ t@ IOSwapFile_Next + !
+		h@ [pri@]IOSwapFilePriorityListTails!
 	end
+
+	rs@ HALCPUInterruptRestore
 end
 
-fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- fragged ok }
+fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- ok }
 	// try to write this many pages as a single clustered operation to the
 	// swapfile.
 
@@ -783,6 +793,9 @@ fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- fragged ok }
 	if (ok@)
 		return
 	end
+
+	auto fragged
+	0 fragged!
 
 	auto writemdl
 
@@ -820,8 +833,6 @@ fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- fragged ok }
 
 		// can use the MDL as-is
 		mdl@ writemdl!
-
-		0 fragged!
 	end
 
 	// perform the write operation
@@ -846,10 +857,12 @@ fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- fragged ok }
 	writefunc@ IODispatchWriteFunction ok! drop
 
 	if (ok@)
-		pagecount@ // pages
-		offset@ // offset
-		swapfile@ // swapfile
-		IOSwapFileRelease
+		if (fragged@)
+			ok@ // status
+			0 // priboost
+			writemdl@ // mdl
+			MmMDLComplete
+		end
 
 		return
 	end
@@ -864,44 +877,72 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	auto transfer
 	mdl@ MmMDLHeader_Context1 + @ transfer!
 
+	auto status
+	mdl@ MmMDLHeader_Status + @ status!
+
+	auto pagecount
+	mdl@ MmMDLHeader_Pages + @ pagecount!
+
+	auto swapfile
+	mdl@ MmMDLHeader_Context3 + @ swapfile!
+
+	auto offset
+	mdl@ MmMDLHeader_Context2 + @ offset!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
 	if (transfer@)
-		auto pagecount
-		mdl@ MmMDLHeader_Pages + @ pagecount!
-
-		auto swapfile
-		mdl@ MmMDLHeader_Context3 + @ swapfile!
-
-		auto offset
-		mdl@ MmMDLHeader_Context2 + @ offset!
-
-		auto mdlpos
-		mdl@ MmMDLHeader_SIZEOF + mdlpos!
-
 		auto number
 		swapfile@ IOSwapFile_Number + @ number!
+	end
 
-		while (pagecount@)
-			auto pfdbe
-			mdlpos@@ pfdbe!
+	while (pagecount@)
+		auto pfdbe
+		mdlpos@@ pfdbe!
 
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
-				MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
-				// modified or deleted, free the swap page :(
+		if (transfer@)
+			if (status@)
+				// IO error, don't save the swap page
 
 				offset@ swapfile@ IOSwapPageFree
 			end else
-				offset@ PAGESHIFT << number@ PTE_SWAPFILE_SHIFT << | PTE_INSWAP | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
+					MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
+					// modified or deleted, free the swap page :(
+
+					offset@ swapfile@ IOSwapPageFree
+				end else
+					offset@ PAGESHIFT << number@ PTE_SWAPFILE_SHIFT << | PTE_INSWAP | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+				end
+			end
+		end
+
+		if (mdl@ MmMDLHeader_ParentMDL + @ ~~)
+			if (status@)
+				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP & ~~)
+					// no need to mark the page modified again if it was
+					// written to swap successfully.
+
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+				end
 			end
 
 			pfdbe@ MmEvictablePageDereference drop
-
-			1 offset +=
-			1 pagecount -=
-			4 mdlpos +=
 		end
+
+		1 offset +=
+		1 pagecount -=
+		4 mdlpos +=
 	end
 
 	if (mdl@ MmMDLHeader_ParentMDL + @ ~~)
+		if (status@)
+			// TODO pop-up window or something
+			status@ "IO error while writing data to swap (%i)\n" Printf
+		end
+
 		// root MDL, complete transfer
 		mdl@ IOTransferComplete
 	end

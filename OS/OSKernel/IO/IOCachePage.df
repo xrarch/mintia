@@ -491,16 +491,16 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	fcb@ // fcb
 	writefunc@ IODispatchWriteFunction ok! drop
 
-	if (transfer@ ~~)
-		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
+	if (ok@)
+		// complete the MDL so we can wait for any fragments to finish
 
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end
-	
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end
+
+	if (transfer@ ~~)
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			KERNELMODE // waitmode
 			0 // alertable
@@ -512,11 +512,6 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 		if (ok@ ~~)
 			mdl@ MmMDLHeader_Status + @ ok!
 		end
-	end
-
-	if (ok@)
-		// TODO handle properly
-		ok@ "IOCachePageWrite: failed to write (%i)\n" KeCrash
 	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
@@ -532,6 +527,14 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
+	auto status
+	mdl@ MmMDLHeader_Status + @ status!
+
+	if (status@)
+		// TODO pop-up window or something
+		status@ "IO error while writing unsaved data (%i)\n" Printf
+	end
+
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
@@ -539,8 +542,16 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 	mdl@ MmMDLHeader_Pages + @ pagecount!
 
 	while (pagecount@)
-		mdlpos@@ IOCachePageSatisfy
-		mdlpos@@ MmEvictablePageDereference drop
+		auto pfdbe
+		mdlpos@@ pfdbe!
+
+		if (status@)
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		end
+
+		pfdbe@ IOCachePageSatisfy
+		pfdbe@ MmEvictablePageDereference drop
 
 		1 pagecount -=
 		4 mdlpos +=

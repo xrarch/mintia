@@ -50,11 +50,12 @@ Logging in as `guest` works with any password, and the default password for `roo
 12. Userspace dynamic linking.
 13. Up to 16 dynamically-growable swapfiles and working set management.
 14. Minimal command-line interface over TTY.
+15. Support for native and MBR partition table formats.
 
 ## Planned features (in rough descending order of priority)
 
 1. Useful command-line interface. (in progress)
-2. MBR partition table support; FAT32 driver
+2. FAT32 driver
 3. Mac OS 9-lookalike window system.
 4. Self-hosting with a fully native toolchain.
 5. Networking.

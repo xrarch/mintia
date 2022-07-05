@@ -55,7 +55,7 @@ Logging in as `guest` works with any password, and the default password for `roo
 ## Planned features (in rough descending order of priority)
 
 1. Useful command-line interface. (in progress)
-2. FAT32 driver
+2. FAT12/16/32 driver.
 3. Mac OS 9-lookalike window system.
 4. Self-hosting with a fully native toolchain.
 5. Networking.

@@ -34,28 +34,23 @@ MINTIA should boot to the `username:` prompt.
 Logging in as `guest` works with any password, and the default password for `root` is `mintia`.
 
 
-## Implemented features
+- [x] Dynamically-linked kernel modules.
+- [x] Priority-based preemptive multitasking with wait boosting.
+- [x] Nested interrupts.
+- [x] IPLs (analogous to Windows IRQLs) and DPCs.
+- [x] Waiting on multiple events at once.
+- [x] An Object Manager for centralized resource tracking and IPC.
+- [x] Unix-like permissions model.
+- [x] Loadable kernel-mode debugger with stack tracing.
+- [x] File page cache.
+- [x] AisixFS support.
+- [x] Demand paging, memory-mapped files, etc.
+- [x] Userspace dynamic linking.
+- [x] Up to 16 dynamically-growable swapfiles and working set management.
+- [x] Minimal command-line interface over TTY.
+- [x] Support for native and MBR partition table formats.
 
-1. Dynamically-linked kernel modules.
-2. Priority-based preemptive multitasking with wait boosting.
-3. Nested interrupts.
-4. IPLs (analogous to Windows IRQLs) and DPCs.
-5. Waiting on multiple events at once.
-6. An Object Manager for centralized resource tracking and IPC.
-7. Unix-like permissions model.
-8. Loadable kernel-mode debugger with stack tracing.
-9. File page cache.
-10. AisixFS support.
-11. Demand paging, memory-mapped files, etc.
-12. Userspace dynamic linking.
-13. Up to 16 dynamically-growable swapfiles and working set management.
-14. Minimal command-line interface over TTY.
-15. Support for native and MBR partition table formats.
-
-## Planned features (in rough descending order of priority)
-
-1. Useful command-line interface. (in progress)
-2. FAT12/16/32 driver.
-3. Mac OS 9-lookalike window system.
-4. Self-hosting with a fully native toolchain.
-5. Networking.
+- [ ] FAT12/16/32 driver.
+- [ ] Mac OS 9-lookalike window system.
+- [ ] Self-hosting with a fully native toolchain.
+- [ ] Networking.

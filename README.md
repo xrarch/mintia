@@ -33,6 +33,7 @@ MINTIA should boot to the `username:` prompt.
 
 Logging in as `guest` works with any password, and the default password for `root` is `mintia`.
 
+## Features
 
 - [x] Dynamically-linked kernel modules.
 - [x] Priority-based preemptive multitasking with wait boosting.

@@ -37,8 +37,7 @@ Logging in as `guest` works with any password, and the default password for `roo
 
 - [x] Dynamically-linked kernel modules.
 - [x] Priority-based preemptive multitasking with wait boosting.
-- [x] Nested interrupts.
-- [x] IPLs (analogous to Windows IRQLs) and DPCs.
+- [x] Nested interrupts, managed by IPLs (analogous to Windows IRQLs) and DPCs.
 - [x] Waiting on multiple events at once.
 - [x] An Object Manager for centralized resource tracking and IPC.
 - [x] Unix-like permissions model.

@@ -34,3 +34,4 @@ view.exe view.exe 493
 help.exe help.exe 493
 
 mousedemo.exe mousedemo.exe 493
+stress.exe stress.exe 493

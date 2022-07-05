@@ -33,6 +33,7 @@ all:
 	make -C help
 
 	make -C mousedemo
+	make -C stress
 
 	make -C launchtty
 	make -C login
@@ -72,6 +73,7 @@ cleanup:
 	make -C help cleanup
 
 	make -C mousedemo cleanup
+	make -C stress cleanup
 
 	make -C launchtty cleanup
 	make -C login cleanup

@@ -90,6 +90,8 @@ extern ScreenNavigateY { down cancellinepos -- update }
 extern ScreenBackspace { -- update }
 extern ScreenInsert { c -- update }
 
+extern ScreenLineKill { -- update }
+
 // draw
 
 extern DrawAll { -- }

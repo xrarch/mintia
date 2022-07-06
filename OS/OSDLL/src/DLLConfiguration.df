@@ -448,7 +448,7 @@ struct DLLParse
 endstruct
 
 const DLLCONFIGPARSEBUFFERSIZE 4096
-const DLLCONFIGLINEBUFFERSIZE  256
+const DLLCONFIGLINEBUFFERSIZE  512
 
 fn DLLConfigFileParse { config -- ok }
 	auto buffer
@@ -526,6 +526,9 @@ fn DLLConfigFileGetNextLine { buffer parse -- done ok }
 	auto ptr
 	buffer@ ptr!
 
+	auto len
+	0 len!
+
 	auto inwhitespace
 	0 inwhitespace!
 
@@ -562,6 +565,12 @@ fn DLLConfigFileGetNextLine { buffer parse -- done ok }
 		end
 
 		if (inescape@)
+			1 len +=
+			if (len@ DLLCONFIGLINEBUFFERSIZE >=)
+				STATUS_INVALID_CONFIG_FILE ok!
+				return
+			end
+
 			c@ ptr@ sb
 			1 ptr +=
 
@@ -574,6 +583,12 @@ fn DLLConfigFileGetNextLine { buffer parse -- done ok }
 			if (c@ 39 ==) // singlequote
 				0 instring!
 			end else
+				1 len +=
+				if (len@ DLLCONFIGLINEBUFFERSIZE >=)
+					STATUS_INVALID_CONFIG_FILE ok!
+					return
+				end
+
 				c@ ptr@ sb
 				1 ptr +=
 			end
@@ -586,12 +601,24 @@ fn DLLConfigFileGetNextLine { buffer parse -- done ok }
 		end elseif (c@ DLLConfigIsWhitespace)
 			if (inwhitespace@ ~~)
 				if (start@ ~~)
+					1 len +=
+					if (len@ DLLCONFIGLINEBUFFERSIZE >=)
+						STATUS_INVALID_CONFIG_FILE ok!
+						return
+					end
+
 					1 inwhitespace!
 					' ' ptr@ sb
 					1 ptr +=
 				end
 			end
 		end else
+			1 len +=
+			if (len@ DLLCONFIGLINEBUFFERSIZE >=)
+				STATUS_INVALID_CONFIG_FILE ok!
+				return
+			end
+		
 			0 inwhitespace!
 			0 start!
 			c@ ptr@ sb
@@ -632,6 +659,9 @@ fn DLLConfigFileParseFile { parse config -- ok }
 	auto keyname
 	DLLCONFIGNAMEMAX alloc keyname!
 
+	auto multilinecomment
+	0 multilinecomment!
+
 	while (1)
 		auto done
 		linebuffer@ // buffer
@@ -647,6 +677,19 @@ fn DLLConfigFileParseFile { parse config -- ok }
 				return
 			end
 
+			continue
+		end
+
+		if (multilinecomment@)
+			if (linebuffer@ ";;" strcmp)
+				0 multilinecomment!
+			end
+
+			continue
+		end
+
+		if (linebuffer@ ";;" strcmp)
+			1 multilinecomment!
 			continue
 		end
 

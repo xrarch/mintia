@@ -13,6 +13,8 @@ buffer SwapFileInformation OSFileInformation_SIZEOF
 
 var BootFlags 0
 
+var SwapFileCount 0
+
 fn SetSystemConsole { path -- ok }
 	auto handle
 	0 // flags
@@ -107,6 +109,8 @@ fn SetSwapFile { section -- }
 		ok@ OSStatusGetName path@ "* Failed to create %s: %s\n" Printf
 		return
 	end
+
+	1 SwapFileCount +=
 end
 
 fn SetSwapFiles { config -- ok }
@@ -199,16 +203,6 @@ fn Main { ... -- ret }
 
 	bootdevicehandle@ OSClose drop
 
-	if (BootFlags@ OSBOOTFLAG_SINGLEUSERMODE &)
-		"\n" Printf
-
-		SingleUserMode ret!
-
-		if (ret@)
-			ret@ OSStatusGetName "Singleuser mode failed: %s\n" Printf
-		end
-	end
-
 	0 // signaled
 	OSEVENT_SYNCH // type
 	ACCESS_OWNER_ALL // permissions
@@ -219,29 +213,52 @@ fn Main { ... -- ret }
 		ret@ OSStatusGetName "Couldn't create DeadSystemEvent\n" OSError
 	end
 
-	while (1)
-		auto config
+	auto config
+	"/mintia/SystemInit.cfg" // path
+	0 // create
+	0 // write
+	OSConfigFileLoad ret! config!
+
+	while (ret@)
+		ret@ OSStatusGetName "Couldn't open /mintia/SystemInit.cfg: %s\nPlease correct this.\n\n" Printf
+
+		SingleUserMode ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "Singleuser mode failed: %s\n" Printf
+
+			OSSHUTDOWN_HALT OSShutdownSystem drop
+		end
+
 		"/mintia/SystemInit.cfg" // path
 		0 // create
 		0 // write
 		OSConfigFileLoad ret! config!
+	end
 
-		if (ret@ ~~)
-			config@ SetSwapFiles ret!
+	config@ SetSwapFiles ret!
 
-			if (ret@)
-				ret@ OSStatusGetName "Failed to establish swapfile: %s\n" Printf
-			end
+	if (ret@)
+		ret@ OSStatusGetName "Failed to establish swapfiles: %s\n" Printf
+	end
 
-			LotsOfTests
-		
-			config@ StartLines
+	if (BootFlags@ OSBOOTFLAG_SINGLEUSERMODE &)
+		"\n" Printf
 
-			config@ OSConfigFileFree
-		end else
-			ret@ OSStatusGetName "Couldn't open /mintia/SystemInit.cfg: %s\n" Printf
+		SingleUserMode ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "Singleuser mode failed: %s\n" Printf
 		end
+	end
 
+	if (SwapFileCount@ ~~)
+		"* WARNING: No swapfiles! The system may behave strangely.\n" Printf
+	end
+
+	config@ StartLines
+
+	while (1)
 		if (LineCount@)
 			OSWorkingSetPurge drop
 
@@ -264,6 +281,10 @@ fn Main { ... -- ret }
 end
 
 fn SingleUserMode { -- ok }
+	if (SwapFileCount@ ~~)
+		"* WARNING: No swapfiles! The system may behave strangely.\n\n" Printf
+	end
+
 	"Strike ^D to start multiuser mode.\n" Printf
 
 	auto phandle

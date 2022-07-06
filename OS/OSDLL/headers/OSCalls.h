@@ -30,6 +30,8 @@ extern OSMutexCreate { permissions name -- mutexhandle ok }
 extern OSMutexRelease { mutexhandle -- ok }
 extern OSMutexReadState { mutexhandle -- locked ok }
 
+extern OSGetStatistics { statistics -- ok }
+
 // Ob
 extern OSObjectOpen { flags access initialobjecthandle path -- handle ok }
 extern OSQuery { handle query -- ok }

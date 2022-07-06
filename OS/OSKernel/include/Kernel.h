@@ -12,4 +12,6 @@
 
 #include "<inc>/Kernel/Process.h"
 
+externptr KeStatistics
+
 const DEBUGCHECKS 1

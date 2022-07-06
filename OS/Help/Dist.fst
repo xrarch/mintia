@@ -37,3 +37,5 @@
 1/umount 1/umount
 1/ver 1/ver
 1/whoami 1/whoami
+1/kstats 1/kstats
+1/stress 1/stress

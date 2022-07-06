@@ -32,6 +32,7 @@ swapon.exe swapon.exe 493
 edit.exe edit.exe 493
 view.exe view.exe 493
 help.exe help.exe 493
+kstats.exe kstats.exe 493
 
 mousedemo.exe mousedemo.exe 493
 stress.exe stress.exe 493

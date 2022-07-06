@@ -34,6 +34,8 @@ struct OSMemoryInformation
 	4 NonpageableCommitLimit
 	4 NonpageableCommitUsage
 
+	4 ModifiedFilePageCount
+
 	48 Reserved
 endstruct
 

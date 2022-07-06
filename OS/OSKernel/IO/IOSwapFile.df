@@ -44,9 +44,6 @@ public IOSwapPagesRead
 
 buffer IOSwapFileCreationMutex KeMutex_SIZEOF
 
-buffer IOSwapFileCreationEvent KeEvent_SIZEOF
-public IOSwapFileCreationEvent
-
 buffer IOSwapFileExtendEvent KeEvent_SIZEOF
 public IOSwapFileExtendEvent
 
@@ -74,20 +71,13 @@ table IOSwapFilePriorityListTails[IOSWAPFILEMAXPRI]
 var IOSwapFileExtensionIndex 0
 
 var IOSwapFileCount 0
+public IOSwapFileCount
 
 fn IOSwapFileInit { -- }
 	"IOSwapFileCreationMutex" // name
 	KERNELMODE // mode
 	IOSwapFileCreationMutex // mutex
 	KeMutexInitialize
-end
-
-fn IOSwapFileAwaitCreation { -- }
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	IOSwapFileCreationEvent // object
-	KeThreadWaitForObject drop
 end
 
 fn IOSwapFileCreateLock { -- }
@@ -376,24 +366,20 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 
 	rs@ HALCPUInterruptRestore
 
-	1 IOSwapFileCount +=
-
-	if (IOSwapFileCount@ 1 ==)
+	if (IOSwapFileCount@ 0 ==)
 		// this is the first swapfile created.
 		// set the commit limit to its size and signal the creation event.
 
 		minpages@ MmCommitLimit!
 		maxpages@ MmTheoreticalCommitLimit!
-
-		0 // priboost
-		IOSwapFileCreationEvent // event
-		KeEventSignal
 	end else
 		HALCPUInterruptDisable rs!
 		minpages@ MmCommitLimit +=
 		maxpages@ MmTheoreticalCommitLimit +=
 		rs@ HALCPUInterruptRestore
 	end
+
+	1 IOSwapFileCount +=
 
 	IOSwapFileCreateUnlock
 

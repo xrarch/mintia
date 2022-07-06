@@ -65,6 +65,7 @@ externptr MmModifiedPageListHead
 externptr MmModifiedPageListTail
 
 externptr MmModifiedPageCount
+externptr MmModifiedFilePageCount
 
 externptr MmEvictablePageListHead
 externptr MmEvictablePageListTail

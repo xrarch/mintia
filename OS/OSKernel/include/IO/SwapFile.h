@@ -1,3 +1,5 @@
+extern IOSwapFileInit { -- }
+
 extern IOSwapFileCreate { minpages maxpages pri path -- ok }
 extern IOSwapFileQuery { query id -- ok }
 
@@ -20,3 +22,5 @@ externptr IOSwapPagesUsedPeak
 
 externptr IOSwapPagesWritten
 externptr IOSwapPagesRead
+
+externptr IOSwapFileCount

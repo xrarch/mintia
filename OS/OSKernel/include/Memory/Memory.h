@@ -87,6 +87,7 @@ extern MmFlushModifiedPages { -- }
 
 extern MmThrottle { -- }
 
+externptr MmPageTotal
 externptr MmPageFrameDatabase
 externptr MmPageFreeListHead
 externptr MmPageZeroListHead

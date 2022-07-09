@@ -1,0 +1,177 @@
+//
+// Implements Interrupt Priority Level (IPL) management.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/HALInterrupt.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+externptr KeIPLCurrent
+
+asm "
+
+KeIPLRaise:
+.global KeIPLRaise
+	la   t0, KeIPLCurrent
+	mov  t1, long [t0]
+
+	sub  t2, a0, t1
+	beq  t2, .done
+	blt  t2, .mistake
+
+	mov  long [t0], a0
+
+	li   t3, IPLDPC
+
+	slt  t2, t3, a0
+	bne  t2, .update
+
+	slt  t2, t3, t1
+	bne  t2, .update
+
+.done:
+	mov  a0, t1
+	ret
+
+.update:
+	subi sp, sp, 8
+	mov  long [sp], lr
+	mov  long [sp + 4], s0
+
+	mov  s0, t1
+
+	jal  HALPlatformIPLSet
+
+	mov  a0, s0
+
+	mov  s0, long [sp + 4]
+	mov  lr, long [sp]
+	addi sp, sp, 8
+	ret
+
+.mistake:
+	li   a2, 1
+	mov  a1, t1
+	j    KeIPLMistake
+
+
+
+KeIPLLower:
+.global KeIPLLower
+	la   t0, KeIPLCurrent
+	mov  t1, long [t0]
+
+	sub  t2, t1, a0
+	beq  t2, .doneearly
+	blt  t2, .mistake
+
+	slti t2, a0, IPLDPC
+	bne  t2, .longpath
+
+	mov  long [t0], a0
+	j    HALPlatformIPLSet
+;HALPlatformIPLSet doesn't return here
+
+.doneearly:
+	ret
+
+.longpath:
+	subi sp, sp, 12
+	mov  long [sp], lr
+	mov  long [sp + 4], s0
+	mov  long [sp + 8], s1
+
+	mov  s0, a0
+
+;dropped below IPLDPC. we IGNORE the IPLAPC case here because it isn't
+;currently used.
+
+	li   t3, IPLDPC
+	mov  long [t0], t3
+
+	slt  t2, t3, t1
+	beq  t2, .dontupdate
+
+	jal  HALPlatformIPLSet
+
+.dontupdate:
+
+;inlined disable interrupts
+
+	mfcr t2, rs
+	subi t1, zero, 3
+	and  t1, t2, t1
+	mtcr rs, t1
+
+.loop:
+	li   s1, 0
+
+	la   t1, KeDPCListHead
+	mov  t1, long [t1]
+	beq  t1, .nodpcs
+
+	li   s1, 1
+	jal  KeDPCDispatchQueue
+
+.nodpcs:
+	la   t1, KeThreadNext
+	mov  t1, long [t1]
+	beq  t1, .nonext
+
+;inlined enable interrupts
+
+	mfcr t0, rs
+	ori  t0, t0, LIMN2600_RS_INT
+	mtcr rs, t0
+
+	li   s1, 1
+	jal  KeThreadNextSwitch
+
+;inlined disable interrupts
+
+	mfcr t2, rs
+	subi t1, zero, 3
+	and  t1, t2, t1
+	mtcr rs, t1
+
+.nonext:
+	bne  s1, .loop
+
+.done:
+
+;inlined enable interrupts
+
+	mfcr t0, rs
+	ori  t0, t0, LIMN2600_RS_INT
+	mtcr rs, t0
+
+	la   t0, KeIPLCurrent
+	mov  long [t0], s0
+
+	mov  s1, long [sp + 8]
+	mov  s0, long [sp + 4]
+	mov  lr, long [sp]
+	addi sp, sp, 12
+	ret
+
+.mistake:
+	li   a2, 0
+	mov  a1, t1
+	j    KeIPLMistake
+
+"
+
+fn KeIPLMistake { type oldipl newipl -- }
+	if (type@)
+		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not greater or equal (old=%s new=%s)\n" KeCrash
+	end else
+		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not less or equal (old=%s new=%s)\n" KeCrash
+	end
+end

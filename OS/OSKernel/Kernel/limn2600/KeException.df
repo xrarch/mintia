@@ -71,7 +71,7 @@ KeLimn2600ExceptionVector:
 .waskernel:
 	subi sp, sp, OSContext_SIZEOF
 
-	la   t1, KeInterruptNested
+	la   t1, HALInterruptNested
 	mov  t1, long [t1]
 	bne  t1, .skipoverflowcheck
 
@@ -408,8 +408,6 @@ fn KeThreadContinue { context thread -- }
 	ers@ tf@ OSContext_ers + !
 end
 
-externptr KeInterruptNested
-
 fn KeLimn2600Exception { badaddr ecause tf -- }
 	auto handled
 	0 handled!
@@ -424,20 +422,33 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 	end
 
 	if (ecause@ ECAUSEINTERRUPT ==)
-		while (1)
-			auto int
-			HALPlatformInterruptNext int!
+		1 KeStatistics OSStatistics_Interrupts + +=
 
-			if (int@ ~~)
-				break
+		HALInterrupt
+
+		KeIPLCurrent@ signal!
+
+		if (signal@ IPLDPC <)
+			IPLDPC KeIPLCurrent!
+
+			while (KeDPCListHead@ KeThreadNext@ ||)
+				if (KeDPCListHead@)
+					KeDPCDispatchQueue
+				end
+
+				if (KeThreadNext@)
+					HALCPUInterruptEnable
+
+					KeThreadNextSwitch
+
+					HALCPUInterruptDisable drop
+				end
 			end
 
-			[int@ 1 << 1 +]HALPlatformInterruptHandlers@ // ipl
-			int@ // int
-			[int@ 1 <<]HALPlatformInterruptHandlers@ // handler
-			KeInterrupt
+			signal@ KeIPLCurrent!
 		end
 
+		0 signal!
 		1 handled!
 	end elseif (ecause@ ECAUSESYS ==)
 		1 KeStatistics OSStatistics_SystemCalls + +=

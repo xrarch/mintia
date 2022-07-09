@@ -3,8 +3,9 @@ extern HALInterruptUnregister { int -- }
 
 extern HALPlatformInterruptNext { -- int }
 extern HALPlatformInterruptAcknowledge { int -- }
-fnptr HALKeInterruptF { ipl int handler -- }
+extern HALInterrupt { -- }
 
 fnptr HALInterruptHandler { int -- }
 
 externptr HALPlatformInterruptHandlers
+externptr HALInterruptNested

@@ -85,56 +85,80 @@ externptr KeIPLCurrent
 externptr KeTimerExpirationEarliest
 externptr KeTimerExpirationDPC
 
-fn (HALInterruptHandler) DriverRTCInterrupt { int -- }
-	int@ HALPlatformInterruptAcknowledge
+asm "
 
-	1 KeStatistics OSStatistics_ClockTicks + +=
+DriverRTCInterrupt:
+.global DriverRTCInterrupt
+	subi sp, sp, 4
+	mov  long [sp], lr
 
-	HALRTCINTERVAL DriverRTCUptime KeTimeAddMs
+	jal HALPlatformInterruptAcknowledge
 
-	auto currenttime
-	DriverRTCTimeCurrent currenttime!
+	la   t0, KeStatistics
+	mov  t1, long [t0 + OSStatistics_ClockTicks]
+	addi t1, t1, 1
+	mov  long [t0 + OSStatistics_ClockTicks], t1
 
-	currenttime@ DriverRTCQuerySlow
+	la   a0, DriverRTCUptime
+	li   a1, HALRTCINTERVAL
+	jal  KeTimeAddMs
 
-	auto expdpc
-	KeTimerExpirationDPC expdpc!
+	la   a0, DriverRTCTimeCurrent
+	jal  DriverRTCQuerySlow
 
-	if (expdpc@ KeDPC_Enqueued + @ ~~)
-		if (KeTimerExpirationEarliest DriverRTCUptime KeTimeCompare TIMEEARLIER ==)
-			0 // context1
-			0 // context2
-			DPCLOWIMPORTANCE // importance
-			expdpc@ // dpc
-			KeDPCEnqueue
-		end
-	end
+	la   t0, KeTimerExpirationDPC
+	mov  t1, long [t0 + KeDPC_Enqueued]
+	bne  t1, .skipdpc
 
-	auto cth
-	KeThreadCurrent@ cth!
+	la   a1, KeTimerExpirationEarliest
+	la   a0, DriverRTCUptime
+	jal  KeTimeCompare
 
-	if (cth@)
-		auto qt
-		cth@ KeThread_Quantum + @ qt!
+	subi a0, a0, TIMEEARLIER
+	bne  a0, .skipdpc
 
-		if (qt@ QUANTUMUNITSPERTICK <=)
-			0 qt!
-		end else
-			QUANTUMUNITSPERTICK qt -=
-		end
+	li   a3, 0
+	li   a2, 0
+	li   a1, DPCLOWIMPORTANCE
+	la   a0, KeTimerExpirationDPC
+	jal  KeDPCEnqueue
 
-		if (qt@ ~~)
-			KeThreadQuantumDPC expdpc!
+.skipdpc:
+	la   t0, KeThreadCurrent
+	mov  t0, long [t0]
 
-			if (expdpc@ KeDPC_Enqueued + @ ~~)
-				0 // context1
-				0 // context2
-				DPCLOWIMPORTANCE // importance
-				expdpc@ // dpc
-				KeDPCEnqueue
-			end
-		end
+	beq  t0, .skipthread
 
-		qt@ cth@ KeThread_Quantum + !
-	end
-end
+	mov  t1, long [t0 + KeThread_Quantum]
+
+	li   t2, QUANTUMUNITSPERTICK
+	sub  t2, t2, t1
+	blt  t2, .skipdec
+
+	b    .continuedec
+
+.skipdec:
+	li   t2, 0
+
+.continuedec:
+	mov  long [t0 + KeThread_Quantum], t2
+
+	bne  t2, .skipthread
+
+	la   t0, KeThreadQuantumDPC
+	mov  t1, long [t0 + KeDPC_Enqueued]
+	bne  t1, .skipthread
+
+	li   a3, 0
+	li   a2, 0
+	li   a1, DPCLOWIMPORTANCE
+	mov  a0, t0
+	jal  KeDPCEnqueue
+
+.skipthread:
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+"

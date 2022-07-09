@@ -1,7 +1,7 @@
 DFILES := $(shell find . -type f -name "*.df")
 OBJ    := $(DFILES:.df=.o) $(SFILES:.s=.o)
 
-DC      =  ../../../../sdk/dragonc.sh
+DC      = ../../../../sdk/dragonc.sh $(BUILDCONFIG)
 AS      = ../../../../sdk/asm.sh
 OBJTOOL = ../../../../sdk/link.sh
 LD      =  $(OBJTOOL) link

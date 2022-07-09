@@ -3,7 +3,7 @@ SFILES := $(shell find ./src -type f -name "*.s")
 OBJ    := $(DFILES:.df=.o)
 SOBJ   := $(SFILES:.s=.o)
 
-DC  =  ../../../sdk/dragonc.sh
+DC  =  ../../../sdk/dragonc.sh $(BUILDCONFIG)
 AS  =  ../../../sdk/asm.sh
 OBJTOOL = ../../../sdk/link.sh
 LD  =  ../../../sdk/link.sh link

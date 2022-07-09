@@ -78,8 +78,6 @@ const PAGESHIFT 12
 
 const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 
-const DEBUGCHECKS 1
-
 extern LdrArgsValue { arg -- out }
 extern LdrArgsCheck { arg -- present }
 

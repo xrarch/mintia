@@ -8,6 +8,12 @@ else
 	export DISKLABEL  := ./build/small.disklabel
 endif
 
+ifndef BUILDCONFIG
+	BUILDCONFIG := DEBUGCHECKS=0
+endif
+
+export BUILDCONFIG
+
 export FST        := ../sdk/fstool.sh
 export OBJTOOL    := ../sdk/link.sh
 export SYSTOOL    := ../sdk/gensyscalls.sh

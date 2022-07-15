@@ -4,9 +4,9 @@
 ;a1 - fb modulo
 ;a2 - start addr
 ;a3 - height
-;sp+8  - background
-;sp+12 - width
-;sp+16 - foreground
+;sp+4  - background
+;sp+8  - width
+;sp+12 - foreground
 HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 .global HALCPUFastDrawGlyphBackwards
 	mov  t5, long [sp + 4]
@@ -45,9 +45,9 @@ HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 ;a1 - fb modulo
 ;a2 - start addr
 ;a3 - height
-;sp+8  - background
-;sp+12 - width
-;sp+16 - foreground
+;sp+4  - background
+;sp+8  - width
+;sp+12 - foreground
 HALCPUFastDrawGlyph: ;highest bit is leftmost
 .global HALCPUFastDrawGlyph
 	mov  t5, long [sp + 4]

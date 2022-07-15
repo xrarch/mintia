@@ -79,10 +79,12 @@ endstruct
 struct PsThread
 	KeThread_SIZEOF TCB
 
-	4 UserStackBottom
-	4 UserStackTop
+	4 UTEB
 
 	4 TID
+	4 StackHasGuardPage
+	4 StackBottom
+	4 StackTop
 
 	KeEvent_SIZEOF TerminationEvent
 

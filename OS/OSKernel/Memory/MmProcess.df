@@ -375,31 +375,109 @@ fn MmThreadInitialize { thread -- ok }
 	auto process
 	thread@ KeThread_Process + @ process!
 
-	// map usermode stack
+	0 thread@ PsThread_StackHasGuardPage + !
 
-	auto ustackbottom
-	USTACKSZ // length
-	USTACKS // startva
+	// allocate TEB
+
+	auto uteb
+	OSThreadEnvironmentBlock_SIZEOF // length
+	HEAPSTART // startva
 	process@ // processobject
-	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	ACCESS_READ ACCESS_WRITE | // pageprotection
 	0 // flags
-	MmAllocateProcessObject ok! ustackbottom!
+	MmAllocateProcessObject ok! uteb!
 
 	if (ok@)
 		return
 	end
 
-	ustackbottom@ thread@ PsThread_UserStackBottom + !
-	ustackbottom@ USTACKSZ + thread@ PsThread_UserStackTop + !
+	// allocate guard page for stack
+
+	auto ustackbottom
+	OSPAGESIZE // length
+	USTACKS // startva
+	process@ // processobject
+	0 // pageprotection
+	0 // flags
+	MmAllocateProcessObject ok! ustackbottom!
+
+	while (1)
+		if (ok@ ~~)
+			// try to allocate the stack right after the guard page
+
+			USTACKSZ // length
+			ustackbottom@ OSPAGESIZE + // startva
+			process@ // processobject
+			ACCESS_READ ACCESS_WRITE | // pageprotection
+			OSMAPFLAG_FIXEDADDRESS // flags
+			MmAllocateProcessObject ok! drop
+
+			if (ok@)
+				// didn't work. deallocate guard page and retry anywhere
+
+				OSPAGESIZE // length
+				ustackbottom@ // vaddr
+				process@ // processobject
+				MmUnmapViewProcess drop
+
+				continue
+			end
+
+			1 thread@ PsThread_StackHasGuardPage + !
+
+			OSPAGESIZE ustackbottom +=
+		end else
+			// something broke, just allocate the stack anywhere
+
+			USTACKSZ // length
+			USTACKS // startva
+			process@ // processobject
+			ACCESS_READ ACCESS_WRITE | // pageprotection
+			0 // flags
+			MmAllocateProcessObject ok! ustackbottom!
+		end
+
+		break
+	end
+
+	if (ok@)
+		// failed, deallocate TEB
+
+		OSThreadEnvironmentBlock_SIZEOF // length
+		uteb@ // vaddr
+		process@ // processobject
+		MmUnmapViewProcess drop
+
+		return
+	end
+
+	ustackbottom@ thread@ PsThread_StackBottom + !
+	ustackbottom@ USTACKSZ + thread@ PsThread_StackTop + !
+
+	uteb@ thread@ PsThread_UTEB + !
 end
 
 fn MmThreadUninitialize { thread -- ok }
 	auto process
 	thread@ KeThread_Process + @ process!
 
+	// deallocate TEB
+	OSThreadEnvironmentBlock_SIZEOF // length
+	thread@ PsThread_UTEB + @ // vaddr
+	process@ // processobject
+	MmUnmapViewProcess drop
+
 	// unmap usermode stack
+
+	if (thread@ PsThread_StackHasGuardPage + @)
+		PAGESIZE // length
+		thread@ PsThread_StackBottom + @ PAGESIZE - // vaddr
+		process@ // processobject
+		MmUnmapViewProcess drop
+	end
+
 	USTACKSZ // length
-	thread@ PsThread_UserStackBottom + @ // vaddr
+	thread@ PsThread_StackBottom + @ // vaddr
 	process@ // processobject
 	MmUnmapViewProcess ok!
 end

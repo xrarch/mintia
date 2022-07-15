@@ -39,6 +39,17 @@ struct OSThreadInformation
 	48 Reserved
 endstruct
 
+extern OSThreadCurrentTEB { -- teb }
+extern OSThreadCurrentTID { -- tid }
+
+struct OSThreadEnvironmentBlock
+	4 ThreadID
+
+	4 StackTop
+	4 StackBottom
+	4 StackHasGuardPage
+endstruct
+
 struct OSCreationParams
 	// handles to use as the process's stdio if OSPROCESS_NOINHERITH is
 	// specified.

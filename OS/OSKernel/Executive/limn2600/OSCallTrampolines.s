@@ -188,11 +188,11 @@ OSTOSConsolePutCharacter:
 .global OSTOSConsolePutCharacter
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSConsolePutCharacter
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -202,13 +202,13 @@ OSTOSSystemAbort:
 .global OSTOSSystemAbort
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSSystemAbort
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -218,11 +218,11 @@ OSTOSGetSystemConsoleName:
 .global OSTOSGetSystemConsoleName
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSGetSystemConsoleName
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -235,8 +235,8 @@ OSTOSGetBootFlags:
 
 	jal  OSGetBootFlags
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -246,7 +246,7 @@ OSTOSContinue:
 .global OSTOSContinue
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSContinue
 
@@ -262,8 +262,8 @@ OSTOSQueryTime:
 
 	jal  OSQueryTime
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -273,11 +273,11 @@ OSTOSShutdownSystem:
 .global OSTOSShutdownSystem
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSShutdownSystem
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -287,11 +287,11 @@ OSTOSVersion:
 .global OSTOSVersion
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSVersion
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -301,15 +301,15 @@ OSTOSEventCreate:
 .global OSTOSEventCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSEventCreate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -319,12 +319,12 @@ OSTOSEventReset:
 .global OSTOSEventReset
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSEventReset
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -334,11 +334,11 @@ OSTOSEventSignal:
 .global OSTOSEventSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSEventSignal
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -348,11 +348,11 @@ OSTOSEventPulse:
 .global OSTOSEventPulse
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSEventPulse
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -362,12 +362,12 @@ OSTOSEventReadState:
 .global OSTOSEventReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSEventReadState
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -377,14 +377,14 @@ OSTOSSemaphoreCreate:
 .global OSTOSSemaphoreCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSSemaphoreCreate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -394,12 +394,12 @@ OSTOSSemaphoreRelease:
 .global OSTOSSemaphoreRelease
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSSemaphoreRelease
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -409,12 +409,12 @@ OSTOSSemaphoreReadState:
 .global OSTOSSemaphoreReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSSemaphoreReadState
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -424,13 +424,13 @@ OSTOSMutexCreate:
 .global OSTOSMutexCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSMutexCreate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -440,11 +440,11 @@ OSTOSMutexRelease:
 .global OSTOSMutexRelease
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSMutexRelease
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -454,12 +454,12 @@ OSTOSMutexReadState:
 .global OSTOSMutexReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSMutexReadState
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -469,11 +469,11 @@ OSTOSGetStatistics:
 .global OSTOSGetStatistics
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSGetStatistics
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -483,15 +483,15 @@ OSTOSObjectOpen:
 .global OSTOSObjectOpen
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSObjectOpen
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -501,12 +501,12 @@ OSTOSQuery:
 .global OSTOSQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -516,11 +516,11 @@ OSTOSClose:
 .global OSTOSClose
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSClose
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -530,17 +530,17 @@ OSTOSWaitForMultipleObjects:
 .global OSTOSWaitForMultipleObjects
 	subi sp, sp, 8
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
-	mov  t0, long [s18 + 20] ;t5
+	mov  t0, long [s17 + 20] ;t5
 	mov  long [sp + 4], t0
 
 	jal  OSWaitForMultipleObjects
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 8
@@ -550,13 +550,13 @@ OSTOSWaitForObject:
 .global OSTOSWaitForObject
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSWaitForObject
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -566,15 +566,15 @@ OSTOSHandleDuplicate:
 .global OSTOSHandleDuplicate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSHandleDuplicate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -584,12 +584,12 @@ OSTOSDirectoryCountQuery:
 .global OSTOSDirectoryCountQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSDirectoryCountQuery
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -599,14 +599,14 @@ OSTOSDirectoryQueryAll:
 .global OSTOSDirectoryQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSDirectoryQueryAll
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -616,14 +616,14 @@ OSTOSSetSecurity:
 .global OSTOSSetSecurity
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSSetSecurity
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -633,12 +633,12 @@ OSTOSFileQuery:
 .global OSTOSFileQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSFileQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -648,14 +648,14 @@ OSTOSFileTruncate:
 .global OSTOSFileTruncate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSFileTruncate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -665,14 +665,14 @@ OSTOSFileSeek:
 .global OSTOSFileSeek
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSFileSeek
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -682,18 +682,18 @@ OSTOSFileRead:
 .global OSTOSFileRead
 	subi sp, sp, 8
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
-	mov  t0, long [s18 + 20] ;t5
+	mov  t0, long [s17 + 20] ;t5
 	mov  long [sp + 4], t0
 
 	jal  OSFileRead
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 8
@@ -703,15 +703,15 @@ OSTOSFileWrite:
 .global OSTOSFileWrite
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSFileWrite
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -721,12 +721,12 @@ OSTOSFileFlush:
 .global OSTOSFileFlush
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSFileFlush
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -736,14 +736,14 @@ OSTOSDirectoryRename:
 .global OSTOSDirectoryRename
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSDirectoryRename
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -753,12 +753,12 @@ OSTOSDirectoryUnlink:
 .global OSTOSDirectoryUnlink
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSDirectoryUnlink
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -768,12 +768,12 @@ OSTOSDirectoryRead:
 .global OSTOSDirectoryRead
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSDirectoryRead
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -783,14 +783,14 @@ OSTOSSwapFileCreate:
 .global OSTOSSwapFileCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSSwapFileCreate
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -800,12 +800,12 @@ OSTOSSwapFileQuery:
 .global OSTOSSwapFileQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSSwapFileQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -815,14 +815,14 @@ OSTOSIOControl:
 .global OSTOSIOControl
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSIOControl
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -832,11 +832,11 @@ OSTOSGetBootDevicePath:
 .global OSTOSGetBootDevicePath
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSGetBootDevicePath
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -846,13 +846,13 @@ OSTOSFilesystemMount:
 .global OSTOSFilesystemMount
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSFilesystemMount
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -862,11 +862,11 @@ OSTOSFilesystemUnmount:
 .global OSTOSFilesystemUnmount
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSFilesystemUnmount
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -876,13 +876,13 @@ OSTOSMountQueryAll:
 .global OSTOSMountQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSMountQueryAll
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -895,8 +895,8 @@ OSTOSMountCountQuery:
 
 	jal  OSMountCountQuery
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -906,12 +906,12 @@ OSTOSMountUpdateFlags:
 .global OSTOSMountUpdateFlags
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSMountUpdateFlags
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -921,12 +921,12 @@ OSTOSMountGetFilesystemName:
 .global OSTOSMountGetFilesystemName
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSMountGetFilesystemName
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -936,15 +936,15 @@ OSTOSSectionCreate:
 .global OSTOSSectionCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSSectionCreate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -954,24 +954,24 @@ OSTOSMapView:
 .global OSTOSMapView
 	subi sp, sp, 16
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
-	mov  t0, long [s18 + 20] ;t5
+	mov  t0, long [s17 + 20] ;t5
 	mov  long [sp + 4], t0
 
-	mov  t0, long [s18 + 24] ;a0
+	mov  t0, long [s17 + 24] ;a0
 	mov  long [sp + 8], t0
 
-	mov  t0, long [s18 + 28] ;a1
+	mov  t0, long [s17 + 28] ;a1
 	mov  long [sp + 12], t0
 
 	jal  OSMapView
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 16
@@ -981,13 +981,13 @@ OSTOSUnmapView:
 .global OSTOSUnmapView
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
 
 	jal  OSUnmapView
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -997,14 +997,14 @@ OSTOSRemapView:
 .global OSTOSRemapView
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSRemapView
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1014,18 +1014,18 @@ OSTOSAllocate:
 .global OSTOSAllocate
 	subi sp, sp, 8
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
-	mov  t0, long [s18 + 20] ;t5
+	mov  t0, long [s17 + 20] ;t5
 	mov  long [sp + 4], t0
 
 	jal  OSAllocate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 8
@@ -1035,11 +1035,11 @@ OSTOSMemoryQuery:
 .global OSTOSMemoryQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSMemoryQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1052,7 +1052,7 @@ OSTOSWorkingSetPurge:
 
 	jal  OSWorkingSetPurge
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1065,7 +1065,7 @@ OSTOSFlushModifiedPages:
 
 	jal  OSFlushModifiedPages
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1087,15 +1087,15 @@ OSTOSProcessCreate:
 .global OSTOSProcessCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSProcessCreate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1105,12 +1105,12 @@ OSTOSProcessSignal:
 .global OSTOSProcessSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessSignal
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1120,13 +1120,13 @@ OSTOSProcessOpenByPID:
 .global OSTOSProcessOpenByPID
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessOpenByPID
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1136,12 +1136,12 @@ OSTOSProcessQuery:
 .global OSTOSProcessQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1151,12 +1151,12 @@ OSTOSProcessQueryByPID:
 .global OSTOSProcessQueryByPID
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessQueryByPID
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1166,12 +1166,12 @@ OSTOSProcessReadStatus:
 .global OSTOSProcessReadStatus
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSProcessReadStatus
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1181,12 +1181,12 @@ OSTOSProcessMaskSignal:
 .global OSTOSProcessMaskSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessMaskSignal
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1196,12 +1196,12 @@ OSTOSProcessUnmaskSignal:
 .global OSTOSProcessUnmaskSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessUnmaskSignal
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1211,12 +1211,12 @@ OSTOSProcessSetConsoleGroup:
 .global OSTOSProcessSetConsoleGroup
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessSetConsoleGroup
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1226,11 +1226,11 @@ OSTOSProcessClearConsoleGroup:
 .global OSTOSProcessClearConsoleGroup
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSProcessClearConsoleGroup
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1240,11 +1240,11 @@ OSTOSProcessSignalActivation:
 .global OSTOSProcessSignalActivation
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSProcessSignalActivation
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1254,13 +1254,13 @@ OSTOSProcessWaitForActivation:
 .global OSTOSProcessWaitForActivation
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessWaitForActivation
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1270,7 +1270,7 @@ OSTOSProcessExit:
 .global OSTOSProcessExit
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSProcessExit
 
@@ -1286,8 +1286,8 @@ OSTOSProcessCountQuery:
 
 	jal  OSProcessCountQuery
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1297,13 +1297,13 @@ OSTOSProcessQueryAll:
 .global OSTOSProcessQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSProcessQueryAll
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1313,12 +1313,12 @@ OSTOSSetQuota:
 .global OSTOSSetQuota
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSSetQuota
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1328,12 +1328,12 @@ OSTOSQuotaQuery:
 .global OSTOSQuotaQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSQuotaQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1343,11 +1343,11 @@ OSTOSThreadException:
 .global OSTOSThreadException
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSThreadException
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1357,11 +1357,11 @@ OSTOSThreadSetFilePermissions:
 .global OSTOSThreadSetFilePermissions
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSThreadSetFilePermissions
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1371,11 +1371,11 @@ OSTOSThreadSleep:
 .global OSTOSThreadSleep
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSThreadSleep
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1385,21 +1385,21 @@ OSTOSThreadCreate:
 .global OSTOSThreadCreate
 	subi sp, sp, 12
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
-	mov  a2, long [s18 + 12] ;t3
-	mov  a3, long [s18 + 16] ;t4
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
 
-	mov  t0, long [s18 + 20] ;t5
+	mov  t0, long [s17 + 20] ;t5
 	mov  long [sp + 4], t0
 
-	mov  t0, long [s18 + 24] ;a0
+	mov  t0, long [s17 + 24] ;a0
 	mov  long [sp + 8], t0
 
 	jal  OSThreadCreate
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 12
@@ -1409,12 +1409,12 @@ OSTOSThreadTerminate:
 .global OSTOSThreadTerminate
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSThreadTerminate
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1424,11 +1424,11 @@ OSTOSThreadSuspend:
 .global OSTOSThreadSuspend
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSThreadSuspend
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1438,11 +1438,11 @@ OSTOSThreadResume:
 .global OSTOSThreadResume
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSThreadResume
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1452,12 +1452,12 @@ OSTOSThreadReadStatus:
 .global OSTOSThreadReadStatus
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSThreadReadStatus
 
-	mov  long [s18 + 4], a0 ;t1
-	mov  long [s18 + 8], a1 ;t2
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1467,12 +1467,12 @@ OSTOSThreadQuery:
 .global OSTOSThreadQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSThreadQuery
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1482,11 +1482,11 @@ OSTOSSetSystemConsole:
 .global OSTOSSetSystemConsole
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
+	mov  a0, long [s17 + 4] ;t1
 
 	jal  OSSetSystemConsole
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1496,12 +1496,12 @@ OSTOSConsoleSignal:
 .global OSTOSConsoleSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  a0, long [s18 + 4] ;t1
-	mov  a1, long [s18 + 8] ;t2
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSConsoleSignal
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
@@ -1514,7 +1514,7 @@ OSTOSAmIAdmin:
 
 	jal  OSAmIAdmin
 
-	mov  long [s18 + 4], a0 ;t1
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

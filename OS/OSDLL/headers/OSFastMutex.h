@@ -2,6 +2,7 @@ struct OSFastMutex
 	4 SemaphoreHandle
 	4 LockCount
 	4 Name
+	4 OwningThread
 
 	16 Reserved
 endstruct

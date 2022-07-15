@@ -82,6 +82,8 @@ struct PsThread
 	4 UserStackBottom
 	4 UserStackTop
 
+	4 TID
+
 	KeEvent_SIZEOF TerminationEvent
 
 	4 FileCreationPermissions

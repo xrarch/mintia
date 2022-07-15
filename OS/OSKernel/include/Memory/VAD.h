@@ -21,9 +21,9 @@ struct MmVAD
 	4 EndVA
 endstruct
 
-const MMVADFLAG_FILE     1
-const MMVADFLAG_SECTION  2
-const MMVADFLAG_NOCOMMIT 4
+const MMVADFLAG_FILE      1
+const MMVADFLAG_SECTION   2
+const MMVADFLAG_NOCOMMIT  4
 
 extern MmVADCreate { startva endva prot offset processobject mappedobject quotablock -- vad ok }
 extern MmVADListLock { processobject -- ok }

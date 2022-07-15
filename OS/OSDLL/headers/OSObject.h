@@ -38,6 +38,10 @@ extern OSChangeCWD { path -- ok }
 
 extern OSOpen { flags access path -- handle ok }
 
+const OSHANDLEBITS 2
+
+const OSHANDLEBIT_KERNELHANDLE 1
+
 const OSEVENT_SYNCH 1
 const OSEVENT_NOTIF 2
 

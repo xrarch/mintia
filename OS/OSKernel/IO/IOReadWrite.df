@@ -26,6 +26,64 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+fn IOFileFlush { purge filehandle -- ok }
+	auto fileobject
+	auto access
+
+	IOFileTypeObject@ // type
+	filehandle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	if (access@ ACCESS_WRITE ACCESS_READ | & ~~)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	purge@ fileobject@ IOFileFlushObject ok!
+
+	fileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IOFileFlushObject { purge fileobject -- ok }
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (cacheblock@ ~~)
+		// no cacheblock, nothing to do
+
+		fcb@ IOFileControlBlockUnlock
+
+		return
+	end
+
+	if (purge@)
+		0 // newsize
+		1 // writeout
+		cacheblock@ // cacheblock
+		IOCacheInfoBlockTruncate ok!
+	end else
+		cacheblock@ IOCacheInfoBlockFlush ok!
+	end
+
+	fcb@ IOFileControlBlockUnlock
+end
+
 fn IOFileTruncate { newsize growing handle -- oldsize ok }
 	auto fileobject
 	auto access
@@ -59,9 +117,7 @@ fn IOFileTruncate { newsize growing handle -- oldsize ok }
 		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
 			// try to initiate caching to make truncation more efficient
 
-			1 // wantcaching
-			fcb@ // fcb
-			IOFileControlBlockCacheCheck drop drop
+			fcb@ IOFileControlBlockCacheCheck drop drop
 		end
 	end
 
@@ -278,36 +334,13 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 
 	auto rs
 
-	// this is written like this to minimize the amount of time spent with
-	// interrupts disabled
-
-	if (fileflags@ OSFILEFLAG_NOCACHE &)
-		HALCPUInterruptDisable rs!
-
-		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
+	if (fileflags@ OSFILEFLAG_NOCACHE & ~~)
 		if (cacheblock@ ~~)
-			1 fcb@ IOFileControlBlock_UncachedIOCount + +=
-
-			rs@ HALCPUInterruptRestore
-		end else
-			rs@ HALCPUInterruptRestore
-
-			0 // wantcaching
-			fcb@ // fcb
-			IOFileControlBlockCacheCheck ok! cacheblock!
+			fcb@ IOFileControlBlockCacheCheck ok! cacheblock!
 
 			if (ok@)
 				return
 			end
-		end
-	end elseif (cacheblock@ ~~)
-		1 // wantcaching
-		fcb@ // fcb
-		IOFileControlBlockCacheCheck ok! cacheblock!
-
-		if (ok@)
-			return
 		end
 	end
 
@@ -330,10 +363,6 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 		fcb@ // fcb
 		lastmode@ // lastmode
 		IORead ok! bytesread!
-
-		HALCPUInterruptDisable rs!
-		1 fcb@ IOFileControlBlock_UncachedIOCount + -=
-		rs@ HALCPUInterruptRestore
 	end else
 		// caching -- call into cache read function.
 
@@ -501,33 +530,13 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 
 	auto rs
 
-	if (fileflags@ OSFILEFLAG_NOCACHE &)
-		HALCPUInterruptDisable rs!
-
-		fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
+	if (fileflags@ OSFILEFLAG_NOCACHE & ~~)
 		if (cacheblock@ ~~)
-			1 fcb@ IOFileControlBlock_UncachedIOCount + +=
-
-			rs@ HALCPUInterruptRestore
-		end else
-			rs@ HALCPUInterruptRestore
-
-			0 // wantcaching
-			fcb@ // fcb
-			IOFileControlBlockCacheCheck ok! cacheblock!
+			fcb@ IOFileControlBlockCacheCheck ok! cacheblock!
 
 			if (ok@)
 				return
 			end
-		end
-	end elseif (cacheblock@ ~~)
-		1 // wantcaching
-		fcb@ // fcb
-		IOFileControlBlockCacheCheck ok! cacheblock!
-
-		if (ok@)
-			return
 		end
 	end
 
@@ -549,10 +558,6 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 		fcb@ // fcb
 		lastmode@ // lastmode
 		IOWrite ok! byteswritten!
-
-		HALCPUInterruptDisable rs!
-		1 fcb@ IOFileControlBlock_UncachedIOCount + -=
-		rs@ HALCPUInterruptRestore
 
 		fcb@ IOFileControlBlockUnlock
 	end else
@@ -690,9 +695,7 @@ fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok
 	// make sure the directory fcbs have cacheblocks
 
 	if (srcfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		1 // wantcaching
-		srcfcb@ // fcb
-		IOFileControlBlockCacheCheck ok! drop
+		srcfcb@ IOFileControlBlockCacheCheck ok! drop
 
 		if (ok@)
 			return
@@ -700,9 +703,7 @@ fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok
 	end
 
 	if (destfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		1 // wantcaching
-		destfcb@ // fcb
-		IOFileControlBlockCacheCheck ok! drop
+		destfcb@ IOFileControlBlockCacheCheck ok! drop
 
 		if (ok@)
 			return
@@ -821,9 +822,7 @@ fn IODirectoryUnlinkObject { name fileobject -- ok }
 	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
 		// make sure the directory fcb has a cacheblock
 
-		1 // wantcaching
-		fcb@ // fcb
-		IOFileControlBlockCacheCheck ok! drop
+		fcb@ IOFileControlBlockCacheCheck ok! drop
 
 		if (ok@)
 			return
@@ -920,9 +919,7 @@ fn IODirectoryReadObject { dirent fileobject -- ok }
 	end
 
 	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		1 // wantcaching
-		fcb@ // fcb
-		IOFileControlBlockCacheCheck ok! drop
+		fcb@ IOFileControlBlockCacheCheck ok! drop
 
 		if (ok@)
 			return

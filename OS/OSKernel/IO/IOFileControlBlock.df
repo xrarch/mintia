@@ -46,7 +46,6 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	0 fcb@ IOFileControlBlock_FSContext + !
 	0 fcb@ IOFileControlBlock_Mount + !
 	0 fcb@ IOFileControlBlock_ParseCount + !
-	0 fcb@ IOFileControlBlock_UncachedIOCount + !
 
 	0 fcb@ IOFileControlBlock_ReusableListNext + !
 	0 fcb@ IOFileControlBlock_ReusableListPrev + !
@@ -436,7 +435,7 @@ fn IOFileControlBlockInsert { fcb -- }
 	end
 end
 
-fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
+fn IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 	fcb@ IOFileControlBlockLock ok!
 
 	if (ok@)
@@ -445,51 +444,18 @@ fn IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
 
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
-	if (wantcaching@)
-		if (fcb@ IOFileControlBlock_UncachedIOCount + @)
-			STATUS_TRY_AGAIN_LATER ok!
+	if (cacheblock@ ~~)
+		// still no cache block, plus we want there to be one.
+		// therefore, initiate caching
 
+		fcb@ // fcb
+		IOCacheInitialize ok! cacheblock!
+
+		if (ok@)
 			fcb@ IOFileControlBlockUnlock
 
 			return
 		end
-
-		if (cacheblock@ ~~)
-			// still no cache block, plus we want there to be one.
-			// therefore, initiate caching
-
-			fcb@ // fcb
-			IOCacheInitialize ok! cacheblock!
-
-			if (ok@)
-				fcb@ IOFileControlBlockUnlock
-
-				return
-			end
-		end
-	end elseif (cacheblock@)
-		if (fcb@ IOFileControlBlock_References + @ 1 ==)
-			1 // writeout
-			cacheblock@ // cacheblock
-			IOCacheInfoBlockDestroy ok!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					ok@ "IOFileControlBlockCacheCheck: failed to destroy cacheblock (%i)\n" KeCrash
-				end
-			end
-
-			0 fcb@ IOFileControlBlock_CacheInfoBlock + !
-
-			0 cacheblock!
-		end
-	end
-
-	if (cacheblock@ ~~)
-		auto rs
-		HALCPUInterruptDisable rs!
-		1 fcb@ IOFileControlBlock_UncachedIOCount + +=
-		rs@ HALCPUInterruptRestore
 	end
 
 	fcb@ IOFileControlBlockUnlock

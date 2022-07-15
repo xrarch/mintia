@@ -1,4 +1,5 @@
-// note: this header is used to generate the syscall stubs and trampolines
+// note: this header is used to generate the syscall stubs and trampolines.
+// Sys prefix means it has a wrapper function in OSDLL.
 
 // Ex
 extern OSConsolePutCharacter { c -- ok }
@@ -54,6 +55,7 @@ extern OSFileTruncate { newsize growing handle -- oldsize ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }
 extern OSFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
+extern OSFileFlush { purge filehandle -- ok }
 
 extern OSDirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 extern OSDirectoryUnlink { name filehandle -- ok }

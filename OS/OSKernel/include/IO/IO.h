@@ -47,7 +47,6 @@ struct IOFileControlBlock
 	4 FSContext
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 	4 ParseCount
-	4 UncachedIOCount
 
 	4 ReusableListNext
 	4 ReusableListPrev
@@ -119,7 +118,7 @@ extern IOFileControlBlockRescue { fcb -- }
 
 extern IOFileControlBlockTruncate { newsize growing keeplocked zero fcb -- oldsize ok }
 
-extern IOFileControlBlockCacheCheck { wantcaching fcb -- cacheblock ok }
+extern IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 
 extern IOFileGetFileControlBlock { fileobject -- fcb }
 

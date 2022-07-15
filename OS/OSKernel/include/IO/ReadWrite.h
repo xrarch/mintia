@@ -1,3 +1,5 @@
+extern IOFileFlush { purge filehandle -- ok }
+
 extern IOFileTruncate { newsize growing handle -- oldsize ok }
 
 extern IOFileSeek { offset handle mode -- newoffset ok }

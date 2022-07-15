@@ -9,7 +9,7 @@ const OSPEBSIZE OSPAGESIZE
 const OSDLLHEAD 0x7FE00000
 
 const USTACKS   0x7FD00000 // preferred, to keep them out of the way
-const USTACKSZ  16384
+const USTACKSZ  (OSPAGESIZE 3 *)
 
 const HEAPSTART 0x70000000
 

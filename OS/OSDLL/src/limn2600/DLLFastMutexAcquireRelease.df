@@ -32,42 +32,79 @@ OSFastMutexAcquire:
 	sc   t2, [t0], t1
 	beq  t2, .inc
 
-	bne  t1, .wait
+	mov  t3, long [tp + OSThreadEnvironmentBlock_ThreadID]
+	bne  t1, .notowned
+
+	mov  long [a0 + OSFastMutex_OwningThread], t3
+	mov  long [a0 + OSFastMutex_ThreadLockCount], 1
+
+	ret
+
+.notowned:
+	mov  t4, long [a0 + OSFastMutex_OwningThread]
+	sub  t4, t4, t3
+	bne  t4, .wait
+
+	mov  t4, long [a0 + OSFastMutex_ThreadLockCount]
+	addi t4, t4, 1
+	mov  long [a0 + OSFastMutex_ThreadLockCount], t4
 
 	ret
 
 .wait:
-	subi sp, sp, 4
+	subi sp, sp, 8
 	mov  long [sp], lr
+	mov  long [sp + 4], a0
 
-	jal DLLFastMutexWait
+	jal  DLLFastMutexWait
 
+	mov  a0, long [sp + 4]
 	mov  lr, long [sp]
-	addi sp, sp, 4
+	addi sp, sp, 8
+
+	mov  t3, long [tp + OSThreadEnvironmentBlock_ThreadID]
+	mov  long [a0 + OSFastMutex_OwningThread], t3
+	mov  long [a0 + OSFastMutex_ThreadLockCount], 1
+
 	ret
 
 OSFastMutexRelease:
 .global OSFastMutexRelease
 	addi t0, a0, OSFastMutex_LockCount
+
+	mov  t4, long [a0 + OSFastMutex_ThreadLockCount]
+	subi t4, t4, 1
+	mov  long [a0 + OSFastMutex_ThreadLockCount], t4
+	bne  t4, .stillowned
+
+	mov  long [a0 + OSFastMutex_OwningThread], zero
 	
 .dec:
 	mov  t3, locked [t0]
-	subi t1, t3, 1
-	sc   t2, [t0], t1
+	subi t3, t3, 1
+	sc   t2, [t0], t3
 	beq  t2, .dec
 
-	bne  t3, .wake
+	blt  t3, .done
 
-	ret
-
-.wake:
 	subi sp, sp, 4
 	mov  long [sp], lr
 
-	jal DLLFastMutexWake
+	jal  DLLFastMutexWake
 
 	mov  lr, long [sp]
 	addi sp, sp, 4
+	ret
+
+.stillowned:
+
+.dec2:
+	mov  t3, locked [t0]
+	subi t3, t3, 1
+	sc   t2, [t0], t3
+	beq  t2, .dec2
+
+.done:
 	ret
 
 ; shove this stuff in here because why not

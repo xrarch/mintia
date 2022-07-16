@@ -5,6 +5,7 @@
 #include "<inc>/HALMap.h"
 #include "<inc>/HALInterrupt.h"
 #include "<inc>/HALConsole.h"
+#include "<inc>/HALRTC.h"
 
 #include "<inc>/HALDebug.h"
 
@@ -417,14 +418,44 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 
 	badaddr@ tf@ OSContext_badaddr + !
 
+	auto thread
+	KeThreadCurrent@ thread!
+
+	auto ctime
+	KeTime_SIZEOF alloc ctime!
+
 	if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
-		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
+		tf@ thread@ KeThread_TrapFrame + !
+
+		if (ecause@ ECAUSEINTERRUPT ~=)
+			// calculate how much time was spent in usermode
+
+			ctime@ HALUptimeQuery
+
+			ctime@ // time1
+			thread@ KeThread_LastModeChangeTime + // time2
+			ctime@ // timedest
+			KeTimeSub
+
+			// add to usertime
+
+			thread@ KeThread_UserTime + // time1
+			ctime@ // time2
+			thread@ KeThread_UserTime + // timedest
+			KeTimeAdd
+
+			thread@ KeThread_Process + @ KeProcess_UserTime + // time1
+			ctime@ // time2
+			thread@ KeThread_Process + @ KeProcess_UserTime + // timedest
+			KeTimeAdd
+
+			thread@ KeThread_LastModeChangeTime + HALUptimeQuery
+		end
 	end
 
 	if (ecause@ ECAUSEINTERRUPT ==)
 		1 KeStatistics OSStatistics_Interrupts + +=
 
-		tf@ OSContext_ers + @ LIMN2600_ERS_USER & // usermode
 		HALInterrupt
 
 		KeIPLCurrent@ signal!
@@ -518,7 +549,31 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 	end
 
 	if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
-		// we interrupted usermode code
+		// we interrupted usermode code.
+		// calculate how much time was spent in kernel mode.
+
+		if (ecause@ ECAUSEINTERRUPT ~=)
+			ctime@ HALUptimeQuery
+
+			ctime@ // time1
+			thread@ KeThread_LastModeChangeTime + // time2
+			ctime@ // timedest
+			KeTimeSub
+
+			// add to systime
+
+			thread@ KeThread_SysTime + // time1
+			ctime@ // time2
+			thread@ KeThread_SysTime + // timedest
+			KeTimeAdd
+
+			thread@ KeThread_Process + @ KeProcess_SysTime + // time1
+			ctime@ // time2
+			thread@ KeThread_Process + @ KeProcess_SysTime + // timedest
+			KeTimeAdd
+
+			thread@ KeThread_LastModeChangeTime + HALUptimeQuery
+		end
 
 		tf@ PsPrepareUsermode
 	end

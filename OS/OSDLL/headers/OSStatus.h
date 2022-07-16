@@ -67,5 +67,7 @@ const STATUS_NOT_A_CONSOLE           -65
 const STATUS_OVERLAPS_MMIO           -66
 const STATUS_NONPAGE_COMMIT_EXCEEDED -67
 const STATUS_TOO_MANY_SWAPFILES      -68
+const STATUS_ALREADY_ENQUEUED        -69
+const STATUS_NOT_ENQUEUED            -70
 
 extern OSStatusGetName { status -- name }

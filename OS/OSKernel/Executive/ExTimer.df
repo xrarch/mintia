@@ -1,0 +1,247 @@
+//
+// Implements the executive timer object.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+var ExTimerObjectType 0
+
+fn ExTimerInit { -- }
+	auto type
+
+	auto typeinit
+	ObTypeInitializer_SIZEOF alloc typeinit!
+
+	// initialize ObTypeInitializer fields
+
+	typeinit@ ObTypeInitializerInitialize
+
+	"Timer" typeinit@ ObTypeInitializer_Name + !
+	'ExTi' typeinit@ ObTypeInitializer_Tag + !
+	0 typeinit@ ObTypeInitializer_WaitOffset + !
+	pointerof ExTimerDeleteObject typeinit@ ObTypeInitializer_DeleteFunction + !
+
+	auto ok
+	typeinit@ ObTypeCreate ok! type!
+
+	if (ok@)
+		ok@ "ExTimerInit: couldn't create Timer type (%i)\n" KeCrash
+	end
+
+	type@ ExTimerObjectType!
+end
+
+fn (ObTypeDeleteFunction) ExTimerDeleteObject { object -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (object@ KeTimer_Enqueued + @)
+		"yea\n" Printf
+		object@ KeTimerDequeue
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn ExTimerCreateObject { permissions name -- timerobject ok }
+	name@ // name
+	0 // flags
+	permissions@ // permissions
+	0 // quotabias
+	KeTimer_SIZEOF // bodysize
+	ExTimerObjectType@ // type
+	ObObjectCreate ok! timerobject!
+
+	if (ok@)
+		return
+	end
+
+	"ExTimerObject" // name
+	0 // function
+	timerobject@ // timer
+	KeTimerInitialize
+end
+
+fn ExTimerCreate { permissions name -- timerhandle ok }
+	auto timerobject
+
+	permissions@ // permissions
+	name@ // name
+	ExTimerCreateObject ok! timerobject!
+
+	if (ok@)
+		return
+	end
+
+	1 // nocheck
+	ACCESS_ALL // permissions
+	timerobject@ // object
+	ObObjectOpen ok! timerhandle!
+
+	if (ok@)
+		timerobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+end
+
+fn ExTimerResetObject { timerobject -- signaled }
+	timerobject@ // event
+	KeTimerReset signaled!
+end
+
+fn ExTimerReset { timerhandle -- signaled ok }
+	auto obj
+	auto access
+
+	ExTimerObjectType@ // type
+	timerhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_EXEC SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	obj@ ExTimerResetObject signaled!
+
+	obj@ ObObjectDereferenceByPointer drop
+end
+
+fn ExTimerEnqueueObject { interval timerobject -- ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (timerobject@ KeTimer_Enqueued + @)
+		ipl@ KeIPLLower
+
+		STATUS_ALREADY_ENQUEUED ok!
+
+		return
+	end
+
+	0 // context1
+	0 // context2
+	interval@ // interval
+	timerobject@ // timer
+	KeTimerEnqueue
+
+	ipl@ KeIPLLower
+end
+
+fn ExTimerDequeueObject { timerobject -- ok }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (timerobject@ KeTimer_Enqueued + @ ~~)
+		ipl@ KeIPLLower
+
+		STATUS_NOT_ENQUEUED ok!
+
+		return
+	end
+
+	timerobject@ KeTimerDequeue
+
+	ipl@ KeIPLLower
+end
+
+fn ExTimerEnqueue { interval timerhandle -- ok }
+	auto obj
+	auto access
+
+	ExTimerObjectType@ // type
+	timerhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_EXEC SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	interval@ obj@ ExTimerEnqueueObject ok!
+
+	obj@ ObObjectDereferenceByPointer drop
+end
+
+fn ExTimerDequeue { timerhandle -- ok }
+	auto obj
+	auto access
+
+	ExTimerObjectType@ // type
+	timerhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_EXEC SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	obj@ ExTimerDequeueObject ok!
+
+	obj@ ObObjectDereferenceByPointer drop
+end
+
+fn ExTimerReadState { timerhandle -- signaled ok }
+	auto obj
+	auto access
+
+	ExTimerObjectType@ // type
+	timerhandle@ // handle
+	ObObjectReferenceByHandle ok! obj! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_READ SeCheckAccess ok!
+
+	if (ok@)
+		obj@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	obj@ KeDispatchIsSignaled signaled!
+
+	obj@ ObObjectDereferenceByPointer drop
+end

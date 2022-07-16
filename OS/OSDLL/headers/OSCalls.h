@@ -32,6 +32,12 @@ extern OSMutexCreate { permissions name -- mutexhandle ok }
 extern OSMutexRelease { mutexhandle -- ok }
 extern OSMutexReadState { mutexhandle -- locked ok }
 
+extern OSTimerCreate { permissions name -- timerhandle ok }
+extern OSTimerReset { timerhandle -- signaled ok }
+extern OSTimerEnqueue { interval timerhandle -- ok }
+extern OSTimerDequeue { timerhandle -- ok }
+extern OSTimerReadState { timerhandle -- signaled ok }
+
 extern OSGetStatistics { statistics -- ok }
 
 // Ob

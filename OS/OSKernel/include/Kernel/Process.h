@@ -125,6 +125,9 @@ struct KeThread
 	4 ExceptionSignals
 
 	4 TrapFrame
+
+	4 UserTimeMs
+	4 SystemTimeMs
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }

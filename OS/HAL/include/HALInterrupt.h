@@ -1,9 +1,9 @@
 extern HALInterruptRegister { handler int ipl -- }
 extern HALInterruptUnregister { int -- }
 
-extern HALInterrupt { -- }
+extern HALInterrupt { usermode -- }
 
-fnptr HALInterruptHandler { int -- }
+fnptr HALInterruptHandler { usermode int -- }
 
 externptr HALPlatformInterruptHandlers
 externptr HALInterruptNested

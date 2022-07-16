@@ -32,6 +32,7 @@ all:
 	make -C view
 	make -C help
 	make -C kstats
+	make -C time
 
 	make -C mousedemo
 	make -C stress
@@ -73,6 +74,7 @@ cleanup:
 	make -C view cleanup
 	make -C help cleanup
 	make -C kstats cleanup
+	make -C time cleanup
 
 	make -C mousedemo cleanup
 	make -C stress cleanup

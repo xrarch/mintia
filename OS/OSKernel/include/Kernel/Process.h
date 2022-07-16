@@ -35,6 +35,9 @@ struct KeProcess
 	4 Terminated
 	4 KilledStatus
 
+	4 UserTimeMs
+	4 SystemTimeMs
+
 	// memory manager information
 
 	4 PageDirectory

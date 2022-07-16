@@ -14,6 +14,9 @@ extern OSCreationBlockInitialize { creationparams -- }
 extern OSSpawnV { argcn argvt path creationflags creationparams permissions name -- threadhandle processhandle ok }
 extern OSSpawn { ... path creationflags creationparams permissions name -- threadhandle processhandle ok }
 
+extern OSSpawnByNameV { argcn argvt progname creationflags creationparams permissions name -- threadhandle processhandle ok }
+extern OSSpawnByName { ... progname creationflags creationparams permissions name -- threadhandle processhandle ok }
+
 extern OSExit { status -- }
 
 struct OSProcessInformation
@@ -29,6 +32,9 @@ struct OSProcessInformation
 	4 ExitStatus
 	4 WorkingSetSize
 	4 PageFaultCount
+	4 UserTimeMs
+	4 SystemTimeMs
+
 	48 Reserved
 endstruct
 

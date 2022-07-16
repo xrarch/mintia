@@ -39,3 +39,4 @@
 1/whoami 1/whoami
 1/kstats 1/kstats
 1/stress 1/stress
+1/time 1/time

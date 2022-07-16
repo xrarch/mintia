@@ -12,6 +12,7 @@ extern OSGetBootFlags { -- bootflags ok }
 extern OSContinue { context -- }
 
 extern OSQueryTime { -- sec ms }
+extern OSQueryUptime { -- sec ms }
 
 extern OSShutdownSystem { mode -- ok }
 

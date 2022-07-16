@@ -32,12 +32,8 @@ struct OSProcessInformation
 	4 ExitStatus
 	4 WorkingSetSize
 	4 PageFaultCount
-
-	4 UserTimeSecPart
-	4 UserTimeMsPart
-
-	4 SystemTimeSecPart
-	4 SystemTimeMsPart
+	4 UserTimeMs
+	4 SystemTimeMs
 
 	48 Reserved
 endstruct
@@ -46,13 +42,6 @@ struct OSThreadInformation
 	4 Status
 	4 Terminated
 	4 ExitStatus
-
-	4 UserTimeSecPart
-	4 UserTimeMsPart
-
-	4 SystemTimeSecPart
-	4 SystemTimeMsPart
-	
 	48 Reserved
 endstruct
 

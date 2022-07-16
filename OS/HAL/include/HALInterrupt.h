@@ -1,9 +1,9 @@
 extern HALInterruptRegister { handler int ipl -- }
 extern HALInterruptUnregister { int -- }
 
-extern HALInterrupt { -- }
+extern HALInterrupt { trapframe -- }
 
-fnptr HALInterruptHandler { int -- }
+fnptr HALInterruptHandler { trapframe int -- }
 
 externptr HALPlatformInterruptHandlers
 externptr HALInterruptNested

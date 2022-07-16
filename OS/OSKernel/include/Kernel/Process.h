@@ -35,8 +35,8 @@ struct KeProcess
 	4 Terminated
 	4 KilledStatus
 
-	KeTime_SIZEOF UserTime
-	KeTime_SIZEOF SysTime
+	4 UserTimeMs
+	4 SystemTimeMs
 
 	// memory manager information
 
@@ -112,10 +112,6 @@ struct KeThread
 	4 WaitCount
 
 	4 WaitOrReadyTimeSec
-
-	KeTime_SIZEOF LastModeChangeTime
-	KeTime_SIZEOF UserTime
-	KeTime_SIZEOF SysTime
 
 	(THREADWAITBLOCKS KeDispatchWaitBlock_SIZEOF *) WaitBlocks
 

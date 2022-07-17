@@ -25,6 +25,7 @@ extern OSStreamOpen { streamflags flags access path ftype -- stream ok }
 extern OSStreamObjectCreate { flags filehandle -- stream ok }
 extern OSStreamClose { stream -- ok }
 extern OSStreamGetFileHandle { stream -- filehandle }
+extern OSStreamTruncate { newsize growing stream -- oldsize ok }
 extern OSStreamSeek { offset stream mode -- newoffset ok }
 extern OSStreamFlush { purge stream -- ok }
 extern OSStreamRead { timeout flags length buffer stream -- bytesread ok }

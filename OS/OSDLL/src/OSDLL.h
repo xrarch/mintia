@@ -88,6 +88,8 @@ externptr DLLStdInStream
 externptr DLLStdOutStream
 externptr DLLStdErrStream
 
+externptr DLLStdIoFastMutex
+
 const DLLNOSTREAM 2
 
 extern DLLStreamInit { -- }

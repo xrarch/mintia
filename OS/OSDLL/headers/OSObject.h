@@ -20,12 +20,15 @@ extern OSGetStdIn { -- fd }
 extern OSGetStdOut { -- fd }
 extern OSGetStdErr { -- fd }
 
+extern OSGetStdInStream { -- stream }
+extern OSGetStdOutStream { -- stream }
+extern OSGetStdErrStream { -- stream }
+
 extern OSSetStdIn { fd -- }
 extern OSSetStdOut { fd -- }
 extern OSSetStdErr { fd -- }
 
 extern OSFlushLine { -- }
-extern OSPutc { c filehandle -- ok }
 
 extern OSReadline { s max -- eof }
 

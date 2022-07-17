@@ -81,3 +81,37 @@ struct DLLDirectHeapBlock
 endstruct
 
 extern DLLHeapInit { -- }
+
+// stream stuff
+
+externptr DLLStdInStream
+externptr DLLStdOutStream
+externptr DLLStdErrStream
+
+extern DLLStreamInit { -- }
+
+extern DLLStreamWindowFreeChain { wcb -- }
+
+extern DLLStreamWindowRead { length buffer streamptr -- bytesread ok }
+extern DLLStreamWindowWrite { length buffer streamptr -- bytesread ok }
+
+const DLLSTREAMWINDOWSIZELOG 4 // in pages
+
+const DLLSTREAMWINDOWPAGES (1 DLLSTREAMWINDOWSIZELOG <<)
+const DLLSTREAMWINDOWSIZE  (DLLSTREAMWINDOWPAGES OSPAGESHIFT <<)
+const DLLSTREAMWINDOWOFFSETMASK (DLLSTREAMWINDOWSIZE 1 -)
+
+const DLLSTREAMWCBCOUNT 32
+
+struct DLLStreamWCB
+	4 FreeNext
+	4 FreePrev
+
+	4 StreamNext
+	4 StreamPrev
+
+	4 RefCount
+	4 FileOffset
+	4 VirtualAddress
+	4 Length
+endstruct

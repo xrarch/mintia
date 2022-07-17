@@ -13,8 +13,18 @@
 #include "<inc>/OSSignal.h"
 #include "<inc>/OSProcess.h"
 #include "<inc>/OSFastMutex.h"
+#include "<inc>/OSStream.h"
 
 #include "OSDLL.h"
+
+var DLLStdInStream 0
+public DLLStdInStream
+
+var DLLStdOutStream 0
+public DLLStdOutStream
+
+var DLLStdErrStream 0
+public DLLStdErrStream
 
 fn OSGetStdIn { -- fd }
 	OSPEB OSPEBs_StdIn + @ fd!
@@ -28,14 +38,42 @@ fn OSGetStdErr { -- fd }
 	OSPEB OSPEBs_StdErr + @ fd!
 end
 
+fn OSGetStdInStream { -- stream }
+	DLLStdInStream@ stream!
+end
+
+fn OSGetStdOutStream { -- stream }
+	DLLStdOutStream@ stream!
+end
+
+fn OSGetStdErrStream { -- stream }
+	DLLStdErrStream@ stream!
+end
+
 fn OSSetStdIn { fd -- }
 	fd@ OSPEB OSPEBs_StdIn + !
 end
 
 fn OSSetStdOut { fd -- }
 	if (OSPEB OSPEBs_StdOut + @ fd@ ~=)
-		OSFlushLine
+		if (DLLStdOutStream@ 2 ~=)
+			DLLStdOutStream@ OSStreamClose drop
+		end
+		
 		fd@ OSPEB OSPEBs_StdOut + !
+
+		auto ok
+
+		0 // flags
+		fd@ // filehandle
+		OSStreamCreate ok! DLLStdOutStream!
+
+		if (ok@)
+			2 DLLStdOutStream!
+			2 OSPEB OSPEBs_StdOut + !
+
+			ok@ OSStatusGetName "OSSetStdOut: %s\n" OSAbort
+		end
 	end
 end
 
@@ -83,68 +121,30 @@ fn VPrintf { argvt argcn fmt -- }
 	argvt@
 	argcn@
 	fmt@
-	OSPEB OSPEBs_StdOut + @
+	DLLStdOutStream@
 	VFPrintf
 end
 
-const LINEBUFFERMAX 80
-buffer FPutcLineBuffer (LINEBUFFERMAX 16 +)
-var FPutcLineBufferLength 0
-
 fn OSFlushLine { -- }
-	if (OSPEB OSPEBs_StdOut + @ OSNONE ==)
+	if (OSPEB OSPEBs_StdOut + @ 2 ==)
 		return
 	end
 
-	auto len
-	FPutcLineBufferLength@ len!
-
-	if (len@ ~~)
-		return
-	end
-
-	0 FPutcLineBufferLength!
-
-	0 // flags
-	len@ // length
-	FPutcLineBuffer // buffer
-	OSPEB OSPEBs_StdOut + @ // filehandle
-	OSFileWrite drop drop
-end
-
-fn OSPutc { c filehandle -- ok }
-	auto small
-	4 alloc small!
-
-	c@ small@ sb
-
-	0 // flags
-	1 // length
-	small@ // buffer
-	filehandle@ // filehandle
-	OSFileWrite ok! drop
+	0 // purge
+	DLLStdOutStream@ // stream
+	OSStreamFlush drop
 end
 
 fn FPutc { fd c -- }
-	if (fd@ OSNONE ==)
+	if (fd@ 2 ==)
 		c@ OSConsolePutCharacter drop
-	end elseif (fd@ OSPEB OSPEBs_StdOut + @ ==)
-		c@ FPutcLineBuffer FPutcLineBufferLength@ + sb
-		
-		1 FPutcLineBufferLength +=
-
-		if (FPutcLineBufferLength@ LINEBUFFERMAX ==)
-			OSFlushLine
-		end elseif (c@ '\n' ==)
-			OSFlushLine
-		end
 	end else
-		c@ fd@ OSPutc drop
+		c@ fd@ OSStreamWriteCharacter drop
 	end
 end
 
 fn Putc { c -- }
-	OSPEB OSPEBs_StdOut + @
+	DLLStdOutStream@
 	c@
 	FPutc
 end

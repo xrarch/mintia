@@ -22,7 +22,7 @@ endstruct
 const OSSTREAMHANDLEFLAG 1
 
 extern OSStreamOpen { streamflags flags access path ftype -- stream ok }
-extern OSStreamCreate { flags filehandle -- stream ok }
+extern OSStreamObjectCreate { flags filehandle -- stream ok }
 extern OSStreamClose { stream -- ok }
 extern OSStreamGetFileHandle { stream -- filehandle }
 extern OSStreamSeek { offset stream mode -- newoffset ok }

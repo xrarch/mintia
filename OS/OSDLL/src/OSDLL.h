@@ -88,6 +88,8 @@ externptr DLLStdInStream
 externptr DLLStdOutStream
 externptr DLLStdErrStream
 
+const DLLNOSTREAM 2
+
 extern DLLStreamInit { -- }
 
 extern DLLStreamWindowFreeChain { wcb -- }

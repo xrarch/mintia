@@ -994,11 +994,8 @@ end
 fn IOSwapFileExtend { -- }
 	// called by worker thread.
 	// pops extension requests off the listhead and tries to satisfy them.
-	// satisfying a request is done by extending the pagefile, signaling the
-	// event to wake up the waiting thread, and atomically granting the
-	// requested commitment to the process. commitment may already be
-	// plentiful to grant it without extending the swapfile, in that case,
-	// just do that.
+	// satisfying a request is done by extending the pagefile & signaling the
+	// event to wake up the waiting thread.
 
 	while (IOSwapFileExtensionListHead@)
 		auto extension
@@ -1202,5 +1199,168 @@ fn IOSwapFileTryExtend { extension swapfile -- realextension }
 	realextension@ IOSwapPagesCount +=
 	realextension@ MmCommitLimit +=
 
+	0 swapfile@ IOSwapFile_Hint + !
+
 	ipl@ KeIPLLower
+end
+
+const IOSWAPFILEMINIMUMCONTRACTION 32
+
+fn IOSwapFileContract { -- }
+	// called by the worker thread every 5 seconds to scan the swapfiles and
+	// determine if any of them should be shrunk.
+
+	if (MmEventLowMemory KeDispatchIsSignaled)
+		// don't shrink swapfiles while pages are being dumped to disk
+		return
+	end
+
+	auto potentialcontraction
+	MmCommitLimit@ MmCommitUsage@ - potentialcontraction!
+
+	if (potentialcontraction@ IOSWAPFILEMINIMUMCONTRACTION 4 * <)
+		// if commit usage is within a megabyte of the commit limit then it
+		// probably isn't worth it to bother scanning the swapfiles.
+
+		return
+	end
+
+	auto i
+	0 i!
+
+	0 potentialcontraction!
+
+	while (i@ IOSwapFileCount@ <)
+		auto swapfile
+		[i@]IOSwapFiles@ swapfile!
+
+		auto excess
+		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - excess!
+
+		if (excess@ IOSWAPFILEMINIMUMCONTRACTION >=)
+			excess@ potentialcontraction +=
+		end
+
+		1 i +=
+	end
+
+	if (potentialcontraction@ 128 <)
+		return
+	end
+
+	potentialcontraction@ IOSwapFileTryContractAll
+end
+
+fn IOSwapFileTryContractAll { contraction -- }
+	if (IOSwapFileExtensionIndex@ IOSwapFileCount@ >=)
+		0 IOSwapFileExtensionIndex!
+	end
+
+	auto i
+	0 i!
+
+	while (i@ 2 <)
+		auto max
+		auto j
+
+		if (i@ 0 ==)
+			IOSwapFileCount@ max!
+			IOSwapFileExtensionIndex@ j!
+		end else
+			IOSwapFileExtensionIndex@ max!
+			0 j!
+		end
+
+		while (j@ max@ <)
+			auto contractedby
+			contraction@ // contraction
+			[j@]IOSwapFiles@ // swapfile
+			IOSwapFileTryContract contractedby!
+
+			if (contractedby@ contraction@ >=)
+				0 contraction!
+				break
+			end
+
+			contractedby@ contraction -=
+
+			1 j +=
+		end
+
+		if (contraction@ ~~)
+			j@ 1 + IOSwapFileExtensionIndex!
+			break
+		end
+
+		1 i +=
+	end
+end
+
+fn IOSwapFileTryContract { contraction swapfile -- contractedby }
+	0 contractedby!
+
+	if (contraction@ IOSWAPFILEMINIMUMCONTRACTION <)
+		IOSWAPFILEMINIMUMCONTRACTION contraction!
+	end
+
+	if (contraction@ swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - >)
+		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - contraction!
+	end
+
+	if (contraction@ IOSWAPFILEMINIMUMCONTRACTION <)
+		return
+	end
+
+	while (contraction@ IOSWAPFILEMINIMUMCONTRACTION >=)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		if (contraction@ MmCommitLimit@ >)
+			ipl@ KeIPLLower
+
+			break
+		end
+
+		if (MmCommitLimit@ contraction@ - MmCommitUsage@ IOSWAPFILEMINIMUMCONTRACTION 2 * + <)
+			ipl@ KeIPLLower
+
+			break
+		end
+
+		auto clear
+		contraction@ // runlength
+		swapfile@ IOSwapFile_CurrentSize + @ contraction@ - // index
+		swapfile@ IOSwapFile_BitmapHeader + // header
+		ExBitmapCheckClearBits clear!
+
+		if (clear@)
+			// chop!
+
+			contraction@ // runlength
+			swapfile@ IOSwapFile_CurrentSize + @ contraction@ - // index
+			swapfile@ IOSwapFile_BitmapHeader + // header
+			ExBitmapSetBits
+
+			contraction@ swapfile@ IOSwapFile_CurrentSize + -=
+			contraction@ IOSwapPagesCount -=
+			contraction@ MmCommitLimit -=
+
+			0 swapfile@ IOSwapFile_Hint + !
+
+			ipl@ KeIPLLower
+
+			swapfile@ IOSwapFile_CurrentSize + @ PAGESHIFT << // newsize
+			0 // growing
+			0 // keeplocked
+			0 // zero
+			swapfile@ IOSwapFile_FileObject + @ IOFile_FileControlBlock + @ // fcb
+			IOFileControlBlockTruncate drop drop
+
+			return
+		end
+
+		ipl@ KeIPLLower
+
+		1 contraction >>=
+	end
 end

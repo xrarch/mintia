@@ -14,6 +14,8 @@ extern IOSwapFileAwaitCreation { -- }
 extern IOSwapFileRequestExpansion { pages -- ok }
 extern IOSwapFileExtend { -- }
 
+extern IOSwapFileContract { -- }
+
 externptr IOSwapFileExtendEvent
 
 externptr IOSwapPagesUsed

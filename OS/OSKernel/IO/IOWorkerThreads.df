@@ -29,6 +29,12 @@
 
 buffer IOFilesystemSyncTimer KeTimer_SIZEOF
 
+const IOFSSYNCINTERVAL 5000
+
+const IOSWAPFILECONTRACTINTERVAL 30000
+
+const IOSWAPFILECONTRACTTICKS (IOSWAPFILECONTRACTINTERVAL IOFSSYNCINTERVAL /)
+
 fn IOFilesystemSyncWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME // priority
 	KeThreadCurrent@ // thread
@@ -44,20 +50,24 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	auto objecttable
 	8 alloc objecttable!
 
-	IOFilesystemSyncTimer objecttable@!
-	IOSwapFileExtendEvent objecttable@ 4 + !
+	IOSwapFileExtendEvent objecttable@!
+	IOFilesystemSyncTimer objecttable@ 4 + !
 
 	0 // context1
 	0 // context2
-	5000 // interval
+	IOFSSYNCINTERVAL // interval
 	IOFilesystemSyncTimer // timer
 	KeTimerEnqueue
+
+	auto ticks
+	0 ticks!
 
 	auto ok
 
 	while (1)
 		// iterate all mounted filesystems every 5 seconds and ask them
-		// to flush any internal state.
+		// to flush any internal state. this kernel thread is also responsible
+		// for expanding and contracting the swapfiles.
 
 		auto reason
 		KERNELMODE // waitmode
@@ -76,19 +86,27 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 			end
 		end
 
-		if (reason@ 0 ==)
+		if (reason@ 1 ==)
 			IOFilesystemSyncAll ok!
 
 			if (ok@)
 				ok@ "IOFilesystemSyncWorker: failed to sync (%i)\n" KeCrash
 			end
 
+			1 ticks +=
+
+			if (ticks@ IOSWAPFILECONTRACTTICKS ==)
+				IOSwapFileContract
+
+				0 ticks!
+			end
+
 			0 // context1
 			0 // context2
-			5000 // interval
+			IOFSSYNCINTERVAL // interval
 			IOFilesystemSyncTimer // timer
 			KeTimerEnqueue
-		end elseif (reason@ 1 ==)
+		end elseif (reason@ 0 ==)
 			IOSwapFileExtend
 		end
 	end

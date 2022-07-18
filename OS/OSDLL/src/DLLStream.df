@@ -42,6 +42,7 @@ fn OSStreamOpen { streamflags flags access path ftype -- stream ok }
 	end
 
 	streamflags@ // flags
+	access@ // access
 	filehandle@ // filehandle
 	OSStreamObjectCreate ok! stream!
 
@@ -51,7 +52,7 @@ fn OSStreamOpen { streamflags flags access path ftype -- stream ok }
 	end
 end
 
-fn OSStreamObjectCreate { flags filehandle -- stream ok }
+fn OSStreamObjectCreate { flags access filehandle -- stream ok }
 	0 ok!
 
 	if (flags@ OSSTREAMFLAG_BUFFERTYPEMASK & ~~)
@@ -98,7 +99,8 @@ fn OSStreamObjectCreate { flags filehandle -- stream ok }
 	flags@ stream@ OSStream_Flags + !
 	filehandle@ stream@ OSStream_FileHandle + !
 	0 stream@ OSStream_BufferOrListHead + !
-	0 stream@ OSStream_BufferedLength + !
+	0 stream@ OSStream_BufferedLengthOrSeek + !
+	access@ stream@ OSStream_Access + !
 
 	OSSTREAMHANDLEFLAG stream |=
 end
@@ -112,7 +114,7 @@ fn OSStreamClose { stream -- ok }
 		return
 	end
 
-	2 // purge
+	OSSTREAMPURGE_RELEASE // purge
 	stream@ // stream
 	OSStreamFlush ok!
 
@@ -138,11 +140,12 @@ fn OSStreamSeek { offset stream mode -- newoffset ok }
 	auto filehandle
 
 	if (stream@ OSSTREAMHANDLEFLAG & ~~)
-		stream@ filehandle!
-	end else
-		OSSTREAMHANDLEFLAG ~ stream &=
-		stream@ OSStream_FileHandle + @ filehandle!
+		offset@ stream@ mode@ OSFileSeek ok! newoffset!
+		return
 	end
+
+	OSSTREAMHANDLEFLAG ~ stream &=
+	stream@ OSStream_FileHandle + @ filehandle!
 
 	auto flags
 	stream@ OSStream_Flags + @ flags!
@@ -153,9 +156,32 @@ fn OSStreamSeek { offset stream mode -- newoffset ok }
 			stream@ // streamptr
 			DLLStreamFlush drop
 		end
-	end
 
-	offset@ filehandle@ mode@ OSFileSeek ok! newoffset!
+		offset@ filehandle@ mode@ OSFileSeek ok! newoffset!
+	end else
+		if (mode@ OSSEEK_SET ==)
+			offset@ // offset
+			filehandle@ // filehandle
+			OSSEEK_SET // mode
+			OSFileSeek ok! newoffset!
+		end elseif (mode@ OSSEEK_END ==)
+			offset@ // offset
+			filehandle@ // filehandle
+			OSSEEK_END // mode
+			OSFileSeek ok! newoffset!
+		end elseif (mode@ OSSEEK_CUR ==)
+			offset@ stream@ OSStream_BufferedLengthOrSeek + @ + // offset
+			filehandle@ // filehandle
+			OSSEEK_SET // mode
+			OSFileSeek ok! newoffset!
+		end
+
+		if (ok@)
+			return
+		end
+
+		newoffset@ stream@ OSStream_BufferedLengthOrSeek + !
+	end
 end
 
 fn OSStreamTruncate { newsize growing stream -- oldsize ok }
@@ -167,7 +193,7 @@ fn OSStreamTruncate { newsize growing stream -- oldsize ok }
 	OSSTREAMHANDLEFLAG ~ stream &=
 
 	if (growing@ ~~)
-		2 // purge
+		OSSTREAMPURGE_RELEASE // purge
 		stream@ // streamptr
 		DLLStreamFlush drop
 	end
@@ -179,18 +205,14 @@ fn OSStreamTruncate { newsize growing stream -- oldsize ok }
 end
 
 fn DLLStreamFreeBuffers { type streamptr -- }
-	auto b
-	streamptr@ OSStream_BufferOrListHead + @ b!
-
 	if (type@ OSSTREAMTYPE_LINEBUFFER ==)
-		if (b@)
-			b@ OSHeapFree
+		if (streamptr@ OSStream_BufferOrListHead + @)
+			streamptr@ OSStream_BufferOrListHead + @ OSHeapFree
+			0 streamptr@ OSStream_BufferOrListHead + !
 		end
-	end elseif (b@)
-		b@ DLLStreamWindowFreeChain
+	end else
+		streamptr@ DLLStreamWindowFreeAll
 	end
-
-	0 streamptr@ OSStream_BufferOrListHead + !
 end
 
 fn DLLStreamFlush { purge streamptr -- ok }
@@ -223,7 +245,7 @@ fn DLLStreamFlush { purge streamptr -- ok }
 		// assumes nobody seek'd the filehandle directly
 
 		0 // flags
-		streamptr@ OSStream_BufferedLength + @ // length
+		streamptr@ OSStream_BufferedLengthOrSeek + @ // length
 		streamptr@ OSStream_BufferOrListHead + @ // buffer
 		streamptr@ OSStream_FileHandle + @ // filehandle
 		OSFileWrite ok! drop
@@ -232,13 +254,13 @@ fn DLLStreamFlush { purge streamptr -- ok }
 			return
 		end
 
-		0 streamptr@ OSStream_BufferedLength + !
+		0 streamptr@ OSStream_BufferedLengthOrSeek + !
 	end
 
 	if (purge@)
 		type@ streamptr@ DLLStreamFreeBuffers
 
-		if (purge@ 2 ==)
+		if (purge@ OSSTREAMPURGE_RELEASE ==)
 			0 purge!
 		end
 	end
@@ -292,7 +314,7 @@ fn OSStreamRead { timeout flags length buffer stream -- bytesread ok }
 
 	if (DEBUGCHECKS)
 		if (streamflags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_FULLBUFFER ~=)
-			"OSStreamRead\n" OSAbort
+			streamflags@ "OSStreamRead %x\n" OSAbort
 		end
 	end
 
@@ -382,13 +404,13 @@ fn OSStreamWriteCharacter { c stream -- ok }
 
 	c@
 	stream@ OSStream_BufferOrListHead + @
-	stream@ OSStream_BufferedLength + @ + sb
+	stream@ OSStream_BufferedLengthOrSeek + @ + sb
 
-	1 stream@ OSStream_BufferedLength + +=
+	1 stream@ OSStream_BufferedLengthOrSeek + +=
 
 	OSSTREAMFLAG_DIRTY stream@ OSStream_Flags + |=
 
-	if (stream@ OSStream_BufferedLength + @ OSSTREAMLINEBUFFERLENGTH ==
+	if (stream@ OSStream_BufferedLengthOrSeek + @ OSSTREAMLINEBUFFERLENGTH ==
 		c@ '\n' == ||)
 
 		0 // purge

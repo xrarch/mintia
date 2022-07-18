@@ -12,17 +12,17 @@ const OSSTREAMLINEBUFFERLENGTH 80
 struct OSStream
 	4 Flags
 	4 FileHandle
+	4 Access
 	4 BufferOrListHead
-
-// only applicable in line-buffering
-
-	4 BufferedLength
+	4 BufferedLengthOrSeek
 endstruct
+
+const OSSTREAMPURGE_RELEASE 2
 
 const OSSTREAMHANDLEFLAG 1
 
 extern OSStreamOpen { streamflags flags access path ftype -- stream ok }
-extern OSStreamObjectCreate { flags filehandle -- stream ok }
+extern OSStreamObjectCreate { flags access filehandle -- stream ok }
 extern OSStreamClose { stream -- ok }
 extern OSStreamGetFileHandle { stream -- filehandle }
 extern OSStreamTruncate { newsize growing stream -- oldsize ok }

@@ -105,15 +105,9 @@ fn (StressTestF) OverflowTest { -- ok }
 	OverflowTest drop
 end
 
-buffer TestFastMutex OSFastMutex_SIZEOF
-
 fn (StressTestF) FastMutexTest { -- ok }
-	"TestFastMutex" // name
-	TestFastMutex // fastmutex
-	OSFastMutexInitialize
-
 	auto count
-	15 count!
+	39 count!
 
 	while (count@)
 		auto thandle
@@ -137,26 +131,111 @@ fn (StressTestF) FastMutexTest { -- ok }
 	0 FastMutexTestThread drop
 end
 
-var TestValue 0
+table HeapBlockSizes
+	32
+	17
+	1023
+	63
+	4095
+	8191
+	72
+	45
+endtable
 
 fn FastMutexTestThread { context -- ret }
+	auto count
+	0 count!
+
 	while (1)
-		TestFastMutex OSFastMutexAcquire
+		auto block
+		[count@ 7 &]HeapBlockSizes@ OSHeapAllocate ret! block!
 
-		TestFastMutex OSFastMutexAcquire
-
-		auto y
-		1 TestValue +=
-		TestValue@ y!
-
-		if (TestValue@ 1 ~=)
-			"hm!\n" OSAbort
+		if (ret@)
+			ret@ OSStatusGetName "FastMutexTestThread: %s\n" OSError
 		end
 
-		1 TestValue -=
+		block@ // ptr
+		[count@ 7 &]HeapBlockSizes@ // sz
+		0 // word
+		memset
 
-		TestFastMutex OSFastMutexRelease
+		0 OSThreadSleep drop
 
-		TestFastMutex OSFastMutexRelease
+		block@ OSHeapFree
+
+		1 count +=
 	end
+end
+
+buffer TestBuffer 131072
+
+fn (StressTestF) StreamReadTest { -- ok }
+	auto count
+	35 count!
+
+	while (count@)
+		auto thandle
+		0 // context
+		pointerof StreamReadTestThread // startfunc
+		0 // creationflags
+		ACCESS_OWNER_ALL // permissions
+		"StreamReadTestThread" // name
+		OSCURRENTPROCESS // processhandle
+		OSThreadCreate ok! thandle!
+
+		if (ok@)
+			return
+		end
+
+		thandle@ OSClose drop
+
+		1 count -=
+	end
+
+	0 StreamReadTestThread drop
+end
+
+fn StreamReadTestThread { context -- ret }
+	auto ok
+
+	while (1)
+		auto stream
+
+		0 // streamflags
+		0 // flags
+		ACCESS_READ // access
+		"/mintia/SystemInit.cfg" // path
+		OSFILETYPE_FILE // ftype
+		OSStreamOpen ok! stream!
+
+		if (ok@)
+			ok@ OSStatusGetName "%s\n" OSError
+		end
+
+		// stream@ "%x\n" OSGetStdErr FPrintf
+
+		auto bytesread
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		65536 // length
+		TestBuffer // buffer
+		stream@ // stream
+		OSStreamRead ok! bytesread!
+
+		if (ok@)
+			ok@ OSStatusGetName "read: %s\n" OSError
+		end
+
+		bytesread@ "%d " Printf
+
+		stream@ OSStreamClose ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "close: %s\n" OSError
+		end
+	end
+end
+
+fn (StressTestF) StreamWriteTest { -- ok }
+
 end

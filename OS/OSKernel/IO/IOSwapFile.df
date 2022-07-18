@@ -1204,8 +1204,6 @@ fn IOSwapFileTryExtend { extension swapfile -- realextension }
 	ipl@ KeIPLLower
 end
 
-const IOSWAPFILEMINIMUMCONTRACTION 32
-
 fn IOSwapFileContract { -- }
 	// called by the worker thread every 5 seconds to scan the swapfiles and
 	// determine if any of them should be shrunk.
@@ -1218,8 +1216,8 @@ fn IOSwapFileContract { -- }
 	auto potentialcontraction
 	MmCommitLimit@ MmCommitUsage@ - potentialcontraction!
 
-	if (potentialcontraction@ IOSWAPFILEMINIMUMCONTRACTION 4 * <)
-		// if commit usage is within a megabyte of the commit limit then it
+	if (potentialcontraction@ IOSWAPFILEMINIMUMEXTENSION 2 * <)
+		// if commit usage is within 2 megabytes of the commit limit then it
 		// probably isn't worth it to bother scanning the swapfiles.
 
 		return
@@ -1234,17 +1232,22 @@ fn IOSwapFileContract { -- }
 		auto swapfile
 		[i@]IOSwapFiles@ swapfile!
 
-		auto excess
-		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - excess!
+		auto free
+		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - free!
 
-		if (excess@ IOSWAPFILEMINIMUMCONTRACTION >=)
-			excess@ potentialcontraction +=
+		auto excess
+		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - excess!
+
+		if (excess@ IOSWAPFILEMINIMUMEXTENSION >=)
+			if (free@ IOSWAPFILEMINIMUMEXTENSION >=)
+				excess@ free@ min potentialcontraction +=
+			end
 		end
 
 		1 i +=
 	end
 
-	if (potentialcontraction@ 128 <)
+	if (potentialcontraction@ IOSWAPFILEMINIMUMEXTENSION 2 * <)
 		return
 	end
 
@@ -1299,19 +1302,19 @@ end
 fn IOSwapFileTryContract { contraction swapfile -- contractedby }
 	0 contractedby!
 
-	if (contraction@ IOSWAPFILEMINIMUMCONTRACTION <)
-		IOSWAPFILEMINIMUMCONTRACTION contraction!
+	if (contraction@ IOSWAPFILEMINIMUMEXTENSION <)
+		IOSWAPFILEMINIMUMEXTENSION contraction!
 	end
 
 	if (contraction@ swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - >)
 		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - contraction!
 	end
 
-	if (contraction@ IOSWAPFILEMINIMUMCONTRACTION <)
+	if (contraction@ IOSWAPFILEMINIMUMEXTENSION <)
 		return
 	end
 
-	while (contraction@ IOSWAPFILEMINIMUMCONTRACTION >=)
+	while (contraction@ IOSWAPFILEMINIMUMEXTENSION >=)
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
@@ -1321,7 +1324,7 @@ fn IOSwapFileTryContract { contraction swapfile -- contractedby }
 			break
 		end
 
-		if (MmCommitLimit@ contraction@ - MmCommitUsage@ IOSWAPFILEMINIMUMCONTRACTION 2 * + <)
+		if (MmCommitLimit@ contraction@ - MmCommitUsage@ IOSWAPFILEMINIMUMEXTENSION 2 * + <)
 			ipl@ KeIPLLower
 
 			break

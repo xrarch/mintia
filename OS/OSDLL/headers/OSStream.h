@@ -21,6 +21,7 @@ const OSSTREAMPURGE_RELEASE 2
 
 const OSSTREAMHANDLEFLAG 1
 
+extern OSStreamCreate { streamflags permissions flags access path -- stream ok }
 extern OSStreamOpen { streamflags flags access path ftype -- stream ok }
 extern OSStreamObjectCreate { flags access filehandle -- stream ok }
 extern OSStreamClose { stream -- ok }

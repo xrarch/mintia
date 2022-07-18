@@ -97,7 +97,7 @@ extern DLLStreamInit { -- }
 extern DLLStreamWindowFreeAll { streamptr -- }
 
 extern DLLStreamWindowRead { length buffer streamptr -- bytesread ok }
-extern DLLStreamWindowWrite { length buffer streamptr -- bytesread ok }
+extern DLLStreamWindowWrite { length buffer streamptr -- byteswritten ok }
 
 const DLLSTREAMWINDOWSIZELOG 4 // in pages
 

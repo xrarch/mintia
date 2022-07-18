@@ -116,7 +116,7 @@ fn DLLStreamWindowAllocate { offset streamptr -- wcb ok }
 
 			wcbmutex@ OSFastMutexRelease
 
-			0 // alertable
+			1 // alertable
 			250 // timeout
 			DLLStreamWCBAvailableEvent@ // objecthandle
 			OSWaitForObject ok!
@@ -529,15 +529,237 @@ fn DLLStreamWindowRead { length buffer streamptr -- bytesread ok }
 			wcb@ n@ DLLStreamWCB_FreeNext + !
 			wcb@ DLLStreamWCBReclaimableListTail!
 		end
-	end
 
-	if (DLLStreamWCBWaiters@)
-		DLLStreamWCBAvailableEvent@ OSEventSignal drop
+		if (DLLStreamWCBWaiters@)
+			DLLStreamWCBAvailableEvent@ OSEventSignal drop
+		end
 	end
 
 	wcbmutex@ OSFastMutexRelease
 end
 
-fn DLLStreamWindowWrite { length buffer streamptr -- bytesread ok }
+fn DLLStreamWindowWrite { length buffer streamptr -- byteswritten ok }
+	auto seek
+	streamptr@ OSStream_BufferedLengthOrSeek + @ seek!
 
+	auto tend
+	seek@ length@ + 1 - tend!
+
+	auto direct
+	0 direct!
+
+	if (seek@ DLLSTREAMWINDOWNUMBERMASK & tend@ DLLSTREAMWINDOWNUMBERMASK & ~=)
+		1 direct!
+	end elseif (length@ OSPAGESIZE >=)
+		1 direct!
+	end
+
+	0 ok!
+
+	if (direct@)
+		seek@ // offset
+		streamptr@ OSStream_FileHandle + @ // filehandle
+		OSSEEK_SET // mode
+		OSFileSeek ok! drop
+
+		if (ok@)
+			return
+		end
+
+		0 // flags
+		length@ // length
+		buffer@ // buffer
+		streamptr@ OSStream_FileHandle + @ // filehandle
+		OSFileWrite ok! byteswritten!
+
+		if (ok@)
+			return
+		end
+
+		byteswritten@ streamptr@ OSStream_BufferedLengthOrSeek + +=
+
+		return
+	end
+
+	auto wcbmutex
+	DLLStreamWCBFastMutex wcbmutex!
+
+	wcbmutex@ OSFastMutexAcquire
+
+	// look up the WCB
+
+	auto wcb
+	streamptr@ OSStream_BufferOrListHead + @ wcb!
+
+	while (wcb@)
+		if (wcb@ DLLStreamWCB_FileOffset + @ DLLSTREAMWINDOWNUMBERMASK & seek@ DLLSTREAMWINDOWNUMBERMASK & ==)
+			break
+		end
+
+		wcb@ DLLStreamWCB_StreamNext + @ wcb!
+	end
+
+	auto n
+
+	if (wcb@ ~~)
+		// didn't find the WCB, must allocate one
+
+		seek@ DLLSTREAMWINDOWNUMBERMASK & // offset
+		streamptr@ // streamptr
+		DLLStreamWindowAllocate ok! wcb!
+
+		if (ok@)
+			wcbmutex@ OSFastMutexRelease
+
+			if (ok@ STATUS_END_OF_FILE ==)
+				// do direct
+
+				seek@ // offset
+				streamptr@ OSStream_FileHandle + @ // filehandle
+				OSSEEK_SET // mode
+				OSFileSeek ok! drop
+
+				if (ok@)
+					return
+				end
+
+				0 // flags
+				length@ // length
+				buffer@ // buffer
+				streamptr@ OSStream_FileHandle + @ // filehandle
+				OSFileWrite ok! byteswritten!
+
+				if (ok@)
+					return
+				end
+
+				byteswritten@ streamptr@ OSStream_BufferedLengthOrSeek + +=
+			end
+
+			return
+		end
+	end else
+		// found the WCB. increment refcount and remove from reclaimable list
+		// if necessary.
+
+		1 wcb@ DLLStreamWCB_RefCount + +=
+
+		if (wcb@ DLLStreamWCB_RefCount + @ 1 ==)
+			// remove
+
+			auto ls
+			wcb@ DLLStreamWCB_FreePrev + @ ls!
+
+			wcb@ DLLStreamWCB_FreeNext + @ n!
+
+			if (ls@)
+				n@ ls@ DLLStreamWCB_FreeNext + !
+			end else
+				n@ DLLStreamWCBReclaimableListHead!
+			end
+
+			if (n@)
+				ls@ n@ DLLStreamWCB_FreePrev + !
+			end else
+				ls@ DLLStreamWCBReclaimableListTail!
+			end
+		end
+	end
+
+	auto off
+	seek@ DLLSTREAMWINDOWOFFSETMASK & off!
+
+	auto wcblen
+	wcb@ DLLStreamWCB_Length + @ wcblen!
+
+	if (off@ length@ + wcblen@ >=)
+		if (off@ length@ + OSPAGEOFFSETMASK + OSPAGESHIFT >> wcblen@ OSPAGEOFFSETMASK + OSPAGESHIFT >> ~=)
+			// the WCB mapping is the wrong length of pages.
+			// free the WCB so it can get re-allocated with an appropriate
+			// size for the growth.
+
+			wcb@ DLLStreamWindowFree
+
+			wcbmutex@ OSFastMutexRelease
+
+			seek@ // offset
+			streamptr@ OSStream_FileHandle + @ // filehandle
+			OSSEEK_SET // mode
+			OSFileSeek ok! drop
+
+			if (ok@)
+				return
+			end
+
+			0 // flags
+			length@ // length
+			buffer@ // buffer
+			streamptr@ OSStream_FileHandle + @ // filehandle
+			OSFileWrite ok! byteswritten!
+
+			if (ok@)
+				return
+			end
+
+			byteswritten@ streamptr@ OSStream_BufferedLengthOrSeek + +=
+
+			return
+		end
+
+		wcbmutex@ OSFastMutexRelease
+
+		// grow the file
+
+		wcb@ DLLStreamWCB_FileOffset + @ off@ + length@ + // newsize
+		1 // growing
+		streamptr@ OSStream_FileHandle + @ // handle
+		OSFileTruncate ok! drop
+	end else
+		wcbmutex@ OSFastMutexRelease
+	end
+
+	if (ok@ ~~)
+		// write to the file through the magic of virtual memory.
+
+		wcb@ DLLStreamWCB_VirtualAddress + @ off@ + // dest
+		buffer@ // src
+		length@ // sz
+		memcpy
+
+		length@ byteswritten!
+
+		length@ streamptr@ OSStream_BufferedLengthOrSeek + +=
+	end
+
+	wcbmutex@ OSFastMutexAcquire
+
+	// decrement refcount and place on reclaimable list if necessary.
+
+	1 wcb@ DLLStreamWCB_RefCount + -=
+
+	if (wcb@ DLLStreamWCB_RefCount + @ ~~)
+		// insert
+
+		DLLStreamWCBReclaimableListTail@ n!
+
+		if (n@ ~~)
+			0 wcb@ DLLStreamWCB_FreeNext + !
+			0 wcb@ DLLStreamWCB_FreePrev + !
+
+			wcb@ DLLStreamWCBReclaimableListHead!
+			wcb@ DLLStreamWCBReclaimableListTail!
+		end else
+			0 wcb@ DLLStreamWCB_FreeNext + !
+
+			n@ wcb@ DLLStreamWCB_FreePrev + !
+			wcb@ n@ DLLStreamWCB_FreeNext + !
+			wcb@ DLLStreamWCBReclaimableListTail!
+		end
+
+		if (DLLStreamWCBWaiters@)
+			DLLStreamWCBAvailableEvent@ OSEventSignal drop
+		end
+	end
+
+	wcbmutex@ OSFastMutexRelease
 end

@@ -1,4 +1,4 @@
-const OSSTATISTICSCOUNT 5
+const OSSTATISTICSCOUNT (5 32 +)
 
 struct OSStatistics
 	4 Interrupts
@@ -6,6 +6,8 @@ struct OSStatistics
 	4 Preemptions
 	4 QuantumEnds
 	4 SystemCalls
+
+	(32 4 *) IPLTimes
 
 	80 Reserved
 endstruct

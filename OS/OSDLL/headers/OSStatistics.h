@@ -6,6 +6,7 @@ struct OSStatistics
 	4 Preemptions
 	4 QuantumEnds
 	4 SystemCalls
+	4 DPCTimeMs
 
 	(32 4 *) IPLTimes
 

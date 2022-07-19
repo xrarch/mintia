@@ -35,6 +35,7 @@ struct OSProcessInformation
 
 	4 UserTimeMs
 	4 SystemTimeMs
+	4 DPCTimeMs
 
 	48 Reserved
 endstruct
@@ -46,6 +47,7 @@ struct OSThreadInformation
 
 	4 UserTimeMs
 	4 SystemTimeMs
+	4 DPCTimeMs
 	
 	48 Reserved
 endstruct

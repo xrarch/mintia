@@ -37,6 +37,7 @@ struct KeProcess
 
 	4 UserTimeMs
 	4 SystemTimeMs
+	4 DPCTimeMs
 
 	// memory manager information
 
@@ -128,6 +129,7 @@ struct KeThread
 
 	4 UserTimeMs
 	4 SystemTimeMs
+	4 DPCTimeMs
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }

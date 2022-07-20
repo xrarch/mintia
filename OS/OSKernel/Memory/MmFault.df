@@ -288,17 +288,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 				ipl@ KeIPLLower
 
-				auto vad
-				vaddr@ // vaddr
-				process@ // process
-				MmFaultParameters ok! vad! drop drop
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						ok@ "MmSatisfyFault: couldn't find VAD for private page (%i)\n" KeCrash
-					end
-				end
-
 				process@ MmWorkingSetLock drop // will NEVER fail
 
 				process@ // process
@@ -392,13 +381,17 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					end
 				end
 
-				PTE_V flags!
-
-				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-					if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY PAGEACCESS_WRITE | &)
-						PTE_W flags |=
+				if (flags@ PTE_SAVEDW &)
+					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+						PTE_W flags!
+					end else
+						0 flags!
 					end
+				end else
+					0 flags!
 				end
+
+				PTE_V flags |=
 
 				phyaddr@ // phyaddr
 				flags@ // flags
@@ -749,6 +742,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	auto vad
 	0 vad!
 
+	auto pageprot
+	0 pageprot!
+
 	while (1)
 		process@ MmWorkingSetLock drop
 
@@ -760,6 +756,12 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		// hard to allow multiple threads to take a page fault per process without
 		// waiting for eachother.
 
+		auto section
+		auto ok
+		auto pfdbe
+		auto wsli
+		auto wsleptr
+
 		pteaddr@ // pteaddr
 		MmPTEInterpret ok! drop phyaddr!
 
@@ -769,35 +771,35 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 			break
 		end
 
-		auto section
-		auto ok
-		auto pfdbe
-		auto wsli
-		auto wsleptr
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-		if (vad@ ~~)
-			// only look up the VAD if we didn't already do it last time.
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
+			if (vad@ ~~)
+				// only look up the VAD if we didn't already do it last time.
 
-			vaddr@ // vaddr
-			process@ // process
-			MmFaultParameters ok! vad! section! drop
+				vaddr@ // vaddr
+				process@ // process
+				MmFaultParameters ok! vad! section! drop
 
-			if (DEBUGCHECKS)
-				if (ok@)
-					ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
+				if (DEBUGCHECKS)
+					if (ok@)
+						ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
+					end
+
+					if (vad@ MmVAD_PageProtection + @ ~~)
+						"MmWriteFault: VAD was guard region\n" KeCrash
+					end
 				end
 
-				if (vad@ MmVAD_PageProtection + @ ~~)
-					"MmWriteFault: VAD was guard region\n" KeCrash
-				end
+				vad@ MmVAD_PageProtection + @ pageprot!
 			end
+		end else
+			PAGEACCESS_READ PAGEACCESS_WRITE | pageprot!
 		end
 
 		auto ipl
 
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITECOPY &)
+		if (pageprot@ PAGEACCESS_WRITECOPY &)
 			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
 				pfdbe@ // pfdbe
 				process@ // process
@@ -872,7 +874,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 			process@ MmWorkingSetUnlock
 
 			return
-		end elseif (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE & ~~)
+		end elseif (pageprot@ PAGEACCESS_WRITE & ~~)
 			// privilege violation
 			OSSIGNAL_SEGV signal!
 			break

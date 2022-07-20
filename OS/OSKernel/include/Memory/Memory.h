@@ -100,6 +100,7 @@ externptr MmModifiedPageEvent
 externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
+externptr MmModifiedPageWriterThread
 
 externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize

@@ -1,4 +1,4 @@
-// obviously limn2600-specific. will be switched by ifdefs some day.
+#ifdef LIMN2600
 
 // if you modify below, update the matching name table in OSDLL debug dumper
 struct OSContext
@@ -40,3 +40,5 @@ const LIMN2600_ERS_USER 256
 
 const LIMN2600_ERS_KTHREAD (LIMN2600_RS_INT LIMN2600_RS_MMU | 8 <<)
 const LIMN2600_ERS_UTHREAD (LIMN2600_RS_INT LIMN2600_RS_MMU | LIMN2600_RS_USER | 8 <<)
+
+#endif

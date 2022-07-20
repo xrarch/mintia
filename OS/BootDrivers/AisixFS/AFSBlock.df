@@ -19,7 +19,11 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Security.h"
+
 #include "<inc>/IO.h"
+
+#include "<inc>/Process.h"
 
 #include "<inc>/FSRTL.h"
 
@@ -165,14 +169,35 @@ fn AFSBlockBitmapInitialize { mount -- ok }
 
 	0 afsdata@ AFSData_FreeBlockHint + !
 
-	auto bmp
-	blocks@ 7 + 3 >> // size
-	'AFSb' // tag
-	0 // flags
-	MmAllocWithTag ok! bmp!
+	auto bmpsz
+	blocks@ 7 + 3 >> bmpsz!
 
-	if (ok@)
-		return
+	auto bmp
+
+	if (bmpsz@ PAGESIZE 1 >> <)
+		bmpsz@ // size
+		'AFSb' // tag
+		0 // flags
+		MmAllocWithTag ok! bmp!
+
+		if (ok@)
+			return
+		end
+
+		1 afsdata@ AFSData_IsBlockBitmapInHeap + !
+	end else
+		bmpsz@ // length
+		0 // startva
+		PsSystemProcess@ // processobject
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		0 // flags
+		MmAllocateProcessObject ok! bmp!
+
+		if (ok@)
+			return
+		end
+
+		0 afsdata@ AFSData_IsBlockBitmapInHeap + !
 	end
 
 	blocks@ // sizeinbits
@@ -186,6 +211,31 @@ fn AFSBlockBitmapInitialize { mount -- ok }
 	KeMutexInitialize
 
 	mount@ AFSBlockBitmapReadFAT ok!
+end
+
+fn AFSBlockBitmapUninitialize { mount -- }
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto blocks
+	afsdata@ AFSData_VolSize + @ blocks!
+
+	auto bmpsz
+	blocks@ 7 + 3 >> bmpsz!
+
+	if (afsdata@ AFSData_IsBlockBitmapInHeap + @)
+		afsdata@ AFSData_FreeBlockBitmap + ExBitmapGetData MmFree
+	end else
+		auto ok
+		bmpsz@ // length
+		afsdata@ AFSData_FreeBlockBitmap + ExBitmapGetData // vaddr
+		PsSystemProcess@ // processobject
+		MmUnmapViewProcess ok!
+
+		if (ok@)
+			"AFSBlockBitmapUninitialize: failed to unmap (%i)\n" KeCrash
+		end
+	end
 end
 
 fn AFSBlockBitmapLockUnalertable { mount -- }

@@ -35,6 +35,7 @@ struct AFSData
 
 	ExBitmapHeader_SIZEOF FreeBlockBitmap
 	4 FreeBlockHint
+	4 IsBlockBitmapInHeap
 
 	KeMutex_SIZEOF FreeBlockBitmapMutex
 	KeMutex_SIZEOF INodeAllocationMutex
@@ -107,6 +108,7 @@ extern AFSFCBCacheFlush { destroy mount -- ok }
 extern AFSFCBRead { inum mount -- fcb ok }
 
 extern AFSBlockBitmapInitialize { mount -- ok }
+extern AFSBlockBitmapUninitialize { mount -- }
 
 extern AFSBlockBitmapLockUnalertable { mount -- }
 extern AFSBlockBitmapUnlock { mount -- }

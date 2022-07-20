@@ -122,6 +122,16 @@ fn MmFileUnprepareForMap { fileobject -- }
 end
 
 fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobject pageprotection flags -- realva ok }
+	auto kernelmapping
+	processobject@ PsSystemProcess@ == kernelmapping!
+
+	if (kernelmapping@)
+		if (flags@ OSMAPFLAG_FIXEDADDRESS &)
+			STATUS_INVALID_ARGUMENT ok!
+			return
+		end
+	end
+
 	if (sectionoffset@ PAGEOFFSETMASK &)
 		// requested section offset isn't page-aligned
 		STATUS_INVALID_ARGUMENT ok!
@@ -169,16 +179,18 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		return
 	end
 
-	if (startva@ length@ + MMHIGHESTUSERADDRESS >)
-		// requested region goes outside userspace
+	if (kernelmapping@ ~~)
+		if (startva@ length@ + MMHIGHESTUSERADDRESS >)
+			// requested region goes outside userspace
 
-		if (flags@ OSMAPFLAG_FIXEDADDRESS &)
-			STATUS_UNAVAILABLE_ADDRESS ok!
+			if (flags@ OSMAPFLAG_FIXEDADDRESS &)
+				STATUS_UNAVAILABLE_ADDRESS ok!
 
-			return
+				return
+			end
+
+			0 startva!
 		end
-
-		0 startva!
 	end
 
 	auto perm
@@ -211,6 +223,22 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		return
 	end
 
+	if (kernelmapping@)
+		// this is a kernel mapping, so reserve POOLSPACE and use that as the
+		// startva. it must be done like this because kernel page tables are
+		// necessarily not dynamic.
+
+		length@ PAGESHIFT >> MmPoolSpaceReserve ok! startva!
+
+		if (ok@)
+			processobject@ PsProcessCreateDeleteUnlock
+
+			return
+		end
+
+		startva@ PAGESHIFT << POOLSPACE + startva!
+	end
+
 	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
 		// if the section has a file object, initialize caching on its FCB and
 		// reference the cacheblock so that it can't be truncated.
@@ -223,6 +251,12 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 
 		if (ok@)
 			processobject@ PsProcessCreateDeleteUnlock
+
+			if (kernelmapping@)
+				length@ PAGESHIFT >> // pages
+				startva@ POOLSPACE - PAGESHIFT >> // offset
+				MmPoolSpaceRelease
+			end
 
 			return
 		end
@@ -247,6 +281,12 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		end
 
 		processobject@ PsProcessCreateDeleteUnlock
+
+		if (kernelmapping@)
+			length@ PAGESHIFT >> // pages
+			startva@ POOLSPACE - PAGESHIFT >> // offset
+			MmPoolSpaceRelease
+		end
 
 		return
 	end
@@ -326,6 +366,9 @@ fn MmMapView { length startva sectionoffset mappedhandle processhandle pageprote
 end
 
 fn MmUnmapViewProcess { length vaddr processobject -- ok }
+	auto kernelmapping
+	processobject@ PsSystemProcess@ == kernelmapping!
+
 	length@ PAGEOFFSETMASK + PAGENUMBERMASK & length!
 
 	if (length@ 0 ==)
@@ -342,12 +385,14 @@ fn MmUnmapViewProcess { length vaddr processobject -- ok }
 		return
 	end
 
-	if (vaddr@ length@ + MMHIGHESTUSERADDRESS >)
-		// requested region goes outside userspace
+	if (kernelmapping@ ~~)
+		if (vaddr@ length@ + MMHIGHESTUSERADDRESS >)
+			// requested region goes outside userspace
 
-		STATUS_FORBIDDEN_OPERATION ok!
+			STATUS_FORBIDDEN_OPERATION ok!
 
-		return
+			return
+		end
 	end
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
@@ -383,6 +428,24 @@ fn MmUnmapViewProcess { length vaddr processobject -- ok }
 	processobject@ MmVADListUnlock
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	if (kernelmapping@)
+		// release POOLSPACE
+
+		if (DEBUGCHECKS)
+			if (vaddr@ POOLSPACE <)
+				vaddr@ "MmUnmapViewProcess: kernel mapping wasn't in POOLSPACE (vaddr=%x)\n" KeCrash
+			end
+
+			if (vaddr@ length@ + POOLSPACE POOLSIZE + >=)
+				vaddr@ "MmUnmapViewProcess: kernel mapping wasn't in POOLSPACE (vaddr=%x)\n" KeCrash
+			end
+		end
+
+		length@ PAGESHIFT >> // pages
+		vaddr@ POOLSPACE - PAGESHIFT >> // offset
+		MmPoolSpaceRelease
+	end
 end
 
 fn MmUnmapView { length vaddr processhandle -- ok }

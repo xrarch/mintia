@@ -12,7 +12,7 @@ ifndef DEBUGCHECKS
 	DEBUGCHECKS := 0
 endif
 
-export BUILDCONFIG := DEBUGCHECKS=$(DEBUGCHECKS) $(BUILDCONFIG)
+export BUILDCONFIG := DEBUGCHECKS=$(DEBUGCHECKS) LIMN2600=1 $(BUILDCONFIG)
 
 export FST        := ../sdk/fstool.sh
 export OBJTOOL    := ../sdk/link.sh

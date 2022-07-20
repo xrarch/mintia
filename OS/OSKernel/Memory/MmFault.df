@@ -42,6 +42,12 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 	auto signal
 	0 signal!
 
+	auto process
+	KeProcessCurrent process!
+
+	auto kernelmapping
+	0 kernelmapping!
+
 	if (badaddr@ PAGESIZE <)
 		OSSIGNAL_SEGV signal!
 	end else
@@ -50,8 +56,13 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 				OSSIGNAL_SEGV signal!
 			end
 		end elseif (badaddr@ MMLOWESTSYSTEMADDRESS >=)
-			// kernel mode fault on kernel mode address... bad
-			ERROR signal!
+			if (badaddr@ POOLSPACE < badaddr@ POOLSPACE POOLSIZE + >= ||)
+				// kernel mode fault on kernel mode address... bad
+				ERROR signal!
+			end else
+				PsSystemProcess@ process!
+				1 kernelmapping!
+			end
 		end
 	end
 
@@ -63,6 +74,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		REFAULT signal!
 
 		while (signal@ REFAULT ==)
+			kernelmapping@ // kernelmapping
 			writing@ // writing
 			badaddr@ // vaddr
 			MmSatisfyFault signal!
@@ -140,11 +152,8 @@ fn MmThrottle { -- }
 	end
 end
 
-fn MmSatisfyFault { writing vaddr -- signal }
+fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 	0 signal!
-
-	auto process
-	KeProcessCurrent process!
 
 	auto ok
 	auto pteaddr
@@ -154,23 +163,38 @@ fn MmSatisfyFault { writing vaddr -- signal }
 	auto wsleptr
 	auto wsli
 	auto ptpfdbe
+	auto process
 
-	MmThrottle
+	if (kernelmapping@ ~~)
+		KeProcessCurrent process!
 
-	0 // pri
-	vaddr@ // vaddr
-	process@ KeProcess_PageDirectory + @ // pagemap
-	MmPTEReference ok! pteaddr! ptpfdbe!
+		MmThrottle
 
-	if (ok@)
-		if (ok@ -1 ==)
-			// no page table
-			0 ptpfdbe!
-		end else
-			// something else happened
-			OSSIGNAL_KILL signal!
-			return
+		0 // pri
+		vaddr@ // vaddr
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmPTEReference ok! pteaddr! ptpfdbe!
+
+		if (ok@)
+			if (ok@ -1 ==)
+				// no page table
+				0 ptpfdbe!
+			end else
+				// something else happened
+				OSSIGNAL_KILL signal!
+				return
+			end
 		end
+	end else
+		PsSystemProcess@ process!
+
+		0 ptpfdbe!
+
+		vaddr@ // vaddr
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
+
+		0 ok!
 	end
 
 	auto ipl
@@ -187,7 +211,11 @@ fn MmSatisfyFault { writing vaddr -- signal }
 
 			if (flags@ PTE_W &)
 				// no work to do
-				ptpfdbe@ process@ MmPTEDereference
+
+				if (ptpfdbe@)
+					ptpfdbe@ process@ MmPTEDereference
+				end
+
 				return
 			end elseif (writing@)
 				pteaddr@ // pteaddr
@@ -195,11 +223,18 @@ fn MmSatisfyFault { writing vaddr -- signal }
 				process@ // process
 				MmWriteFault signal!
 
-				ptpfdbe@ process@ MmPTEDereference
+				if (ptpfdbe@)
+					ptpfdbe@ process@ MmPTEDereference
+				end
+
 				return
 			end else
 				// no work to do
-				ptpfdbe@ process@ MmPTEDereference
+
+				if (ptpfdbe@)
+					ptpfdbe@ process@ MmPTEDereference
+				end
+
 				return
 			end
 		end else
@@ -215,18 +250,27 @@ fn MmSatisfyFault { writing vaddr -- signal }
 					// reference it now so we can drop IPL
 
 					auto waited
-					CANBLOCK MmPageWait ok! waited!
+
+					if (kernelmapping@)
+						CANBLOCK TRYFOREVER | MmPageWait ok! waited!
+					end else
+						CANBLOCK MmPageWait ok! waited!
+					end
 
 					if (ok@)
 						ipl@ KeIPLLower
-						ptpfdbe@ process@ MmPTEDereference
+						if (ptpfdbe@)
+							ptpfdbe@ process@ MmPTEDereference
+						end
 						OSSIGNAL_KILL signal!
 						return
 					end
 
 					if (waited@)
 						ipl@ KeIPLLower
-						ptpfdbe@ process@ MmPTEDereference
+						if (ptpfdbe@)
+							ptpfdbe@ process@ MmPTEDereference
+						end
 						REFAULT signal!
 						return
 					end
@@ -235,7 +279,7 @@ fn MmSatisfyFault { writing vaddr -- signal }
 
 					if (DEBUGCHECKS)
 						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
-							flags@ vaddr@ "MmSatisfyFault: %x: transition PTE (%x) wasn't COW \n" KeCrash
+							flags@ vaddr@ "MmSatisfyFault: %x: transition PTE (%x) wasn't private\n" KeCrash
 						end
 					end
 
@@ -266,7 +310,10 @@ fn MmSatisfyFault { writing vaddr -- signal }
 					end
 
 					process@ MmWorkingSetUnlock
-					ptpfdbe@ process@ MmPTEDereference
+
+					if (ptpfdbe@)
+						ptpfdbe@ process@ MmPTEDereference
+					end
 
 					OSSIGNAL_KILL signal!
 
@@ -281,7 +328,11 @@ fn MmSatisfyFault { writing vaddr -- signal }
 
 					IPLDPC KeIPLRaise ipl!
 
-					CANBLOCK MmPageWait ok! drop
+					if (kernelmapping@)
+						CANBLOCK TRYFOREVER | MmPageWait ok! drop
+					end else
+						CANBLOCK MmPageWait ok! drop
+					end
 
 					if (ok@)
 						ipl@ KeIPLLower
@@ -294,7 +345,10 @@ fn MmSatisfyFault { writing vaddr -- signal }
 						MmWorkingSetEntryFree
 
 						process@ MmWorkingSetUnlock
-						ptpfdbe@ process@ MmPTEDereference
+
+						if (ptpfdbe@)
+							ptpfdbe@ process@ MmPTEDereference
+						end
 
 						OSSIGNAL_KILL signal!
 
@@ -315,7 +369,10 @@ fn MmSatisfyFault { writing vaddr -- signal }
 						MmWorkingSetEntryFree
 
 						process@ MmWorkingSetUnlock
-						ptpfdbe@ process@ MmPTEDereference
+
+						if (ptpfdbe@)
+							ptpfdbe@ process@ MmPTEDereference
+						end
 
 						OSSIGNAL_KILL signal!
 
@@ -330,7 +387,9 @@ fn MmSatisfyFault { writing vaddr -- signal }
 
 					PAGESHIFT phyaddr <<=
 
-					ptpfdbe@ MmEvictablePageReference drop
+					if (ptpfdbe@)
+						ptpfdbe@ MmEvictablePageReference drop
+					end
 				end
 
 				PTE_V flags!
@@ -355,10 +414,12 @@ fn MmSatisfyFault { writing vaddr -- signal }
 
 				process@ MmWorkingSetUnlock
 
-				ptpfdbe@ process@ MmPTEDereference
+				if (ptpfdbe@)
+					ptpfdbe@ process@ MmPTEDereference
+				end
 
 				return
-			end elseif (flags@ ~~)
+			end elseif (flags@ MmPTEIsZero)
 				ipl@ KeIPLLower
 			end else
 				flags@ "MmSatisfyFault: odd PTE %08x\n" KeCrash
@@ -415,6 +476,8 @@ fn MmNormalFault { vaddr process -- signal }
 	auto pteaddr
 	auto wsli
 	auto wsleptr
+	auto kernelmapping
+	process@ PsSystemProcess@ == kernelmapping!
 
 	vaddr@ // vaddr
 	process@ // process
@@ -448,13 +511,19 @@ fn MmNormalFault { vaddr process -- signal }
 		end
 	end
 
-	vaddr@ // vaddr
-	process@ // process
-	MmPTECreate ok! pteaddr!
+	if (kernelmapping@ ~~)
+		vaddr@ // vaddr
+		process@ // process
+		MmPTECreate ok! pteaddr!
 
-	if (ok@)
-		OSSIGNAL_KILL signal!
-		return
+		if (ok@)
+			OSSIGNAL_KILL signal!
+			return
+		end
+	end else
+		vaddr@ // vaddr
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
 	end
 
 	process@ MmWorkingSetLock drop // will NEVER fail
@@ -465,22 +534,26 @@ fn MmNormalFault { vaddr process -- signal }
 	process@ MmWorkingSetUnlock
 
 	if (ok@)
-		1 // deref
-		pteaddr@ // pteaddr
-		vaddr@ // vaddr
-		process@ // process
-		MmPTEDelete drop
+		if (kernelmapping@ ~~)
+			1 // deref
+			pteaddr@ // pteaddr
+			vaddr@ // vaddr
+			process@ // process
+			MmPTEDelete drop
+		end
 
 		OSSIGNAL_KILL signal!
 		return
 	end
 
 	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
+		process@ // process
 		object@ // fileobject
 		offset@ // offset
 		vad@ // vad
 		MmSatisfyFileFault ok! phyaddr! pfdbe! flags!
 	end else
+		process@ // process
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
 		object@ // section
@@ -499,11 +572,13 @@ fn MmNormalFault { vaddr process -- signal }
 
 		process@ MmWorkingSetUnlock
 
-		1 // deref
-		pteaddr@ // pteaddr
-		vaddr@ // vaddr
-		process@ // process
-		MmPTEDelete drop
+		if (kernelmapping@ ~~)
+			1 // deref
+			pteaddr@ // pteaddr
+			vaddr@ // vaddr
+			process@ // process
+			MmPTEDelete drop
+		end
 
 		OSSIGNAL_KILL signal!
 		return
@@ -561,13 +636,19 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 		PTE_NC flags |=
 	end
 
-	auto pteaddr
-	vaddr@ // vaddr
-	process@ // process
-	MmPTECreate ok! pteaddr!
+	if (process@ PsSystemProcess@ ~=)
+		auto pteaddr
+		vaddr@ // vaddr
+		process@ // process
+		MmPTECreate ok! pteaddr!
 
-	if (ok@)
-		return
+		if (ok@)
+			return
+		end
+	end else
+		vaddr@ // vaddr
+		process@ KeProcess_PageDirectory + @ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
 	end
 
 	phyaddr@ // phyaddr
@@ -578,12 +659,19 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	MmPTEUpdate drop drop drop
 end
 
-fn MmSatisfyFileFault { fileobject offset vad -- flags pfdbe phyaddr ok }
+fn MmSatisfyFileFault { process fileobject offset vad -- flags pfdbe phyaddr ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
+	auto kflags
+	0 kflags!
+
+	if (process@ PsSystemProcess@ ==)
+		IOKFLAG_SWAPIN kflags!
+	end
+
 	0 // flags
-	0 // kflags
+	kflags@ // kflags
 	offset@ PAGENUMBERMASK & // offset
 	fcb@ // fcb
 	IOCachePageRead ok! pfdbe! phyaddr!
@@ -597,9 +685,16 @@ fn MmSatisfyFileFault { fileobject offset vad -- flags pfdbe phyaddr ok }
 	PTE_V flags!
 end
 
-fn MmSatisfyAnonFault { vaddr pteaddr section offset vad -- flags pfdbe phyaddr ok }
+fn MmSatisfyAnonFault { process vaddr pteaddr section offset vad -- flags pfdbe phyaddr ok }
+	auto pri
+	0 pri!
+
+	if (process@ PsSystemProcess@ ==)
+		TRYFOREVER pri!
+	end
+
 	if (section@)
-		0 // pri
+		pri@ // pri
 		offset@ // sectionoffset
 		section@ // sectionobject
 		MmSectionPageGet ok! pfdbe! phyaddr!
@@ -611,7 +706,7 @@ fn MmSatisfyAnonFault { vaddr pteaddr section offset vad -- flags pfdbe phyaddr 
 		// private page
 
 		pteaddr@ // pte
-		ZEROMUST // pri
+		ZEROMUST pri@ | // pri
 		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
 
 		if (ok@)
@@ -621,8 +716,12 @@ fn MmSatisfyAnonFault { vaddr pteaddr section offset vad -- flags pfdbe phyaddr 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-		KeProcessCurrent pfdbe@ MmPageFrameEntryAnonymous_Process + !
+		process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
 		vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+
+		if (process@ PsSystemProcess@ ==)
+			PTE_TLBHACK pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
+		end
 
 		PAGESHIFT phyaddr <<=
 	end
@@ -729,7 +828,11 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 				end
 
 				// starts at demand-zero, which isn't true here
-				MMSWAPPAGE_NONE cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+				if (process@ PsSystemProcess@ ==)
+					SWAPPTE_NONE PTE_TLBHACK | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
+				end else
+					SWAPPTE_NONE cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+				end
 
 				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
 				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb

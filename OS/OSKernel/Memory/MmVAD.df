@@ -206,81 +206,85 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 		return
 	end
 
-	if (startva@)
-		if (startva@ PAGESIZE <)
-			if (fixedva@)
-				processobject@ MmVADListUnlock
+	if (processobject@ PsSystemProcess@ ~=)
+		if (startva@)
+			if (startva@ PAGESIZE <)
+				if (fixedva@)
+					processobject@ MmVADListUnlock
 
-				STATUS_UNAVAILABLE_ADDRESS ok!
+					STATUS_UNAVAILABLE_ADDRESS ok!
 
-				return
+					return
+				end
+
+				PAGESIZE startva!
+				startva@ viewsize@ + endva!
 			end
 
-			PAGESIZE startva!
-			startva@ viewsize@ + endva!
-		end
+			startva@ // value
+			endva@ // endvalue
+			processobject@ PsProcess_VADTreeRoot + @ // root
+			ExSplayTreeFindFirstContainingNode vad!
 
-		startva@ // value
-		endva@ // endvalue
-		processobject@ PsProcess_VADTreeRoot + @ // root
-		ExSplayTreeFindFirstContainingNode vad!
+			if (vad@)
+				if (fixedva@)
+					processobject@ MmVADListUnlock
 
-		if (vad@)
-			if (fixedva@)
-				processobject@ MmVADListUnlock
+					STATUS_UNAVAILABLE_ADDRESS ok!
 
-				STATUS_UNAVAILABLE_ADDRESS ok!
+					return
+				end
 
-				return
-			end
+				MmVAD_Parent vad -=
 
-			MmVAD_Parent vad -=
+				while (1)
+					auto nextvad
+					vad@ MmVAD_Parent + // node
+					ExSplayTreeNodeNext nextvad!
 
-			while (1)
-				auto nextvad
-				vad@ MmVAD_Parent + // node
-				ExSplayTreeNodeNext nextvad!
+					if (nextvad@ ~~)
+						if (MMHIGHESTUSERADDRESS 1 + vad@ MmVAD_EndVA + @ - viewsize@ >=)
+							vad@ MmVAD_EndVA + @ realva!
+						end
 
-				if (nextvad@ ~~)
-					if (MMHIGHESTUSERADDRESS 1 + vad@ MmVAD_EndVA + @ - viewsize@ >=)
-						vad@ MmVAD_EndVA + @ realva!
+						break
 					end
 
-					break
+					MmVAD_Parent nextvad -=
+
+					if (nextvad@ MmVAD_StartVA + @ vad@ MmVAD_EndVA + @ - viewsize@ >=)
+						vad@ MmVAD_EndVA + @ realva!
+						break
+					end
+
+					nextvad@ vad!
 				end
-
-				MmVAD_Parent nextvad -=
-
-				if (nextvad@ MmVAD_StartVA + @ vad@ MmVAD_EndVA + @ - viewsize@ >=)
-					vad@ MmVAD_EndVA + @ realva!
-					break
-				end
-
-				nextvad@ vad!
+			end else
+				startva@ realva!
 			end
-		end else
-			startva@ realva!
-		end
-	end elseif (fixedva@)
-		processobject@ MmVADListUnlock
-
-		STATUS_UNAVAILABLE_ADDRESS ok!
-
-		return
-	end
-
-	if (realva@ ~~)
-		viewsize@ // size
-		processobject@ PsProcess_VADTreeRoot + @ // root
-		ExSplayTreeFindEmptyRange realva! vad!
-
-		if (realva@ ~~)
+		end elseif (fixedva@)
 			processobject@ MmVADListUnlock
 
 			STATUS_UNAVAILABLE_ADDRESS ok!
 
 			return
 		end
+
+		if (realva@ ~~)
+			viewsize@ // size
+			processobject@ PsProcess_VADTreeRoot + @ // root
+			ExSplayTreeFindEmptyRange realva! vad!
+
+			if (realva@ ~~)
+				processobject@ MmVADListUnlock
+
+				STATUS_UNAVAILABLE_ADDRESS ok!
+
+				return
+			end
+		end
+	end else
+		startva@ realva!
 	end
 
 	// create the VAD for this mapping and insert it in the tree
@@ -324,13 +328,19 @@ fn MmVADUnmap { vad processobject -- }
 		end
 	end
 
-	auto ok
-	TRYFOREVER // pri
-	processobject@ // process
-	MmPageDirectoryReference ok!
+	auto kernelmapping
+	processobject@ PsSystemProcess@ == kernelmapping!
 
-	if (ok@)
-		ok@ "MmVADUnmap: failed to reference page directory (%i)\n" KeCrash
+	auto ok
+
+	if (kernelmapping@ ~~)
+		TRYFOREVER // pri
+		processobject@ // process
+		MmPageDirectoryReference ok!
+
+		if (ok@)
+			ok@ "MmVADUnmap: failed to reference page directory (%i)\n" KeCrash
+		end
 	end
 
 	auto pdir
@@ -356,8 +366,14 @@ fn MmVADUnmap { vad processobject -- }
 			max@ "MmVADUnmap: max wasn't page-aligned (0x%08x)\n" KeCrash
 		end
 
-		if (vaddr@ MMHIGHESTUSERADDRESS >)
-			vaddr@ "MmVADUnmap: vaddr > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
+		if (kernelmapping@)
+			if (vaddr@ MMLOWESTSYSTEMADDRESS <)
+				vaddr@ "MmVADUnmap: vaddr < MMLOWESTSYSTEMADDRESS (0x%08x)\n" KeCrash
+			end
+		end else
+			if (vaddr@ MMHIGHESTUSERADDRESS >)
+				vaddr@ "MmVADUnmap: vaddr > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
+			end
 		end
 	end
 
@@ -389,27 +405,34 @@ fn MmVADUnmap { vad processobject -- }
 
 		auto ptpfdbe
 		0 ptpfdbe!
+		0 pteaddr!
 
 		while (vaddr@ max@ <=)
-			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
-				if (ptpfdbe@)
-					ptpfdbe@ processobject@ MmPTEDereference
-				end
-
-				TRYFOREVER // pri
-				vaddr@ // vaddr
-				pdir@ // pagemap
-				MmPTEReference ok! pteaddr! ptpfdbe!
-
-				if (ok@)
-					if (ok@ -1 ~=)
-						ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
+			if (kernelmapping@ ~~)
+				if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
+					if (ptpfdbe@)
+						ptpfdbe@ processobject@ MmPTEDereference
 					end
 
-					0 ptpfdbe!
-					PERPAGETABLE vaddr +=
-					continue
+					TRYFOREVER // pri
+					vaddr@ // vaddr
+					pdir@ // pagemap
+					MmPTEReference ok! pteaddr! ptpfdbe!
+
+					if (ok@)
+						if (ok@ -1 ~=)
+							ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
+						end
+
+						0 ptpfdbe!
+						PERPAGETABLE vaddr +=
+						continue
+					end
 				end
+			end elseif (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
+				vaddr@ // vaddr
+				pdir@ // pagemap
+				MmVirtualtoPTEAddress pteaddr!
 			end
 
 			auto ipl
@@ -417,7 +440,7 @@ fn MmVADUnmap { vad processobject -- }
 
 			pteaddr@@ pte!
 
-			if (pte@)
+			if (pte@ MmPTEIsZero ~~)
 				0 // phyaddr
 				0 // flags
 				vaddr@ // vaddr
@@ -456,18 +479,20 @@ fn MmVADUnmap { vad processobject -- }
 					ipl@ KeIPLLower
 				end
 
-				// there was a PTE containing some information, so delete it.
+				if (kernelmapping@ ~~)
+					// there was a PTE containing some information, so delete it.
 
-				deref@ // deref
-				pteaddr@ // pteaddr
-				vaddr@ // vaddr
-				processobject@ // process
-				MmPTEDelete drop
+					deref@ // deref
+					pteaddr@ // pteaddr
+					vaddr@ // vaddr
+					processobject@ // process
+					MmPTEDelete drop
+				end
 			end else
 				ipl@ KeIPLLower
 			end
 
-			4 pteaddr +=
+			PTESIZE pteaddr +=
 			PAGESIZE vaddr +=
 		end
 
@@ -476,7 +501,9 @@ fn MmVADUnmap { vad processobject -- }
 		end
 	end
 
-	processobject@ MmPageDirectoryDereference
+	if (kernelmapping@ ~~)
+		processobject@ MmPageDirectoryDereference
+	end
 
 	// remove from VAD tree
 

@@ -13,9 +13,6 @@ struct MmSection
 	KeMutex_SIZEOF PrototypePageTableMutex
 endstruct
 
-const MMSWAPPAGE_NONE       0
-const MMSWAPPAGE_DEMANDZERO 1
-
 extern MmSectionPPTLock { sectionobject -- ok }
 extern MmSectionPPTUnlock { sectionobject -- }
 

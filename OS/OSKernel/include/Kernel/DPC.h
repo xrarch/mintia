@@ -10,8 +10,6 @@ struct KeDPC
 	4 Context1
 	4 Context2
 	4 Enqueued
-	4 Reserved1
-	4 Reserved2
 endstruct
 
 const DPCHIGHIMPORTANCE 1

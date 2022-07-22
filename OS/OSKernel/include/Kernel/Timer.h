@@ -11,8 +11,6 @@ struct KeTimer
 	4 Enqueued
 	KeTime_SIZEOF ExpiryTime
 	KeDPC_SIZEOF DPC
-	4 Reserved1
-	4 Reserved2
 endstruct
 
 extern KeTimerInitialize { name function timer -- }

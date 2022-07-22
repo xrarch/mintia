@@ -14,9 +14,6 @@ struct KeDispatchHeader
 	4 WaitBlockListTail
 
 	4 Name
-
-	4 Reserved1
-	4 Reserved2
 endstruct
 
 // a thread can wait on up to THREADWAITBLOCKS dispatcher objects at a time,

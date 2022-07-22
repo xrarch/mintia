@@ -6,9 +6,6 @@ struct KeMutex
 	
 	4 Prev
 	4 Next
-
-	4 Reserved1
-	4 Reserved2
 endstruct
 
 extern KeMutexInitialize { name mode mutex -- }

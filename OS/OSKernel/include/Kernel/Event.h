@@ -1,9 +1,6 @@
 // do NOT change the size of this
 struct KeEvent
 	KeDispatchHeader_SIZEOF DispatchHeader
-
-	4 Reserved1
-	4 Reserved2
 endstruct
 
 extern KeEventInitialize { signaled type name event -- }

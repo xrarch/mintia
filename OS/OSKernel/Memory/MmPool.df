@@ -717,12 +717,60 @@ fn MmBlockChargeGet { block -- charge }
 			end
 		end
 
-		// page aligned. charge is defined by the pfdbe.
+		// page aligned.
+		// determine if the given block is in paged or nonpaged pool.
 
-		auto pfdbe
-		block@ MmPoolPageGetPhysical pfdbe! drop
+		auto pteaddr
+		block@ // vaddr
+		HALPlatformKernelPageDirectory@ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
 
-		pfdbe@ MmPageFrameEntryPool_ByteSize + @ charge!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		auto ok
+		auto phyaddr
+		pteaddr@ // pteaddr
+		MmPTEInterpret ok! drop phyaddr!
+
+		if (ok@ ~~)
+			// maybe paged or nonpaged. check PFDBE.
+
+			auto pfdbe
+			phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+			if (pfdbe@ MmPageFrameEntryPool_ZeroIfNonPaged + @ 0 ==)
+				ipl@ KeIPLLower
+
+				// nonpaged.
+
+				pfdbe@ MmPageFrameEntryPool_ByteSize + @ charge!
+
+				return
+			end
+		end
+
+		ipl@ KeIPLLower
+
+		// paged.
+
+		auto offset
+		block@ POOLSPACE - PAGESHIFT >> offset!
+
+		auto pages
+		0 pages!
+
+		auto bmph
+		MmPoolSpacePagedEndBitmapHeader bmph!
+
+		while (offset@ bmph@ ExBitmapBitGet ~~)
+			1 offset +=
+			1 pages +=
+		end
+
+		1 pages +=
+
+		pages@ PAGESHIFT << charge!
 
 		return
 	end

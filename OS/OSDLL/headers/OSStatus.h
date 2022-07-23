@@ -43,7 +43,7 @@ const STATUS_SWAP_TOO_SMALL          -41
 const STATUS_NO_SWAP                 -42
 const STATUS_RING_FULL               -43
 const STATUS_RING_EMPTY              -44
-const STATUS_WS_QUOTA_EXCEEDED       -45
+const STATUS_PAGED_QUOTA_EXCEEDED    -45
 const STATUS_MUTEX_NOT_OWNED         -46
 const STATUS_CONSOLE_HUNG_UP         -47
 const STATUS_PROCESS_IS_TERMINATED   -48

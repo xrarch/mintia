@@ -36,7 +36,7 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 
 	qcharge@ // charge
 	quotablock@ // quotablock
-	MmQuotaBlockCharge ok!
+	MmQuotaBlockChargePaged ok!
 
 	if (ok@)
 		return
@@ -44,13 +44,13 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 
 	MmVAD_SIZEOF // bytes
 	'nVAD' // tag
-	CANBLOCK // flags
+	PAGED // flags
 	MmAllocWithTag ok! vad!
 
 	if (ok@)
 		qcharge@ // charge
 		quotablock@ // quotablock
-		MmQuotaBlockUncharge
+		MmQuotaBlockUnchargePaged
 
 		return
 	end
@@ -70,7 +70,7 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 
 			qcharge@ // charge
 			quotablock@ // quotablock
-			MmQuotaBlockUncharge
+			MmQuotaBlockUnchargePaged
 
 			return
 		end
@@ -88,7 +88,7 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 
 				qcharge@ // charge
 				quotablock@ // quotablock
-				MmQuotaBlockUncharge
+				MmQuotaBlockUnchargePaged
 
 				return
 			end
@@ -353,6 +353,22 @@ fn MmVADUnmap { vad processobject -- }
 	vad@ MmVAD_StartVA + @ vaddr!
 
 	auto max
+	vad@ MmVAD_EndVA + @ max!
+
+	auto commitcharge
+	vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT & ~~ commitcharge!
+
+	if (commitcharge@)
+		processobject@ MmWorkingSetLock drop
+
+		vaddr@ // startva
+		max@ // endva
+		processobject@ // process
+		MmWorkingSetTrimRange
+
+		processobject@ MmWorkingSetUnlock
+	end
+
 	// only unmap up to the highest vaddr that was ever faulted in, as an
 	// optimization.
 	vad@ MmVAD_FurthestExtentMapped + @ max!
@@ -377,26 +393,15 @@ fn MmVADUnmap { vad processobject -- }
 		end
 	end
 
-	auto commitcharge
-	vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT & ~~ commitcharge!
-
-	if (commitcharge@)
-		processobject@ MmWorkingSetLock drop
-
-		vad@ MmVAD_StartVA + @ // startva
-		vad@ MmVAD_EndVA + @ // endva
-		processobject@ // process
-		MmWorkingSetTrimRange
-
-		processobject@ MmWorkingSetUnlock
-	end
-
 	auto pteaddr
 	auto pte
 
 	auto pfdbe
 
-	if (vad@ MmVAD_ChargeVMQuota + @ commitcharge@ ~~ || max@ &&)
+	auto chargevmquota
+	vad@ MmVAD_ChargeVMQuota + @ chargevmquota!
+
+	if (chargevmquota@ commitcharge@ ~~ || max@ &&)
 		// this means that the VAD is or was mapped COW. we need to traverse
 		// the page tables to find transition and swap PTEs to free.
 
@@ -451,7 +456,7 @@ fn MmVADUnmap { vad processobject -- }
 				auto deref
 				1 deref!
 
-				if (vad@ MmVAD_ChargeVMQuota + @)
+				if (chargevmquota@)
 					if (DEBUGCHECKS)
 						if (pte@ PTE_V &)
 							"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
@@ -518,10 +523,10 @@ fn MmVADUnmap { vad processobject -- }
 
 	MmVAD_SIZEOF MmChargeBytesGet // charge
 	quotablock@ // quotablock
-	MmQuotaBlockUncharge
+	MmQuotaBlockUnchargePaged
 
-	if (vad@ MmVAD_ChargeVMQuota + @)
-		vad@ MmVAD_ChargeVMQuota + @ // charge
+	if (chargevmquota@)
+		chargevmquota@ // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUnchargeVM
 	end

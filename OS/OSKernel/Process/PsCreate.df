@@ -136,26 +136,34 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 
 	handletable@ processobject@ PsProcess_HandleTable + !
 
-	PsProcessTable@ ExHandleTableLockUnalertable
+	0 pid!
 
-	auto pid
-	processobject@ // entryvalue
-	PsProcessTable@ // handletable
-	1 // locked
-	ExHandleCreate ok! drop pid!
+	if (initial@ ~~)
+		// defer creating system process handle until later since the PID
+		// table is allocated in paged pool and we can't fault in the idle
+		// thread.
 
-	if (ok@)
-		PsProcessTable@ ExHandleTableUnlock
+		PsProcessTable@ ExHandleTableLockUnalertable
 
-		if (initial@ ~~)
-			0 handletable@ ExHandleTableDelete
+		auto pid
+		processobject@ // entryvalue
+		PsProcessTable@ // handletable
+		1 // locked
+		ExHandleCreate ok! drop pid!
+
+		if (ok@)
+			PsProcessTable@ ExHandleTableUnlock
+
+			if (initial@ ~~)
+				0 handletable@ ExHandleTableDelete
+			end
+
+			quotablock@ MmQuotaBlockDereference
+
+			processobject@ ObObjectDeallocate
+
+			return
 		end
-
-		quotablock@ MmQuotaBlockDereference
-
-		processobject@ ObObjectDeallocate
-
-		return
 	end
 
 	parentprocess@ PsProcess_PID + @ processobject@ PsProcess_ParentPID + !
@@ -234,12 +242,14 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 
 		processobject@ KeProcessUninitialize
 
-		pid@ // handle
-		PsProcessTable@ // handletable
-		1 // locked
-		ExHandleDelete drop drop drop
+		if (initial@ ~~)
+			pid@ // handle
+			PsProcessTable@ // handletable
+			1 // locked
+			ExHandleDelete drop drop drop
 
-		PsProcessTable@ ExHandleTableUnlock
+			PsProcessTable@ ExHandleTableUnlock
+		end
 
 		0 handletable@ ExHandleTableDelete
 
@@ -256,7 +266,9 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 	processobject@ PsProcessInsert
 	PsProcessListUnlock
 
-	PsProcessTable@ ExHandleTableUnlock
+	if (initial@ ~~)
+		PsProcessTable@ ExHandleTableUnlock
+	end
 
 	if (creationflags@ OSPROCESS_DETACHCONSOLE & ~~)
 		// inherit the console group

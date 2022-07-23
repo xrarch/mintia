@@ -25,7 +25,6 @@ const PTE_WC 32 // writecombine
 
 // software PTE fields
 
-const SWAPPTE_NONE       0
 const SWAPPTE_DEMANDZERO 0
 
 const PTE_TLBHACK PTE_G

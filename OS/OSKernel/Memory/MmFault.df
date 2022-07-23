@@ -415,6 +415,12 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 			end elseif (flags@ PTE_KERNEL_DEMANDZERO ==)
 				ipl@ KeIPLLower
 
+				if (DEBUGCHECKS)
+					if (process@ PsSystemProcess@ ~=)
+						"MmSatisfyFault: demandzero PTE in userspace\n" KeCrash
+					end
+				end
+
 				// paged pool or whatnot. allocate and map a private page.
 
 				pteaddr@ // pte
@@ -516,6 +522,7 @@ fn MmNormalFault { vaddr process -- signal }
 	auto pteaddr
 	auto wsli
 	auto wsleptr
+
 	auto kernelmapping
 	process@ PsSystemProcess@ == kernelmapping!
 
@@ -792,6 +799,53 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	auto pageprot
 	0 pageprot!
 
+	// first check if this is a private page in order to determine if we
+	// need to look up the VAD or not. private PTEs are "sticky" so we can
+	// determine this regardless of trimming, so we don't need to lock the
+	// working set lock to check this. we want to do this first so we can
+	// look up the VAD without locking the working set, which could cause
+	// a deadlock since they're allocated in paged pool.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pteaddr@ // pteaddr
+	MmPTEInterpret ok! drop phyaddr!
+
+	if (ok@)
+		// invalid
+		ipl@ KeIPLLower
+		REFAULT signal!
+		return
+	end
+
+	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
+		-1 vad!
+		PAGEACCESS_READ PAGEACCESS_WRITE | pageprot!
+	end
+
+	ipl@ KeIPLLower
+
+	if (vad@ ~~)
+		vaddr@ // vaddr
+		process@ // process
+		MmFaultParameters ok! vad! section! drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
+			end
+
+			if (vad@ MmVAD_PageProtection + @ ~~)
+				"MmWriteFault: VAD was guard region\n" KeCrash
+			end
+		end
+
+		vad@ MmVAD_PageProtection + @ pageprot!
+	end
+
 	while (1)
 		process@ MmWorkingSetLock drop
 
@@ -820,32 +874,6 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
-			if (vad@ ~~)
-				// only look up the VAD if we didn't already do it last time.
-
-				vaddr@ // vaddr
-				process@ // process
-				MmFaultParameters ok! vad! section! drop
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
-					end
-
-					if (vad@ MmVAD_PageProtection + @ ~~)
-						"MmWriteFault: VAD was guard region\n" KeCrash
-					end
-				end
-
-				vad@ MmVAD_PageProtection + @ pageprot!
-			end
-		end else
-			PAGEACCESS_READ PAGEACCESS_WRITE | pageprot!
-		end
-
-		auto ipl
-
 		if (pageprot@ PAGEACCESS_WRITECOPY &)
 			// COW, allocate a page frame and copy the old page frame into it.
 
@@ -861,11 +889,8 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 					return
 				end
 
-				// starts at demand-zero, which isn't true here
 				if (process@ PsSystemProcess@ ==)
-					SWAPPTE_NONE PTE_TLBHACK | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
-				end else
-					SWAPPTE_NONE cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+					SWAPPTE_DEMANDZERO PTE_TLBHACK | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
 				end
 
 				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |

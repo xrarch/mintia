@@ -35,6 +35,7 @@ struct ObType
 	4 ParseFunction
 	4 SetSecurityFunction
 
+	4 Paged
 	4 WaitOffset
 endstruct
 
@@ -49,6 +50,7 @@ struct ObTypeInitializer
 	4 ParseFunction
 	4 SetSecurityFunction
 
+	4 Paged
 	4 WaitOffset
 endstruct
 

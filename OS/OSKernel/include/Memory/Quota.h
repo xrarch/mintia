@@ -7,15 +7,15 @@ struct MmQuotaBlock
 	4 VMUsed
 	4 VMMax
 
-	4 WorkingSetUsed
-	4 WorkingSetMax
+	4 PagedHeapUsed
+	4 PagedHeapMax
 endstruct
 
 const MMQUOTAINFINITE -1
 
-extern MmQuotaBlockCreate { wsmax vmmax heapmax -- quotablock ok }
+extern MmQuotaBlockCreate { pghpmax vmmax heapmax -- quotablock ok }
 extern MmQuotaBlockFork { quotablock -- newquotablock ok }
-extern MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
+extern MmQuotaBlockInitialize { pghpmax vmmax heapmax quotablock -- ok }
 extern MmQuotaBlockReference { quotablock -- }
 extern MmQuotaBlockDereference { quotablock -- }
 
@@ -26,8 +26,8 @@ extern MmQuotaBlockCharge { charge quotablock -- ok }
 extern MmQuotaBlockUncharge { charge quotablock -- }
 extern MmQuotaBlockChargeVM { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeVM { charge quotablock -- }
-extern MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
-extern MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
+extern MmQuotaBlockChargePaged { charge quotablock -- ok }
+extern MmQuotaBlockUnchargePaged { charge quotablock -- }
 extern MmQuotaBlockPrint { quotablock -- }
 
 extern MmSetQuota { quota quotablock -- }

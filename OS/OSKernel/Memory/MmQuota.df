@@ -22,7 +22,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmQuotaBlockCreate { wsmax vmmax heapmax -- quotablock ok }
+fn MmQuotaBlockCreate { pghpmax vmmax heapmax -- quotablock ok }
 	MmQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
 	CANBLOCK // flags
@@ -32,7 +32,7 @@ fn MmQuotaBlockCreate { wsmax vmmax heapmax -- quotablock ok }
 		return
 	end
 
-	wsmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
+	pghpmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
 end
 
 fn MmQuotaBlockFork { quotablock -- newquotablock ok }
@@ -45,14 +45,14 @@ fn MmQuotaBlockFork { quotablock -- newquotablock ok }
 		return
 	end
 
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ // wsmax
+	quotablock@ MmQuotaBlock_PagedHeapMax + @ // pghpmax
 	quotablock@ MmQuotaBlock_VMMax + @ // vmmax
 	quotablock@ MmQuotaBlock_HeapMax + @ // heapmax
 	newquotablock@ // quotablock
 	MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
+fn MmQuotaBlockInitialize { pghpmax vmmax heapmax quotablock -- ok }
 	0 ok!
 
 	1 quotablock@ MmQuotaBlock_References + !
@@ -63,8 +63,8 @@ fn MmQuotaBlockInitialize { wsmax vmmax heapmax quotablock -- ok }
 	0 quotablock@ MmQuotaBlock_VMUsed + !
 	vmmax@ quotablock@ MmQuotaBlock_VMMax + !
 
-	0 quotablock@ MmQuotaBlock_WorkingSetUsed + !
-	wsmax@ quotablock@ MmQuotaBlock_WorkingSetMax + !
+	0 quotablock@ MmQuotaBlock_PagedHeapUsed + !
+	pghpmax@ quotablock@ MmQuotaBlock_PagedHeapMax + !
 end
 
 fn MmQuotaBlockReference { quotablock -- }
@@ -293,7 +293,7 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
+fn MmQuotaBlockChargePaged { charge quotablock -- ok }
 	if (charge@ 0 s<)
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -305,13 +305,13 @@ fn MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	auto wsmax
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ wsmax!
+	auto phmax
+	quotablock@ MmQuotaBlock_PagedHeapMax + @ phmax!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
+	quotablock@ MmQuotaBlock_PagedHeapUsed + @ oldcharge!
 
-	if (oldcharge@ charge@ + wsmax@ >)
+	if (oldcharge@ charge@ + phmax@ >)
 		rs@ HALCPUInterruptRestore
 
 		STATUS_WS_QUOTA_EXCEEDED ok!
@@ -319,17 +319,17 @@ fn MmQuotaBlockChargeWorkingSet { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ + quotablock@ MmQuotaBlock_WorkingSetUsed + !
+	oldcharge@ charge@ + quotablock@ MmQuotaBlock_PagedHeapUsed + !
 
 	rs@ HALCPUInterruptRestore
 end
 
-fn MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
+fn MmQuotaBlockUnchargePaged { charge quotablock -- }
 	auto rs
 	HALCPUInterruptDisable rs!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
+	quotablock@ MmQuotaBlock_PagedHeapUsed + @ oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
@@ -337,7 +337,7 @@ fn MmQuotaBlockUnchargeWorkingSet { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MmQuotaBlock_WorkingSetUsed + !
+	oldcharge@ charge@ - quotablock@ MmQuotaBlock_PagedHeapUsed + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -347,7 +347,7 @@ fn MmSetQuota { quota quotablock -- }
 
 	quota@ OSQuota_Heap + @ quotablock@ MmQuotaBlock_HeapMax + !
 	quota@ OSQuota_VirtualMemory + @ quotablock@ MmQuotaBlock_VMMax + !
-	quota@ OSQuota_WorkingSet + @ quotablock@ MmQuotaBlock_WorkingSetMax + !
+	quota@ OSQuota_PagedHeap + @ quotablock@ MmQuotaBlock_PagedHeapMax + !
 end
 
 fn MmQuotaQuery { query quotablock -- }
@@ -362,8 +362,8 @@ fn MmQuotaQuery { query quotablock -- }
 	quotablock@ MmQuotaBlock_VMUsed + @ query@ OSQuotaInformation_VirtualMemoryUsed + !
 	quotablock@ MmQuotaBlock_VMMax + @ query@ OSQuotaInformation_VirtualMemoryMaximum + !
 
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ query@ OSQuotaInformation_WorkingSetUsed + !
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ query@ OSQuotaInformation_WorkingSetMaximum + !
+	quotablock@ MmQuotaBlock_PagedHeapUsed + @ query@ OSQuotaInformation_PagedHeapUsed + !
+	quotablock@ MmQuotaBlock_PagedHeapMax + @ query@ OSQuotaInformation_PagedHeapMaximum + !
 end
 
 fn MmQuotaBlockPrint { quotablock -- }
@@ -373,8 +373,8 @@ fn MmQuotaBlockPrint { quotablock -- }
 	quotablock@ MmQuotaBlock_VMMax + @
 	quotablock@ MmQuotaBlock_VMUsed + @ " VM   = %d/%i bytes\n" Printf
 
-	quotablock@ MmQuotaBlock_WorkingSetMax + @
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ " WSET = %d/%i pages\n" Printf
+	quotablock@ MmQuotaBlock_PagedHeapMax + @
+	quotablock@ MmQuotaBlock_PagedHeapUsed + @ " PGHP = %d/%i pages\n" Printf
 
 	quotablock@ MmQuotaBlock_References + @ " REFS = %d\n" Printf
 end

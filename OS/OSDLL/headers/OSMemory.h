@@ -49,8 +49,8 @@ struct OSQuotaInformation
 	4 VirtualMemoryUsed
 	4 VirtualMemoryMaximum
 
-	4 WorkingSetUsed
-	4 WorkingSetMaximum
+	4 PagedHeapUsed
+	4 PagedHeapMaximum
 
 	48 Reserved
 endstruct
@@ -58,7 +58,7 @@ endstruct
 struct OSQuota
 	4 Heap
 	4 VirtualMemory
-	4 WorkingSet
+	4 PagedHeap
 
 	48 Reserved
 endstruct

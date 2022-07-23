@@ -69,7 +69,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 	if (signal@ ~~)
 		// too complex to deal with being murdered here
 		KeThreadCurrent@ KeThreadIgnoreKill drop
-		KeProcessCurrent MmVADListLock drop
+		process@ MmVADListLock drop
 
 		REFAULT signal!
 
@@ -80,7 +80,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 			MmSatisfyFault signal!
 		end
 
-		KeProcessCurrent MmVADListUnlock
+		process@ MmVADListUnlock
 		KeThreadCurrent@ KeThreadAcceptKill drop
 	end
 
@@ -410,6 +410,53 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 						REFAULT signal!
 					end
 				end
+
+				return
+			end elseif (flags@ PTE_KERNEL_DEMANDZERO ==)
+				ipl@ KeIPLLower
+
+				// paged pool or whatnot. allocate and map a private page.
+
+				pteaddr@ // pte
+				FREEFIRST MUSTSUCCEED | // pri
+				MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+
+				if (ok@)
+					"MmSatisfyFault: failed to allocate private kernel page\n" KeCrash
+				end
+
+				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
+				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+				process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+				vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+
+				PTE_KERNEL_DEMANDZERO pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+
+				PAGESHIFT phyaddr <<=
+
+				process@ MmWorkingSetLock drop
+
+				process@ // process
+				MmWorkingSetEntryReserve ok! wsleptr! wsli!
+
+				if (ok@)
+					"MmSatisfyFault: couldn't reserve WSLE for private kernel page\n" KeCrash
+				end
+
+				phyaddr@ // phyaddr
+				PTE_V // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				process@ KeProcess_ASID + @ // asid
+				MmPTEUpdate drop drop drop
+
+				vaddr@ PAGENUMBERMASK & // vaddr
+				wsleptr@ // wsleptr
+				process@ // process
+				MmWorkingSetEntryInsert
+
+				process@ MmWorkingSetUnlock
 
 				return
 			end elseif (flags@ MmPTEIsZero)

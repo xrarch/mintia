@@ -35,7 +35,6 @@ struct AFSData
 
 	ExBitmapHeader_SIZEOF FreeBlockBitmap
 	4 FreeBlockHint
-	4 IsBlockBitmapInHeap
 
 	KeMutex_SIZEOF FreeBlockBitmapMutex
 	KeMutex_SIZEOF INodeAllocationMutex

@@ -211,17 +211,8 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		end
 	end
 
-	// XXX in principle we only need to do this if the target process is
-	// different from the calling process, but its easier to just always lock
-	// the createdelete rwlock.
-
-	0 // needsthread
-	processobject@ // processobject
-	PsProcessCreateDeleteAcquireCheck ok!
-
-	if (ok@)
-		return
-	end
+	auto locked
+	0 locked!
 
 	if (kernelmapping@)
 		// this is a kernel mapping, so reserve POOLSPACE and use that as the
@@ -231,12 +222,22 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		length@ PAGESHIFT >> MmPoolSpaceReserve ok! startva!
 
 		if (ok@)
-			processobject@ PsProcessCreateDeleteUnlock
-
 			return
 		end
 
 		startva@ PAGESHIFT << POOLSPACE + startva!
+	end else
+		processobject@ KeThreadCurrent@ KeThread_Process + @ ~= locked!
+
+		if (locked@)
+			0 // needsthread
+			processobject@ // processobject
+			PsProcessCreateDeleteAcquireCheck ok!
+
+			if (ok@)
+				return
+			end
+		end
 	end
 
 	if (mappedobject@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ==)
@@ -250,7 +251,9 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		MmFilePrepareForMap ok!
 
 		if (ok@)
-			processobject@ PsProcessCreateDeleteUnlock
+			if (locked@)
+				processobject@ PsProcessCreateDeleteUnlock
+			end
 
 			if (kernelmapping@)
 				length@ PAGESHIFT >> // pages
@@ -280,7 +283,9 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 			MmFileUnprepareForMap
 		end
 
-		processobject@ PsProcessCreateDeleteUnlock
+		if (locked@)
+			processobject@ PsProcessCreateDeleteUnlock
+		end
 
 		if (kernelmapping@)
 			length@ PAGESHIFT >> // pages
@@ -291,7 +296,9 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		return
 	end
 
-	processobject@ PsProcessCreateDeleteUnlock
+	if (locked@)
+		processobject@ PsProcessCreateDeleteUnlock
+	end
 end
 
 fn MmMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }

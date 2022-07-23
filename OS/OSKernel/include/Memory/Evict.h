@@ -19,8 +19,8 @@ struct MmPageFrameEntryAnonymous
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 SwapPTE
 	4 PrototypePTE
-	4 Process        // for reclaiming DEMANDZERO private pages
-	4 VirtualAddress // for reclaiming DEMANDZERO private pages
+	4 Process        // for reclaiming DEMANDZERO private pages.
+	4 VirtualAddress // for reclaiming DEMANDZERO private pages.
 	4 Context3
 endstruct
 

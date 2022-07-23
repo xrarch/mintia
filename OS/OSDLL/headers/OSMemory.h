@@ -14,8 +14,11 @@ struct OSMemoryInformation
 	4 SwapPagesRead
 	4 SwapPagesWritten
 
-	4 PoolBytesUsedInternally
-	4 PoolBytesUsedExternally
+	4 NonpagedPoolBytesUsedInternally
+	4 NonpagedPoolBytesUsedExternally
+
+	4 PagedPoolBytesUsedInternally
+	4 PagedPoolBytesUsedExternally
 
 	4 EvictablePageCount
 

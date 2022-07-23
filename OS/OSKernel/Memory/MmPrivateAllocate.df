@@ -25,16 +25,6 @@
 #include "<ll>/OSDLL/OS.h"
 
 fn MmAllocateProcessObject { length startva processobject pageprotection flags -- realva ok }
-	auto kernelmapping
-	processobject@ PsSystemProcess@ == kernelmapping!
-
-	if (kernelmapping@)
-		if (flags@ OSMAPFLAG_FIXEDADDRESS &)
-			STATUS_INVALID_ARGUMENT ok!
-			return
-		end
-	end
-
 	if (pageprotection@ PAGEACCESS_WRITECOPY &)
 		// COW makes no sense for private memory.
 		STATUS_INVALID_ARGUMENT ok!
@@ -42,6 +32,12 @@ fn MmAllocateProcessObject { length startva processobject pageprotection flags -
 		return
 	end elseif (pageprotection@ PAGEACCESS_WRITE PAGEACCESS_READ | & PAGEACCESS_WRITE PAGEACCESS_READ | ~=)
 		// read-only or write-only memory makes no sense for private memory.
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	if (processobject@ PsSystemProcess@ ==)
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
@@ -77,46 +73,29 @@ fn MmAllocateProcessObject { length startva processobject pageprotection flags -
 		return
 	end
 
-	if (kernelmapping@ ~~)
-		if (startva@ length@ + MMHIGHESTUSERADDRESS >)
-			// requested region goes outside userspace
+	if (startva@ length@ + MMHIGHESTUSERADDRESS >)
+		// requested region goes outside userspace
 
-			if (flags@ OSMAPFLAG_FIXEDADDRESS &)
-				STATUS_UNAVAILABLE_ADDRESS ok!
-
-				return
-			end
-
-			0 startva!
-		end
-	end
-
-	// XXX in principle we only need to do this if the target process is
-	// different from the calling process, but its easier to just always lock
-	// the createdelete rwlock.
-
-	0 // needsthread
-	processobject@ // processobject
-	PsProcessCreateDeleteAcquireCheck ok!
-
-	if (ok@)
-		return
-	end
-
-	if (kernelmapping@)
-		// this is a kernel mapping, so reserve POOLSPACE and use that as the
-		// startva. it must be done like this because kernel page tables are
-		// necessarily not dynamic.
-
-		length@ PAGESHIFT >> MmPoolSpaceReserve ok! startva!
-
-		if (ok@)
-			processobject@ PsProcessCreateDeleteUnlock
+		if (flags@ OSMAPFLAG_FIXEDADDRESS &)
+			STATUS_UNAVAILABLE_ADDRESS ok!
 
 			return
 		end
 
-		startva@ PAGESHIFT << POOLSPACE + startva!
+		0 startva!
+	end
+
+	auto locked
+	processobject@ KeThreadCurrent@ KeThread_Process + @ ~= locked!
+
+	if (locked@)
+		0 // needsthread
+		processobject@ // processobject
+		PsProcessCreateDeleteAcquireCheck ok!
+
+		if (ok@)
+			return
+		end
 	end
 
 	length@ // viewsize
@@ -128,15 +107,9 @@ fn MmAllocateProcessObject { length startva processobject pageprotection flags -
 	processobject@ // processobject
 	MmVADFindAndMapFreeRegion ok! realva!
 
-	if (ok@)
-		if (kernelmapping@)
-			length@ PAGESHIFT >> // pages
-			startva@ POOLSPACE - PAGESHIFT >> // offset
-			MmPoolSpaceRelease
-		end
+	if (locked@)
+		processobject@ PsProcessCreateDeleteUnlock
 	end
-
-	processobject@ PsProcessCreateDeleteUnlock
 end
 
 fn MmAllocate { length startva processhandle pageprotection flags -- realva ok }

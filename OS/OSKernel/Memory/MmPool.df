@@ -16,15 +16,28 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/IO.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
 #include "<ll>/OSDLL/OSStatus.h"
 
 buffer MmPoolSpaceBitmapHeader ExBitmapHeader_SIZEOF
 public MmPoolSpaceBitmapHeader
 
-buffer MmPoolSpaceBitmap (POOLPAGES 7 + 3 >>)
+buffer MmPoolSpacePagedEndBitmapHeader ExBitmapHeader_SIZEOF
+public MmPoolSpacePagedEndBitmapHeader
 
-var MmPoolBytesUsed 0
-public MmPoolBytesUsed
+buffer MmPoolSpaceBitmap (POOLPAGES 7 + 3 >>)
+buffer MmPoolSpacePagedEndBitmap (POOLPAGES 7 + 3 >>)
+
+var MmNonpagedPoolBytesUsed 0
+public MmNonpagedPoolBytesUsed
+
+var MmPagedPoolBytesUsed 0
+public MmPagedPoolBytesUsed
 
 var MmPoolPageListHead 0
 
@@ -33,11 +46,20 @@ var MmPoolPageListHead 0
 // allocator within pool pages. Allocations of a page size or more are handled
 // by directly allocating pool pages.
 
+extern MmHeapInit { -- }
+
 fn MmPoolInit { -- }
 	POOLPAGES // sizeinbits
 	MmPoolSpaceBitmap // data	
 	MmPoolSpaceBitmapHeader // header
 	ExBitmapInitialize
+
+	POOLPAGES // sizeinbits
+	MmPoolSpacePagedEndBitmap // data	
+	MmPoolSpacePagedEndBitmapHeader // header
+	ExBitmapInitialize
+
+	MmHeapInit
 end
 
 fn MmHeapPrintTag { tag -- }
@@ -105,6 +127,7 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 	end
 
 	if (flags@ 0 ==)
+		// can't block, so give this nonpaged allocation a small leg up
 		POOLALLOC flags!
 	end
 
@@ -112,10 +135,17 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 	bytes@ 3 + 3 ~ & bytes!
 
 	if (bytes@ MmAllocatedHeapBlock_SIZEOF + PAGESIZE 2 / >=)
-		bytes@ // bytes
-		tag@ // tag
-		flags@ // flags
-		MmPoolPageAlignedAlloc ok! ptr! drop
+		if (flags@ PAGED &)
+			bytes@ // bytes
+			tag@ // tag
+			flags@ // flags
+			MmPagedPoolAllocPages ok! ptr!
+		end else
+			bytes@ // bytes
+			tag@ // tag
+			flags@ // flags
+			MmNonpagedPoolAllocPages ok! ptr!
+		end
 
 		return
 	end
@@ -141,15 +171,68 @@ fn MmFree { ptr -- }
 		end
 	end
 
-	if (ptr@ ~~)
-		"MmFree: tried to free null pointer\n" KeCrash
+	if (ptr@ MMLOWESTSYSTEMADDRESS <)
+		ptr@ "MmFree: tried to free null pointer (%x)\n" KeCrash
 	end
 
 	if (ptr@ PAGEOFFSETMASK & ~~)
 		// page aligned.
+		// determine if the given block is in paged or nonpaged pool.
 
-		ptr@ // ptr
-		MmPoolPageAlignedFree
+		auto pteaddr
+		ptr@ // vaddr
+		HALPlatformKernelPageDirectory@ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		auto ok
+		auto phyaddr
+		pteaddr@ // pteaddr
+		MmPTEInterpret ok! drop phyaddr!
+
+		if (ok@)
+			ipl@ KeIPLLower
+
+			// only paged pool can be non-resident.
+			// and also mistaken frees.
+
+			if (DEBUGCHECKS)
+				if (ptr@ POOLSPACE <)
+					ptr@ "MmFree: ptr 0x%08x < POOLSPACE\n" KeCrash
+				end
+
+				if (ptr@ POOLSPACE POOLSIZE + >=)
+					ptr@ "MmFree: ptr 0x%08x beyond pool space\n" KeCrash
+				end
+			end
+
+			0 // noaccount
+			ptr@ // ptr
+			MmPagedPoolFreePages
+		end else
+			// maybe paged or nonpaged. check PFDBE.
+
+			auto pfdbe
+			phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+			if (pfdbe@ MmPageFrameEntryPool_ZeroIfNonPaged + @ 0 ==)
+				ipl@ KeIPLLower
+
+				// nonpaged.
+
+				ptr@ MmNonpagedPoolFreePages
+			end else
+				ipl@ KeIPLLower
+
+				// paged.
+
+				0 // noaccount
+				ptr@ // ptr
+				MmPagedPoolFreePages
+			end
+		end
 
 		return
 	end
@@ -158,6 +241,9 @@ fn MmFree { ptr -- }
 end
 
 var MmPoolPageHint 0
+
+var MmPoolSpaceUsed 0
+public MmPoolSpaceUsed
 
 fn MmPoolSpaceReserve { pagesneeded -- offset ok }
 	auto bmpheader
@@ -172,6 +258,20 @@ fn MmPoolSpaceReserve { pagesneeded -- offset ok }
 	ExBitmapFindRun ok! offset!
 
 	if (ok@)
+		if (DEBUGCHECKS)
+			bmpheader@ ExBitmapDump
+			ok@ pagesneeded@ "\n\n%d (%i)\n" Printf
+
+			POOLPAGES
+			MmPoolSpaceUsed@
+			"used: %d / %d\n" Printf
+
+			MmPagedPoolBytesUsed@ PAGESHIFT >>
+			"pagedpool: %d\n" Printf
+
+			while (1) end
+		end
+
 		ipl@ KeIPLLower
 
 		STATUS_NO_MEMORY ok!
@@ -186,6 +286,8 @@ fn MmPoolSpaceReserve { pagesneeded -- offset ok }
 	bmpheader@ // header
 	ExBitmapSetBits
 
+	pagesneeded@ MmPoolSpaceUsed +=
+
 	ipl@ KeIPLLower
 end
 
@@ -198,10 +300,216 @@ fn MmPoolSpaceRelease { pages offset -- }
 	MmPoolSpaceBitmapHeader // header
 	ExBitmapClearBits
 
+	pages@ MmPoolSpaceUsed -=
+
 	ipl@ KeIPLLower
 end
 
-fn MmPoolPageAlignedAlloc { bytes tag flags -- pfdbe ptr ok }
+fn MmPagedPoolAllocPages { bytes tag flags -- realva ok }
+	// this is a kernel mapping, so reserve POOLSPACE and use that as the
+	// startva. it must be done like this because kernel page tables are
+	// necessarily not dynamic.
+
+	auto pages
+	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	pages@ PAGESHIFT << // charge
+	MmQuotaSystem // quotablock
+	MmQuotaBlockChargeVM ok!
+
+	if (ok@)
+		return
+	end
+
+	auto startva
+	pages@ MmPoolSpaceReserve ok! startva!
+
+	if (ok@)
+		pages@ PAGESHIFT << // charge
+		MmQuotaSystem // quotablock
+		MmQuotaBlockUnchargeVM
+
+		return
+	end
+
+	// set the bit for the final page in this allocation in the final page
+	// bitmap so we can count bits to know how long it is when we go to free.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 // runlength
+	startva@ pages@ 1 - + // index
+	MmPoolSpacePagedEndBitmapHeader // header
+	ExBitmapSetBits
+
+	if (flags@ PAGEPOOLEXP & ~~)
+		pages@ PAGESHIFT << MmPagedPoolBytesUsed +=
+	end
+
+	ipl@ KeIPLLower
+
+	// calculate the vaddr from the index MmPoolSpaceReserve gave us.
+
+	startva@ PAGESHIFT << POOLSPACE + startva!
+	startva@ realva!
+
+	// initialize the PTEs in that region of POOLSPACE as kernel demand-
+	// zero. this avoids having to allocate a VAD for private kernel
+	// mappings, which makes them much cheaper. we can't do this for user-
+	// space because userspace page tables are dynamically created and
+	// deleted as pages are faulted in and removed which necessitates a
+	// more permanent place for information. also, VADs are going to be
+	// placed in paged pool, which will cause a dependency cycle if we use
+	// them for private kernel mappings.
+
+	auto pteaddr
+	0 pteaddr!
+
+	while (pages@)
+		if (startva@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
+			startva@ // vaddr
+			HALPlatformKernelPageDirectory@ // pagemap
+			MmVirtualtoPTEAddress pteaddr!
+		end
+
+		PTE_KERNEL_DEMANDZERO pteaddr@!
+
+		4 pteaddr +=
+		PAGESIZE startva +=
+		1 pages -=
+	end
+
+	// TODO Tag
+end
+
+fn MmPagedPoolFreePages { noaccount vaddr -- }
+	auto pteaddr
+	0 pteaddr!
+
+	auto offset
+	vaddr@ POOLSPACE - PAGESHIFT >> offset!
+
+	auto pages
+	0 pages!
+
+	// find the length of the allocation by counting the number of clear bits
+	// until the next bit in the end bitmap. we don't wrap this in any
+	// synchronization mechanism because it shouldn't(?) be possible for
+	// anybody to interfere with this range of the bitmap while it is
+	// allocated, even if they (non-atomically) set bits in the same byte of
+	// it.
+
+	// XXX review this assumption for architectures like Alpha which don't
+	// have atomic loads and stores of bytes. this also may have weird
+	// interactions with some SMP schemes.
+
+	auto bmph
+	MmPoolSpacePagedEndBitmapHeader bmph!
+
+	auto off
+	offset@ off!
+
+	while (off@ bmph@ ExBitmapBitGet ~~)
+		1 off +=
+		1 pages +=
+	end
+
+	1 pages +=
+
+	// clear the final page bit.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pages@ "%d " Printf
+
+	1 // runlength
+	off@ // index
+	MmPoolSpacePagedEndBitmapHeader // header
+	ExBitmapClearBits
+
+	ipl@ KeIPLLower
+
+	// trim the valid pages from the system working set.
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+	PsSystemProcess@ MmWorkingSetLock drop
+
+	vaddr@ // startva
+	vaddr@ pages@ PAGESHIFT << + // endva
+	PsSystemProcess@ // process
+	MmWorkingSetTrimRange
+
+	PsSystemProcess@ MmWorkingSetUnlock
+	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	auto count
+	pages@ count!
+
+	while (count@)
+		if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
+			vaddr@ // vaddr
+			HALPlatformKernelPageDirectory@ // pagemap
+			MmVirtualtoPTEAddress pteaddr!
+		end
+
+		IPLDPC KeIPLRaise ipl!
+
+		auto pte
+		pteaddr@@ pte!
+
+		if (DEBUGCHECKS)
+			if (pte@ PTE_V &)
+				"MmPagedPoolFreePages: valid PTE found despite clearing working set\n" KeCrash
+			end
+		end
+
+		if (pte@ PTE_INSWAP &)
+			// free private page in swap
+
+			ipl@ KeIPLLower
+
+			pte@ IOSwapPageFreePTE
+		end elseif (pte@ PTE_TRANSITION &)
+			// free private page
+
+			ipl@ // ipl
+			pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
+			MmAnonymousPageDelete
+		end else
+			pte@ "MmPagedPoolFreePages: strange PTE %08x\n" KeCrash
+		end
+
+		0 // phyaddr
+		0 // flags
+		vaddr@ // vaddr
+		pteaddr@ // pteaddr
+		0 // asid
+		MmPTEUpdate drop drop drop
+
+		1 count -=
+		4 pteaddr +=
+		PAGESIZE vaddr +=
+	end
+
+	pages@ // pages
+	offset@ // offset
+	MmPoolSpaceRelease
+
+	pages@ PAGESHIFT << // charge
+	MmQuotaSystem // quotablock
+	MmQuotaBlockUnchargeVM
+
+	if (noaccount@ ~~)
+		auto rs
+		HALCPUInterruptDisable rs!
+		pages@ PAGESHIFT << MmPagedPoolBytesUsed -=
+		rs@ HALCPUInterruptRestore
+	end
+end
+
+fn MmNonpagedPoolAllocPages { bytes tag flags -- ptr ok }
 	auto pagesneeded
 	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
 
@@ -216,6 +524,8 @@ fn MmPoolPageAlignedAlloc { bytes tag flags -- pfdbe ptr ok }
 
 	// the vaddrs are marked allocated, so we don't need to be in IPLDPC now,
 	// since nobody else is going to touch this range.
+
+	auto pfdbe
 
 	auto vaddr
 	offset@ PAGESHIFT << POOLSPACE + vaddr!
@@ -289,6 +599,7 @@ fn MmPoolPageAlignedAlloc { bytes tag flags -- pfdbe ptr ok }
 		tag@ pfdbe@ MmPageFrameEntryPool_Tag + !
 		pagesneeded@ PAGESHIFT << pfdbe@ MmPageFrameEntryPool_ByteSize + !
 		vaddr@ pfdbe@ MmPageFrameEntryPool_VirtualAddress + !
+		0 pfdbe@ MmPageFrameEntryPool_ZeroIfNonPaged + !
 		-1 pfdbe@ MmPageFrameEntryPool_Level + !
 
 		PAGESIZE vaddr +=
@@ -297,7 +608,7 @@ fn MmPoolPageAlignedAlloc { bytes tag flags -- pfdbe ptr ok }
 
 	auto rs
 	HALCPUInterruptDisable rs!
-	pagesneeded@ PAGESHIFT << MmPoolBytesUsed +=
+	pagesneeded@ PAGESHIFT << MmNonpagedPoolBytesUsed +=
 	rs@ HALCPUInterruptRestore
 
 	auto ipl
@@ -308,7 +619,7 @@ fn MmPoolPageAlignedAlloc { bytes tag flags -- pfdbe ptr ok }
 	firstpfdbe@ pfdbe!
 end
 
-fn MmPoolPageAlignedFree { ptr -- }
+fn MmNonpagedPoolFreePages { ptr -- }
 	if (DEBUGCHECKS)
 		if (ptr@ POOLSPACE <)
 			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x < POOLSPACE\n" KeCrash
@@ -366,7 +677,7 @@ fn MmPoolPageAlignedFree { ptr -- }
 
 	auto rs
 	HALCPUInterruptDisable rs!
-	pages@ PAGESHIFT << MmPoolBytesUsed -=
+	pages@ PAGESHIFT << MmNonpagedPoolBytesUsed -=
 	rs@ HALCPUInterruptRestore
 
 	pages@ // pages

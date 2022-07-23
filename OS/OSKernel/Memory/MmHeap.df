@@ -15,7 +15,7 @@
 
 #include "<inc>/Memory.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
+#include "<ll>/OSDLL/OS.h"
 
 // heap allocation functions. should be called only through MmAllocWithTag and
 // MmFree. manages free-list allocations within pages.
@@ -45,26 +45,66 @@ table MmHeapNormalListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
 table MmHeapMSL2ListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
 table MmHeapMustSucceedListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
 
+table MmHeapPagedListHeads[(MMHEAPBLOCKBUCKETS 1 +)]
+
 table MmHeapListHeads
 	pointerof MmHeapNormalListHeads
 	pointerof MmHeapMSL2ListHeads
 	pointerof MmHeapMustSucceedListHeads
+	pointerof MmHeapPagedListHeads
 endtable
 
 table MmHeapLevelPriorities
 	0
 	MUSTSUCCEEDL2
 	MUSTSUCCEED
+	0
 endtable
 
-var MmHeapBytesUsedInternally 0
-public MmHeapBytesUsedInternally
+var MmNonpagedHeapBytesUsedInternally 0
+public MmNonpagedHeapBytesUsedInternally
 
-var MmHeapBytesUsedExternally 0
-public MmHeapBytesUsedExternally
+var MmNonpagedHeapBytesUsedExternally 0
+public MmNonpagedHeapBytesUsedExternally
+
+var MmPagedHeapBytesUsedInternally 0
+public MmPagedHeapBytesUsedInternally
+
+var MmPagedHeapBytesUsedExternally 0
+public MmPagedHeapBytesUsedExternally
+
+buffer MmPagedHeapMutex KeMutex_SIZEOF
+
+fn MmHeapInit { -- }
+	"MmPagedHeapMutex" // name
+	KERNELMODE // mode
+	MmPagedHeapMutex
+	KeMutexInitialize
+end
 
 fn MmHeapAlloc { bytes tag flags -- ptr ok }
 	auto maxlevel
+
+	if (flags@ PAGED &)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		MmPagedHeapMutex // object
+		KeThreadWaitForObject drop
+
+		-1 // ipl
+		bytes@ // bytes
+		tag@ // tag
+		MMHEAPPAGED // level
+		flags@ // flags
+		MmHeapAllocateLevel ok! ptr!
+
+		0 // abandon
+		MmPagedHeapMutex // mutex
+		KeMutexRelease drop
+
+		return
+	end
 
 	if (flags@ MUSTSUCCEED &)
 		MMHEAPMS maxlevel!
@@ -77,20 +117,28 @@ fn MmHeapAlloc { bytes tag flags -- ptr ok }
 	auto level
 	MMHEAPNORMAL level!
 
+	auto ipl
+
 	while (level@ maxlevel@ <=)
+		IPLDPC KeIPLRaise ipl!
+
 		if (level@ maxlevel@ ==)
+			ipl@ // ipl
 			bytes@ // bytes
 			tag@ // tag
 			level@ // level
 			flags@ // flags
 			MmHeapAllocateLevel ok! ptr!
 		end else
+			ipl@ // ipl
 			bytes@ // bytes
 			tag@ // tag
 			level@ // level
 			[level@]MmHeapLevelPriorities@ // flags
 			MmHeapAllocateLevel ok! ptr!
 		end
+
+		ipl@ KeIPLLower
 
 		if (ok@ ~~)
 			return
@@ -100,7 +148,9 @@ fn MmHeapAlloc { bytes tag flags -- ptr ok }
 	end
 end
 
-fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
+fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
+	// called at IPLDPC if nonpaged, or with MmPagedHeapMutex held if paged.
+
 	MmAllocatedHeapBlock_SIZEOF bytes +=
 
 	auto n
@@ -112,9 +162,6 @@ fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
 
 	auto listheads
 	[level@]MmHeapListHeads@ listheads!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
 
 	listheads@ bucketindex@ 2 << + @ ptr!
 
@@ -141,9 +188,11 @@ fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
 
 		n@ listheads@ bucketindex@ 2 << + !
 
-		bytes@ MmHeapBytesUsedInternally +=
-
-		ipl@ KeIPLLower
+		if (flags@ PAGED &)
+			bytes@ MmPagedHeapBytesUsedInternally +=
+		end else
+			bytes@ MmNonpagedHeapBytesUsedInternally +=
+		end
 
 		tag@ ptr@ MmAllocatedHeapBlock_Tag + !
 
@@ -222,9 +271,11 @@ fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
 
 			newblock@ listheads@ newbucketindex@ 2 << + !
 
-			bytes@ MmHeapBytesUsedInternally +=
-
-			ipl@ KeIPLLower
+			if (flags@ PAGED &)
+				bytes@ MmPagedHeapBytesUsedInternally +=
+			end else
+				bytes@ MmNonpagedHeapBytesUsedInternally +=
+			end
 
 			// set tag
 			tag@ ptr@ MmAllocatedHeapBlock_Tag + !
@@ -243,31 +294,38 @@ fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
 	// no sufficient block! allocate a page.
 	// store pfdbe in n.
 
-	if (flags@ CANBLOCK &)
-		ipl@ KeIPLLower
-	end
+	if (flags@ PAGED &)
+		PAGESIZE // bytes
+		'PgHp' // tag
+		flags@ PAGEPOOLEXP | // flags
+		MmPagedPoolAllocPages ok! ptr!
 
-	FREEFIRST flags@ | // priority
-	MmPageAlloc ok! ptr! n!
-
-	if (ok@)
-		if (flags@ CANBLOCK & ~~)
+		if (ok@)
+			return
+		end
+	end else
+		if (flags@ CANBLOCK &)
 			ipl@ KeIPLLower
 		end
 
-		return
+		FREEFIRST flags@ | // priority
+		MmPageAlloc ok! ptr! n!
+
+		if (ok@)
+			return
+		end
+
+		if (flags@ CANBLOCK &)
+			IPLDPC KeIPLRaise drop
+		end
+
+		// initialize the pfdbe
+		level@ n@ MmPageFrameEntryHeap_Level + !
+		0 n@ MmPageFrameEntryHeap_Permanent + !
+		n@ MmPoolPageInsert
+
+		ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
 	end
-
-	if (flags@ CANBLOCK &)
-		IPLDPC KeIPLRaise ipl!
-	end
-
-	// initialize the pfdbe
-	level@ n@ MmPageFrameEntryHeap_Level + !
-	0 n@ MmPageFrameEntryHeap_Permanent + !
-	n@ MmPoolPageInsert
-
-	ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
 
 	// set bucketindex in our block header
 	0 ptr@ MmHeapBlock_LastBucketIndex + sb
@@ -296,10 +354,13 @@ fn MmHeapAllocateLevel { bytes tag level flags -- ptr ok }
 
 	newblock@ listheads@ newbucketindex@ 2 << + !
 
-	PAGESIZE MmHeapBytesUsedExternally +=
-	bytes@ MmHeapBytesUsedInternally +=
-
-	ipl@ KeIPLLower
+	if (flags@ PAGED &)
+		PAGESIZE MmPagedHeapBytesUsedExternally +=
+		bytes@ MmPagedHeapBytesUsedInternally +=
+	end else
+		PAGESIZE MmNonpagedHeapBytesUsedExternally +=
+		bytes@ MmNonpagedHeapBytesUsedInternally +=
+	end
 
 	// set tag
 	tag@ ptr@ MmAllocatedHeapBlock_Tag + !
@@ -329,13 +390,29 @@ fn MmHeapFree { ptr -- }
 		ptr@ MmHeapBlock_Magic + gi "MmHeapFree: bad magic %x\n" KeCrash
 	end
 
+	auto level
+	ptr@ MmHeapBlock_Magic + gi 15 & level!
+
 	auto listheads
-	[ptr@ MmHeapBlock_Magic + gi 15 &]MmHeapListHeads@ listheads!
+	[level@]MmHeapListHeads@ listheads!
 
 	auto ipl
-	IPLDPC KeIPLRaise ipl!
 
-	bucketindex@ MMHEAPBLOCKSIZESHIFT << MmHeapBytesUsedInternally -=
+	if (level@ MMHEAPPAGED ~=)
+		IPLDPC KeIPLRaise ipl!
+
+		bucketindex@ MMHEAPBLOCKSIZESHIFT <<
+		MmNonpagedHeapBytesUsedInternally -=
+	end else
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		MmPagedHeapMutex // object
+		KeThreadWaitForObject drop
+
+		bucketindex@ MMHEAPBLOCKSIZESHIFT <<
+		MmPagedHeapBytesUsedInternally -=
+	end
 
 	if (ptr@ PAGEOFFSETMASK &)
 		// we're not at the start of the page, check left
@@ -435,16 +512,30 @@ fn MmHeapFree { ptr -- }
 	if (bucketindex@ MMHEAPBLOCKBUCKETS ==)
 		// free this heap page.
 
-		ptr@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + nb!
+		if (level@ MMHEAPPAGED ==)
+			PAGESIZE MmPagedHeapBytesUsedExternally -=
 
-		if (nb@ MmPageFrameEntryHeap_Permanent + @ ~~)
-			nb@ MmPoolPageRemove
-			nb@ MmPageFreeByEntry
+			0 // abandon
+			MmPagedHeapMutex // mutex
+			KeMutexRelease drop
 
-			PAGESIZE MmHeapBytesUsedExternally -=
+			1 // noaccount
+			ptr@ // ptr
+			MmPagedPoolFreePages
 
-			ipl@ KeIPLLower
 			return
+		end else
+			ptr@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + nb!
+
+			if (nb@ MmPageFrameEntryHeap_Permanent + @ ~~)
+				nb@ MmPoolPageRemove
+				nb@ MmPageFreeByEntry
+
+				PAGESIZE MmNonpagedHeapBytesUsedExternally -=
+
+				ipl@ KeIPLLower
+				return
+			end
 		end
 	end
 
@@ -463,7 +554,13 @@ fn MmHeapFree { ptr -- }
 
 	ptr@ listheads@ bucketindex@ 2 << + !
 
-	ipl@ KeIPLLower
+	if (level@ MMHEAPPAGED ==)
+		0 // abandon
+		MmPagedHeapMutex // mutex
+		KeMutexRelease drop
+	end else
+		ipl@ KeIPLLower
+	end
 end
 
 fn MmHeapChargeBytesGet { bytes -- charge }

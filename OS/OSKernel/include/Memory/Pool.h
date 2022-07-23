@@ -1,4 +1,5 @@
-externptr MmPoolBytesUsed
+externptr MmNonpagedPoolBytesUsed
+externptr MmPagedPoolBytesUsed
 
 extern MmPoolSpaceReserve { pagesneeded -- offset ok }
 extern MmPoolSpaceRelease { pages offset -- }
@@ -6,6 +7,9 @@ extern MmPoolSpaceRelease { pages offset -- }
 extern MmPoolPageRemove { pfdbe -- }
 extern MmPoolPageInsert { pfdbe -- }
 extern MmPoolDump { -- }
+
+extern MmPagedPoolAllocPages { bytes tag flags -- realva ok }
+extern MmPagedPoolFreePages { noaccount vaddr -- }
 
 // heap stuff
 
@@ -16,8 +20,11 @@ extern MmHeapChargeGet { block -- charge }
 extern MmHeapAlloc { bytes tag flags -- ptr ok }
 extern MmHeapFree { ptr -- }
 
-externptr MmHeapBytesUsedExternally
-externptr MmHeapBytesUsedInternally
+externptr MmNonpagedHeapBytesUsedExternally
+externptr MmNonpagedHeapBytesUsedInternally
+
+externptr MmPagedHeapBytesUsedExternally
+externptr MmPagedHeapBytesUsedInternally
 
 const MMHEAPSWIFTMAGIC  0x1DC0
 const MMHEAPFREEMAGIC   0xE433
@@ -25,6 +32,7 @@ const MMHEAPFREEMAGIC   0xE433
 const MMHEAPNORMAL      0
 const MMHEAPMSL2        1
 const MMHEAPMS          2
+const MMHEAPPAGED       3
 
 struct MmAllocatedHeapBlock
 	1 BucketIndex

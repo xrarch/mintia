@@ -27,8 +27,8 @@ endstruct
 struct MmPageFrameEntryPool
 	4 ByteSize
 	4 Tag
+	4 ZeroIfNonPaged
 	4 VirtualAddress
-	4 Context3
 	4 Context4
 	4 Level
 	4 PoolListNext
@@ -151,3 +151,5 @@ const CANBLOCK      0x10000
 const MUSTSUCCEEDL2 0x40000
 const TRYFOREVER    0x80000
 const POOLALLOC     0x100000
+const PAGED         0x200000 // implies CANBLOCK
+const PAGEPOOLEXP   0x400000

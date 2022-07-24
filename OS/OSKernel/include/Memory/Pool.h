@@ -1,5 +1,8 @@
 externptr MmNonpagedPoolBytesUsed
+externptr MmNonpagedPoolBytesPeak
+
 externptr MmPagedPoolBytesUsed
+externptr MmPagedPoolBytesPeak
 
 extern MmPoolSpaceReserve { pagesneeded -- offset ok }
 extern MmPoolSpaceRelease { pages offset -- }
@@ -22,9 +25,11 @@ extern MmHeapFree { ptr -- }
 
 externptr MmNonpagedHeapBytesUsedExternally
 externptr MmNonpagedHeapBytesUsedInternally
+externptr MmNonpagedHeapBytesUsedPeak
 
 externptr MmPagedHeapBytesUsedExternally
 externptr MmPagedHeapBytesUsedInternally
+externptr MmPagedHeapBytesUsedPeak
 
 const MMHEAPSWIFTMAGIC  0x1DC0
 const MMHEAPFREEMAGIC   0xE433

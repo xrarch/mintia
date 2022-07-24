@@ -16,9 +16,11 @@ struct OSMemoryInformation
 
 	4 NonpagedPoolBytesUsedInternally
 	4 NonpagedPoolBytesUsedExternally
+	4 NonpagedPoolBytesUsedPeak
 
 	4 PagedPoolBytesUsedInternally
 	4 PagedPoolBytesUsedExternally
+	4 PagedPoolBytesUsedPeak
 
 	4 EvictablePageCount
 

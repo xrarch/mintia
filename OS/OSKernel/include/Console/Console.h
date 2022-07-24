@@ -21,8 +21,10 @@ struct CoConsole
 
 	4 ProcessListHead
 
-	4 Width
-	4 Height
+	4 Echoed
+
+	2 WidthI
+	2 HeightI
 endstruct
 
 externptr CoDispatch

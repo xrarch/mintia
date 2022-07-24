@@ -9,7 +9,7 @@ extern MmPoolSpaceRelease { pages offset -- }
 
 extern MmPoolPageRemove { pfdbe -- }
 extern MmPoolPageInsert { pfdbe -- }
-extern MmPoolDump { -- }
+extern MmPoolDump { tag -- usage }
 
 extern MmPagedPoolAllocPages { bytes tag flags -- realva ok }
 extern MmPagedPoolFreePages { noaccount vaddr -- }

@@ -176,7 +176,7 @@ fn CoVideoConsoleInit { -- }
 
 	auto deviceobject
 
-	pointerof CoVideoConsoleOutput // outputfunc
+	0 // outputfunc
 	0 // context
 	CoVideoConsoleRawBuffer@ // rawbuffer
 	0 // quotablock
@@ -222,7 +222,7 @@ fn CoVideoConsoleInit { -- }
 	auto buf
 	CoVideoConsoleRows@ CoVideoConsoleColumns@ * 4 * // bytes
 	'CoBf' // tag
-	MUSTSUCCEED // flags
+	PAGED // flags
 	MmAllocWithTag ok! buf!
 
 	if (ok@)
@@ -262,8 +262,8 @@ fn CoVideoConsoleInit { -- }
 
 	deviceobject@ IODeviceGetExtension CoVideoConsole!
 
-	CoVideoConsoleColumns@ CoVideoConsole@ CoConsole_Width + !
-	CoVideoConsoleRows@ CoVideoConsole@ CoConsole_Height + !
+	CoVideoConsoleColumns@ CoVideoConsole@ CoConsole_WidthI + si
+	CoVideoConsoleRows@ CoVideoConsole@ CoConsole_HeightI + si
 
 	0 // context1
 	0 // context2
@@ -526,12 +526,6 @@ fn CoVideoConsoleInitializeBuffer { buf -- }
 end
 
 fn CoVideoConsoleMakeDirty { -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"CoVideoConsoleMakeDirty: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
 	1 CoVideoConsoleIsDirty!
 
 	if (CoVideoConsoleTimer KeTimer_Enqueued + @ ~~)
@@ -876,12 +870,8 @@ fn CoVideoConsolePutCharacter { c -- }
 		return
 	end
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
 	if (CoVideoConsoleEscape@)
 		c@ CoVideoConsoleParseEscape
-		ipl@ KeIPLLower
 		return
 	end elseif (c@ 0x1B ==)
 		0 CoVideoConsoleEscapeIndex!
@@ -895,26 +885,21 @@ fn CoVideoConsolePutCharacter { c -- }
 			1 i +=
 		end
 
-		ipl@ KeIPLLower
 		return
 	end elseif (c@ '\n' ==)
 		CoVideoConsoleNewline
-		ipl@ KeIPLLower
 		return
 	end elseif (c@ '\b' ==)
 		CoVideoConsoleBackUp
-		ipl@ KeIPLLower
 		return
 	end elseif (c@ 0x7F ==)
 		CoVideoConsoleRubout
-		ipl@ KeIPLLower
 		return
 	end elseif (c@ '\t' ==)
 		' ' c!
 	end elseif (c@ '\r' ==)
 		0 CoVideoConsoleUpdateCursorX!
 		CoVideoConsoleMakeDirty
-		ipl@ KeIPLLower
 		return
 	end
 
@@ -942,8 +927,6 @@ fn CoVideoConsolePutCharacter { c -- }
 	end
 
 	CoVideoConsoleMakeDirty
-
-	ipl@ KeIPLLower
 end
 
 fn CoVideoConsoleExpediteRedraw { -- }
@@ -959,32 +942,6 @@ fn CoVideoConsoleExpediteRedraw { -- }
 	0 // priboost
 	CoVideoConsoleOutputEvent // event
 	KeEventSignal
-end
-
-fn (CoOutputFunction) CoVideoConsoleOutput { echo console -- ok }
-	auto outputbuffer
-	console@ CoConsoleOutputBufferGet outputbuffer!
-
-	0 ok!
-
-	while (1)
-		auto c
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonempty
-		outputbuffer@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
-
-		if (ok@)
-			break
-		end
-
-		c@ CoVideoConsolePutCharacter
-	end
-
-	if (echo@)
-		CoVideoConsoleExpediteRedraw
-	end
 end
 
 fn CoVideoConsoleClearCursor { -- }
@@ -1154,11 +1111,15 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
-	auto objecttable
-	8 alloc objecttable!
+	auto outputbuffer
+	CoVideoConsole@ CoConsoleOutputBufferGet outputbuffer!
 
-	CoVideoConsoleOutputEvent objecttable@!
+	auto objecttable
+	12 alloc objecttable!
+
+	outputbuffer@ ExRingBuffer_ReaderEvent + objecttable@!
 	CoVideoConsoleTimer objecttable@ 4 + !
+	CoVideoConsoleOutputEvent objecttable@ 8 + !
 
 	auto ok
 
@@ -1168,21 +1129,36 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 		0 // alertable
 		OSWAITANY // waittype
 		OSWAIT_TIMEOUTINFINITE // timeout
-		2 // objectcount
+		3 // objectcount
 		objecttable@ // objecttable
 		KeThreadWaitForMultipleObjects reason!
 
-		while (CoVideoConsoleIsDirty@)
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
+		if (reason@ 0 ==)
+			auto c
+
+			while (1)
+				0 // timeout
+				KERNELMODE // lastmode
+				EXRINGDONTWAIT // waitonempty
+				outputbuffer@ // ringbuffer
+				ExRingBufferReadValue ok! drop c!
+
+				if (ok@)
+					break
+				end
+
+				c@ CoVideoConsolePutCharacter
+			end
+		end
+
+		if (reason@ 0 ~= CoVideoConsole@ CoConsole_Echoed + @ ||)
+			0 CoVideoConsole@ CoConsole_Echoed + !
 
 			CoVideoConsoleUpdate
 
-			ipl@ KeIPLLower
-		end
-
-		if (reason@ 1 ==)
-			CoVideoConsoleTimer KeTimerReset drop
+			if (reason@ 1 ==)
+				CoVideoConsoleTimer KeTimerReset drop
+			end
 		end
 	end
 end

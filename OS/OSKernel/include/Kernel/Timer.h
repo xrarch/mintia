@@ -6,8 +6,6 @@ struct KeTimer
 	KeDispatchHeader_SIZEOF DispatchHeader
 	4 Next
 	4 Prev
-	4 Context1
-	4 Context2
 	4 Enqueued
 	KeTime_SIZEOF ExpiryTime
 	KeDPC_SIZEOF DPC

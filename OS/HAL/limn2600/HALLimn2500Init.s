@@ -8,8 +8,7 @@ HALLimn2500SavedEV:
 
 HALCPUExit:
 .global HALCPUExit
-	la   t0, HALLimn2500SavedEV
-	mov  t0, long [t0]
+	mov  t0, long [HALLimn2500SavedEV]
 	mtcr evec, t0
 
 	ret

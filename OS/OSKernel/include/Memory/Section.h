@@ -10,6 +10,8 @@ struct MmSection
 
 	4 QuotaBlock
 
+	4 Mutex
+
 	KeMutex_SIZEOF PrototypePageTableMutex
 endstruct
 

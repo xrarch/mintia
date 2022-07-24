@@ -13,9 +13,6 @@ extern HALCPUEnterUserMode { teb exitfunc context ustack entryfunc -- }
 extern HALCPUIsUserTrapFrame { tf -- user }
 extern HALCPUTrapFrameAbort { abort tf -- }
 
-extern HALCPUAtomicIncrement { inc ptr -- oldvalue }
-extern HALCPUAtomicDecrement { dec ptr -- oldvalue }
-
 extern HALCPUASIDRegister { asid -- }
 extern HALCPUASIDUnregister { asid -- }
 extern HALCPUAddressSpaceSwitch { asid pdir -- }

@@ -114,6 +114,8 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	end
 
 	object@ MmSectionPPTUnlock
+
+	object@ MmSection_Mutex + @ MmFree
 end
 
 fn MmAnonymousPageDelete { ipl pfdbe -- }
@@ -164,7 +166,7 @@ fn MmSectionPPTLock { sectionobject -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	sectionobject@ MmSection_PrototypePageTableMutex + // object
+	sectionobject@ MmSection_Mutex + @ // object
 	KeThreadWaitForObject ok!
 end
 
@@ -172,13 +174,13 @@ fn MmSectionPPTTryLock { sectionobject -- ok }
 	KERNELMODE // waitmode
 	0 // alertable
 	0 // timeout
-	sectionobject@ MmSection_PrototypePageTableMutex + // object
+	sectionobject@ MmSection_Mutex + @ // object
 	KeThreadWaitForObject ok!
 end
 
 fn MmSectionPPTUnlock { sectionobject -- }
 	0 // abandon
-	sectionobject@ MmSection_PrototypePageTableMutex + // mutex
+	sectionobject@ MmSection_Mutex + @ // mutex
 	KeMutexRelease drop
 end
 
@@ -215,7 +217,7 @@ fn MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sec
 	name@ // name
 	0 // flags
 	permissions@ // permissions
-	0 // quotabias
+	KeMutex_SIZEOF // quotabias
 	MmSection_SIZEOF // bodysize
 	MmSectionObjectType@ // type
 	ObObjectCreate ok! sectionobject!
@@ -230,10 +232,24 @@ fn MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sec
 	0 sectionobject@ MmSection_NoCommit + !
 	0 sectionobject@ MmSection_QuotaBlock + !
 
+	auto mutex
+	KeMutex_SIZEOF // bytes
+	'SeMu' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! mutex!
+
+	if (ok@)
+		sectionobject@ ObObjectDeallocate
+
+		return
+	end
+
 	"MmSectionPrototypePageTableMutex" // name
 	KERNELMODE // mode
-	sectionobject@ MmSection_PrototypePageTableMutex + // mutex
+	mutex@ // mutex
 	KeMutexInitialize
+
+	mutex@ sectionobject@ MmSection_Mutex + !
 
 	anonsize@ // charge
 	quotablock@ // quotablock
@@ -241,6 +257,8 @@ fn MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sec
 
 	if (ok@)
 		sectionobject@ ObObjectDeallocate
+
+		mutex@ MmFree
 
 		return
 	end

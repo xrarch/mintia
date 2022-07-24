@@ -138,17 +138,17 @@ fn ObDirectoryQueryAllObject { buffer maxquery dirobject -- count ok }
 		return
 	end
 
-	auto obh
-	dirobject@ ObDirectory_ObjectListHead + @ obh!
+	auto object
+	dirobject@ ObDirectory_ObjectListHead + @ object!
 
 	0 count!
 
-	while (obh@)
+	while (object@)
 		if (maxquery@ ~~)
 			break
 		end
 
-		obh@ ObHeader_SIZEOF + // processobject
+		object@ // object
 		buffer@ // query
 		ObObjectQueryObject ok!
 
@@ -161,7 +161,7 @@ fn ObDirectoryQueryAllObject { buffer maxquery dirobject -- count ok }
 		1 count +=
 		1 maxquery -=
 		OSObjectQuery_SIZEOF buffer +=
-		obh@ ObHeader_DirectoryListNext + @ obh!
+		object@ ObObjectPagedHeader ObPagedHeader_DirectoryListNext + @ object!
 	end
 
 	ObRootDirectoryUnlock
@@ -252,7 +252,7 @@ fn ObDirectoryInsert { objecthandle directoryhandle -- ok }
 		return
 	end
 
-	obj@ ObHeader_SIZEOF - // object
+	obj@ // object
 	dir@ // directory
 	ObDirectoryInsertByPointers ok!
 
@@ -296,7 +296,7 @@ fn ObDirectoryRemove { objecthandle -- ok }
 	end
 
 	0 // locked
-	obj@ ObHeader_SIZEOF - // object
+	obj@ // object
 	ObDirectoryRemoveByPointer ok!
 
 	handletable@ ExHandleTableUnlock
@@ -305,8 +305,6 @@ fn ObDirectoryRemove { objecthandle -- ok }
 end
 
 fn ObDirectoryInsertByPointers { object directory -- ok }
-	// must be passed the object's header.
-
 	// assumes the caller locked the handletable shared, to prevent a nasty
 	// race condition where the object may get referenced and then closed for
 	// the last time by another thread in the same process, then promptly
@@ -316,13 +314,19 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 
 	0 ok!
 
+	auto pheader
+	object@ ObObjectPagedHeader pheader!
+
+	auto npheader
+	object@ ObObjectNonpagedHeader npheader!
+
 	ObRootDirectoryLock ok!
 
 	if (ok@)
 		return
 	end
 
-	if (object@ ObHeader_DirectoryObject + @)
+	if (pheader@ ObPagedHeader_DirectoryObject + @)
 		// object was already inserted in a directory
 
 		ObRootDirectoryUnlock
@@ -332,7 +336,7 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 		return
 	end
 
-	if (object@ ObHeader_Name + @ ~~)
+	if (object@ ObObjectName ~~)
 		// no name! no bueno
 
 		ObRootDirectoryUnlock
@@ -342,8 +346,8 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 		return
 	end
 
-	if (object@ ObHeader_HandleCount + @ ~~)
-		if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
+	if (npheader@ ObNonpagedHeader_HandleCount + @ ~~)
+		if (pheader@ ObPagedHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
 			// another thread in the process closed this object
 			// before we could insert it. plus its not permanent.
 			// should not be allowed to insert.
@@ -359,16 +363,16 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 	auto h
 	directory@ ObDirectory_ObjectListHead + @ h!
 
-	h@ object@ ObHeader_DirectoryListNext + !
+	h@ pheader@ ObPagedHeader_DirectoryListNext + !
 
 	if (h@)
-		object@ h@ ObHeader_DirectoryListPrev + !
+		object@ h@ ObObjectPagedHeader ObPagedHeader_DirectoryListPrev + !
 	end
 
 	object@ directory@ ObDirectory_ObjectListHead + !
 	1 directory@ ObDirectory_ChildCount + +=
 
-	directory@ object@ ObHeader_DirectoryObject + !
+	directory@ pheader@ ObPagedHeader_DirectoryObject + !
 
 	directory@ ObObjectReferenceByPointer drop
 
@@ -376,12 +380,14 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 end
 
 fn ObDirectoryRemoveByPointer { locked object -- ok }
-	// must be passed the object's header.
 	// assumes the caller locked the handletable shared. i don't know if that
 	// is strictly necessary for removal, but i know it is for insertion,
 	// which makes me paranoid.
 
-	if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT &)
+	auto pheader
+	object@ ObObjectPagedHeader pheader!
+
+	if (pheader@ ObPagedHeader_Flags + @ OBFLAGS_PERMANENT &)
 		// don't remove from directory if permanent
 
 		STATUS_FORBIDDEN_OPERATION ok!
@@ -398,7 +404,7 @@ fn ObDirectoryRemoveByPointer { locked object -- ok }
 	end
 
 	auto dir
-	object@ ObHeader_DirectoryObject + @ dir!
+	pheader@ ObPagedHeader_DirectoryObject + @ dir!
 
 	if (dir@ ~~)
 		// object was not in a directory
@@ -413,17 +419,17 @@ fn ObDirectoryRemoveByPointer { locked object -- ok }
 	end
 
 	auto n
-	object@ ObHeader_DirectoryListNext + @ n!
+	pheader@ ObPagedHeader_DirectoryListNext + @ n!
 
 	auto l
-	object@ ObHeader_DirectoryListPrev + @ l!
+	pheader@ ObPagedHeader_DirectoryListPrev + @ l!
 
 	if (n@)
-		l@ n@ ObHeader_DirectoryListPrev + !
+		l@ n@ ObObjectPagedHeader ObPagedHeader_DirectoryListPrev + !
 	end
 
 	if (l@)
-		n@ l@ ObHeader_DirectoryListNext + !
+		n@ l@ ObObjectPagedHeader ObPagedHeader_DirectoryListNext + !
 	end else
 		// no prev means we were the listhead
 
@@ -432,48 +438,12 @@ fn ObDirectoryRemoveByPointer { locked object -- ok }
 
 	1 dir@ ObDirectory_ChildCount + -=
 
-	0 object@ ObHeader_DirectoryObject + !
+	0 pheader@ ObPagedHeader_DirectoryObject + !
 
 	dir@ ObObjectDereferenceByPointer drop
 
 	if (locked@ ~~)
 		ObRootDirectoryUnlock
-	end
-end
-
-fn ObDirectoryDumpTree { directory spaces -- }
-	auto i
-	spaces@ i!
-
-	while (i@)
-		' ' Putc
-		1 i -=
-	end
-
-	directory@ ObHeader_Name + @ "%s/\n" Printf
-
-	auto obj
-	directory@ ObHeader_SIZEOF + ObDirectory_ObjectListHead + @ obj!
-
-	while (obj@)
-		if (obj@ ObHeader_TypeObject + @ ObTypeDirectoryType@ ==)
-			obj@ spaces@ 4 + ObDirectoryDumpTree
-		end else
-			spaces@ 4 + i!
-
-			while (i@)
-				' ' Putc
-				1 i -=
-			end
-
-			if (obj@ ObHeader_Name + @)
-				obj@ ObHeader_Name + @ "%s\n" Printf
-			end else
-				obj@ "UNNAMED [0x%08x]\n" Printf
-			end
-		end
-
-		obj@ ObHeader_DirectoryListNext + @ obj!
 	end
 end
 
@@ -539,11 +509,8 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 	end
 
 	while (1)
-		auto obh
-		object@ ObHeader_SIZEOF - obh!
-
 		auto typeobj
-		obh@ ObHeader_TypeObject + @ typeobj!
+		object@ ObObjectType typeobj!
 
 		if (typeobj@ ObTypeDirectoryType@ ~=)
 			object@ ObObjectReferenceByPointer drop
@@ -701,8 +668,8 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 			end
 
 			if (pcomp@ ".." strcmp)
-				if (obh@ ObHeader_DirectoryObject + @)
-					obh@ ObHeader_DirectoryObject + @ object!
+				if (object@ ObObjectPagedHeader ObPagedHeader_DirectoryObject + @)
+					object@ ObObjectPagedHeader ObPagedHeader_DirectoryObject + @ object!
 
 					continue
 				end else
@@ -717,20 +684,20 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 			while (searchobj@)
 				if (DEBUGCHECKS)
-					if (searchobj@ ObHeader_Name + @ ~~)
+					if (searchobj@ ObObjectName ~~)
 						"ObObjectReferenceByPath: object was in a directory but had no name\n" KeCrash
 					end
 				end
 
-				if (searchobj@ ObHeader_Name + @ pcomp@ strcmp)
+				if (searchobj@ ObObjectName pcomp@ strcmp)
 					// found it !!!
 
-					searchobj@ ObHeader_SIZEOF + object!
+					searchobj@ object!
 
 					break
 				end
 
-				searchobj@ ObHeader_DirectoryListNext + @ searchobj!
+				searchobj@ ObObjectPagedHeader ObPagedHeader_DirectoryListNext + @ searchobj!
 			end
 
 			if (object@ ~~)
@@ -770,7 +737,7 @@ fn ObObjectOpenByPathProcess { flags access initialobject path process -- handle
 	end
 
 	if (flags@ OSFILEFLAG_MUSTBEFILE &)
-		if (object@ ObHeader_SIZEOF - ObHeader_TypeObject + @ IOFileTypeObject@ ~=)
+		if (object@ ObObjectType IOFileTypeObject@ ~=)
 			object@ ObObjectDereferenceByPointer drop
 
 			STATUS_INVALID_OBJECT_TYPE ok!

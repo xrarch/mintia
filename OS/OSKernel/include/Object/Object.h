@@ -1,8 +1,37 @@
-struct ObHeader
+// An object may be allocated from either paged or nonpaged pool depending on
+// what is specified in its type object. It is allocated in two pieces: one is
+// an inline allocation from the specified pool, containing the appropriate
+// header, the object's name, and the object's body. The other piece contains
+// the header for the opposite pool. This attempts to maximize what can be
+// placed in paged pool.
+//
+//
+// Inline allocation layout:
+//
+// Ob[HeapType]Header
+// Object Name (w/ null terminator and padding)
+// ObCommonHeader
+//  <-- object pointer
+// Object Body
+
+struct ObCommonHeader
+	4 PagedHeader
+	4 NonpagedHeader
+	4 Name
+endstruct
+
+struct ObNonpagedHeader
+	4 TypeObject
+
+	4 HandleCount
+	4 PointerCount
+
+	4 QuotaBlock
+endstruct
+
+struct ObPagedHeader
 	4 TypeListNext
 	4 TypeListPrev
-
-	4 TypeObject
 
 	4 DirectoryListNext
 	4 DirectoryListPrev
@@ -11,17 +40,12 @@ struct ObHeader
 
 	4 Flags
 
-	4 HandleCount
-	4 PointerCount
-
 	4 UID
 	4 GID
 	4 Permissions
 
-	4 QuotaCharge
-	4 QuotaBlock
-
-	4 Name
+	4 PagedQuotaCharge
+	4 NonpagedQuotaCharge
 endstruct
 
 struct ObType
@@ -37,6 +61,8 @@ struct ObType
 
 	4 Paged
 	4 WaitOffset
+
+	KeMutex_SIZEOF Mutex
 endstruct
 
 struct ObTypeInitializer
@@ -99,8 +125,6 @@ extern ObObjectReferenceByHandleProcess { type handle process -- access object o
 extern ObObjectClose { handle -- ok }
 extern ObObjectCloseProcess { handle process -- ok }
 
-extern ObObjectUncharge { obh -- }
-
 extern ObObjectOpen { nocheck access object -- handle ok }
 extern ObObjectOpenProcess { nocheck access object process -- handle ok }
 
@@ -109,6 +133,11 @@ extern ObObjectHandleCountDecrement { object -- oldcount }
 
 extern ObObjectReferenceByPointer { object -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
+
+extern ObObjectNonpagedHeader { object -- npheader }
+extern ObObjectPagedHeader { object -- pheader }
+extern ObObjectName { object -- name }
+extern ObObjectType { object -- type }
 
 extern ObObjectQueryObject { object query -- ok }
 extern ObObjectQuery { objecthandle query -- ok }

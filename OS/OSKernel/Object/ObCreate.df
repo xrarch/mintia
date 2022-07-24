@@ -21,132 +21,203 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+externptr ObFullyNonpagedObjects
+
 fn ObObjectCreate { name flags permissions quotabias bodysize type -- object ok }
 	0 ok!
 
 	auto tag
+	auto paged
+
 	if (type@)
 		type@ ObType_Tag + @ tag!
+		type@ ObType_Paged + @ paged!
 	end else
 		'Objt' tag!
+		0 paged!
 	end
 
-	bodysize@ ObHeader_SIZEOF + // bytes
-	tag@ // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! object!
+	auto pheader
+	auto npheader
+	auto cheader
+	auto obname
 
-	if (ok@)
-		return
-	end
+	auto npcharge
+	auto pcharge
 
-	auto qcharge
-	object@ MmBlockChargeGet qcharge!
-
-	auto namebuf
-	0 namebuf!
+	auto namelen
 
 	if (name@)
-		auto namelen
 		name@ strlen namelen!
-
-		if (namelen@ OBNAMEMAX 1 - >=)
-			object@ MmFree
-
-			STATUS_NAME_TOO_LONG ok!
-
-			return
-		end
-
-		namelen@ 1 + // bytes
-		'ObNm' // tag
-		CANBLOCK // flags
-		MmAllocWithTag ok! namebuf!
-
-		if (ok@)
-			object@ MmFree
-
-			return
-		end
-
-		namebuf@ name@ strcpy
-
-		namebuf@ MmBlockChargeGet qcharge +=
+		namelen@ 1 + 3 + 3 ~ & namelen!
+	end else
+		0 namelen!
 	end
 
-	quotabias@ qcharge +=
+	// see Object.h for an explanation on these structures.
 
-	type@ object@ ObHeader_TypeObject + !
+	if (ObFullyNonpagedObjects@)
+		ObNonpagedHeader_SIZEOF
+		ObPagedHeader_SIZEOF +
+		namelen@ +
+		ObCommonHeader_SIZEOF +
+		bodysize@ + // bytes
 
-	0 object@ ObHeader_DirectoryListPrev + !
-	0 object@ ObHeader_DirectoryListNext + !
+		tag@ // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! npheader!
 
-	0 object@ ObHeader_DirectoryObject + !
+		if (ok@)
+			return
+		end
 
-	flags@ object@ ObHeader_Flags + !
+		npheader@ ObNonpagedHeader_SIZEOF + pheader!
+		pheader@ ObPagedHeader_SIZEOF + obname!
+		obname@ namelen@ + cheader!
+		cheader@ ObCommonHeader_SIZEOF + object!
 
-	0 object@ ObHeader_HandleCount + !
-	1 object@ ObHeader_PointerCount + !
+		npheader@ MmBlockChargeGet npcharge!
 
-	auto curproc
-	KeProcessCurrent curproc!
+		0 pcharge!
+	end elseif (paged@)
+		ObPagedHeader_SIZEOF
+		namelen@ +
+		ObCommonHeader_SIZEOF +
+		bodysize@ + // bytes
 
-	curproc@ PsProcess_UID + @ object@ ObHeader_UID + !
-	curproc@ PsProcess_GID + @ object@ ObHeader_GID + !
-	permissions@ object@ ObHeader_Permissions + !
+		tag@ // tag
+		PAGED // flags
+		MmAllocWithTag ok! pheader!
 
-	qcharge@ object@ ObHeader_QuotaCharge + !
-	0 object@ ObHeader_QuotaBlock + !
+		if (ok@)
+			return
+		end
 
-	namebuf@ object@ ObHeader_Name + !
+		pheader@ ObPagedHeader_SIZEOF + obname!
+		obname@ namelen@ + cheader!
+		cheader@ ObCommonHeader_SIZEOF + object!
+
+		ObNonpagedHeader_SIZEOF // bytes
+		'ObNH' // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! npheader!
+
+		if (ok@)
+			pheader@ MmFree
+
+			return
+		end
+
+		npheader@ MmBlockChargeGet npcharge!
+		pheader@ MmBlockChargeGet pcharge!
+	end else
+		ObNonpagedHeader_SIZEOF
+		namelen@ +
+		ObCommonHeader_SIZEOF +
+		bodysize@ + // bytes
+
+		tag@ // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! npheader!
+
+		if (ok@)
+			return
+		end
+
+		npheader@ ObNonpagedHeader_SIZEOF + obname!
+		obname@ namelen@ + cheader!
+		cheader@ ObCommonHeader_SIZEOF + object!
+
+		ObPagedHeader_SIZEOF // bytes
+		'ObPH' // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! pheader!
+
+		if (ok@)
+			npheader@ MmFree
+
+			return
+		end
+
+		npheader@ MmBlockChargeGet npcharge!
+		pheader@ MmBlockChargeGet pcharge!
+	end
+
+	if (name@ ~~)
+		0 obname!
+	end else
+		obname@ // dest
+		name@ // src
+		strcpy
+	end
+
+	pheader@ cheader@ ObCommonHeader_PagedHeader + !
+	npheader@ cheader@ ObCommonHeader_NonpagedHeader + !
+	obname@ cheader@ ObCommonHeader_Name + !
+
+	type@ npheader@ ObNonpagedHeader_TypeObject + !
+	0 npheader@ ObNonpagedHeader_HandleCount + !
+	1 npheader@ ObNonpagedHeader_PointerCount + !
+	0 npheader@ ObNonpagedHeader_QuotaBlock + !
+
+	0 pheader@ ObPagedHeader_TypeListNext + !
+	0 pheader@ ObPagedHeader_TypeListPrev + !
+
+	0 pheader@ ObPagedHeader_DirectoryListNext + !
+	0 pheader@ ObPagedHeader_DirectoryListPrev + !
+	0 pheader@ ObPagedHeader_DirectoryObject + !
+
+	flags@ pheader@ ObPagedHeader_Flags + !
 
 	auto h
+	KeProcessCurrent h!
 
-	0 object@ ObHeader_TypeListPrev + !
-	0 object@ ObHeader_TypeListNext + !
+	h@ PsProcess_UID + @ pheader@ ObPagedHeader_UID + !
+	h@ PsProcess_GID + @ pheader@ ObPagedHeader_GID + !
+	permissions@ pheader@ ObPagedHeader_Permissions + !
+
+	pcharge@ pheader@ ObPagedHeader_PagedQuotaCharge + !
+	npcharge@ pheader@ ObPagedHeader_NonpagedQuotaCharge + !
 
 	if (type@)
-		// insert in type list
-
-		auto rs
-		HALCPUInterruptDisable rs!
+		type@ ObTypeLock
 
 		type@ ObType_ObjectListHead + @ h!
 
 		if (h@)
-			h@ object@ ObHeader_TypeListNext + !
-			object@ h@ ObHeader_TypeListPrev + !
+			h@ pheader@ ObPagedHeader_TypeListNext + !
+			object@ h@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_TypeListPrev + !
 		end
 
 		object@ type@ ObType_ObjectListHead + !
 
-		rs@ HALCPUInterruptRestore
+		type@ ObTypeUnlock
 	end
-
-	ObHeader_SIZEOF object +=
 end
 
 fn ObObjectFree { object -- ok }
 	0 ok!
 
-	ObHeader_SIZEOF object -=
+	ObCommonHeader_SIZEOF object -=
 
 	if (DEBUGCHECKS)
-		if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT &)
+		if (object@ ObCommonHeader_PagedHeader + @ ObPagedHeader_Flags + @ OBFLAGS_PERMANENT &)
 			"ObObjectFree: attempt to free PERMANENT object\n" KeCrash
 		end
 
-		if (object@ ObHeader_HandleCount + @)
+		if (object@ ObCommonHeader_NonpagedHeader + @ ObNonpagedHeader_HandleCount + @)
 			"ObObjectFree: attempt to free object with nonzero handle count\n" KeCrash
 		end
 
-		if (object@ ObHeader_PointerCount + @)
+		if (object@ ObCommonHeader_NonpagedHeader + @ ObNonpagedHeader_PointerCount + @)
 			"ObObjectFree: attempt to free object with nonzero pointer count\n" KeCrash
 		end
 	end
 
 	auto type
-	object@ ObHeader_TypeObject + @ type!
+	object@ ObCommonHeader_NonpagedHeader + @ ObNonpagedHeader_TypeObject + @ type!
+
+	ObCommonHeader_SIZEOF object +=
 
 	if (type@)
 		auto deletefunc
@@ -154,70 +225,71 @@ fn ObObjectFree { object -- ok }
 		type@ ObType_DeleteFunction + @ deletefunc!
 
 		if (deletefunc@)
-			object@ ObHeader_SIZEOF + deletefunc@ ObTypeDeleteFunction
+			object@ deletefunc@ ObTypeDeleteFunction
 		end
 	end
-
-	ObHeader_SIZEOF object +=
 
 	object@ ObObjectDeallocate
 end
 
 fn ObObjectDeallocate { object -- }
-	ObHeader_SIZEOF object -=
+	ObCommonHeader_SIZEOF object -=
+
+	auto npheader
+	object@ ObCommonHeader_NonpagedHeader + @ npheader!
+
+	auto pheader
+	object@ ObCommonHeader_PagedHeader + @ pheader!
 
 	auto type
-	object@ ObHeader_TypeObject + @ type!
+	object@ ObCommonHeader_NonpagedHeader + @ ObNonpagedHeader_TypeObject + @ type!
 
 	if (type@)
 		// remove from type list
 
-		auto rs
-		HALCPUInterruptDisable rs!
+		type@ ObTypeLock
 
 		auto n
-		object@ ObHeader_TypeListNext + @ n!
+		pheader@ ObPagedHeader_TypeListNext + @ n!
 
 		auto l
-		object@ ObHeader_TypeListPrev + @ l!
+		pheader@ ObPagedHeader_TypeListPrev + @ l!
 
 		if (n@)
-			l@ n@ ObHeader_TypeListPrev + !
+			l@ n@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_TypeListPrev + !
 		end
 
 		if (l@)
-			n@ l@ ObHeader_TypeListNext + !
+			n@ l@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_TypeListNext + !
 		end else
 			// no prev means we were the listhead
 
 			n@ type@ ObType_ObjectListHead + !
 		end
 
-		rs@ HALCPUInterruptRestore
+		type@ ObTypeUnlock
 	end
-
-	auto qcharge
-	object@ ObHeader_QuotaCharge + @ qcharge!
 
 	auto quotablock
-	object@ ObHeader_QuotaBlock + @ quotablock!
+	npheader@ ObNonpagedHeader_QuotaBlock + @ quotablock!
 
-	if (object@ ObHeader_Name + @)
-		object@ ObHeader_Name + @ MmFree
-	end
+	auto pcharge
+	pheader@ ObPagedHeader_PagedQuotaCharge + @ pcharge!
 
-	object@ MmFree
+	auto npcharge
+	pheader@ ObPagedHeader_NonpagedQuotaCharge + @ npcharge!
+
+	pheader@ MmFree
+	npheader@ MmFree
 
 	if (quotablock@)
-		if (type@ ObType_Paged + @)
-			qcharge@ // charge
-			quotablock@ // quotablock
-			MmQuotaBlockUnchargePaged
-		end else
-			qcharge@ // charge
-			quotablock@ // quotablock
-			MmQuotaBlockUncharge
-		end
+		npcharge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		pcharge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargePaged
 
 		quotablock@ MmQuotaBlockDereference
 	end
@@ -265,21 +337,37 @@ fn ObTypeCreate { initializer -- type ok }
 
 	0 type@ ObType_ObjectListHead + !
 
+	"ObTypeMutex" // name
+	KERNELMODE // mode
+	type@ ObType_Mutex + // mutex
+	KeMutexInitialize
+
 	if (typetype@ ~~)
 		type@ ObTypeObjectType!
-		type@ ObHeader_SIZEOF - type@ ObType_ObjectListHead + !
+		type@ type@ ObType_ObjectListHead + !
 
-		auto hdr
-		type@ ObHeader_SIZEOF - hdr!
-
-		type@ hdr@ ObHeader_TypeObject + !
+		type@ type@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ ObNonpagedHeader_TypeObject + !
 	end elseif (ObObjectTypesDirectoryObject@)
-		type@ ObHeader_SIZEOF - // object
+		type@ // object
 		ObObjectTypesDirectoryObject@ // directory
 		ObDirectoryInsertByPointers ok!
 
 		if (ok@)
-			ok@ type@ ObHeader_SIZEOF - ObHeader_Name + @ "ObTypeCreate: couldn't insert type '%s' into /ObjectTypes (%i)\n" KeCrash
+			ok@ type@ ObCommonHeader_SIZEOF - ObCommonHeader_Name + @ "ObTypeCreate: couldn't insert type '%s' into /ObjectTypes (%i)\n" KeCrash
 		end
 	end
+end
+
+fn ObTypeLock { type -- }
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	type@ ObType_Mutex + // object
+	KeThreadWaitForObject drop
+end
+
+fn ObTypeUnlock { type -- }
+	0 // abandon
+	type@ ObType_Mutex + // mutex
+	KeMutexRelease drop
 end

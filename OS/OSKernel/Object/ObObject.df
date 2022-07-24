@@ -77,13 +77,10 @@ fn ObObjectCloseProcess { handle process -- ok }
 	// process can no longer access this handle. unlocking is safe.
 	handletable@ ExHandleTableUnlock
 
-	auto obh
-	object@ ObHeader_SIZEOF - obh!
-
 	object@ ObObjectHandleCountDecrement drop
 
 	auto type
-	obh@ ObHeader_TypeObject + @ type!
+	object@ ObObjectType type!
 
 	if (type@)
 		auto closefunc
@@ -100,9 +97,12 @@ fn ObObjectCloseProcess { handle process -- ok }
 	object@ ObObjectDereferenceByPointer drop
 end
 
-fn ObObjectUncharge { obh -- }
+fn ObObjectUncharge { object -- }
+	auto npheader
+	object@ ObObjectNonpagedHeader npheader!
+
 	auto quotablock
-	obh@ ObHeader_QuotaBlock + @ quotablock!
+	npheader@ ObNonpagedHeader_QuotaBlock + @ quotablock!
 
 	if (DEBUGCHECKS)
 		if (quotablock@ ~~)
@@ -110,17 +110,18 @@ fn ObObjectUncharge { obh -- }
 		end
 	end
 
-	0 obh@ ObHeader_QuotaBlock + !
+	0 npheader@ ObNonpagedHeader_QuotaBlock + !
 
-	if (obh@ ObHeader_TypeObject + @ ObType_Paged + @)
-		obh@ ObHeader_QuotaCharge + @ // charge
-		quotablock@ // quotablock
-		MmQuotaBlockUnchargePaged
-	end else
-		obh@ ObHeader_QuotaCharge + @ // charge
-		quotablock@ // quotablock
-		MmQuotaBlockUncharge
-	end
+	auto pheader
+	object@ ObObjectPagedHeader pheader!
+
+	pheader@ ObPagedHeader_PagedQuotaCharge + @ // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUnchargePaged
+
+	pheader@ ObPagedHeader_NonpagedQuotaCharge + @ // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUncharge
 
 	quotablock@ MmQuotaBlockDereference
 end
@@ -147,35 +148,41 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 		end
 	end
 
-	auto obh
-	object@ ObHeader_SIZEOF - obh!
+	auto npheader
+	object@ ObObjectNonpagedHeader npheader!
+
+	auto pheader
+	object@ ObObjectPagedHeader pheader!
 
 	auto type
-	obh@ ObHeader_TypeObject + @ type!
+	npheader@ ObNonpagedHeader_TypeObject + @ type!
+
+	auto flags
+	pheader@ ObPagedHeader_Flags + @ flags!
 
 	auto quotablock
 	0 quotablock!
 
-	if (obh@ ObHeader_QuotaBlock + @ ~~)
+	auto pcharge
+	auto npcharge
+
+	if (npheader@ ObNonpagedHeader_QuotaBlock + @ ~~)
+		pheader@ ObPagedHeader_PagedQuotaCharge + @ pcharge!
+		pheader@ ObPagedHeader_NonpagedQuotaCharge + @ npcharge!
+
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		if (obh@ ObHeader_QuotaBlock + @ ~~)
-			if (obh@ ObHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
+		if (npheader@ ObNonpagedHeader_QuotaBlock + @ ~~)
+			if (flags@ OBFLAGS_PERMANENT & ~~)
 				// no quotablock and object isnt permanent; claim quota for
 				// current process
 
 				KeProcessCurrent PsProcess_QuotaBlock + @ quotablock!
 
-				if (type@ ObType_Paged + @)
-					obh@ ObHeader_QuotaCharge + @ // charge
-					quotablock@ // quotablock
-					MmQuotaBlockChargePaged ok!
-				end else
-					obh@ ObHeader_QuotaCharge + @ // charge
-					quotablock@ // quotablock
-					MmQuotaBlockCharge ok!
-				end
+				pcharge@ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockChargePaged ok!
 
 				if (ok@)
 					ipl@ KeIPLLower
@@ -183,9 +190,23 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 					return
 				end
 
+				npcharge@ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockCharge ok!
+
+				if (ok@)
+					pcharge@ // charge
+					quotablock@ // quotablock
+					MmQuotaBlockUnchargePaged
+
+					ipl@ KeIPLLower
+
+					return
+				end
+
 				quotablock@ MmQuotaBlockReference
 
-				quotablock@ obh@ ObHeader_QuotaBlock + !
+				quotablock@ npheader@ ObNonpagedHeader_QuotaBlock + !
 			end
 		end
 
@@ -196,7 +217,7 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 
 	if (ok@)
 		if (quotablock@)
-			obh@ ObObjectUncharge
+			object@ ObObjectUncharge
 		end
 
 		return
@@ -210,7 +231,7 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 
 		if (ok@)
 			if (quotablock@)
-				obh@ ObObjectUncharge
+				object@ ObObjectUncharge
 			end
 
 			handletable@ ExHandleTableUnlock
@@ -228,7 +249,7 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 
 	if (ok@)
 		if (quotablock@)
-			obh@ ObObjectUncharge
+			object@ ObObjectUncharge
 		end
 
 		handletable@ ExHandleTableUnlock
@@ -250,7 +271,7 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 
 			if (ok@)
 				if (quotablock@)
-					obh@ ObObjectUncharge
+					object@ ObObjectUncharge
 				end
 
 				handle@ // handle
@@ -355,11 +376,8 @@ fn ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 	entryptr@ ObObjectTableEntry_Object + @ object!
 	entryptr@ ObObjectTableEntry_Access + @ access!
 
-	auto obh
-	object@ ObHeader_SIZEOF - obh!
-
 	if (type@)
-		if (obh@ ObHeader_TypeObject + @ type@ ~=)
+		if (object@ ObObjectType type@ ~=)
 			handletable@ ExHandleTableUnlock
 
 			STATUS_INVALID_OBJECT_TYPE ok!
@@ -374,25 +392,27 @@ fn ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 end
 
 fn ObObjectHandleCountIncrement { object -- oldcount }
-	ObHeader_SIZEOF object -=
+	auto npheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	object@ ObHeader_HandleCount + @ oldcount!
+	npheader@ ObNonpagedHeader_HandleCount + @ oldcount!
 
-	oldcount@ 1 + object@ ObHeader_HandleCount + !
+	oldcount@ 1 + npheader@ ObNonpagedHeader_HandleCount + !
 
 	rs@ HALCPUInterruptRestore
 end
 
 fn ObObjectHandleCountDecrement { object -- oldcount }
-	ObHeader_SIZEOF object -=
+	auto npheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	object@ ObHeader_HandleCount + @ oldcount!
+	npheader@ ObNonpagedHeader_HandleCount + @ oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -404,12 +424,12 @@ fn ObObjectHandleCountDecrement { object -- oldcount }
 		// end
 	end
 
-	oldcount@ 1 - object@ ObHeader_HandleCount + !
+	oldcount@ 1 - npheader@ ObNonpagedHeader_HandleCount + !
 
 	rs@ HALCPUInterruptRestore
 
 	if (oldcount@ 1 ==)
-		if (object@ ObHeader_DirectoryObject + @)
+		if (object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_DirectoryObject + @)
 			ObRootDirectoryLockUnalertable
 
 			// locking the root directory successfully serializes this case
@@ -419,9 +439,9 @@ fn ObObjectHandleCountDecrement { object -- oldcount }
 
 			// test the handle count again to make sure it's still 0.
 
-			if (object@ ObHeader_HandleCount + @ 0 ==)
-				if (object@ ObHeader_DirectoryObject + @)
-					if (object@ ObHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
+			if (npheader@ ObNonpagedHeader_HandleCount + @ 0 ==)
+				if (object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_DirectoryObject + @)
+					if (object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_Flags + @ OBFLAGS_PERMANENT & ~~)
 						1 // locked
 						object@ // object
 						ObDirectoryRemoveByPointer drop
@@ -435,25 +455,27 @@ fn ObObjectHandleCountDecrement { object -- oldcount }
 end
 
 fn ObObjectReferenceByPointer { object -- oldcount }
-	ObHeader_SIZEOF object -=
+	auto npheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	object@ ObHeader_PointerCount + @ oldcount!
+	npheader@ ObNonpagedHeader_PointerCount + @ oldcount!
 
-	oldcount@ 1 + object@ ObHeader_PointerCount + !
+	oldcount@ 1 + npheader@ ObNonpagedHeader_PointerCount + !
 
 	rs@ HALCPUInterruptRestore
 end
 
 fn ObObjectDereferenceByPointer { object -- oldcount }
-	ObHeader_SIZEOF object -=
+	auto npheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	object@ ObHeader_PointerCount + @ oldcount!
+	npheader@ ObNonpagedHeader_PointerCount + @ oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -465,7 +487,7 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 		// end
 	end
 
-	oldcount@ 1 - object@ ObHeader_PointerCount + !
+	oldcount@ 1 - npheader@ ObNonpagedHeader_PointerCount + !
 
 	// the following comment applied to a field that no longer exists. the
 	// current check involves just checking if the PointerCount is 0.
@@ -488,7 +510,7 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 		// just decremented the pointer count to zero. delete the object
 
 		if (DEBUGCHECKS)
-			if (object@ ObHeader_DirectoryObject + @)
+			if (object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_DirectoryObject + @)
 				"ObObjectDereferenceByPointer: object was still linked into a directory\n" KeCrash
 			end
 		end
@@ -501,7 +523,7 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 			// cleaning up a dead object.
 			KeThreadCurrent@ KeThreadIgnoreKill drop
 
-			object@ ObHeader_SIZEOF + ObObjectFree ok!
+			object@ ObObjectFree ok!
 
 			if (DEBUGCHECKS)
 				if (ok@)
@@ -518,6 +540,22 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 	end
 end
 
+fn ObObjectNonpagedHeader { object -- npheader }
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
+end
+
+fn ObObjectPagedHeader { object -- pheader }
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ pheader!
+end
+
+fn ObObjectName { object -- name }
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_Name + @ name!
+end
+
+fn ObObjectType { object -- type }
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ ObNonpagedHeader_TypeObject + @ type!
+end
+
 fn ObObjectQueryObject { object query -- ok }
 	0 ok!
 
@@ -526,16 +564,22 @@ fn ObObjectQueryObject { object query -- ok }
 	0 // word
 	memset
 
-	ObHeader_SIZEOF object -=
+	ObCommonHeader_SIZEOF object -=
+
+	auto npheader
+	object@ ObCommonHeader_NonpagedHeader + @ npheader!
+
+	auto pheader
+	object@ ObCommonHeader_PagedHeader + @ pheader!
 
 	auto typeobj
-	object@ ObHeader_TypeObject + @ typeobj!
+	npheader@ ObNonpagedHeader_TypeObject + @ typeobj!
 
 	auto name
 	0 name!
 
 	if (typeobj@)
-		typeobj@ ObHeader_SIZEOF - ObHeader_Name + @ name!
+		typeobj@ ObCommonHeader_SIZEOF - ObCommonHeader_Name + @ name!
 	end
 
 	if (name@)
@@ -546,7 +590,7 @@ fn ObObjectQueryObject { object query -- ok }
 		0 query@ OSObjectQuery_TypeName + sb
 	end
 
-	object@ ObHeader_Name + @ name!
+	object@ ObCommonHeader_Name + @ name!
 
 	if (name@)
 		query@ OSObjectQuery_Name + // dest
@@ -556,13 +600,13 @@ fn ObObjectQueryObject { object query -- ok }
 		0 query@ OSObjectQuery_Name + sb
 	end
 
-	object@ ObHeader_HandleCount + @ query@ OSObjectQuery_HandleCount + !
-	object@ ObHeader_PointerCount + @ query@ OSObjectQuery_PointerCount + !
+	npheader@ ObNonpagedHeader_HandleCount + @ query@ OSObjectQuery_HandleCount + !
+	npheader@ ObNonpagedHeader_PointerCount + @ query@ OSObjectQuery_PointerCount + !
 
-	object@ ObHeader_Permissions + @ query@ OSObjectQuery_Permissions + !
+	pheader@ ObPagedHeader_Permissions + @ query@ OSObjectQuery_Permissions + !
 
-	object@ ObHeader_UID + @ query@ OSObjectQuery_UID + !
-	object@ ObHeader_GID + @ query@ OSObjectQuery_GID + !
+	pheader@ ObPagedHeader_UID + @ query@ OSObjectQuery_UID + !
+	pheader@ ObPagedHeader_GID + @ query@ OSObjectQuery_GID + !
 end
 
 fn ObObjectQuery { objecthandle query -- ok }
@@ -584,19 +628,25 @@ fn ObObjectQuery { objecthandle query -- ok }
 end
 
 fn ObObjectSetUID { uid object -- }
-	uid@ object@ ObHeader_SIZEOF - ObHeader_UID + !
+	auto pheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ pheader!
+
+	uid@ pheader@ ObPagedHeader_UID + !
 end
 
 fn ObObjectSetGID { gid object -- }
-	gid@ object@ ObHeader_SIZEOF - ObHeader_GID + !
+	auto pheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ pheader!
+
+	gid@ pheader@ ObPagedHeader_GID + !
 end
 
 fn ObSetSecurityObject { uid gid permissions object -- ok }
-	auto obh
-	object@ ObHeader_SIZEOF - obh!
-
 	auto typeobj
-	obh@ ObHeader_TypeObject + @ typeobj!
+	object@ ObObjectType typeobj!
+
+	auto pheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ pheader!
 
 	if (typeobj@ ObType_SetSecurityFunction + @)
 		uid@ // uid
@@ -611,15 +661,15 @@ fn ObSetSecurityObject { uid gid permissions object -- ok }
 	end
 
 	if (uid@ -1 ~=)
-		uid@ obh@ ObHeader_UID + !
+		uid@ pheader@ ObPagedHeader_UID + !
 	end
 
 	if (gid@ -1 ~=)
-		gid@ obh@ ObHeader_GID + !
+		gid@ pheader@ ObPagedHeader_GID + !
 	end
 
 	if (permissions@ -1 ~=)
-		permissions@ obh@ ObHeader_Permissions + !
+		permissions@ pheader@ ObPagedHeader_Permissions + !
 	end
 
 	0 ok!
@@ -670,7 +720,7 @@ fn ObSetSecurity { uid gid permissions handle -- ok }
 	end
 
 	if (notadmin@)
-		if (object@ ObHeader_SIZEOF - ObHeader_UID + @ process@ PsProcess_UID + @ ~=)
+		if (object@ ObObjectPagedHeader ObPagedHeader_UID + @ process@ PsProcess_UID + @ ~=)
 			// not the owner of the object, forbidden
 			
 			object@ ObObjectDereferenceByPointer drop

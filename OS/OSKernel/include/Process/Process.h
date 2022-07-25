@@ -41,16 +41,7 @@ struct PsProcess
 
 	KeMutex_SIZEOF WorkingSetMutex
 
-	4 WorkingSetSize
-	4 WorkingSetMinimum
-	4 WorkingSetMaximum
-	4 WorkingSetTrimFaultCount
-
-	4 WorkingSetFreeListHead
-	4 WorkingSetMaximumIndex
-	4 WorkingSetReplacementIndex
-
-	(WORKINGSETLISTCOUNT 4 *) WorkingSetListPointers
+	4 MmHeader
 endstruct
 
 struct PsProcessPaged

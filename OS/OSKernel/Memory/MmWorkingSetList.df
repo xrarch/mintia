@@ -24,6 +24,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+const MMWORKINGSETTABLESIZE       (PAGESIZE MmProcessHeader_SIZEOF -)
+const MMWORKINGSETENTRIESPERTABLE (MMWORKINGSETTABLESIZE 4 /)
+
 const MMWORKINGSETENTRY_VALID 1
 
 fn MmWorkingSetLock { processobject -- ok }
@@ -67,38 +70,50 @@ end
 fn MmWorkingSetListInitialize { process -- ok }
 	0 ok!
 
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
+
 	"MmWorkingSetMutex" // name
 	KERNELMODE // mode
 	process@ PsProcess_WorkingSetMutex + // mutex
 	KeMutexInitialize
 
-	0 process@ PsProcess_WorkingSetSize + !
-	MMWORKINGSETDEFAULTMINIMUM process@ PsProcess_WorkingSetMinimum + !
-	MMWORKINGSETDEFAULTMAXIMUM process@ PsProcess_WorkingSetMaximum + !
+	0 phdr@ MmProcessHeader_WorkingSetSize + !
+	MMWORKINGSETDEFAULTMINIMUM phdr@ MmProcessHeader_WorkingSetMinimum + !
+	MMWORKINGSETDEFAULTMAXIMUM phdr@ MmProcessHeader_WorkingSetMaximum + !
 
-	-1 process@ PsProcess_WorkingSetFreeListHead + !
-	-1 process@ PsProcess_WorkingSetMaximumIndex + !
-	0 process@ PsProcess_WorkingSetReplacementIndex + !
-	0 process@ PsProcess_WorkingSetTrimFaultCount + !
+	0 phdr@ MmProcessHeader_WorkingSetReplacementIndex + !
+	0 phdr@ MmProcessHeader_WorkingSetTrimFaultCount + !
 
-	process@ PsProcess_WorkingSetListPointers + // ptr
-	WORKINGSETLISTCOUNT 4 * // size
-	0 // word
-	memset
+	// initialize the working set list.
 
-	// allocate the first working set list table now.
+	auto entryptr
+	phdr@ MmProcessHeader_SIZEOF +
+	MMWORKINGSETENTRIESPERTABLE 4 * + entryptr!
 
-	auto wsli
-	auto wsleptr
-	process@ MmWorkingSetArrayExpand ok! wsleptr! wsli!
+	auto last
+	-1 last!
 
-	if (ok@)
-		return
+	auto ihandle
+	MMWORKINGSETENTRIESPERTABLE ihandle!
+
+	auto count
+	MMWORKINGSETENTRIESPERTABLE count!
+
+	// initialize the free list
+
+	while (count@)
+		4 entryptr -=
+		1 ihandle -=
+
+		last@ PAGESHIFT << entryptr@!
+
+		ihandle@ last!
+		1 count -=
 	end
 
-	// relinquish the first entry MmWorkingSetArrayExpand gave us.
-
-	wsli@ wsleptr@ process@ MmWorkingSetEntryFree
+	last@ phdr@ MmProcessHeader_WorkingSetFreeListHead + !
+	MMWORKINGSETENTRIESPERTABLE 1 - phdr@ MmProcessHeader_WorkingSetMaximumIndex + !
 end
 
 // unless explicitly stated otherwise, all working set manipulation functions
@@ -106,32 +121,13 @@ end
 
 fn MmWorkingSetListFree { process -- }
 	if (DEBUGCHECKS)
-		if (process@ PsProcess_WorkingSetSize + @)
-			process@ PsProcess_WorkingSetSize + @
+		if (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
+			process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @
 			"MmWorkingSetListFree: working set size > 0 (%d)\n" KeCrash
 		end
 	end
 
-	auto count
-	WORKINGSETLISTCOUNT count!
-
-	auto ptr
-	process@ PsProcess_WorkingSetListPointers + ptr!
-
-	while (count@)
-		if (ptr@@)
-			ptr@@ MmFree
-
-			0 ptr@!
-		end
-
-		4 ptr +=
-		1 count -=
-	end
-
-	-1 process@ PsProcess_WorkingSetFreeListHead + !
-	-1 process@ PsProcess_WorkingSetMaximumIndex + !
-	0 process@ PsProcess_WorkingSetReplacementIndex + !
+	return
 end
 
 fn MmWorkingSetTrimPage { wsli wsleptr process -- }
@@ -156,9 +152,12 @@ fn MmWorkingSetTrim { dire pages process -- trimmed }
 	auto wsleptr
 	auto ok
 
-	process@ PsProcess_PageFaultCount + @ process@ PsProcess_WorkingSetTrimFaultCount + !
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
 
-	while (process@ PsProcess_WorkingSetSize + @ process@ PsProcess_WorkingSetMaximum + @ >)
+	process@ PsProcess_PageFaultCount + @ phdr@ MmProcessHeader_WorkingSetTrimFaultCount + !
+
+	while (phdr@ MmProcessHeader_WorkingSetSize + @ phdr@ MmProcessHeader_WorkingSetMaximum + @ >)
 		// greater than the maximum, nuke all the way down to it
 
 		if (pages@ ~~)
@@ -187,7 +186,7 @@ fn MmWorkingSetTrim { dire pages process -- trimmed }
 		5 pages@ min pages!
 	end
 
-	while (process@ PsProcess_WorkingSetSize + @ process@ PsProcess_WorkingSetMinimum + @ >)
+	while (phdr@ MmProcessHeader_WorkingSetSize + @ phdr@ MmProcessHeader_WorkingSetMinimum + @ >)
 		// between minimum and maximum, nuke at most 5 entries, or 15 if dire
 
 		if (pages@ ~~)
@@ -220,7 +219,7 @@ fn MmWorkingSetTrim { dire pages process -- trimmed }
 		1 pages@ min pages!
 	end
 
-	while (process@ PsProcess_WorkingSetSize + @ musthave@ >)
+	while (phdr@ MmProcessHeader_WorkingSetSize + @ musthave@ >)
 		// below minimum, nuke only 1 entry, or 5 if dire
 
 		if (pages@ ~~)
@@ -259,34 +258,22 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 	auto wsli
 	0 wsli!
 
-	auto tabptr
-	process@ PsProcess_WorkingSetListPointers + tabptr!
-
 	auto wsleptr
-	tabptr@@ wsleptr!
+	process@ PsProcess_MmHeader + @ MmProcessHeader_SIZEOF + wsleptr!
 
 	auto wsle
 
 	auto ok
 	auto pteaddr
 
-	auto leftintable
-	MMWORKINGSETENTRIESPERTABLE leftintable!
-
 	auto maxi
-	process@ PsProcess_WorkingSetMaximumIndex + @ maxi!
+	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMaximumIndex + @ maxi!
 
 	if (maxi@ -1 ==)
 		return
 	end
 
 	while (wsli@ maxi@ <=)
-		if (leftintable@ ~~)
-			4 tabptr +=
-			tabptr@@ wsleptr!
-			MMWORKINGSETENTRIESPERTABLE leftintable!
-		end
-
 		wsleptr@@ wsle!
 
 		if (wsle@ MMWORKINGSETENTRY_VALID &)
@@ -320,7 +307,6 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 			end
 		end
 
-		1 leftintable -=
 		4 wsleptr +=
 		1 wsli +=
 	end
@@ -332,33 +318,24 @@ fn MmWorkingSetTrimRange { startva endva process -- }
 	auto wsli
 	0 wsli!
 
-	auto tabptr
-	process@ PsProcess_WorkingSetListPointers + tabptr!
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
 
 	auto wsleptr
-	tabptr@@ wsleptr!
+	process@ PsProcess_MmHeader + @ MmProcessHeader_SIZEOF + wsleptr!
 
 	auto wsle
 
-	auto leftintable
-	MMWORKINGSETENTRIESPERTABLE leftintable!
-
 	auto maxi
-	process@ PsProcess_WorkingSetMaximumIndex + @ maxi!
+	phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ maxi!
 
 	if (maxi@ -1 ==)
 		return
 	end
 
 	while (wsli@ maxi@ <=)
-		if (process@ PsProcess_WorkingSetSize + @ ~~)
+		if (phdr@ MmProcessHeader_WorkingSetSize + @ ~~)
 			return
-		end
-
-		if (leftintable@ ~~)
-			4 tabptr +=
-			tabptr@@ wsleptr!
-			MMWORKINGSETENTRIESPERTABLE leftintable!
 		end
 
 		wsleptr@@ wsle!
@@ -378,7 +355,6 @@ fn MmWorkingSetTrimRange { startva endva process -- }
 			end
 		end
 
-		1 leftintable -=
 		4 wsleptr +=
 		1 wsli +=
 	end
@@ -399,7 +375,7 @@ fn MmWorkingSetEntryInsert { vaddr wsleptr process -- }
 	auto wsle
 	vaddr@ MMWORKINGSETENTRY_VALID | wsle!
 
-	1 process@ PsProcess_WorkingSetSize + +=
+	1 process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + +=
 
 	wsle@ wsleptr@!
 end
@@ -427,13 +403,16 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 
 	0 ok!
 
-	auto wssize
-	process@ PsProcess_WorkingSetSize + @ wssize!
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
 
-	if (wssize@ process@ PsProcess_WorkingSetMinimum + @ <)
+	auto wssize
+	phdr@ MmProcessHeader_WorkingSetSize + @ wssize!
+
+	if (wssize@ phdr@ MmProcessHeader_WorkingSetMinimum + @ <)
 		// below minimum, there's always room
 		1 room!
-	end elseif (wssize@ process@ PsProcess_WorkingSetMaximum + @ <)
+	end elseif (wssize@ phdr@ MmProcessHeader_WorkingSetMaximum + @ <)
 		// between minimum and maximum
 		if (MmEventLowMemory KeDispatchIsSignaled ~~)
 			1 room!
@@ -441,7 +420,7 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 	end else
 		// above maximum
 		if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
-			if (process@ PsProcess_PageFaultCount + @ process@ PsProcess_WorkingSetTrimFaultCount + @ - 50 >)
+			if (process@ PsProcess_PageFaultCount + @ phdr@ MmProcessHeader_WorkingSetTrimFaultCount + @ - 50 >)
 				1 room!
 			end
 		end
@@ -465,7 +444,7 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 			process@ // process
 			MmWorkingSetEntryRemove
 		end else
-			process@ PsProcess_WorkingSetFreeListHead + @ wsli!
+			phdr@ MmProcessHeader_WorkingSetFreeListHead + @ wsli!
 
 			if (wsli@ -1 ~=)
 				// yoink
@@ -490,9 +469,9 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 				end
 
 				if (wsle@ PAGENUMBERMASK ==)
-					-1 process@ PsProcess_WorkingSetFreeListHead + !
+					-1 phdr@ MmProcessHeader_WorkingSetFreeListHead + !
 				end else
-					wsle@ PAGESHIFT >> process@ PsProcess_WorkingSetFreeListHead + !
+					wsle@ PAGESHIFT >> phdr@ MmProcessHeader_WorkingSetFreeListHead + !
 				end
 			end else
 				// no free entries, we need to allocate a new working set
@@ -525,83 +504,6 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 end
 
 fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
-	// first we have to find the first zero pointer in the process
-	// PsProcess_WorkingSetListPointers array. if there is none, we've hit the
-	// capacity of the working set list data structure and must count that as
-	// a failed allocation.
-
-	// then we need to allocate the array and set the pointer in the process's
-	// WorkingSetListPointers array. then we need to initialize it by placing
-	// MMWORKINGSETENTRIESPERTABLE-1 of its entries on the free list,
-	// reserving the last one for our caller.
-
-	auto tabptr
-	process@ PsProcess_WorkingSetListPointers + tabptr!
-
-	auto count
-	WORKINGSETLISTCOUNT count!
-
-	0 wsli!
-
-	while (count@)
-		if (tabptr@@ ~~)
-			// found it
-
-			auto tab
-			MMWORKINGSETTABLESIZE // bytes
-			'MmWs' // tag
-			0 // flags
-			MmAllocWithTag ok! tab!
-
-			if (ok@)
-				return
-			end
-
-			0 tab@!
-
-			tab@ wsleptr!
-			tab@ tabptr@!
-
-			MMWORKINGSETENTRIESPERTABLE 1 - count!
-
-			auto last
-			-1 last!
-
-			auto iwsli
-			wsli@ 1 + iwsli!
-
-			4 tab +=
-
-			// initialize the free list
-
-			while (count@)
-				last@ PAGESHIFT << tab@!
-
-				iwsli@ last!
-				4 tab +=
-				1 iwsli +=
-				1 count -=
-			end
-
-			if (DEBUGCHECKS)
-				if (last@ -1 ==)
-					"MmWorkingSetArrayExpand\n" KeCrash
-				end
-			end
-
-			last@ process@ PsProcess_WorkingSetMaximumIndex + !
-			last@ process@ PsProcess_WorkingSetFreeListHead + !
-
-			0 wsleptr@!
-
-			return
-		end
-
-		MMWORKINGSETENTRIESPERTABLE wsli +=
-		4 tabptr +=
-		1 count -=
-	end
-
 	STATUS_NO_MEMORY ok!
 end
 
@@ -610,16 +512,19 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 
 	0 ok!
 
-	if (process@ PsProcess_WorkingSetMaximumIndex + @ -1 ==)
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
+
+	if (phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ -1 ==)
 		-1 ok!
 
 		return
 	end
 
 	auto hint
-	process@ PsProcess_WorkingSetReplacementIndex + @ hint!
+	phdr@ MmProcessHeader_WorkingSetReplacementIndex + @ hint!
 
-	if (hint@ process@ PsProcess_WorkingSetMaximumIndex + @ >)
+	if (hint@ phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ >)
 		0 hint!
 	end
 
@@ -634,7 +539,7 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 
 		if (i@ 0 ==)
 			hint@ wsli!
-			process@ PsProcess_WorkingSetMaximumIndex + @ 1 + endindex!
+			phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ 1 + endindex!
 		end elseif (hint@)
 			0 wsli!
 			hint@ endindex!
@@ -644,36 +549,22 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 			return
 		end
 
-		auto tabptr
-		process@ PsProcess_WorkingSetListPointers + wsli@ MMWORKINGSETENTRIESPERTABLE / 2 << + tabptr!
 
-		auto off
-		wsli@ MMWORKINGSETENTRIESPERTABLE % off!
-
-		tabptr@@ off@ 2 << + wsleptr!
+		phdr@ MmProcessHeader_SIZEOF + wsleptr!
+		wsli@ 2 << wsleptr +=
 
 		auto wsle
 
-		auto leftintable
-		MMWORKINGSETENTRIESPERTABLE off@ - leftintable!
-
 		while (wsli@ endindex@ <)
-			if (leftintable@ ~~)
-				4 tabptr +=
-				tabptr@@ wsleptr!
-				MMWORKINGSETENTRIESPERTABLE leftintable!
-			end
-
 			wsleptr@@ wsle!
 
 			if (wsle@ MMWORKINGSETENTRY_VALID &)
 				// found one
-				wsli@ 1 + process@ PsProcess_WorkingSetReplacementIndex + !
+				wsli@ 1 + phdr@ MmProcessHeader_WorkingSetReplacementIndex + !
 
 				return
 			end
 
-			1 leftintable -=
 			4 wsleptr +=
 			1 wsli +=
 		end
@@ -788,7 +679,7 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 	pfdbe@ MmEvictablePageDereference drop
 
 	auto oldcount
-	process@ PsProcess_WorkingSetSize + @ oldcount!
+	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @ oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -796,48 +687,37 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 		end
 	end
 
-	oldcount@ 1 - process@ PsProcess_WorkingSetSize + !
+	oldcount@ 1 - process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + !
 end
 
 fn MmWorkingSetEntryFindByIndex { wsli process -- wsleptr ok }
 	// look up a working set index in the working set and return the pointer.
 	// return -1 in ok if the index is beyond the end of valid indices.
 
-	if (process@ PsProcess_WorkingSetMaximumIndex + @ -1 ==)
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
+
+	if (phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ -1 ==)
 		-1 ok!
 		return
 	end
 
-	if (wsli@ process@ PsProcess_WorkingSetMaximumIndex + @ >)
+	if (wsli@ phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ >)
 		-1 ok!
 		return
 	end
 
 	0 ok!
 
-	auto ix
-	wsli@ MMWORKINGSETENTRIESPERTABLE / ix!
-
-	auto off
-	wsli@ MMWORKINGSETENTRIESPERTABLE % off!
-
-	auto tab
-	process@ PsProcess_WorkingSetListPointers + ix@ 2 << + @ tab!
-
-	if (DEBUGCHECKS)
-		if (tab@ ~~)
-			"MmWorkingSetEntryFindByIndex: no table despite being <= maximum index\n" KeCrash
-		end
-	end
-
-	tab@ off@ 2 << + wsleptr!
+	phdr@ MmProcessHeader_SIZEOF +
+	wsli@ 2 << + wsleptr!
 end
 
 fn MmWorkingSetEntryFree { wsli wsleptr process -- }
 	// place a working set entry on the free list.
 
-	process@ PsProcess_WorkingSetFreeListHead + @ PAGESHIFT << wsleptr@!
-	wsli@ process@ PsProcess_WorkingSetFreeListHead + !
+	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetFreeListHead + @ PAGESHIFT << wsleptr@!
+	wsli@ process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetFreeListHead + !
 end
 
 // this function is called by the balance set manager thread when free/standby
@@ -885,14 +765,16 @@ fn MmManageWorkingSets { -- success }
 		while (process@ count@ &&)
 			process@ PsProcess_GlobalListNext + @ nprocess!
 
-			if (process@ PsProcess_WorkingSetSize + @)
-				auto ok
+			auto ok
 
-				10 // timeout
-				process@ // processobject
-				MmWorkingSetLockTimeout ok!
+			10 // timeout
+			process@ // processobject
+			MmWorkingSetLockTimeout ok!
 
-				if (ok@ ~~)
+			if (ok@ ~~)
+				if (process@ PsProcess_SwappedOut + @)
+					process@ MmWorkingSetUnlock
+				end elseif (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
 					auto trimmed
 
 					dire@ // dire
@@ -915,6 +797,8 @@ fn MmManageWorkingSets { -- success }
 					trimmed@ totaltrimmed +=
 
 					trimmed@ pagecount -=
+				end else
+					process@ MmWorkingSetUnlock
 				end
 			end
 

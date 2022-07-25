@@ -24,6 +24,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+buffer MmSystemProcessHeader PAGESIZE
+
 fn MmProcessInitialize { sectionobject process -- ok }
 	// initialize virtual memory related fields
 
@@ -61,9 +63,21 @@ fn MmProcessInitialize { sectionobject process -- ok }
 
 	0 pagedarea@ PsProcessPaged_PTECountTableListHead + !
 
+	if (PsSystemProcess@ ~~)
+		MmSystemProcessHeader process@ PsProcess_MmHeader + !
+	end else
+		process@ MmProcessHeaderCreate ok! drop drop
+
+		if (ok@)
+			return
+		end
+	end
+
 	process@ MmWorkingSetListInitialize ok!
 
 	if (ok@)
+		process@ MmProcessHeaderDestroy
+
 		return
 	end
 
@@ -90,7 +104,7 @@ fn MmProcessInitialize { sectionobject process -- ok }
 	MmMapViewProcessObject ok! drop
 
 	if (ok@)
-		process@ MmWorkingSetListFree
+		process@ MmProcessHeaderDestroy
 		process@ MmProcessUnchargePageTables
 
 		return
@@ -120,7 +134,7 @@ fn MmProcessInitialize { sectionobject process -- ok }
 			end
 		end
 
-		process@ MmWorkingSetListFree
+		process@ MmProcessHeaderDestroy
 		process@ MmProcessUnchargePageTables
 
 		return
@@ -157,7 +171,7 @@ fn MmProcessInitialize { sectionobject process -- ok }
 			end
 		end
 
-		process@ MmWorkingSetListFree
+		process@ MmProcessHeaderDestroy
 		process@ MmProcessUnchargePageTables
 
 		return
@@ -208,7 +222,7 @@ fn MmProcessInitialize { sectionobject process -- ok }
 				end
 			end
 
-			process@ MmWorkingSetListFree
+			process@ MmProcessHeaderDestroy
 			process@ MmProcessUnchargePageTables
 
 			return
@@ -303,7 +317,7 @@ fn MmProcessUninitialize { process -- ok }
 	end
 
 	if (DEBUGCHECKS)
-		if (process@ PsProcess_WorkingSetSize + @)
+		if (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
 			"MmProcessUninitialize: unmapped all VADs yet working set size non-zero\n" KeCrash
 		end
 	end
@@ -327,7 +341,7 @@ fn MmProcessSwapOut { process -- }
 	process@ MmWorkingSetLock drop
 
 	process@ MmWorkingSetPurge
-	process@ MmWorkingSetListFree
+	process@ MmProcessHeaderDereference
 
 	process@ MmWorkingSetUnlock
 
@@ -339,14 +353,11 @@ end
 fn MmProcessSwapIn { process -- }
 	// entered at IPLDPC. must leave at IPLDPC.
 
-	0 process@ PsProcess_SwappedOut + !
-
 	// make the page directory resident again if it was swapped out.
 
 	IPLLOW KeIPLLower
 
 	auto ok
-
 	TRYFOREVER // pri
 	process@ // process
 	MmPageDirectoryReference ok!
@@ -355,7 +366,17 @@ fn MmProcessSwapIn { process -- }
 		ok@ "MmProcessSwapIn: failed to reference page directory (%i)\n" KeCrash
 	end
 
+	TRYFOREVER // pri
+	process@ // process
+	MmProcessHeaderReference ok!
+
+	if (ok@)
+		ok@ "MmProcessSwapIn: failed to reference process header (%i)\n" KeCrash
+	end
+
 	IPLDPC KeIPLRaise drop
+
+	0 process@ PsProcess_SwappedOut + !
 end
 
 fn MmProcessChargePageTables { startva endva process -- ok }

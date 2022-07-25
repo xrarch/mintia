@@ -33,8 +33,6 @@ struct PsProcess
 
 	4 ModifiedPages
 
-	4 VADTreeRoot
-
 	4 PinnedPageCount
 
 	4 PageFaultCount
@@ -68,6 +66,8 @@ struct PsProcessPaged
 	4 QuotaBlock
 
 	// virtual memory
+
+	4 VADTreeRoot
 
 	64 CommittedPageTablesBitmap // assumes 32-bit but this will have to change completely if we ever do a 64-bit port anyway
 	4 CommittedPageTablesCount

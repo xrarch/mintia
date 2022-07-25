@@ -14,6 +14,7 @@ struct MmProcessHeader
 	4 WorkingSetSize
 	4 WorkingSetMinimum
 	4 WorkingSetMaximum
+	4 WorkingSetQuota
 	4 WorkingSetTrimFaultCount
 
 	4 WorkingSetFreeListHead

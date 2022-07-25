@@ -130,6 +130,10 @@ const MMDIREPAGES           (MMNORMALTHRESH 1 -)
 
 const MMWORKINGSETDEFAULTMINIMUM 8
 const MMWORKINGSETDEFAULTMAXIMUM 64
+const MMWORKINGSETDEFAULTQUOTA   256
+
+const MMSYSTEMWORKINGSETDEFAULTMINIMUM 32
+const MMSYSTEMWORKINGSETDEFAULTMAXIMUM 100
 
 // a process will always be able to pin at least this many pages, no matter
 // what kind of load the system is undergoing.

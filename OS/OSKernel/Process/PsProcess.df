@@ -388,17 +388,82 @@ fn PsProcessSignalActivation { activationstatus -- ok }
 
 	activationstatus@ curproc@ PsProcess_ActivationStatus + !
 
-	0 // priboost
-	curproc@ PsProcess_ActivationEvent + // event
-	KeEventSignal
+	curproc@ PsProcessCreateDeleteLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto activationblock
+	curproc@ PsProcess_ActivationBlock + @ activationblock!
+
+	if (activationblock@ ~~)
+		-1 curproc@ PsProcess_ActivationBlock + !
+	end elseif (activationblock@ -1 ~=)
+		0 // priboost
+		activationblock@ PsProcessActivationBlock_Event + // event
+		KeEventSignal
+	end
+
+	curproc@ PsProcessCreateDeleteUnlock
 end
 
 fn PsProcessWaitForActivationObject { timeout processobject -- activationstatus ok }
+	auto activationblock
+
+	processobject@ PsProcessCreateDeleteLock ok!
+
+	if (ok@)
+		return
+	end
+
+	processobject@ PsProcess_ActivationBlock + @ activationblock!
+
+	if (activationblock@ ~~)
+		PsProcessActivationBlock_SIZEOF // bytes
+		'PsAc' // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! activationblock!
+
+		0 // signaled
+		OSEVENT_NOTIF // type
+		"PsProcessActivationEvent" // name
+		activationblock@ PsProcessActivationBlock_Event + // event
+		KeEventInitialize
+
+		0 activationblock@ PsProcessActivationBlock_References + !
+
+		activationblock@ processobject@ PsProcess_ActivationBlock + !
+	end elseif (activationblock@ -1 ==)
+		processobject@ PsProcessCreateDeleteUnlock
+
+		processobject@ PsProcess_ActivationStatus + @ activationstatus!
+
+		return
+	end
+
+	1 activationblock@ PsProcessActivationBlock_References + +=
+
+	processobject@ PsProcessCreateDeleteUnlock
+
 	USERMODE // waitmode
 	1 // alertable
 	timeout@ // timeout
-	processobject@ PsProcess_ActivationEvent + // object
+	activationblock@ PsProcessActivationBlock_Event + // object
 	KeThreadWaitForObject ok!
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+	processobject@ PsProcessCreateDeleteLock drop
+
+	1 activationblock@ PsProcessActivationBlock_References + -=
+
+	if (activationblock@ PsProcessActivationBlock_References + @ ~~)
+		activationblock@ MmFree
+		-1 processobject@ PsProcess_ActivationBlock + !
+	end
+
+	processobject@ PsProcessCreateDeleteUnlock
+	KeThreadCurrent@ KeThreadAcceptKill drop
 
 	if (ok@)
 		return

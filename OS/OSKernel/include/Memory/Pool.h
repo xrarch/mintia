@@ -31,6 +31,10 @@ externptr MmPagedHeapBytesUsedExternally
 externptr MmPagedHeapBytesUsedInternally
 externptr MmPagedHeapBytesUsedPeak
 
+const MMHEAPBLOCKSIZESHIFT 5
+const MMHEAPBLOCKMINSIZE   (1 MMHEAPBLOCKSIZESHIFT <<)
+const MMHEAPBLOCKSIZEMASK  (MMHEAPBLOCKMINSIZE 1 -)
+
 const MMHEAPSWIFTMAGIC  0x1DC0
 const MMHEAPFREEMAGIC   0xE433
 

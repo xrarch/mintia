@@ -1,5 +1,10 @@
 const WORKINGSETLISTCOUNT 8
 
+struct PsProcessActivationBlock
+	KeEvent_SIZEOF Event
+	4 References
+endstruct
+
 struct PsProcess
 	KeProcess_SIZEOF PCB
 
@@ -15,7 +20,7 @@ struct PsProcess
 
 	KeEvent_SIZEOF TerminationEvent
 
-	KeEvent_SIZEOF ActivationEvent
+	4 ActivationBlock
 	4 ActivationStatus
 
 	// console

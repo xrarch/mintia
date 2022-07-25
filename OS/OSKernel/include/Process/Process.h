@@ -11,11 +11,6 @@ struct PsProcess
 	4 GlobalListNext
 	4 GlobalListPrev
 
-	4 PID
-	4 ParentPID
-
-	4 CleanedUp
-
 	KeMutex_SIZEOF ThreadCreateDeleteMutex
 
 	KeEvent_SIZEOF TerminationEvent
@@ -28,27 +23,11 @@ struct PsProcess
 	4 ConsoleListNext
 	4 ConsoleListPrev
 
-	// memory management
-
-	4 QuotaBlock
-
-	// security
-
-	4 UID
-	4 GID
-	SePermissions_SIZEOF Permissions
-
-	// object manager
-
-	4 HandleTable
-
 	// virtual memory information
 
 	4 SwapOutNext
 	4 SwapOutPrev
 	4 SwappedOut
-
-	4 MappedMMIOCount
 
 	KeMutex_SIZEOF VADListMutex
 
@@ -81,10 +60,31 @@ struct PsProcessPaged
 	4 ActivationBlock
 	4 ActivationStatus
 
+	4 PID
+	4 ParentPID
+
+	4 CleanedUp
+
+	// security
+
+	4 UID
+	4 GID
+	SePermissions_SIZEOF Permissions
+
+	// object manager
+
+	4 HandleTable
+
+	// memory management
+
+	4 QuotaBlock
+
 	// virtual memory
 
 	64 CommittedPageTablesBitmap // assumes 32-bit but this will have to change completely if we ever do a 64-bit port anyway
 	4 CommittedPageTablesCount
+
+	4 MappedMMIOCount
 endstruct
 
 struct PsThread

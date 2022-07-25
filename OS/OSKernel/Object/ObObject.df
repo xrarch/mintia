@@ -30,7 +30,7 @@ end
 
 fn ObObjectCloseProcess { handle process -- ok }
 	auto handletable
-	process@ PsProcess_HandleTable + @ handletable!
+	process@ PsProcess_PagedArea + @ PsProcessPaged_HandleTable + @ handletable!
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLLOW ~=)
@@ -136,7 +136,7 @@ end
 
 fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	auto handletable
-	process@ PsProcess_HandleTable + @ handletable!
+	process@ PsProcess_PagedArea + @ PsProcessPaged_HandleTable + @ handletable!
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLLOW ~=)
@@ -161,7 +161,7 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	pheader@ ObPagedHeader_Flags + @ flags!
 
 	auto quotablock
-	0 quotablock!
+	process@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
 
 	auto pcharge
 	auto npcharge
@@ -177,8 +177,6 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 			if (flags@ OBFLAGS_PERMANENT & ~~)
 				// no quotablock and object isnt permanent; claim quota for
 				// current process
-
-				KeProcessCurrent PsProcess_QuotaBlock + @ quotablock!
 
 				pcharge@ // charge
 				quotablock@ // quotablock
@@ -208,9 +206,13 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 
 				quotablock@ npheader@ ObNonpagedHeader_QuotaBlock + !
 			end
+		end else
+			0 quotablock!
 		end
 
 		ipl@ KeIPLLower
+	end else
+		0 quotablock!
 	end
 
 	handletable@ ExHandleTableLock ok!
@@ -340,7 +342,7 @@ end
 
 fn ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 	auto handletable
-	process@ PsProcess_HandleTable + @ handletable!
+	process@ PsProcess_PagedArea + @ PsProcessPaged_HandleTable + @ handletable!
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLLOW ~=)
@@ -691,7 +693,7 @@ fn ObSetSecurity { uid gid permissions handle -- ok }
 
 		if (uid@ -1 ~=)
 			// changing UID
-			if (process@ PsProcess_UID + @ uid@ ~=)
+			if (process@ PsProcess_PagedArea + @ PsProcessPaged_UID + @ uid@ ~=)
 				// not setting to the same UID, forbidden
 				STATUS_FORBIDDEN_OPERATION ok!
 				return
@@ -700,7 +702,7 @@ fn ObSetSecurity { uid gid permissions handle -- ok }
 
 		if (gid@ -1 ~=)
 			// changing GID
-			if (process@ PsProcess_GID + @ gid@ ~=)
+			if (process@ PsProcess_PagedArea + @ PsProcessPaged_GID + @ gid@ ~=)
 				// not setting to the same GID, forbidden
 				STATUS_FORBIDDEN_OPERATION ok!
 				return
@@ -720,7 +722,8 @@ fn ObSetSecurity { uid gid permissions handle -- ok }
 	end
 
 	if (notadmin@)
-		if (object@ ObObjectPagedHeader ObPagedHeader_UID + @ process@ PsProcess_UID + @ ~=)
+		if (object@ ObObjectPagedHeader ObPagedHeader_UID + @
+			process@ PsProcess_PagedArea + @ PsProcessPaged_UID + @ ~=)
 			// not the owner of the object, forbidden
 			
 			object@ ObObjectDereferenceByPointer drop

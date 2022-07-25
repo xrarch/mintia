@@ -50,7 +50,7 @@ fn (ObTypeDeleteFunction) PsProcessObjectDelete { object -- }
 
 	// destroy PID
 
-	object@ PsProcess_PID + @ // handle
+	pagedarea@ PsProcessPaged_PID + @ // handle
 	PsProcessTable@ // handletable
 	0 // locked
 	ExHandleDelete ok! drop drop
@@ -67,17 +67,17 @@ fn (ObTypeDeleteFunction) PsProcessObjectDelete { object -- }
 
 	object@ MmPageDirectoryDestroy
 
-	object@ PsProcess_QuotaBlock + @ MmQuotaBlockDereference
+	pagedarea@ PsProcessPaged_QuotaBlock + @ MmQuotaBlockDereference
 
 	object@ KeProcessUninitialize
-
-	pagedarea@ MmFree
 
 	if (DEBUGCHECKS)
 		if (pagedarea@ PsProcessPaged_CommittedPageTablesCount + @)
 			"PsProcessObjectDelete: failed to decommit page tables\n" KeCrash
 		end
 	end
+
+	pagedarea@ MmFree
 end
 
 fn (ObTypeDeleteFunction) PsThreadObjectDelete { object -- }
@@ -111,7 +111,7 @@ fn (ObTypeDeleteFunction) PsThreadObjectDelete { object -- }
 	object@ KeThread_KernelStackBottom + @ MmKernelStackFree
 
 	KETHREADSTACKSIZE // charge
-	object@ KeThread_Process + @ PsProcess_QuotaBlock + @ // quotablock
+	object@ KeThread_Process + @ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
 	MmQuotaBlockUnchargeVM
 
 	object@ KeThread_Process + @ ObObjectDereferenceByPointer drop
@@ -160,17 +160,20 @@ fn PsReaperWorker { context1 context2 -- }
 end
 
 fn PsProcessCleanup { process -- }
-	if (process@ PsProcess_CleanedUp + @)
+	auto pagedarea
+	process@ PsProcess_PagedArea + @ pagedarea!
+
+	if (pagedarea@ PsProcessPaged_CleanedUp + @)
 		// process had a last thread that did all this already
 		return
 	end
 
-	1 process@ PsProcess_CleanedUp + !
+	1 pagedarea@ PsProcessPaged_CleanedUp + !
 
 	// destroy handle table
 
 	pointerof ObHandleDestroyFunction // enum func
-	process@ PsProcess_HandleTable + @ // handle table
+	pagedarea@ PsProcessPaged_HandleTable + @ // handle table
 	ExHandleTableDelete
 
 	// uninitialize virtual memory structures

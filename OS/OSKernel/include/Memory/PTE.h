@@ -1,7 +1,7 @@
 extern MmPTECreate { vaddr process -- pteaddr ok }
 extern MmPTEDelete { deref pteaddr vaddr process -- ok }
 
-extern MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
+extern MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 extern MmPTEDereference { pfdbe process -- }
 extern MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
 extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }
@@ -11,6 +11,16 @@ extern MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr old
 extern MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
 extern MmPTEValid { pteaddr -- valid }
 extern MmPTEIsZero { pte -- iszero }
+
+struct MmPTECountTableHeader
+	4 Next
+	4 Number
+endstruct
+
+const MMPTECOUNTTABLESIZE (32 MmAllocatedHeapBlock_SIZEOF - MmPTECountTableHeader_SIZEOF -)
+const MMPTECOUNTSPERTABLE (MMPTECOUNTTABLESIZE 2 /)
+
+extern MmProcessPTECountGet { pri vaddr process -- ptect ok }
 
 #ifdef LIMN2600
 

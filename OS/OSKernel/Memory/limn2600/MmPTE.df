@@ -40,12 +40,10 @@ fn MmPTECreate { vaddr process -- pteaddr ok }
 	// create an empty PTE for the vaddr in the given pagemap.
 	// if the page table exists, it is referenced. otherwise it is created and
 	// initialized with a refcount of 1.
+	// assumes VAD list mutex is held.
 
 	auto pagemap
 	process@ KeProcess_PageDirectory + @ IDENTITYSPACE | pagemap!
-
-	auto ptecount
-	process@ PsProcess_PageTableEntryCounts + vaddr@ 22 >> 1 << + ptecount!
 
 	0 ok!
 
@@ -61,6 +59,8 @@ fn MmPTECreate { vaddr process -- pteaddr ok }
 		end
 	end
 
+	auto ptecount
+
 	auto pt
 	ent@@ 5 >> PAGESHIFT << pt!
 
@@ -71,6 +71,15 @@ fn MmPTECreate { vaddr process -- pteaddr ok }
 
 		ipl@ KeIPLLower
 
+		0 // pri
+		vaddr@ // vaddr
+		process@ // process
+		MmProcessPTECountGet ok! ptecount!
+
+		if (ok@)
+			return
+		end
+
 		ent@ // pte
 		ZEROMUST // priority
 		MmAnonymousPageAlloc ok! pt! pfdbe!
@@ -80,6 +89,7 @@ fn MmPTECreate { vaddr process -- pteaddr ok }
 		end
 
 		1 ptecount@ si
+		ptecount@ pfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + !
 		0 pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
 		vaddr@ 22 >> pfdbe@ MmPageFrameEntryPageTable_PDENumber + !
 
@@ -101,7 +111,8 @@ fn MmPTECreate { vaddr process -- pteaddr ok }
 			end
 		end
 
-		ptecount@ gi 1 + ptecount@ si
+		pfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + @ gi 1 +
+		pfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + @ si
 
 		pfdbe@ MmEvictablePageReference drop
 
@@ -124,9 +135,6 @@ fn MmPTEDelete { deref pteaddr vaddr process -- ok }
 	auto pagemap
 	process@ KeProcess_PageDirectory + @ IDENTITYSPACE | pagemap!
 
-	auto ptecount
-	process@ PsProcess_PageTableEntryCounts + vaddr@ 22 >> 1 << + ptecount!
-
 	0 ok!
 
 	if (DEBUGCHECKS)
@@ -140,6 +148,9 @@ fn MmPTEDelete { deref pteaddr vaddr process -- ok }
 
 	auto pfdbe
 	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	auto ptecount
+	pfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + @ ptecount!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -180,7 +191,7 @@ fn MmPTEDelete { deref pteaddr vaddr process -- ok }
 	end
 end
 
-fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
+fn MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 	// works like MmVirtualToPTEAddress but will swap in PTEs that are swapped
 	// out and will return a referenced page table pfdbe.
 
@@ -197,6 +208,9 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 			vaddr@ "MmPTEReference: used on system address 0x%08x\n" KeCrash
 		end
 	end
+
+	auto pagemap
+	process@ KeProcess_PageDirectory + @ pagemap!
 
 	IDENTITYSPACE pagemap |=
 
@@ -241,9 +255,20 @@ fn MmPTEReference { pri vaddr pagemap -- pfdbe pteaddr ok }
 			return
 		end
 
+		auto ptecount
+		pri@ // pri
+		vaddr@ // vaddr
+		process@ // process
+		MmProcessPTECountGet ok! ptecount!
+
+		if (ok@)
+			"MmPTEReference: failed to get PTE count\n" KeCrash
+		end
+
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PAGETABLE |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
+		ptecount@ pfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + !
 		1 pfdbe@ MmPageFrameEntryPageTable_HoldCount + !
 		vaddr@ 22 >> pfdbe@ MmPageFrameEntryPageTable_PDENumber + !
 
@@ -290,7 +315,7 @@ fn MmPTEDereference { pfdbe process -- }
 
 	if (oldcount@ 1 ==)
 		auto ptecount
-		process@ PsProcess_PageTableEntryCounts + pfdbe@ MmPageFrameEntryPageTable_PDENumber + @ 1 << + ptecount!
+		pfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + @ ptecount!
 
 		if (ptecount@ gi ~~)
 			// perform deferred deletion of page table

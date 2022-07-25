@@ -39,7 +39,6 @@ fn MmProcessInitialize { sectionobject process -- ok }
 	0 process@ PsProcess_ModifiedPages + !
 
 	0 process@ PsProcess_PageFaultCount + !
-	0 process@ PsProcess_ThrottleFaultCount + !
 
 	0 process@ PsProcess_VADTreeRoot + !
 
@@ -60,10 +59,7 @@ fn MmProcessInitialize { sectionobject process -- ok }
 
 	0 pagedarea@ PsProcessPaged_CommittedPageTablesCount + !
 
-	process@ PsProcess_PageTableEntryCounts + // ptr
-	1024 // size
-	0 // word
-	memset
+	0 pagedarea@ PsProcessPaged_PTECountTableListHead + !
 
 	process@ MmWorkingSetListInitialize ok!
 
@@ -220,6 +216,66 @@ fn MmProcessInitialize { sectionobject process -- ok }
 	end
 end
 
+fn MmProcessPTECountGet { pri vaddr process -- ptect ok }
+	// assumes VAD list locked
+
+	0 ok!
+
+	auto ptn
+	vaddr@ PERPAGETABLESHIFT >> MMPTECOUNTSPERTABLE / ptn!
+
+	process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + @ ptect!
+
+	while (ptect@)
+		if (ptect@ MmPTECountTableHeader_Number + @ ptn@ ==)
+			break
+		end
+
+		ptect@ MmPTECountTableHeader_Next + @ ptect!
+	end
+
+	if (ptect@ ~~)
+		// create
+
+		MmPTECountTableHeader_SIZEOF MMPTECOUNTTABLESIZE + // bytes
+		'MmPC' // tag
+		pri@ CANBLOCK | // flags
+		MmAllocWithTag ok! ptect!
+
+		if (ok@)
+			return
+		end
+
+		process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + @ ptect@ MmPTECountTableHeader_Next + !
+		ptn@ ptect@ MmPTECountTableHeader_Number + !
+
+		ptect@ process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + !
+
+		ptect@ MmPTECountTableHeader_SIZEOF + // ptr
+		MMPTECOUNTTABLESIZE // size
+		0 // word
+		memset
+	end
+
+	ptect@ MmPTECountTableHeader_SIZEOF +
+	vaddr@ PERPAGETABLESHIFT >> MMPTECOUNTSPERTABLE % 1 << +
+	ptect!
+end
+
+fn MmProcessPTECountDestroy { process -- }
+	auto ptect
+	process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + @ ptect!
+
+	while (ptect@)
+		auto nptect
+		ptect@ MmPTECountTableHeader_Next + @ nptect!
+
+		ptect@ MmFree
+
+		nptect@ ptect!
+	end
+end
+
 fn MmProcessUninitialize { process -- ok }
 	// destroy all VADs, free page tables, etc
 
@@ -259,6 +315,7 @@ fn MmProcessUninitialize { process -- ok }
 	process@ MmWorkingSetListFree
 	process@ MmWorkingSetUnlock
 
+	process@ MmProcessPTECountDestroy
 	process@ MmProcessUnchargePageTables
 
 	KeThreadCurrent@ KeThreadAcceptKill drop

@@ -30,7 +30,7 @@ struct MmPageFrameEntryPageTable
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 SwapPTE
 	4 PrototypePTE
-	4 Context1
+	4 PTECountTableEntry
 	4 HoldCount
 	4 PDENumber
 endstruct

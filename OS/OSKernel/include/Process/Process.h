@@ -38,7 +38,6 @@ struct PsProcess
 	4 PinnedPageCount
 
 	4 PageFaultCount
-	4 ThrottleFaultCount
 
 	KeMutex_SIZEOF WorkingSetMutex
 
@@ -52,8 +51,6 @@ struct PsProcess
 	4 WorkingSetReplacementIndex
 
 	(WORKINGSETLISTCOUNT 4 *) WorkingSetListPointers
-
-	1024 PageTableEntryCounts
 endstruct
 
 struct PsProcessPaged
@@ -85,6 +82,8 @@ struct PsProcessPaged
 	4 CommittedPageTablesCount
 
 	4 MappedMMIOCount
+
+	4 PTECountTableListHead
 endstruct
 
 struct PsThread

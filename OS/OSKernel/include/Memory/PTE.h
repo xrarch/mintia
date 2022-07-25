@@ -28,6 +28,7 @@ extern MmProcessPTECountGet { pri vaddr process -- ptect ok }
 
 const PTE_V  1  // valid
 const PTE_W  2  // writable
+const PTE_D  2  // dirty
 const PTE_K  4  // kernel
 const PTE_NC 8  // non-cacheable
 const PTE_G  16 // global

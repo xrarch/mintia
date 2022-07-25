@@ -60,30 +60,59 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 		end
 	end
 
-	name@ // name
-	0 // flags
-	permissions@ // permissions
-	
-	// quotabias:
-	WORKINGSETLISTCOUNT MMWORKINGSETTABLESIZE * // working set list
-	// MMWORKINGSETDEFAULTMINIMUM PAGESHIFT << + // minimum working set
-
-	PsProcess_SIZEOF // bodysize
-	PsProcessObjectType@ // type
-	ObObjectCreate ok! processobject!
-
-	if (ok@)
-		return
-	end
+	auto paged
 
 	if (initial@)
+		name@ // name
+		0 // flags
+		permissions@ // permissions
+		
+		// npquotabias:
+		WORKINGSETLISTCOUNT MMWORKINGSETTABLESIZE * // working set list
+		// MMWORKINGSETDEFAULTMINIMUM PAGESHIFT << + // minimum working set
+
+		0 // pquotabias
+		PsProcess_SIZEOF PsProcessPaged_SIZEOF + // bodysize
+		PsProcessObjectType@ // type
+		ObObjectCreate ok! processobject!
+
+		if (ok@)
+			return
+		end
+
 		// memset the system process because some stuff won't get initialized
 
 		processobject@ // ptr
-		PsProcess_SIZEOF // size
+		PsProcess_SIZEOF PsProcessPaged_SIZEOF + // size
 		0 // word
 		memset
+
+		processobject@ PsProcess_SIZEOF + paged!
+	end else
+		name@ // name
+		0 // flags
+		permissions@ // permissions
+		
+		// npquotabias:
+		WORKINGSETLISTCOUNT MMWORKINGSETTABLESIZE * // working set list
+		// MMWORKINGSETDEFAULTMINIMUM PAGESHIFT << + // minimum working set
+
+		PsProcessPaged_SIZEOF MmChargeBytesGet // pquotabias
+		PsProcess_SIZEOF // bodysize
+		PsProcessObjectType@ // type
+		ObObjectCreate ok! processobject!
+
+		if (ok@)
+			return
+		end
+
+		PsProcessPaged_SIZEOF // bytes
+		'PrPg' // tag
+		PAGED // flags
+		MmAllocWithTag ok! paged!
 	end
+
+	paged@ processobject@ PsProcess_PagedArea + !
 
 	parentprocess@ PsProcess_UID + @ processobject@ PsProcess_UID + !
 	parentprocess@ PsProcess_GID + @ processobject@ PsProcess_GID + !
@@ -182,8 +211,8 @@ fn PsProcessCreateObject { sectionobject creationflags parentprocess permissions
 	processobject@ PsProcess_TerminationEvent +
 	KeEventInitialize
 
-	0 processobject@ PsProcess_ActivationBlock + !
-	0 processobject@ PsProcess_ActivationStatus + !
+	0 paged@ PsProcessPaged_ActivationBlock + !
+	0 paged@ PsProcessPaged_ActivationStatus + !
 
 	name@ // name
 	pid@ // asid
@@ -366,7 +395,8 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 	name@ // name
 	0 // flags
 	permissions@ // permissions
-	KETHREADSTACKSIZE // quotabias
+	KETHREADSTACKSIZE // npquotabias
+	0 // pquotabias
 	PsThread_SIZEOF // bodysize
 	PsThreadObjectType@ // type
 	ObObjectCreate ok! threadobject!

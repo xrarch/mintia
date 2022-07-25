@@ -42,20 +42,23 @@ fn MmProcessInitialize { sectionobject process -- ok }
 
 	0 process@ PsProcess_PinnedPageCount + !
 
-	0 process@ PsProcess_CommittedPageTablesCount + !
-
 	"PsProcessVADListMutex" // name
 	KERNELMODE // mode
 	process@ PsProcess_VADListMutex + // mutex
 	KeMutexInitialize
 
+	auto pagedarea
+	process@ PsProcess_PagedArea + @ pagedarea!
+
 	// size is 64 assuming a 32-bit address space, but this entire method of
 	// keeping track of page table commit will have to change with a 64-bit
 	// port anyway.
-	process@ PsProcess_CommittedPageTablesBitmap + // ptr
+	pagedarea@ PsProcessPaged_CommittedPageTablesBitmap + // ptr
 	64 // size
 	0 // word
 	memset
+
+	0 pagedarea@ PsProcessPaged_CommittedPageTablesCount + !
 
 	process@ PsProcess_PageTableEntryCounts + // ptr
 	1024 // size
@@ -314,8 +317,11 @@ fn MmProcessChargePageTables { startva endva process -- ok }
 	auto lastpt
 	endva@ PERPAGETABLESHIFT >> lastpt!
 
+	auto pagedarea
+	process@ PsProcess_PagedArea + @ pagedarea!
+
 	auto bmp
-	process@ PsProcess_CommittedPageTablesBitmap + bmp!
+	pagedarea@ PsProcessPaged_CommittedPageTablesBitmap + bmp!
 
 	auto quotablock
 	process@ PsProcess_QuotaBlock + @ quotablock!
@@ -349,7 +355,7 @@ fn MmProcessChargePageTables { startva endva process -- ok }
 			bmp@ firstpt@ 3 >> + gb 1 firstpt@ 7 & << |
 			bmp@ firstpt@ 3 >> + sb
 
-			1 process@ PsProcess_CommittedPageTablesCount + +=
+			1 pagedarea@ PsProcessPaged_CommittedPageTablesCount + +=
 		end
 
 		1 firstpt +=
@@ -360,20 +366,23 @@ fn MmProcessUnchargePageTables { process -- }
 	// uncharge quota for all the page tables the process committed in its
 	// lifetime.
 
-	process@ PsProcess_CommittedPageTablesCount + @ PAGESHIFT << // quota
+	auto pagedarea
+	process@ PsProcess_PagedArea + @ pagedarea!
+
+	pagedarea@ PsProcessPaged_CommittedPageTablesCount + @ PAGESHIFT << // quota
 	process@ PsProcess_QuotaBlock + @ // quotablock
 	MmQuotaBlockUnchargeVM
 
-	process@ PsProcess_CommittedPageTablesCount + @ PAGESHIFT << // quota
+	pagedarea@ PsProcessPaged_CommittedPageTablesCount + @ PAGESHIFT << // quota
 	process@ PsProcess_QuotaBlock + @ // quotablock
 	MmQuotaBlockUncharge
 
-	process@ PsProcess_CommittedPageTablesBitmap + // ptr
+	pagedarea@ PsProcessPaged_CommittedPageTablesBitmap + // ptr
 	64 // size
 	0 // word
 	memset
 
-	0 process@ PsProcess_CommittedPageTablesCount + !
+	0 pagedarea@ PsProcessPaged_CommittedPageTablesCount + !
 end
 
 fn MmThreadInitialize { thread -- ok }

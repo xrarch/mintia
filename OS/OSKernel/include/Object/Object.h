@@ -112,7 +112,7 @@ extern ObInitPhase1 { -- }
 
 extern ObHandleDestroyFunction { entryptr handle handletable -- ok }
 
-extern ObObjectCreate { name flags permissions quotabias bodysize type -- object ok }
+extern ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type -- object ok }
 extern ObObjectFree { object -- ok }
 extern ObObjectDeallocate { object -- }
 

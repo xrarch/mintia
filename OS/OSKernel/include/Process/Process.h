@@ -20,8 +20,7 @@ struct PsProcess
 
 	KeEvent_SIZEOF TerminationEvent
 
-	4 ActivationBlock
-	4 ActivationStatus
+	4 PagedArea
 
 	// console
 
@@ -75,10 +74,17 @@ struct PsProcess
 
 	(WORKINGSETLISTCOUNT 4 *) WorkingSetListPointers
 
+	1024 PageTableEntryCounts
+endstruct
+
+struct PsProcessPaged
+	4 ActivationBlock
+	4 ActivationStatus
+
+	// virtual memory
+
 	64 CommittedPageTablesBitmap // assumes 32-bit but this will have to change completely if we ever do a 64-bit port anyway
 	4 CommittedPageTablesCount
-
-	1024 PageTableEntryCounts
 endstruct
 
 struct PsThread

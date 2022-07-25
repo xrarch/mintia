@@ -2,6 +2,8 @@ externptr HALPlatformKernelPageDirectory
 
 #ifdef LIMN2600
 
+#define DIRTY_BIT_CAUSES_FAULT
+
 const KERNELSPACE   0x80000000
 const POOLSPACE     0xB8000000
 const IDENTITYSPACE 0xC0000000

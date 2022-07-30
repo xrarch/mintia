@@ -8,7 +8,7 @@ a3xBootDescriptor.bin: a3xBootDescriptor.s
 
 AisixFSBoot.bin: AisixFSBoot.s
 	$(AS) AisixFSBoot.s AisixFSBoot.bin
-	$(OBJTOOL) move AisixFSBoot.bin text=0x40000,data=text+text_size,bss=data+data_size
+	$(OBJTOOL) move AisixFSBoot.bin text=0x40000,bss=text+text_size
 	$(OBJTOOL) binary -nobss AisixFSBoot.bin
 
 cleanup:

@@ -1,0 +1,110 @@
+// implements a shared dynamic linking codebase. intended to be #include'd
+// when useful. functionality is switched by ifdefs (mmap vs. direct read,
+// etc) according to the needs of its consumer. any synchronization concerns
+// should be handled by the caller.
+
+#include "Common.h"
+#include "Module.h"
+
+var ComDLLListHead 0
+public ComDLLListHead
+
+var ComDLLListTail 0
+public ComDLLListTail
+
+fn ComDLLCreate { name -- dll ok }
+#ifdef  OSDLL
+	ComDLL_SIZEOF // bytes
+	OSHeapAllocate ok! dll!
+#elseif OSLOADER
+	ComDLL_SIZEOF // bytes
+	LdrMemoryAllocate ok! dll!
+#endif
+
+	if (ok@)
+		return
+	end
+
+	auto namelen
+	name@ strlen namelen!
+
+	auto namebuf
+
+#ifdef  OSDLL
+	namelen@ 1 + // bytes
+	OSHeapAllocate ok! namebuf!
+#elseif OSLOADER
+	namelen@ 1 + // bytes
+	LdrMemoryAllocate ok! namebuf!
+#endif
+
+	if (ok@)
+#ifdef OSDLL
+		dll@ OSHeapFree
+#endif
+
+		return
+	end
+
+	namebuf@ name@ strcpy
+
+	namebuf@ dll@ ComDLL_Name + !
+
+	0 dll@ ComDLL_Next + !
+	0 dll@ ComDLL_Prev + !
+
+	1 dll@ ComDLL_LoadCount + !
+
+	0 dll@ ComDLL_HeadVAddr + !
+	0 dll@ ComDLL_HeadLength + !
+
+	0 dll@ ComDLL_Timestamp + !
+	0 dll@ ComDLL_Base + !
+
+	0 dll@ ComDLL_LoadFunction + !
+	0 dll@ ComDLL_UnloadFunction + !
+
+	0 dll@ ComDLL_Flags + !
+end
+
+fn ComDLLDelete { dll -- }
+#ifdef OSDLL
+	dll@ ComDLL_Name + @ OSHeapFree
+	dll@ OSHeapFree
+#endif
+end
+
+fn ComDLLFindByName { name -- dll ok }
+	COMSTATUS_NOT_FOUND ok!
+
+	ComDLLListHead@ dll!
+
+	while (dll@)
+		if (dll@ ComDLL_Name + @ name@ strcmp)
+			0 ok!
+
+			return
+		end
+
+		dll@ ComDLL_Next + @ dll!
+	end
+end
+
+fn ComDLLLoad { flags name -- dll ok }
+	name@ ComDLLFindByName ok! dll!
+
+	if (ok@ ~~)
+		// already loaded, return
+
+		return
+	end
+
+	// not loaded. load it
+
+	auto handle
+	name@ ComDLLOpenFile ok! handle!
+
+	if (ok@)
+		return
+	end
+end

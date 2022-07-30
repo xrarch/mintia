@@ -12,5 +12,6 @@ cleanup:
 	make -C $(DBG_DIR) cleanup
 	make -C $(DRIVER_DIR) cleanup
 	make -C $(RTL_DIR) cleanup
+	make -C TestDLL cleanup
 	make -C SystemInit cleanup
 	make -C Commands cleanup

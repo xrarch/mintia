@@ -17,7 +17,7 @@ all: $(HAL)
 
 $(HAL): $(OBJ) ../HAL/HALhal.o ../limn2600/HALlimn2600.o
 	$(LD) $(HAL) L/rta3x/_boot.o $(OBJ) L/rta3x/cia3x.o ../HAL/HALhal.o ../limn2600/HALlimn2600.o -d $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(HAL) text=0x80101000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move $(HAL) base=0x80101000
 	$(OBJTOOL) dystrip $(HAL)
 
 %.o: %.df ./include/*.h ../include/*.h

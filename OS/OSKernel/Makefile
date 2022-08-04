@@ -17,7 +17,7 @@ all: $(SYSBINDIR)/OSKernel.exe
 $(SYSBINDIR)/OSKernel.exe: $(OBJ) ./Executive/limn2600/OSCallTrampolines.o
 	$(LD) $(SYSBINDIR)/OSKernel.exe $(OBJ) ./Executive/limn2600/OSCallTrampolines.o -d HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
 	$(OBJTOOL) move $(SYSBINDIR)/OSKernel.exe text=0x80001000,data=text+text_size+align,bss=data+data_size+align
-	$(OBJTOOL) dystrip $(SYSBINDIR)/OSKernel.exe
+	$(OBJTOOL) istrip $(SYSBINDIR)/OSKernel.exe
 
 Executive/limn2600/OSCallTrampolines.s: ../OSDLL/headers/OSCalls.h 
 	$(SYSTOOL) ../OSDLL/headers/OSCalls.h NO ./Executive/limn2600/OSCallTrampolines.s

@@ -69,5 +69,6 @@ const STATUS_NONPAGE_COMMIT_EXCEEDED -67
 const STATUS_TOO_MANY_SWAPFILES      -68
 const STATUS_ALREADY_ENQUEUED        -69
 const STATUS_NOT_ENQUEUED            -70
+const STATUS_STRIPPED_EXECUTABLE     -71
 
 extern OSStatusGetName { status -- name }

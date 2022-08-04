@@ -18,6 +18,7 @@ obj/OSDLL.dll: $(OBJ) $(SOBJ)
 	mkdir -p src
 	$(LD) obj/OSDLL.dll $(SOBJ) $(OBJ) L/dfrt/dfrt.f.o
 	$(OBJTOOL) move obj/OSDLL.dll mintiadll text=0x1000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) dystrip obj/OSDLL.dll
 
 %.o: %.df ./headers/* ./src/OSDLL.h
 	$(DC) $< $@ incdir=./headers/

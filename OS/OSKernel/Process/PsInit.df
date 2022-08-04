@@ -25,6 +25,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "../../Common/Module.h"
+
 var PsProcessObjectType 0
 public PsProcessObjectType
 
@@ -272,44 +274,6 @@ public PsOSDLLInformation
 var PsOSDLLFileObject 0
 public PsOSDLLFileObject
 
-struct LOFFHeader
-	4 Magic
-	4 SymbolTableOffset
-	4 SymbolCount
-	4 StringTableOffset
-	4 StringTableSize
-	4 TargetArchitecture
-	4 EntrySymbol
-	4 Stripped
-	4 ImportTableOffset
-	4 ImportCount
-	4 Timestamp
-	4 Fragment
-	12 Reserved2
-	4 TextHeader
-	4 DataHeader
-	4 BSSHeader
-endstruct
-
-struct LOFFSectionHeader
-	4 FixupTableOffset
-	4 FixupCount
-	4 SectionOffset
-	4 SectionSize
-	4 LinkedAddress
-endstruct
-
-struct LOFFSymbol
-	4 NameOffset
-	4 Section
-	4 Type
-	4 Value
-	4 ImportIndex
-endstruct
-
-const LOFFMAGIC  'LOF5'
-const LOFFGLOBAL 1
-
 fn PsOSDLLInit { -- }
 	auto info
 	PsOSDLLInformation info!
@@ -343,21 +307,43 @@ fn PsOSDLLInit { -- }
 		ok@ "PsOSDLLInit: failed to load head (%i)\n" KeCrash
 	end
 
+	// the first three mappable section headers are interpreted as text, data,
+	// and bss.
+
 	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
 
-	head@ LOFFHeader_TextHeader + @ head@ + sectionheader!
-	sectionheader@ LOFFSectionHeader_SectionOffset + @ info@ PsOSDLLInfo_TextOffset + !
-	sectionheader@ LOFFSectionHeader_SectionSize + @ info@ PsOSDLLInfo_TextSize + !
-	sectionheader@ LOFFSectionHeader_LinkedAddress + @ info@ PsOSDLLInfo_TextVAddr + !
+	auto count
+	head@ XLOFFHeader_SectionCount + @ count!
 
-	head@ LOFFHeader_DataHeader + @ head@ + sectionheader!
-	sectionheader@ LOFFSectionHeader_SectionOffset + @ info@ PsOSDLLInfo_DataOffset + !
-	sectionheader@ LOFFSectionHeader_SectionSize + @ info@ PsOSDLLInfo_DataSize + !
-	sectionheader@ LOFFSectionHeader_LinkedAddress + @ info@ PsOSDLLInfo_DataVAddr + !
+	auto i
+	0 i!
 
-	head@ LOFFHeader_BSSHeader + @ head@ + sectionheader!
-	sectionheader@ LOFFSectionHeader_SectionSize + @ info@ PsOSDLLInfo_BSSSize + !
-	sectionheader@ LOFFSectionHeader_LinkedAddress + @ info@ PsOSDLLInfo_BSSVAddr + !
+	while (count@)
+		if (i@ 3 >=)
+			break
+		end
+
+		if (sectionheader@ XLOFFSectionHeader_Flags + @ XLOFF_SECTIONFLAG_MAP &)
+			if (i@ 0 ==)
+				sectionheader@ XLOFFSectionHeader_DataOffset + @ info@ PsOSDLLInfo_TextOffset + !
+				sectionheader@ XLOFFSectionHeader_DataSize + @ info@ PsOSDLLInfo_TextSize + !
+				sectionheader@ XLOFFSectionHeader_VirtualAddress + @ info@ PsOSDLLInfo_TextVAddr + !
+			end elseif (i@ 1 ==)
+				sectionheader@ XLOFFSectionHeader_DataOffset + @ info@ PsOSDLLInfo_DataOffset + !
+				sectionheader@ XLOFFSectionHeader_DataSize + @ info@ PsOSDLLInfo_DataSize + !
+				sectionheader@ XLOFFSectionHeader_VirtualAddress + @ info@ PsOSDLLInfo_DataVAddr + !
+			end elseif (i@ 2 ==)
+				sectionheader@ XLOFFSectionHeader_DataSize + @ info@ PsOSDLLInfo_BSSSize + !
+				sectionheader@ XLOFFSectionHeader_VirtualAddress + @ info@ PsOSDLLInfo_BSSVAddr + !
+			end
+
+			1 i +=
+		end
+
+		1 count -=
+		XLOFFSectionHeader_SIZEOF sectionheader +=
+	end
 
 	auto addr
 
@@ -399,13 +385,13 @@ end
 
 fn PsOSDLLLoadHead { filehandle -- head ok }
 	auto loffheader
-	LOFFHeader_SIZEOF alloc loffheader!
+	XLOFFHeader_SIZEOF alloc loffheader!
 
 	auto bytesread
 
 	OSWAIT_TIMEOUTINFINITE // timeout
 	0 // flags
-	LOFFHeader_SIZEOF // length
+	XLOFFHeader_SIZEOF // length
 	loffheader@ // buffer
 	filehandle@ // filehandle
 	IOFileRead ok! bytesread!
@@ -414,23 +400,20 @@ fn PsOSDLLLoadHead { filehandle -- head ok }
 		ok@ "PsOSDLLLoadHead: couldn't read /mintia/OSDLL.dll header (%i)\n" KeCrash
 	end
 
-	if (bytesread@ LOFFHeader_SIZEOF <)
+	if (bytesread@ XLOFFHeader_SIZEOF <)
 		ok@ "PsOSDLLLoadHead: /mintia/OSDLL.dll short (%i)\n" KeCrash
 	end
 
-	if (loffheader@ LOFFHeader_Magic + @ LOFFMAGIC ~=)
-		loffheader@ LOFFHeader_Magic + @ "PsOSDLLLoadHead: /mintia/OSDLL.dll corrupted (0x%08x)\n" KeCrash
+	if (loffheader@ XLOFFHeader_Magic + @ XLOFF_MAGIC ~=)
+		loffheader@ XLOFFHeader_Magic + @ "PsOSDLLLoadHead: /mintia/OSDLL.dll corrupted (0x%08x)\n" KeCrash
 	end
 
-	if (loffheader@ LOFFHeader_TargetArchitecture + @ 5 ~=)
-		// XXX portability issue: this value is specific to limn2600...
-		// though I guess LOFF is a giant portability issue already.
-
+	if (loffheader@ XLOFFHeader_TargetArchitecture + @ XLOFF_ARCHITECTURE ~=)
 		"PsOSDLLLoadHead: /mintia/OSDLL.dll is not for this architecture\n" KeCrash
 	end
 
 	auto headsz
-	loffheader@ LOFFHeader_BSSHeader + @ LOFFSectionHeader_SIZEOF + headsz!
+	loffheader@ XLOFFHeader_HeadLength + @ headsz!
 
 	headsz@ PsOSDLLInformation PsOSDLLInfo_HeadSize + !
 
@@ -470,32 +453,32 @@ end
 
 fn PsOSDLLFindFunction { name textbase head -- addr ok }
 	auto ptr
-	head@ LOFFHeader_SymbolTableOffset + @ head@ + ptr!
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + ptr!
 
 	auto stringtable
-	head@ LOFFHeader_StringTableOffset + @ head@ + stringtable!
+	head@ XLOFFHeader_StringTableOffset + @ head@ + stringtable!
 
 	auto i
 	0 i!
 
 	auto count
-	head@ LOFFHeader_SymbolCount + @ count!
+	head@ XLOFFHeader_SymbolCount + @ count!
 
 	0 ok!
 
 	while (i@ count@ <)
-		if (ptr@ LOFFSymbol_Type + @ LOFFGLOBAL ==)
+		if (ptr@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
 			auto sname
-			ptr@ LOFFSymbol_NameOffset + @ stringtable@ + sname!
+			ptr@ XLOFFSymbol_NameOffset + @ stringtable@ + sname!
 
 			if (sname@ name@ strcmp)
-				ptr@ LOFFSymbol_Value + @ textbase@ + addr!
+				ptr@ XLOFFSymbol_Value + @ textbase@ + addr!
 
 				return
 			end
 		end
 
-		LOFFSymbol_SIZEOF ptr +=
+		XLOFFSymbol_SIZEOF ptr +=
 		1 i +=
 	end
 

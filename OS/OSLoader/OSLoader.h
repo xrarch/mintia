@@ -1,4 +1,4 @@
-#include "<inc>/OSLoaderGlobal.h"
+#define OSLOADER
 
 extern LdrMain { -- ret }
 extern LdrCrash { ... fmt -- }
@@ -58,6 +58,7 @@ const LDRSTATUS_NOT_A_DIRECTORY       -10
 const LDRSTATUS_IS_A_DIRECTORY        -11
 const LDRSTATUS_BAD_EXECUTABLE        -12
 const LDRSTATUS_EXEC_NOT_FOR_ARCH     -13
+const LDRSTATUS_INVALID_ARGUMENT      -14
 
 const LDRMEM_CACHED       0
 const LDRMEM_NONCACHED    1
@@ -135,16 +136,12 @@ externptr LdrBootResourcesListHead
 
 extern LdrBootResourcesLoadAll { -- }
 
-externptr LdrDLLListHead
-
-extern LdrGetSymbolAddress { name dll -- address ok }
-extern LdrModuleLoad { flags name -- dll ok }
-
-extern LdrDoFixup { ptr value type -- ok }
-
 extern LdrBootDriversLoadAll { -- }
 extern LdrBootDriverLoad { flags name -- dll ok }
 
 extern LdrPlatformBootDriversLoadAll { -- }
 
 extern LdrPlatformStartSystem { -- }
+
+#include "../Common/Common.h"
+#include "<inc>/OSLoaderGlobal.h"

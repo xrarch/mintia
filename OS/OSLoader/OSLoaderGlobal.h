@@ -1,3 +1,5 @@
+#include "../Common/Module.h"
+
 struct LdrMemoryDescriptor
 	4 Next
 
@@ -52,24 +54,6 @@ struct LdrBootResource
 	4 Data
 endstruct
 
-struct LdrModule
-	4 Next
-
-	64 Name
-
-	4 HeadVAddr
-	4 HeadLength
-
-	4 DriverInit
-
-	4 Timestamp
-	4 Base
-
-	4 Format
-
-	4 Flags
-endstruct
-
 const OSLOADERMEM_FREE        1 // not used by anything
 const OSLOADERMEM_RECLAIMABLE 2 // used by firmware and bootloader
 const OSLOADERMEM_USED        3 // needed by OS at runtime
@@ -79,5 +63,3 @@ const OSLOADERMAJOR 3
 const OSLOADERMINOR 0
 
 const OSBOOTFBFORMAT_AB5G5R5 1
-
-const LDRMODULEFORMAT_LOFF   1

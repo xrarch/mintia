@@ -3,8 +3,10 @@
 // etc) according to the needs of its consumer. any synchronization concerns
 // should be handled by the caller.
 
-#include "Common.h"
-#include "Module.h"
+// defined consumers are currently: OSDLL, OSLoader
+
+// #include "Common.h"
+// #include "Module.h"
 
 var ComDLLListHead 0
 public ComDLLListHead
@@ -13,10 +15,11 @@ var ComDLLListTail 0
 public ComDLLListTail
 
 fn ComDLLCreate { name -- dll ok }
-#ifdef  OSDLL
+#ifdef OSDLL
 	ComDLL_SIZEOF // bytes
 	OSHeapAllocate ok! dll!
-#elseif OSLOADER
+#endif
+#ifdef OSLOADER
 	ComDLL_SIZEOF // bytes
 	LdrMemoryAllocate ok! dll!
 #endif
@@ -30,12 +33,15 @@ fn ComDLLCreate { name -- dll ok }
 
 	auto namebuf
 
-#ifdef  OSDLL
+#ifdef OSDLL
 	namelen@ 1 + // bytes
 	OSHeapAllocate ok! namebuf!
-#elseif OSLOADER
+#endif
+#ifdef OSLOADER
 	namelen@ 1 + // bytes
 	LdrMemoryAllocate ok! namebuf!
+
+	IDENTITYSPACE namebuf |=
 #endif
 
 	if (ok@)
@@ -59,10 +65,13 @@ fn ComDLLCreate { name -- dll ok }
 	0 dll@ ComDLL_HeadLength + !
 
 	0 dll@ ComDLL_Timestamp + !
+
 	0 dll@ ComDLL_Base + !
+	0 dll@ ComDLL_End + !
 
 	0 dll@ ComDLL_LoadFunction + !
-	0 dll@ ComDLL_UnloadFunction + !
+
+	-1 dll@ ComDLL_TextSectionIndex + !
 
 	0 dll@ ComDLL_Flags + !
 end
@@ -79,6 +88,10 @@ fn ComDLLFindByName { name -- dll ok }
 
 	ComDLLListHead@ dll!
 
+	LdrModuleNameBuffer
+	name@
+	strcpy
+
 	while (dll@)
 		if (dll@ ComDLL_Name + @ name@ strcmp)
 			0 ok!
@@ -90,6 +103,706 @@ fn ComDLLFindByName { name -- dll ok }
 	end
 end
 
+fn ComDLLUndoImports { upto dll -- }
+	// undo all the imports in this module, up to (and not including) the
+	// index given in upto.
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	if (upto@ -1 ==)
+		head@ XLOFFHeader_ImportCount + @ upto!
+	end
+
+	auto import
+	head@ XLOFFHeader_ImportTableOffset + @ head@ + import!
+
+	while (upto@)
+		import@ XLOFFImport_NameOffset + @ ComDLLUnload
+
+		1 upto -=
+		XLOFFImport_SIZEOF import +=
+	end
+end
+
+fn ComDLLDoFixup { ptr value type -- ok }
+	0 ok!
+
+#ifdef LIMN2600
+	if (type@ XLOFF_RELOC_LIMN2500_LONG ==)
+		value@ ptr@!
+	end elseif (type@ XLOFF_RELOC_LIMN2500_ABSJ ==)
+		ptr@@ 0x7 & value@ 2 >> 3 << | ptr@!
+	end elseif (type@ XLOFF_RELOC_LIMN2500_LA ==)
+		value@ 0xFFFF0000 & ptr@@ 0xFFFF & | ptr@!
+		value@ 0xFFFF & 16 << ptr@ 4 + @ 0xFFFF & | ptr@ 4 + !
+	end elseif (type@ XLOFF_RELOC_LIMN2600_FAR_INT ==)
+		value@ 0xFFFF0000 & ptr@@ 0xFFFF & | ptr@!
+		value@ 0xFFFF & 1 >> 16 << ptr@ 4 + @ 0xFFFF & | ptr@ 4 + !
+	end elseif (type@ XLOFF_RELOC_LIMN2600_FAR_LONG ==)
+		value@ 0xFFFF0000 & ptr@@ 0xFFFF & | ptr@!
+		value@ 0xFFFF & 2 >> 16 << ptr@ 4 + @ 0xFFFF & | ptr@ 4 + !
+	end else
+		COMSTATUS_BAD_EXECUTABLE ok!
+	end
+#endif
+end
+
+fn ComDLLProcessSectionRelocations { sectionheader dll -- ok }
+	0 ok!
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto reloccount
+	sectionheader@ XLOFFSectionHeader_RelocCount + @ reloccount!
+
+	auto reloc
+	sectionheader@ XLOFFSectionHeader_RelocTableOffset + @ head@ + reloc!
+
+	auto symboltable
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symboltable!
+
+	auto sectiontable
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectiontable!
+
+	auto base
+	sectionheader@ XLOFFSectionHeader_VirtualAddress + @ base!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	while (reloccount@)
+		auto symbol
+		reloc@ XLOFFRelocation_SymbolIndex + @ XLOFFSymbol_SIZEOF * symboltable@ + symbol!
+
+		auto value
+
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_EXTERN ==)
+			if (head@ XLOFFHeader_Flags + @ XLOFF_FLAG_FRAGMENT & ~~)
+				COMSTATUS_BAD_EXECUTABLE ok!
+				return
+			end
+
+			// search all the modules to try to resolve this extern.
+			// OSDLL isn't supposed to be able to get here since this is used
+			// for a weird linking trick with Dragonfruit.dll.
+
+			0 value!
+
+#ifdef OSLOADER
+			auto sdll
+			ComDLLListHead@ sdll!
+
+			while (sdll@)
+				symbol@ XLOFFSymbol_NameOffset + @ strtab@ + // name
+				sdll@ // dll
+				ComDLLGetSymbolAddress ok! value!
+
+				if (ok@ ~~)
+					break
+				end else
+					0 value!
+				end
+
+				sdll@ ComDLL_Next + @ sdll!
+			end
+
+			if (value@ ~~)
+				LdrModuleNameBuffer // dest
+				symbol@ XLOFFSymbol_NameOffset + @ strtab@ + // src
+				strcpy
+
+				dll@ ComDLL_Name + @
+				LdrModuleNameBuffer
+				"symbol '%s' not found, referenced by %s\n" Printf
+
+				return
+			end
+
+			value@ symbol@ XLOFFSymbol_Value + !
+			XLOFF_SYMTYPE_RESOLVED symbol@ XLOFFSymbol_TypeB + sb
+#endif
+		end elseif (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_RESOLVED ==)
+			if (head@ XLOFFHeader_Flags + @ XLOFF_FLAG_FRAGMENT & ~~)
+				COMSTATUS_BAD_EXECUTABLE ok!
+				return
+			end
+
+			symbol@ XLOFFSymbol_Value + @ value!
+		end else
+			auto q
+			symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * sectiontable@ + q!
+
+			symbol@ XLOFFSymbol_Value + @ q@ XLOFFSectionHeader_VirtualAddress + @ + value!
+		end
+
+		reloc@ XLOFFRelocation_Offset + @ base@ + // ptr
+		value@ // value
+		reloc@ XLOFFRelocation_RelocTypeI + gi // type
+		ComDLLDoFixup ok!
+
+		if (ok@)
+			return
+		end
+
+		1 reloccount -=
+		XLOFFRelocation_SIZEOF reloc +=
+	end
+end
+
+fn ComDLLProcessImportFixups { import dllp dll -- ok }
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto fixupcount
+	import@ XLOFFImport_FixupCount + @ fixupcount!
+
+	auto fixup
+	import@ XLOFFImport_FixupTableOffset + @ head@ + fixup!
+
+	auto sectiontable
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectiontable!
+
+	auto symboltable
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symboltable!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	0 ok!
+
+	while (fixupcount@)
+		auto sectionheader
+		fixup@ XLOFFFixup_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * sectiontable@ + sectionheader!
+
+		auto base
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ base!
+
+		auto symbol
+		fixup@ XLOFFFixup_SymbolIndex + @ XLOFFSymbol_SIZEOF * symboltable@ + symbol!
+
+		auto value
+		symbol@ XLOFFSymbol_Value + @ value!
+
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_RESOLVED ~=)
+			// resolve the symbol
+
+			symbol@ XLOFFSymbol_NameOffset + @ strtab@ + // name
+			dllp@ // dll
+			ComDLLGetSymbolAddress ok! value!
+
+			if (ok@)
+#ifdef OSDLL
+				if (DLLProcessInit@)
+					dllp@ ComDLL_Name + @
+					symbol@ XLOFFSymbol_NameOffset + @ strtab@ +
+					dll@ ComDLL_Name + @
+					"LINK ERROR: %s: couldn't find symbol '%s' in '%s'\n"
+					OSGetStdErr FPrintf
+				end
+#endif
+#ifdef OSLOADER
+				LdrModuleNameBuffer // dest
+				symbol@ XLOFFSymbol_NameOffset + @ strtab@ + // src
+				strcpy
+
+				LdrModuleNameBuffer
+				"symbol '%s' not found" Printf
+
+				dll@ ComDLL_Name + @
+				dllp@ ComDLL_Name + @
+				" in %s, referenced by %s\n" Printf
+#endif
+
+				return
+			end
+
+			value@ symbol@ XLOFFSymbol_Value + !
+			XLOFF_SYMTYPE_RESOLVED symbol@ XLOFFSymbol_TypeB + sb
+		end
+
+		fixup@ XLOFFFixup_Offset + @ base@ + // ptr
+		value@ // value
+		fixup@ XLOFFFixup_RelocTypeI + gi // type
+		ComDLLDoFixup ok!
+
+		if (ok@)
+			return
+		end
+
+		XLOFFFixup_SIZEOF fixup +=
+		1 fixupcount -=
+	end
+end
+
+fn ComDLLProcessImports { dll -- ok }
+	// iterate import table and recursively load any modules this one depends
+	// upon.
+
+	0 ok!
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto count
+	head@ XLOFFHeader_ImportCount + @ count!
+
+	auto import
+	head@ XLOFFHeader_ImportTableOffset + @ head@ + import!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	auto rebased
+
+	auto i
+	0 i!
+
+	while (i@ count@ <)
+		auto dllp
+
+		0 // flags
+		import@ XLOFFImport_NameOffset + @ strtab@ + // name
+		ComDLLLoad ok! dllp!
+
+		if (ok@)
+			// failed to load dependency
+			i@ dll@ ComDLLUndoImports
+			return
+		end
+
+		// remember import DLL by stashing it in the name field
+		dllp@ import@ XLOFFImport_NameOffset + !
+
+		auto headp
+		dllp@ ComDLL_HeadVAddr + @ headp!
+
+		if (dllp@ ComDLL_Base + @ import@ XLOFFImport_ExpectedBase + @ ~=)
+			1 rebased!
+		end elseif (dllp@ ComDLL_Flags + @ COMDLLFLAG_RELOCATE &)
+			1 rebased!
+		end elseif (dllp@ ComDLL_Timestamp + @ import@ XLOFFImport_ExpectedTimestamp + @ ~=)
+			1 rebased!
+		end else
+			0 rebased!
+		end
+
+		if (rebased@)
+			if (head@ XLOFFHeader_Flags + @ XLOFF_FLAG_FSTRIP &)
+				// we were stripped of our import fixups, can't do them.
+				COMSTATUS_STRIPPED_EXECUTABLE ok!
+			end elseif (headp@ XLOFFHeader_Flags + @ XLOFF_FLAG_GSTRIP &)
+				// it was stripped of its global symbols, can't resolve our
+				// fixups.
+				COMSTATUS_STRIPPED_EXECUTABLE ok!
+			end
+
+			if (ok@)
+				i@ dll@ ComDLLUndoImports
+				return
+			end
+
+			// perform import fixups
+
+			import@ // import
+			dllp@ // dllp
+			dll@ // dll
+			ComDLLProcessImportFixups ok!
+
+			if (ok@)
+				i@ dll@ ComDLLUndoImports
+
+				return
+			end
+		end
+
+		XLOFFImport_SIZEOF import +=
+		1 i +=
+	end
+end
+
+fn ComDLLUnmap { upto dll -- }
+	// unmap all the sections in this module, up to (and not including) the
+	// index given in upto.
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	if (upto@ -1 ==)
+		head@ XLOFFHeader_SectionCount + @ upto!
+	end
+
+	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+	while (upto@)
+		if (sectionheader@ XLOFFSectionHeader_Flags + @ XLOFF_SECTIONFLAG_MAP &)
+			if (sectionheader@ XLOFFSectionHeader_DataSize + @)
+#ifdef OSDLL
+				sectionheader@ XLOFFSectionHeader_DataSize + @ // length
+				sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // vaddr
+				OSCURRENTPROCESS // processhandle
+				OSUnmapView drop
+#endif
+			end
+		end
+
+		XLOFFSectionHeader_SIZEOF sectionheader +=
+		1 upto -=
+	end
+end
+
+fn ComDLLMapSection { index sectionheader handle dll -- ok }
+	0 ok!
+
+	if (sectionheader@ XLOFFSectionHeader_DataSize + @ ~~)
+		return
+	end
+
+	auto flags
+	sectionheader@ XLOFFSectionHeader_Flags + @ flags!
+
+	if (flags@ XLOFF_SECTIONFLAG_TEXT &)
+		if (dll@ ComDLL_TextSectionIndex + @ -1 ==)
+			index@ dll@ ComDLL_TextSectionIndex + !
+		end
+	end
+
+		sectionheader@ XLOFFSectionHeader_DataOffset + @
+		sectionheader@ XLOFFSectionHeader_DataSize + @ // length
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // startva
+		flags@
+		"flags=%x startva=%x length=%x offset=%x " Printf
+
+	auto realva
+
+	if (flags@ XLOFF_SECTIONFLAG_BSS &)
+#ifdef OSDLL
+		sectionheader@ XLOFFSectionHeader_DataSize + @ // length
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // startva
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+		0 // flags
+		OSAllocate ok! realva!
+#endif
+#ifdef OSLOADER
+		sectionheader@ XLOFFSectionHeader_DataSize + @ PAGEOFFSETMASK + PAGESHIFT >> // pages
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // prefva
+		0 // fixed
+		OSLOADERMEM_USED // type
+		LdrMemoryAllocatePhysicalRangeAndMap ok! realva!
+
+		if (ok@)
+			return
+		end
+
+		realva@ // ptr
+		sectionheader@ XLOFFSectionHeader_DataSize + @ // size
+		0 // word
+		memset
+#endif
+	end else
+#ifdef OSDLL
+		auto pageprot
+		PAGEACCESS_READ pageprot!
+
+		if (flags@ XLOFF_SECTIONFLAG_READONLY & ~~)
+			PAGEACCESS_WRITECOPY pageprot |=
+		end
+
+		sectionheader@ XLOFFSectionHeader_DataSize + @ // length
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // startva
+		sectionheader@ XLOFFSectionHeader_DataOffset + @ // sectionoffset
+		handle@ // mappedhandle
+		OSCURRENTPROCESS // processhandle
+		pageprot@ // pageprotection
+		0 // flags
+		OSMapView ok! realva!
+#endif
+#ifdef OSLOADER
+		sectionheader@ XLOFFSectionHeader_DataSize + @ PAGEOFFSETMASK + PAGESHIFT >> // pages
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // prefva
+		0 // fixed
+		OSLOADERMEM_USED // type
+		LdrMemoryAllocatePhysicalRangeAndMap ok! realva!
+
+		if (ok@)
+			return
+		end
+
+		sectionheader@ XLOFFSectionHeader_DataSize + @ // length
+		realva@ // buf
+		sectionheader@ XLOFFSectionHeader_DataOffset + @ // offset
+		handle@ // file
+		LdrFileRead ok! drop
+
+		if (ok@)
+			return
+		end
+#endif
+	end
+
+	realva@ "realva=%x\n" Printf
+
+	if (realva@ sectionheader@ XLOFFSectionHeader_VirtualAddress + @ ~=)
+		// couldn't map at preferred address, mark module for internal
+		// relocation and update header field.
+
+		COMDLLFLAG_RELOCATE dll@ ComDLL_Flags + |=
+		realva@ sectionheader@ XLOFFSectionHeader_VirtualAddress + !
+	end
+
+	if (dll@ ComDLL_Base + @ ~~)
+		realva@ dll@ ComDLL_Base + !
+	end
+
+	if (realva@ sectionheader@ XLOFFSectionHeader_DataSize + @ +
+		dll@ ComDLL_End + @ >=)
+		realva@ sectionheader@ XLOFFSectionHeader_DataSize + @ + dll@ ComDLL_End + !
+	end
+end
+
+fn ComDLLMap { handle dll -- ok }
+	0 ok!
+
+#ifdef OSDLL
+	if (dll@ ComDLL_Name + @ "OSDLL.dll" strcmp)
+		return
+	end
+#endif
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+	auto sectioncount
+	head@ XLOFFHeader_SectionCount + @ sectioncount!
+
+	auto i
+	0 i!
+
+	while (i@ sectioncount@ <)
+		if (sectionheader@ XLOFFSectionHeader_Flags + @ XLOFF_SECTIONFLAG_MAP &)
+			i@ // index
+			sectionheader@ // sectionheader
+			handle@ // handle
+			dll@ // dll
+			ComDLLMapSection ok!
+
+			if (ok@)
+				i@ dll@ ComDLLUnmap
+
+				return
+			end
+		end
+
+		XLOFFSectionHeader_SIZEOF sectionheader +=
+		1 i +=
+	end
+end
+
+fn ComDLLGetSymbolByAddress { address dll -- symbase symname symbol ok }
+	if (address@ dll@ ComDLL_Base + @ <)
+		COMSTATUS_NO_SYMBOL ok!
+		return
+	end
+
+	if (address@ dll@ ComDLL_End + @ >=)
+		COMSTATUS_NO_SYMBOL ok!
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectiontable
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectiontable!
+
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ XLOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	auto lastsym
+	0 lastsym!
+
+	COMSTATUS_NO_SYMBOL ok!
+
+	while (i@ count@ <)
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
+			auto sectionheader
+			sectiontable@ symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * + sectionheader!
+
+			auto sbase
+			symbol@ XLOFFSymbol_Value + @ sectionheader@ XLOFFSectionHeader_VirtualAddress + @ + sbase!
+
+			if (address@ sbase@ >=)
+				symbol@ XLOFFSymbol_NameOffset + @ symname!
+
+				if (symname@ 0xFFFFFFFF ==)
+					0 symname!
+				end else
+					strtab@ symname +=
+				end
+
+				symbol@ lastsym!
+				sbase@ symbase!
+			end elseif (address@ sbase@ <)
+				if (lastsym@)
+					0 ok!
+				end
+
+				lastsym@ symbol!
+
+				return
+			end
+		end
+
+		XLOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+
+	if (lastsym@)
+		0 ok!
+	end
+
+	lastsym@ symbol!
+end
+
+fn ComDLLGetSymbol { name dll -- symbol ok }
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ XLOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	COMSTATUS_NO_SYMBOL ok!
+
+	while (i@ count@ <)
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
+			auto sname
+			symbol@ XLOFFSymbol_NameOffset + @ sname!
+
+			if (sname@ 0xFFFFFFFF ~=)
+				strtab@ sname +=
+
+				if (sname@ name@ strcmp)
+					0 ok!
+					return
+				end
+			end
+		end
+
+		XLOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+end
+
+fn ComDLLGetSymbolAddress { name dll -- address ok }
+	auto symbol
+	name@ dll@ ComDLLGetSymbol ok! symbol!
+
+	if (ok@)
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+	symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * sectionheader +=
+
+	symbol@ XLOFFSymbol_Value + @ address!
+
+	sectionheader@ XLOFFSectionHeader_VirtualAddress + @ address +=
+end
+
+fn ComDLLRemapText { dll -- }
+	auto text
+	dll@ ComDLL_TextSectionIndex + @ text!
+
+	if (text@ -1 ==)
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	text@ XLOFFSectionHeader_SIZEOF * head@ XLOFFHeader_SectionTableOffset + @ + head@ + text!
+
+#ifdef OSDLL
+	ACCESS_READ ACCESS_EXEC | // pageprotection
+	text@ XLOFFSectionHeader_DataSize + @ // length
+	text@ XLOFFSectionHeader_VirtualAddress + @ // vaddr
+	OSCURRENTPROCESS // processhandle
+	OSRemapView drop
+#endif
+end
+
+fn ComDLLRebase { dll -- ok }
+	0 ok!
+
+	if (dll@ ComDLL_Flags + @ COMDLLFLAG_FIXUP &)
+#ifdef OSDLL
+		STATUS_BAD_EXECUTABLE ok!
+		return
+#endif
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	if (head@ XLOFFHeader_Flags + @ XLOFF_FLAG_ISTRIP &)
+		// we were stripped of our internal relocation tables.
+
+		COMSTATUS_STRIPPED_EXECUTABLE ok!
+
+		return
+	end
+
+	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+	auto sectioncount
+	head@ XLOFFHeader_SectionCount + @ sectioncount!
+
+	while (sectioncount@)
+		if (sectionheader@ XLOFFSectionHeader_Flags + @ XLOFF_SECTIONFLAG_MAP &)
+			// perform relocations
+
+			sectionheader@ // sectionheader
+			dll@ // dll
+			ComDLLProcessSectionRelocations ok!
+
+			if (ok@)
+				return
+			end
+		end
+
+		XLOFFSectionHeader_SIZEOF sectionheader +=
+		1 sectioncount -=
+	end
+end
+
 // implemented by consumer
 // fn ComDLLOpenFile { name -- handle ok }
 
@@ -97,7 +810,9 @@ fn ComDLLLoad { flags name -- dll ok }
 	name@ ComDLLFindByName ok! dll!
 
 	if (ok@ ~~)
-		// already loaded, return
+		// already loaded, increment load count and return
+
+		1 dll@ ComDLL_LoadCount + +=
 
 		return
 	end
@@ -108,6 +823,400 @@ fn ComDLLLoad { flags name -- dll ok }
 	name@ ComDLLOpenFile ok! handle!
 
 	if (ok@)
+#ifdef OSDLL
+		if (flags@ OSMODULELOAD_MAINIMAGE & ~~)
+			if (DLLProcessInit@)
+				ok@ OSStatusGetName
+				name@
+				"LINK ERROR: couldn't open image %s: %s\n" OSGetStdErr FPrintf
+
+				if (ok@ STATUS_NOT_FOUND ==)
+					STATUS_BAD_EXECUTABLE ok!
+				end
+			end
+		end
+#endif
+
 		return
 	end
+
+	auto header
+	XLOFFHeader_SIZEOF alloc header!
+
+	auto bytesread
+
+	// read in header
+
+#ifdef OSDLL
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	XLOFFHeader_SIZEOF // length
+	header@ // buffer
+	handle@ // filehandle
+	OSFileRead ok! bytesread!
+
+	if (ok@)
+		handle@ OSClose drop
+
+		return
+	end
+#endif
+#ifdef OSLOADER
+	XLOFFHeader_SIZEOF // length
+	header@ // buf
+	0 // offset
+	handle@ // file
+	LdrFileRead ok! bytesread!
+
+	if (ok@)
+		return
+	end
+#endif
+
+	// verify parameters
+
+	if (bytesread@ XLOFFHeader_SIZEOF <)
+#ifdef OSDLL
+		handle@ OSClose drop
+#endif
+
+		COMSTATUS_BAD_EXECUTABLE ok!
+		return
+	end
+
+	if (header@ XLOFFHeader_Magic + @ XLOFF_MAGIC ~=)
+#ifdef OSDLL
+		handle@ OSClose drop
+#endif
+
+		COMSTATUS_BAD_EXECUTABLE ok!
+		return
+	end
+
+	if (header@ XLOFFHeader_TargetArchitecture + @ XLOFF_ARCHITECTURE ~=)
+#ifdef OSDLL
+		handle@ OSClose drop
+#endif
+
+		COMSTATUS_EXEC_NOT_FOR_ARCH ok!
+		return
+	end
+
+#ifdef OSDLL
+	if (header@ XLOFFHeader_Flags + @ XLOFF_FLAG_ALIGN4K & ~~)
+		COMSTATUS_BAD_EXECUTABLE ok!
+		return
+	end
+#endif
+
+#ifdef OSLOADER
+	name@ LdrLastComponent name!
+#endif
+
+	// create a module block
+
+	name@ ComDLLCreate ok! dll!
+
+	if (ok@)
+#ifdef OSDLL
+		handle@ OSClose drop
+#endif
+
+		return
+	end
+
+	// find out head size
+
+	auto headsz
+	header@ XLOFFHeader_HeadLength + @ headsz!
+
+	auto head
+
+	// map in the head
+
+#ifdef OSDLL
+	headsz@ // length
+	OSDLLHEAD // startva
+	0 // sectionoffset
+	handle@ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITECOPY | // pageprotection
+	0 // flags
+	OSMapView ok! head!
+
+	if (ok@)
+		dll@ ComDLLDelete
+
+		handle@ OSClose drop
+
+		return
+	end
+#endif
+
+#ifdef OSLOADER
+	headsz@ PAGEOFFSETMASK + PAGESHIFT >> // pages
+	KERNELSTRUCTURES // prefva
+	0 // fixed
+	OSLOADERMEM_DEBUG // type
+	LdrMemoryAllocatePhysicalRangeAndMap ok! head!
+
+	if (ok@)
+		return
+	end
+
+	headsz@ // length
+	head@ // buf
+	0 // offset
+	handle@ // file
+	LdrFileRead ok! bytesread!
+
+	if (ok@)
+		return
+	end
+#endif
+
+	// initialize module block.
+
+	head@ dll@ ComDLL_HeadVAddr + !
+	headsz@ dll@ ComDLL_HeadLength + !
+
+	head@ XLOFFHeader_Timestamp + @ dll@ ComDLL_Timestamp + !
+
+	// map sections. the Base is determined here based on the vaddr of the
+	// first mappable section.
+
+	handle@ // file
+	dll@ // dll
+	ComDLLMap ok!
+
+#ifdef OSDLL
+	handle@ OSClose drop
+#endif
+
+	if (ok@)
+		dll@ ComDLLDelete
+
+#ifdef OSDLL
+		headsz@ // length
+		head@ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+#endif
+
+		return
+	end
+
+#ifdef OSLOADER
+	auto t
+	ComDLLListTail@ t!
+
+	if (t@ ~~)
+		0 dll@ ComDLL_Next + !
+
+		dll@ ComDLLListHead!
+		dll@ ComDLLListTail!
+	end else
+		0 dll@ ComDLL_Next + !
+
+		dll@ IDENTITYSPACE | t@ ComDLL_Next + !
+		dll@ ComDLLListTail!
+	end
+#endif
+
+	// process import table.
+
+	dll@ ComDLLProcessImports ok!
+
+	if (ok@)
+		-1 dll@ ComDLLUnmap
+		-1 dll@ ComDLLUndoImports
+
+		dll@ ComDLLDelete
+
+#ifdef OSDLL
+		headsz@ // length
+		head@ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+#endif
+
+		return
+	end
+
+	if (head@ XLOFFHeader_Flags + @ XLOFF_FLAG_FRAGMENT &)
+		COMDLLFLAG_FIXUP dll@ ComDLL_Flags + |=
+	end
+
+#ifdef OSLOADER
+	if ("-relink" LdrArgsCheck)
+		COMDLLFLAG_REBASE dll@ ComDLL_Flags + |=
+	end
+
+	auto entry
+	head@ XLOFFHeader_EntrySymbol + @ entry!
+
+	if (entry@ 0xFFFFFFFF ~=)
+		if (LdrSystemEntryPoint@)
+			"conflicting entrypoints\n" LdrCrash
+		end
+
+		head@ XLOFFHeader_SymbolTableOffset + @ head@ + entry@ XLOFFSymbol_SIZEOF * + entry!
+
+		auto sectionheader
+		entry@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * head@ XLOFFHeader_SectionTableOffset + @ + head@ + sectionheader!
+
+		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ entry@ XLOFFSymbol_Value + @ + entry!
+
+		entry@ LdrSystemEntryPoint!
+
+		entry@ "system entrypoint @ 0x%08x\n" Printf
+	end
+#endif
+
+	if (dll@ ComDLL_Flags + @ COMDLLFLAG_REBASE &)
+		dll@ ComDLLRebase ok!
+
+		if (ok@)
+			-1 dll@ ComDLLUnmap
+			-1 dll@ ComDLLUndoImports
+
+			dll@ ComDLLDelete
+
+#ifdef OSDLL
+			headsz@ // length
+			head@ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+#endif
+		end
+	end
+
+	// add to tail of module list.
+
+#ifdef OSDLL
+	auto t
+	ComDLLListTail@ t!
+
+	if (t@ ~~)
+		0 dll@ ComDLL_Next + !
+		0 dll@ ComDLL_Prev + !
+
+		dll@ ComDLLListHead!
+		dll@ ComDLLListTail!
+	end else
+		0 dll@ ComDLL_Next + !
+
+		t@ dll@ ComDLL_Prev + !
+		dll@ t@ ComDLL_Next + !
+		dll@ ComDLLListTail!
+	end
+
+	// try to remap text section non-COW to save on VM quota
+
+	dll@ ComDLLRemapText
+
+	// flush icache
+
+	OSSynchronizeIcache
+
+	// call init function
+
+	auto func
+
+	if (dll@ ComDLL_Flags + @ COMDLLFLAG_SHOULDINIT &)
+		"DLLMain" // name
+		dll@ // dll
+		ComDLLGetSymbolAddress ok! func!
+
+		if (ok@ ~~)
+			func@ OSModuleMainFunction ok!
+
+			if (ok@)
+				dll@ ComDLLUnload
+
+				return
+			end
+		end
+
+		0 ok!
+	end
+#endif
+end
+
+fn ComDLLUnload { dll -- }
+	if (dll@ ComDLL_LoadCount + @ 0 ==)
+#ifdef OSDLL
+		"ComDLLUnload: underflow\n" OSAbort
+#endif
+#ifdef OSLOADER
+		"ComDLLUnload: underflow\n" LdrCrash
+#endif
+	end
+
+	1 dll@ ComDLL_LoadCount + -=
+
+	if (dll@ ComDLL_LoadCount + @)
+		// still has references
+
+		return
+	end
+
+	// no more references, unload for real
+
+#ifdef OSDLL
+	if (dll@ ComDLL_Name + @ "OSDLL.dll" strcmp)
+		1 dll@ ComDLL_LoadCount + !
+		return
+	end
+
+	auto ok
+	auto func
+
+	// call unload function
+	"DLLUnload" // name
+	dll@ // dll
+	ComDLLGetSymbolAddress ok! func!
+
+	if (ok@ ~~)
+		func@ OSModuleUnloadFunction
+	end
+
+	// unmap head
+	dll@ ComDLL_HeadLength + @ // length
+	dll@ ComDLL_HeadVAddr + @ // vaddr
+	OSCURRENTPROCESS // processhandle
+	OSUnmapView drop
+#endif
+
+	// unmap sections
+	-1 dll@ ComDLLUnmap
+
+	// unload dependencies
+	-1 dll@ ComDLLUndoImports
+
+	// unlink from module list
+
+	auto ls
+	dll@ ComDLL_Prev + @ ls!
+
+	auto ns
+	dll@ ComDLL_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ ComDLL_Next + !
+	end else
+		ns@ ComDLLListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ ComDLL_Prev + !
+	end else
+		ls@ ComDLLListTail!
+	end
+
+	0 dll@ ComDLL_Prev + !
+	0 dll@ ComDLL_Next + !
+
+	// destroy
+	dll@ ComDLLDelete
 end

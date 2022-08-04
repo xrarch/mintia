@@ -17,6 +17,7 @@ all: $(BINDIR)/$(CMDNAME).exe
 $(BINDIR)/$(CMDNAME).exe: $(OBJ)
 	$(LD) $(BINDIR)/$(CMDNAME).exe $(OBJ) -d $(SYSBINDIR)/OSDLL.dll
 	$(OBJTOOL) move $(BINDIR)/$(CMDNAME).exe mintia
+	$(OBJTOOL) istrip $(BINDIR)/$(CMDNAME).exe
 
 %.o: %.df $(HFILES)
 	$(DC) $(DCFLAGS) $< $@

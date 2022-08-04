@@ -88,10 +88,6 @@ fn ComDLLFindByName { name -- dll ok }
 
 	ComDLLListHead@ dll!
 
-	LdrModuleNameBuffer
-	name@
-	strcpy
-
 	while (dll@)
 		if (dll@ ComDLL_Name + @ name@ strcmp)
 			0 ok!
@@ -469,12 +465,6 @@ fn ComDLLMapSection { index sectionheader handle dll -- ok }
 		end
 	end
 
-		sectionheader@ XLOFFSectionHeader_DataOffset + @
-		sectionheader@ XLOFFSectionHeader_DataSize + @ // length
-		sectionheader@ XLOFFSectionHeader_VirtualAddress + @ // startva
-		flags@
-		"flags=%x startva=%x length=%x offset=%x " Printf
-
 	auto realva
 
 	if (flags@ XLOFF_SECTIONFLAG_BSS &)
@@ -543,8 +533,6 @@ fn ComDLLMapSection { index sectionheader handle dll -- ok }
 #endif
 	end
 
-	realva@ "realva=%x\n" Printf
-
 	if (realva@ sectionheader@ XLOFFSectionHeader_VirtualAddress + @ ~=)
 		// couldn't map at preferred address, mark module for internal
 		// relocation and update header field.
@@ -566,9 +554,12 @@ end
 fn ComDLLMap { handle dll -- ok }
 	0 ok!
 
+	auto isosdll
+	0 isosdll!
+
 #ifdef OSDLL
 	if (dll@ ComDLL_Name + @ "OSDLL.dll" strcmp)
-		return
+		1 isosdll!
 	end
 #endif
 
@@ -586,16 +577,27 @@ fn ComDLLMap { handle dll -- ok }
 
 	while (i@ sectioncount@ <)
 		if (sectionheader@ XLOFFSectionHeader_Flags + @ XLOFF_SECTIONFLAG_MAP &)
-			i@ // index
-			sectionheader@ // sectionheader
-			handle@ // handle
-			dll@ // dll
-			ComDLLMapSection ok!
+			if (isosdll@)
+				if (dll@ ComDLL_Base + @ ~~)
+					sectionheader@ XLOFFSectionHeader_VirtualAddress + @ dll@ ComDLL_Base + !
+				end
 
-			if (ok@)
-				i@ dll@ ComDLLUnmap
+				if (sectionheader@ XLOFFSectionHeader_VirtualAddress + @ sectionheader@ XLOFFSectionHeader_DataSize + @ +
+					dll@ ComDLL_End + @ >=)
+					sectionheader@ XLOFFSectionHeader_VirtualAddress + @ sectionheader@ XLOFFSectionHeader_DataSize + @ + dll@ ComDLL_End + !
+				end
+			end else
+				i@ // index
+				sectionheader@ // sectionheader
+				handle@ // handle
+				dll@ // dll
+				ComDLLMapSection ok!
 
-				return
+				if (ok@)
+					i@ dll@ ComDLLUnmap
+
+					return
+				end
 			end
 		end
 

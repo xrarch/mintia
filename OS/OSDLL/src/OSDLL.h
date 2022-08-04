@@ -1,3 +1,5 @@
+#define OSDLL
+
 // init stuff
 
 externptr DLLComponentsInitialized
@@ -16,8 +18,6 @@ struct OSPEBs
 	4 StdOut
 	4 StdErr
 	4 CurrentDirectory
-	4 DLLListHead
-	4 DLLListTail
 	4 UMask
 
 	(32 4 *) SignalActions
@@ -121,3 +121,5 @@ struct DLLStreamWCB
 	4 VirtualAddress
 	4 Length
 endstruct
+
+#include "../../Common/Module.h"

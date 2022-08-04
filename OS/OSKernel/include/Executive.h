@@ -2,7 +2,6 @@
 #include "<inc>/Executive/Handle.h"
 #include "<inc>/Executive/RingBuffer.h"
 #include "<inc>/Executive/Log.h"
-#include "<inc>/Executive/Bitmap.h"
 #include "<inc>/Executive/Call.h"
 #include "<inc>/Executive/Event.h"
 #include "<inc>/Executive/Semaphore.h"

@@ -1,3 +1,5 @@
+#include "../../Common/Common.h"
+
 const AFSDEBUG 0
 
 const AFSBLOCKSIZE 512
@@ -33,7 +35,7 @@ struct AFSData
 	4 ICount
 	4 VolSize
 
-	ExBitmapHeader_SIZEOF FreeBlockBitmap
+	ComBitmapHeader_SIZEOF FreeBlockBitmap
 	4 FreeBlockHint
 
 	KeMutex_SIZEOF FreeBlockBitmapMutex

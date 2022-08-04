@@ -1,3 +1,5 @@
+#define OSKERNEL
+
 #include "<inc>/Kernel/Crash.h"
 #include "<inc>/Kernel/IPL.h"
 

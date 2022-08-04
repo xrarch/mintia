@@ -83,17 +83,6 @@ const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 extern LdrArgsValue { arg -- out }
 extern LdrArgsCheck { arg -- present }
 
-struct LdrBitmapHeader
-	4 Data
-	4 SizeInBits
-endstruct
-
-extern LdrBitmapInitialize { sizeinbits data header -- }
-extern LdrBitmapFindRun { hint runlength header -- offset ok }
-extern LdrBitmapSetBits { runlength index header -- }
-extern LdrBitmapClearBits { runlength index header -- }
-extern LdrBitmapCheckClearBits { runlength index header -- isclear }
-
 externptr LdrPlatformHALName
 
 externptr LdrBootDeviceName

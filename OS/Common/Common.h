@@ -21,3 +21,18 @@ const COMSTATUS_EXEC_NOT_FOR_ARCH   STATUS_EXEC_NOT_FOR_ARCH
 const COMSTATUS_NO_SYMBOL           STATUS_NO_SYMBOL
 
 #endif
+
+struct ComBitmapHeader
+	4 Data
+	4 SizeInBits
+endstruct
+
+extern ComBitmapInitialize { sizeinbits data header -- }
+extern ComBitmapDump { header -- }
+extern ComBitmapGetData { header -- data }
+extern ComBitmapClear { header -- }
+extern ComBitmapFindRun { hint runlength header -- offset ok }
+extern ComBitmapSetBits { runlength index header -- }
+extern ComBitmapClearBits { runlength index header -- }
+extern ComBitmapBitGet { index header -- value }
+extern ComBitmapCheckClearBits { runlength index header -- isclear }

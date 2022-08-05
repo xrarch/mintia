@@ -49,6 +49,7 @@ Logging in as `guest` works with any password, and the default password for `roo
 - [x] Up to 16 dynamically-growable swapfiles and working set management.
 - [x] Minimal command-line interface over TTY.
 - [x] Support for native and MBR partition table formats.
+- [x] Swappable kernel sections and heap.
 
 - [ ] FAT12/16/32 driver.
 - [ ] Mac OS 9-lookalike window system.

@@ -14,8 +14,8 @@ DCFLAGS = incdir=../../../HAL/include/:../../../HAL/LIMNstation/include:../../..
 all: Mouse.sys
 
 Mouse.sys: $(OBJ)
-	$(LD) Mouse.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move Mouse.sys text=0x80C00000,data=text+text_size+align,bss=data+data_size+align
+	$(LD) -nostubs Mouse.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(OBJTOOL) move Mouse.sys base=0x80C00000
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

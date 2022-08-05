@@ -14,8 +14,8 @@ DCFLAGS = incdir=../../../HAL/include/:../../../HAL/LIMNstation/include:../../..
 all: KinnowFB.sys
 
 KinnowFB.sys: $(OBJ)
-	$(LD) KinnowFB.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move KinnowFB.sys text=0x80900000,data=text+text_size+align,bss=data+data_size+align
+	$(LD) -nostubs KinnowFB.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(OBJTOOL) move KinnowFB.sys base=0x80900000
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

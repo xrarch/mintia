@@ -14,8 +14,8 @@ DCFLAGS = incdir=../../../HAL/include/:../../../HAL/LIMNstation/include:../../..
 all: RTC.sys
 
 RTC.sys: $(OBJ)
-	$(LD) RTC.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move RTC.sys text=0x80400000,data=text+text_size+align,bss=data+data_size+align
+	$(LD) -nostubs RTC.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(OBJTOOL) move RTC.sys base=0x80400000
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

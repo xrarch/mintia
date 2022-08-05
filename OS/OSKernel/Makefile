@@ -15,7 +15,7 @@ DCFLAGS = incdir=./include/:../HAL/include:../HAL/limn2600/include
 all: $(SYSBINDIR)/OSKernel.exe
 
 $(SYSBINDIR)/OSKernel.exe: $(OBJ) ./Executive/limn2600/OSCallTrampolines.o
-	$(LD) $(SYSBINDIR)/OSKernel.exe $(OBJ) ./Executive/limn2600/OSCallTrampolines.o -d HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(LD) -nostubs $(SYSBINDIR)/OSKernel.exe $(OBJ) ./Executive/limn2600/OSCallTrampolines.o -d HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
 	$(OBJTOOL) move $(SYSBINDIR)/OSKernel.exe base=0x80001000
 	$(OBJTOOL) istrip $(SYSBINDIR)/OSKernel.exe
 

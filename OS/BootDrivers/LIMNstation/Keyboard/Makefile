@@ -14,8 +14,8 @@ DCFLAGS = incdir=../../../HAL/include/:../../../HAL/LIMNstation/include:../../..
 all: Keyboard.sys
 
 Keyboard.sys: $(OBJ)
-	$(LD) Keyboard.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move Keyboard.sys text=0x80B00000,data=text+text_size+align,bss=data+data_size+align
+	$(LD) -nostubs Keyboard.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
+	$(OBJTOOL) move Keyboard.sys base=0x80B00000
 
 %.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
 	$(DC) $(DCFLAGS) $< $@

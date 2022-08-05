@@ -76,6 +76,43 @@ var IOSwapFileExtensionIndex 0
 var IOSwapFileCount 0
 public IOSwapFileCount
 
+fn IOSwapFileInsert { pri fcb swapfile -- }
+	// set system file flag
+	auto rs
+	HALCPUInterruptDisable rs!
+	IOFCBFLAG_SYSTEMFILE fcb@ IOFileControlBlock_Flags + |=
+
+	swapfile@ [IOSwapFileCount@]IOSwapFiles!
+	swapfile@ IOSwapFile_MinimumSize + @ IOSwapPagesCount +=
+
+	auto h
+	[pri@]IOSwapFilePriorityListHeads@ h!
+
+	h@ swapfile@ IOSwapFile_Next + !
+	swapfile@ [pri@]IOSwapFilePriorityListHeads!
+
+	if (h@ ~~)
+		swapfile@ [pri@]IOSwapFilePriorityListTails!
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	if (IOSwapFileCount@ 0 ==)
+		// this is the first swapfile created.
+		// set the commit limit to its size and signal the creation event.
+
+		swapfile@ IOSwapFile_MinimumSize + @ MmCommitLimit!
+		swapfile@ IOSwapFile_MaximumSize + @ MmTheoreticalCommitLimit!
+	end else
+		HALCPUInterruptDisable rs!
+		swapfile@ IOSwapFile_MinimumSize + @ MmCommitLimit +=
+		swapfile@ IOSwapFile_MaximumSize + @ MmTheoreticalCommitLimit +=
+		rs@ HALCPUInterruptRestore
+	end
+
+	1 IOSwapFileCount +=
+end
+
 fn IOSwapFileInit { -- }
 	fnsection "INIT$text"
 
@@ -86,6 +123,8 @@ fn IOSwapFileInit { -- }
 end
 
 fn IOSwapFileCreateLock { -- }
+	fnsection "PAGE$text"
+
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
@@ -94,12 +133,16 @@ fn IOSwapFileCreateLock { -- }
 end
 
 fn IOSwapFileCreateUnlock { -- }
+	fnsection "PAGE$text"
+
 	0 // abandon
 	IOSwapFileCreationMutex // mutex
 	KeMutexRelease drop
 end
 
 fn IOSwapFileCreate { minpages maxpages pri path -- ok }
+	fnsection "PAGE$text"
+
 	SeAmIAdmin ok!
 
 	if (ok@)
@@ -298,12 +341,6 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	swapfile@ IOSwapFile_BitmapHeader + // header
 	ComBitmapSetBits
 
-	// set system file flag
-	auto rs
-	HALCPUInterruptDisable rs!
-	IOFCBFLAG_SYSTEMFILE fcb@ IOFileControlBlock_Flags + |=
-	rs@ HALCPUInterruptRestore
-
 	// initialize swapfile structures
 	minpages@ swapfile@ IOSwapFile_MinimumSize + !
 	maxpages@ swapfile@ IOSwapFile_MaximumSize + !
@@ -315,43 +352,10 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	pri@ swapfile@ IOSwapFile_Priority + !
 	IOSwapFileCount@ swapfile@ IOSwapFile_Number + !
 
-	HALCPUInterruptDisable rs!
-
-	swapfile@ [IOSwapFileCount@]IOSwapFiles!
-	minpages@ IOSwapPagesCount +=
-
-	auto h
-	[pri@]IOSwapFilePriorityListHeads@ h!
-
-	h@ swapfile@ IOSwapFile_Next + !
-	swapfile@ [pri@]IOSwapFilePriorityListHeads!
-
-	if (h@ ~~)
-		swapfile@ [pri@]IOSwapFilePriorityListTails!
-	end
-
-	rs@ HALCPUInterruptRestore
-
-	auto first
-
-	if (IOSwapFileCount@ 0 ==)
-		// this is the first swapfile created.
-		// set the commit limit to its size and signal the creation event.
-
-		1 first!
-
-		minpages@ MmCommitLimit!
-		maxpages@ MmTheoreticalCommitLimit!
-	end else
-		0 first!
-
-		HALCPUInterruptDisable rs!
-		minpages@ MmCommitLimit +=
-		maxpages@ MmTheoreticalCommitLimit +=
-		rs@ HALCPUInterruptRestore
-	end
-
-	1 IOSwapFileCount +=
+	pri@ // pri
+	fcb@ // fcb
+	swapfile@ // swapfile
+	IOSwapFileInsert
 
 	IOSwapFileCreateUnlock
 
@@ -361,6 +365,8 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 end
 
 fn IOSwapFileQuery { query id -- ok }
+	fnsection "PAGE$text"
+
 	if (id@ IOSwapFileCount@ >=)
 		STATUS_INVALID_ARGUMENT ok!
 

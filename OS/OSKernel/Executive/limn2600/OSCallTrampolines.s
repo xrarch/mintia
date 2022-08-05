@@ -1,6 +1,6 @@
 ; AUTOMATICALLY GENERATED -- DO NOT EDIT
 
-.section text
+.section PAGE$text
 
 .extern OSConsolePutCharacter
 .extern OSSystemAbort

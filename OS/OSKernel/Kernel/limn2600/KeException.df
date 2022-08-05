@@ -408,7 +408,7 @@ end
 
 fn KeLimn2600Exception { badaddr ecause tf -- }
 	auto handled
-	0 handled!
+	1 handled!
 	
 	auto signal
 	0 signal!
@@ -420,78 +420,86 @@ fn KeLimn2600Exception { badaddr ecause tf -- }
 		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
 	end
 
-	if (ecause@ ECAUSEINTERRUPT ==)
-		1 KeStatistics OSStatistics_Interrupts + +=
-
-		tf@ // trapframe
-		HALInterrupt
-
-		// this is an inlined version of what KeIPLLower also does
-
-		if (KeIPLCurrent@ IPLDPC <)
-			IPLDPC KeIPLCurrent!
-
-			while (KeDPCListHead@ KeThreadNext@ ||)
-				if (KeDPCListHead@)
-					KeDPCDispatchQueue
-				end
-
-				if (KeThreadNext@)
-					HALCPUInterruptEnable
-
-					KeThreadNextSwitch
-
-					HALCPUInterruptDisable drop
-				end
-			end
-
-			signal@ KeIPLCurrent!
-		end
-
-		0 signal!
-		1 handled!
-	end elseif (ecause@ ECAUSESYS ==)
-		1 KeStatistics OSStatistics_SystemCalls + +=
-
-		tf@ KeLimn2600Syscall
-		1 handled!
-	end elseif (ecause@ ECAUSEPAGEFAULT ==)
-		0 // writing
-		badaddr@ // badaddr
-		tf@ // trapframe
-		MmPageFault handled!
-	end elseif (ecause@ ECAUSEPAGEWRITE ==)
-		1 // writing
-		badaddr@ // badaddr
-		tf@ // trapframe
-		MmPageFault handled!
-	end elseif (ecause@ ECAUSEINVALID ==)
-		OSSIGNAL_ILL signal!
-	end elseif (ecause@ ECAUSEPRIVVIOL ==)
-		OSSIGNAL_ILL signal!
-	end elseif (ecause@ ECAUSEUNALIGNED ==)
-		OSSIGNAL_BUS signal!
-	end elseif (ecause@ ECAUSEBRK ==)
-		1 handled!
-		// TODO debugging stuff
+	if (tf@ OSContext_ers + @ LIMN2600_ERS_INT & ~~)
+		0 handled!
 	end
 
-	if (signal@)
-		if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
-			signal@ // signal
-			KeThreadCurrent@ // thread
-			KeThreadException drop
+	if (handled@)
+		0 handled!
 
+		if (ecause@ ECAUSEINTERRUPT ==)
+			1 KeStatistics OSStatistics_Interrupts + +=
+
+			tf@ // trapframe
+			HALInterrupt
+
+			// this is an inlined version of what KeIPLLower also does
+
+			if (KeIPLCurrent@ IPLDPC <)
+				IPLDPC KeIPLCurrent!
+
+				while (KeDPCListHead@ KeThreadNext@ ||)
+					if (KeDPCListHead@)
+						KeDPCDispatchQueue
+					end
+
+					if (KeThreadNext@)
+						HALCPUInterruptEnable
+
+						KeThreadNextSwitch
+
+						HALCPUInterruptDisable drop
+					end
+				end
+
+				signal@ KeIPLCurrent!
+			end
+
+			0 signal!
 			1 handled!
-		end elseif (ecause@ ECAUSEUNALIGNED ==)
-			auto abort
-			KeThreadCurrent@ KeThread_SafeAccessAbort + @ abort!
+		end elseif (ecause@ ECAUSESYS ==)
+			1 KeStatistics OSStatistics_SystemCalls + +=
 
-			if (abort@)
-				// thought this might happen.
-				abort@ tf@ HALCPUTrapFrameAbort
+			tf@ KeLimn2600Syscall
+			1 handled!
+		end elseif (ecause@ ECAUSEPAGEFAULT ==)
+			0 // writing
+			badaddr@ // badaddr
+			tf@ // trapframe
+			MmPageFault handled!
+		end elseif (ecause@ ECAUSEPAGEWRITE ==)
+			1 // writing
+			badaddr@ // badaddr
+			tf@ // trapframe
+			MmPageFault handled!
+		end elseif (ecause@ ECAUSEINVALID ==)
+			OSSIGNAL_ILL signal!
+		end elseif (ecause@ ECAUSEPRIVVIOL ==)
+			OSSIGNAL_ILL signal!
+		end elseif (ecause@ ECAUSEUNALIGNED ==)
+			OSSIGNAL_BUS signal!
+		end elseif (ecause@ ECAUSEBRK ==)
+			1 handled!
+			// TODO debugging stuff
+		end
+
+		if (signal@)
+			if (tf@ OSContext_ers + @ LIMN2600_ERS_USER &)
+				signal@ // signal
+				KeThreadCurrent@ // thread
+				KeThreadException drop
 
 				1 handled!
+			end elseif (ecause@ ECAUSEUNALIGNED ==)
+				auto abort
+				KeThreadCurrent@ KeThread_SafeAccessAbort + @ abort!
+
+				if (abort@)
+					// thought this might happen.
+					abort@ tf@ HALCPUTrapFrameAbort
+
+					1 handled!
+				end
 			end
 		end
 	end

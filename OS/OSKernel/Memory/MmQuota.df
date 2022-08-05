@@ -197,6 +197,64 @@ fn MmQuotaBlockUncharge { charge quotablock -- }
 	rs@ HALCPUInterruptRestore
 end
 
+fn MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
+	if (DEBUGCHECKS)
+		if (charge@ PAGEOFFSETMASK &)
+			"MmQuotaBlockChargeVM: charge isn't aligned to page size\n" KeCrash
+		end
+	end
+
+	if (charge@ 0 s<)
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	PAGESHIFT charge >>=
+
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto vmmax
+	quotablock@ MmQuotaBlock_VMMax + @ vmmax!
+
+	auto oldcharge
+	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
+
+	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
+		ipl@ KeIPLLower
+
+		STATUS_VM_QUOTA_EXCEEDED ok!
+
+		return
+	end
+
+	oldcharge@ charge@ PAGESHIFT << + quotablock@ MmQuotaBlock_VMUsed + !
+
+	auto commitlimit
+	MmCommitLimit@ commitlimit!
+
+	auto commitused
+	MmCommitUsage@ commitused!
+
+	if (commitused@ charge@ + commitlimit@ >)
+		// uncharge quota
+		charge@ PAGESHIFT << quotablock@ MmQuotaBlock_VMUsed + -=
+
+		ipl@ KeIPLLower
+
+		STATUS_VM_QUOTA_EXCEEDED ok!
+
+		return
+	end
+
+	commitused@ charge@ + MmCommitUsage!
+
+	ipl@ KeIPLLower
+end
+
 fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 	if (DEBUGCHECKS)
 		if (charge@ PAGEOFFSETMASK &)

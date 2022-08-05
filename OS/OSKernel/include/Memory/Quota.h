@@ -25,6 +25,7 @@ extern MmQuotaUnchargeBuffer { buffersize -- }
 extern MmQuotaBlockCharge { charge quotablock -- ok }
 extern MmQuotaBlockUncharge { charge quotablock -- }
 extern MmQuotaBlockChargeVM { charge quotablock -- ok }
+extern MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeVM { charge quotablock -- }
 extern MmQuotaBlockChargePaged { charge quotablock -- ok }
 extern MmQuotaBlockUnchargePaged { charge quotablock -- }

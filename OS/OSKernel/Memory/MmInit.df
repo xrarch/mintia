@@ -56,6 +56,19 @@ public MmPageFreeCount
 var MmConstantZeroPage 0
 public MmConstantZeroPage
 
+var MmUnwireRecordListHead 0
+
+struct MmUnwireRecord
+	4 Next
+
+	4 Type
+	4 StartVA
+	4 Pages
+endstruct
+
+const MMUNWIRE_FREE 1
+const MMUNWIRE_PAGE 2
+
 var MmInited 0
 public MmInited
 
@@ -368,6 +381,8 @@ fn MmReclaimMemory { -- }
 	auto sz
 	auto rs
 
+	auto name
+
 	0 newlisthead!
 
 	HALLoaderInfo@ LdrInfo_DLLListHead + @ current!
@@ -395,21 +410,20 @@ fn MmReclaimMemory { -- }
 		ComDLL_SIZEOF // size
 		memcpy
 
-		auto newname
 		current@ ComDLL_Name + @ strlen // bytes
 		'DLLN' // tag
 		MUSTSUCCEED // flags
-		MmAllocWithTag ok! newname!
+		MmAllocWithTag ok! name!
 
 		if (ok@)
 			ok@ "MmReclaimMemory: couldn't relocate DLL list (%i) 2\n" KeCrash
 		end
 
-		newname@ // dest
+		name@ // dest
 		current@ ComDLL_Name + @ // src
 		strcpy
 
-		newname@ new@ ComDLL_Name + !
+		name@ new@ ComDLL_Name + !
 
 		0 new@ ComDLL_Next + !
 
@@ -417,6 +431,58 @@ fn MmReclaimMemory { -- }
 	end
 
 	newlisthead@ HALLoaderInfo@ LdrInfo_DLLListHead + !
+
+	// iterate the sections of all the DLLs and build a list of unwireable
+	// regions.
+
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ current!
+
+	while (current@)
+		auto head
+		current@ ComDLL_HeadVAddr + @ head!
+
+		auto sectionheader
+		head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+		head@ XLOFFHeader_SectionCount + @ sz!
+
+		while (sz@)
+			sectionheader@ XLOFFSectionHeader_NameOffset + @
+			head@ XLOFFHeader_StringTableOffset + @ + head@ + name!
+
+			auto type
+			0 type!
+
+			if (name@ "INIT" 4 strncmp)
+				MMUNWIRE_FREE type!
+			end elseif (name@ "PAGE" 4 strncmp)
+				MMUNWIRE_PAGE type!
+			end
+
+			if (type@)
+				MmUnwireRecord_SIZEOF // bytes
+				'Unwi' // tag
+				MUSTSUCCEED // flags
+				MmAllocWithTag ok! start!
+
+				if (ok@)
+					ok@ "MmReclaimMemory: couldn't build unwire list (%i)\n" KeCrash
+				end
+
+				type@ start@ MmUnwireRecord_Type + !
+				sectionheader@ XLOFFSectionHeader_VirtualAddress + @ start@ MmUnwireRecord_StartVA + !
+				sectionheader@ XLOFFSectionHeader_DataSize + @ PAGEOFFSETMASK + PAGESHIFT >> start@ MmUnwireRecord_Pages + !
+
+				MmUnwireRecordListHead@ start@ MmUnwireRecord_Next + !
+				start@ MmUnwireRecordListHead!
+			end
+
+			1 sz -=
+			XLOFFSectionHeader_SIZEOF sectionheader +=
+		end
+
+		current@ ComDLL_Next + @ current!
+	end
 
 	auto desc
 	HALLoaderInfo@ LdrInfo_MemoryDescriptorListHead + @ desc!
@@ -551,7 +617,103 @@ fn MmInitNonpageableCommit { -- }
 	limit@ MmNonpageableCommitLimit!
 end
 
+fn MmUnwireKernel { -- }
+	auto unwr
+	MmUnwireRecordListHead@ unwr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	while (unwr@)
+		auto nunwr
+		unwr@ MmUnwireRecord_Next + @ nunwr!
+
+		auto vaddr
+		unwr@ MmUnwireRecord_StartVA + @ vaddr!
+
+		auto pages
+		unwr@ MmUnwireRecord_Pages + @ pages!
+
+		if (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_PAGE ==)
+			pages@ PAGESHIFT << // charge
+			MmQuotaSystem // quotablock
+			MmQuotaBlockChargeVMNoExtend ok!
+
+			if (ok@)
+				ok@ "MmUnwireKernel: failed to charge commitment for paged section (%i)\n" KeCrash
+			end
+		end
+
+		while (pages@)
+			auto pteaddr
+			vaddr@ // vaddr
+			kdir@ // pagemap
+			MmVirtualtoPTEAddress pteaddr!
+
+			auto ok
+			auto flags
+			auto phyaddr
+
+			pteaddr@ MmPTEInterpret ok! flags! phyaddr!
+
+			if (ok@)
+				ok@ "MmUnwireKernel: failed to interpret PTE (%i)\n" KeCrash
+			end
+
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			0 // phyaddr
+			0 // flags
+			vaddr@ // vaddr
+			pteaddr@ // pteaddr
+			0 // asid
+			MmPTEUpdate drop drop drop
+
+			if (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_FREE ==)
+				phyaddr@ PAGESHIFT >> MmPageFree
+				1 MmPageTotal +=
+			end elseif (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_PAGE ==)
+				// convert the page to a modified private anonymous page, and
+				// set the PTE to transition.
+
+				auto pfdbe
+				phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+				0 pfdbe@ MmPageFrameEntryAnonymous_Next + !
+				0 pfdbe@ MmPageFrameEntryAnonymous_Prev + !
+
+				MMEVICTFLAG_WORKINGSET MMEVICTFLAG_PRIVATE |
+				MMEVICTFLAG_MODIFIED | pfdbe@ MmPageFrameEntryAnonymous_EvictionFlagsB + sb
+
+				MMEVICTTYPE_ANON pfdbe@ MmPageFrameEntryAnonymous_EvictionTypeB + sb
+
+				1 pfdbe@ MmPageFrameEntryAnonymous_ReferencesI + si
+
+				PTE_TLBHACK pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+
+				pteaddr@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				phyaddr@ PTE_TRANSITION | PTE_TLBHACK | pteaddr@!
+			end
+
+			ipl@ KeIPLLower
+
+			PAGESIZE vaddr +=
+			1 pages -=
+		end
+
+		unwr@ MmFree
+
+		nunwr@ unwr!
+	end
+end
+
 fn MmQuery { query -- ok }
+	fnsection "PAGE$text"
+
 	0 ok!
 
 	query@ // ptr

@@ -35,6 +35,51 @@ fn IODeviceDirectoryInsert { deviceobject -- ok }
 	ObDirectoryInsertByPointers ok!
 end
 
+fn IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
+	fnsection "PAGE$text"
+
+	auto driver
+	deviceobject@ IODevice_Driver + @ driver!
+
+	driver@ IODriver_DispatchTable + @ // dispatchtable
+	deviceobject@ // devobj
+	driver@ IODriver_DeviceType + @ // filetype
+	0 // flags
+	IOFileControlBlockCreate ok! fcb!
+end
+
+fn IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
+	fnsection "PAGE$text"
+
+	deviceobject@ ObObjectReferenceByPointer drop
+	fcb@ IOFileControlBlockReference drop
+
+	auto fullpath
+	OBNAMEMAX 4 + alloc fullpath!
+
+	':' fullpath@ sb
+	fullpath@ 1 + // dest
+	deviceobject@ ObObjectName // src
+	strcpy
+
+	fullpath@ // openedpath
+	flags@ // flags
+	deviceobject@ ObObjectPagedHeader ObPagedHeader_Permissions + @ // permissions
+	fcb@ // fcb
+	IOFileCreateObject ok! fileobject!
+
+	if (ok@)
+		fcb@ IOFileControlBlockDereference drop
+		deviceobject@ ObObjectDereferenceByPointer drop
+	end else
+		deviceobject@ ObObjectPagedHeader ObPagedHeader_UID + @
+		fileobject@ ObObjectPagedHeader ObPagedHeader_UID + !
+
+		deviceobject@ ObObjectPagedHeader ObPagedHeader_GID + @
+		fileobject@ ObObjectPagedHeader ObPagedHeader_GID + !
+	end
+end
+
 fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
 	fnsection "PAGE$text"
 
@@ -59,12 +104,13 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 		return
 	end
 
+	driver@ deviceobject@ IODevice_Driver + !
+	deviceobject@ IODevice_SIZEOF + deviceobject@ IODevice_Extension + !
+	0 deviceobject@ IODevice_BlockLog + !
+	0 deviceobject@ IODevice_IsAConsole + !
+
 	auto fcb
-	driver@ IODriver_DispatchTable + @ // dispatchtable
-	deviceobject@ // devobj
-	driver@ IODriver_DeviceType + @ // filetype
-	0 // flags
-	IOFileControlBlockCreate ok! fcb!
+	deviceobject@ IODeviceCreateFileControlBlock ok! fcb!
 
 	if (ok@)
 		deviceobject@ ObObjectDeallocate
@@ -72,11 +118,7 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 		return
 	end
 
-	driver@ deviceobject@ IODevice_Driver + !
-	deviceobject@ IODevice_SIZEOF + deviceobject@ IODevice_Extension + !
 	fcb@ deviceobject@ IODevice_FileControlBlock + !
-	0 deviceobject@ IODevice_BlockLog + !
-	0 deviceobject@ IODevice_IsAConsole + !
 
 	sizeinbytes@ fcb@ IOFileControlBlock_SizeInBytes + !
 end

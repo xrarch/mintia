@@ -66,10 +66,101 @@ end
 fn FSVolumeUninitialize { mount -- }
 	fnsection "PAGE$text"
 
+	auto volfile
+	mount@ IOMount_VolumeFile + @ volfile!
+
 	auto volfcb
-	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+	volfile@ IOFile_FileControlBlock + @ volfcb!
 
 	volfcb@ IOFileControlBlock_CacheInfoBlock + @ IOCacheInfoBlockDecrementMap drop
+
+	auto realvolfile
+	mount@ IOMount_RealVolumeFile + @ realvolfile!
+
+	if (realvolfile@)
+		volfile@ ObObjectDereferenceByPointer drop
+
+		1 // writeout
+		volfcb@ // fcb
+		IOFileControlBlockDelete
+
+		realvolfile@ mount@ IOMount_VolumeFile + !
+		0 mount@ IOMount_RealVolumeFile + !
+	end
+end
+
+fn FSVolumeFileCreate { size mount -- ok }
+	fnsection "PAGE$text"
+
+	// create a virtual volume file with the given size representing metadata
+	// at the beginning of the volume. if the filesystem wants to modify
+	// metadata more complex than a simple "header" at the beginning of the
+	// volume, it will need its own scheme to deal with that. assumes the
+	// caller already called FSVolumeInitialize.
+
+	// XXX if called more than once per mount, fileobjects will leak!
+
+	if (DEBUGCHECKS)
+		if (mount@ IOMount_RealVolumeFile + @)
+			"FSVolumeFileCreate: attempt to create virtual volume file twice\n" KeCrash
+		end
+	end
+
+	auto realvolfile
+	mount@ IOMount_VolumeFile + @ realvolfile!
+
+	auto realvolfcb
+	realvolfile@ IOFile_FileControlBlock + @ realvolfcb!
+
+	auto deviceobject
+	realvolfcb@ IOFileControlBlock_DeviceObject + @ deviceobject!
+
+	auto volfcb
+	deviceobject@ IODeviceCreateFileControlBlock ok! volfcb!
+
+	if (ok@)
+		return
+	end
+
+	size@ volfcb@ IOFileControlBlock_SizeInBytes + !
+
+	auto volfile
+	realvolfile@ IOFile_Flags + @ // flags
+	volfcb@ // fcb
+	deviceobject@ // deviceobject
+	IODeviceCreateFileObject ok! volfile!
+
+	if (ok@)
+		-1 // writeout
+		volfcb@ // fcb
+		IOFileControlBlockDelete
+
+		return
+	end
+
+	auto cacheblock
+	volfcb@ IOFileControlBlockCacheCheck ok! cacheblock!
+
+	if (ok@)
+		volfile@ ObObjectDereferenceByPointer drop
+
+		-1 // writeout
+		volfcb@ // fcb
+		IOFileControlBlockDelete
+
+		return
+	end
+
+	cacheblock@ IOCacheInfoBlockTryIncrementMap ok! drop
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "FSVolumeFileCreate: failed to increment map count (%i)\n" KeCrash
+		end
+	end
+
+	realvolfile@ mount@ IOMount_RealVolumeFile + !
+	volfile@ mount@ IOMount_VolumeFile + !
 end
 
 fn FSVolumeFlush { mount -- ok }
@@ -190,7 +281,14 @@ fn FSVolumeBlockWrite { pfdbe mount -- ok }
 end
 
 fn FSVolumeGetFCB { fcb -- volfcb }
-	fcb@ IOFileControlBlock_DeviceObject + @ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+	auto mount
+	fcb@ IOFileControlBlock_DeviceObject + @ mount!
+
+	if (mount@ IOMount_RealVolumeFile + @)
+		mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+	end else
+		mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+	end
 end
 
 fn FSVolumeFCBGetReadFunction { volfcb -- readfunc }

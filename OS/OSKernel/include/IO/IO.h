@@ -12,6 +12,8 @@ const IOKFLAG_PAGEIN  16
 
 extern IOInitPhase1 { -- }
 
+extern IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
+extern IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
 extern IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
 extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
 extern IODeviceDeleteFileObject { object -- ok }

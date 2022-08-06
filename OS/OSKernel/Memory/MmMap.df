@@ -589,14 +589,11 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 
 	pageprotection@ vad@ MmVAD_PageProtection + !
 
-	auto flags
-	PTE_V flags!
-
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 	processobject@ MmWorkingSetLock drop
 
 	if (processobject@ PsProcess_SwappedOut + @ ~~)
-		flags@ // flags
+		PTE_V // flags
 		startva@ // startva
 		endva@ // endva
 		processobject@ // process
@@ -636,6 +633,87 @@ fn MmRemapView { pageprotection length vaddr processhandle -- ok }
 	vaddr@ // vaddr
 	processobject@ // processobject
 	MmRemapViewProcess ok!
+
+	processobject@ ObObjectDereferenceByPointer drop
+end
+
+fn MmFlushViewProcess { length vaddr processobject -- ok }
+	fnsection "PAGE$text"
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & length!
+
+	if (length@ 0 ==)
+		// length overflowed
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (vaddr@ length@ + vaddr@ <)
+		// vaddr+length overflows
+		STATUS_OVERFLOW ok!
+
+		return
+	end
+
+	if (processobject@ PsSystemProcess@ ~=)
+		if (vaddr@ length@ + MMHIGHESTUSERADDRESS >)
+			// requested region goes outside userspace
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			return
+		end
+	end
+
+	processobject@ MmVADListLock ok!
+
+	if (ok@)
+		return
+	end
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+	processobject@ MmWorkingSetLock drop
+
+	if (processobject@ PsProcess_SwappedOut + @ ~~)
+		PTE_V // flags
+		vaddr@ // startva
+		vaddr@ length@ + // endva
+		processobject@ // process
+		MmWorkingSetRemap
+	end
+
+	processobject@ MmWorkingSetUnlock
+	KeThreadCurrent@ KeThreadAcceptKill drop
+
+	processobject@ MmVADListUnlock
+end
+
+fn MmFlushView { length vaddr processhandle -- ok }
+	fnsection "PAGE$text"
+
+	auto processobject
+	auto access
+
+	PsProcessObjectType@ // type
+	processhandle@ // handle
+	ObObjectReferenceByHandle ok! processobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	length@ // length
+	vaddr@ // vaddr
+	processobject@ // processobject
+	MmFlushViewProcess ok!
 
 	processobject@ ObObjectDereferenceByPointer drop
 end

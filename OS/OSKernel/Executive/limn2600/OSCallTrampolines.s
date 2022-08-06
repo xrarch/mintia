@@ -61,6 +61,7 @@
 .extern OSMapView
 .extern OSUnmapView
 .extern OSRemapView
+.extern OSFlushView
 .extern OSAllocate
 .extern OSMemoryQuery
 .extern OSWorkingSetPurge
@@ -97,7 +98,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 92
+	.dl 93
 
 OSCallTable:
 .global OSCallTable
@@ -161,39 +162,40 @@ OSCallTable:
 	.dl OSTOSMapView                                     ;57
 	.dl OSTOSUnmapView                                   ;58
 	.dl OSTOSRemapView                                   ;59
-	.dl OSTOSAllocate                                    ;60
-	.dl OSTOSMemoryQuery                                 ;61
-	.dl OSTOSWorkingSetPurge                             ;62
-	.dl OSTOSSynchronizeIcache                           ;63
-	.dl OSTOSProcessCreate                               ;64
-	.dl OSTOSProcessSignal                               ;65
-	.dl OSTOSProcessOpenByPID                            ;66
-	.dl OSTOSProcessQuery                                ;67
-	.dl OSTOSProcessQueryByPID                           ;68
-	.dl OSTOSProcessReadStatus                           ;69
-	.dl OSTOSProcessMaskSignal                           ;70
-	.dl OSTOSProcessUnmaskSignal                         ;71
-	.dl OSTOSProcessSetConsoleGroup                      ;72
-	.dl OSTOSProcessClearConsoleGroup                    ;73
-	.dl OSTOSProcessSignalActivation                     ;74
-	.dl OSTOSProcessWaitForActivation                    ;75
-	.dl OSTOSProcessExit                                 ;76
-	.dl OSTOSProcessCountQuery                           ;77
-	.dl OSTOSProcessQueryAll                             ;78
-	.dl OSTOSSetQuota                                    ;79
-	.dl OSTOSQuotaQuery                                  ;80
-	.dl OSTOSThreadException                             ;81
-	.dl OSTOSThreadSetFilePermissions                    ;82
-	.dl OSTOSThreadSleep                                 ;83
-	.dl OSTOSThreadCreate                                ;84
-	.dl OSTOSThreadTerminate                             ;85
-	.dl OSTOSThreadSuspend                               ;86
-	.dl OSTOSThreadResume                                ;87
-	.dl OSTOSThreadReadStatus                            ;88
-	.dl OSTOSThreadQuery                                 ;89
-	.dl OSTOSSetSystemConsole                            ;90
-	.dl OSTOSConsoleSignal                               ;91
-	.dl OSTOSAmIAdmin                                    ;92
+	.dl OSTOSFlushView                                   ;60
+	.dl OSTOSAllocate                                    ;61
+	.dl OSTOSMemoryQuery                                 ;62
+	.dl OSTOSWorkingSetPurge                             ;63
+	.dl OSTOSSynchronizeIcache                           ;64
+	.dl OSTOSProcessCreate                               ;65
+	.dl OSTOSProcessSignal                               ;66
+	.dl OSTOSProcessOpenByPID                            ;67
+	.dl OSTOSProcessQuery                                ;68
+	.dl OSTOSProcessQueryByPID                           ;69
+	.dl OSTOSProcessReadStatus                           ;70
+	.dl OSTOSProcessMaskSignal                           ;71
+	.dl OSTOSProcessUnmaskSignal                         ;72
+	.dl OSTOSProcessSetConsoleGroup                      ;73
+	.dl OSTOSProcessClearConsoleGroup                    ;74
+	.dl OSTOSProcessSignalActivation                     ;75
+	.dl OSTOSProcessWaitForActivation                    ;76
+	.dl OSTOSProcessExit                                 ;77
+	.dl OSTOSProcessCountQuery                           ;78
+	.dl OSTOSProcessQueryAll                             ;79
+	.dl OSTOSSetQuota                                    ;80
+	.dl OSTOSQuotaQuery                                  ;81
+	.dl OSTOSThreadException                             ;82
+	.dl OSTOSThreadSetFilePermissions                    ;83
+	.dl OSTOSThreadSleep                                 ;84
+	.dl OSTOSThreadCreate                                ;85
+	.dl OSTOSThreadTerminate                             ;86
+	.dl OSTOSThreadSuspend                               ;87
+	.dl OSTOSThreadResume                                ;88
+	.dl OSTOSThreadReadStatus                            ;89
+	.dl OSTOSThreadQuery                                 ;90
+	.dl OSTOSSetSystemConsole                            ;91
+	.dl OSTOSConsoleSignal                               ;92
+	.dl OSTOSAmIAdmin                                    ;93
 
 
 OSTOSConsolePutCharacter:
@@ -1117,6 +1119,22 @@ OSTOSRemapView:
 	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSRemapView
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSFlushView:
+.global OSTOSFlushView
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+
+	jal  OSFlushView
 
 	mov  long [s17 + 4], a0 ;t1
 

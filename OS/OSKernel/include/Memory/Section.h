@@ -35,6 +35,9 @@ extern MmRemapView { pageprotection length vaddr processhandle -- ok }
 extern MmAllocateProcessObject { length startva processobject pageprotection flags -- realva ok }
 extern MmAllocate { length startva processhandle pageprotection flags -- realva ok }
 
+extern MmFlushViewProcess { length vaddr processobject -- ok }
+extern MmFlushView { length vaddr processhandle -- ok }
+
 extern MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 
 extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }

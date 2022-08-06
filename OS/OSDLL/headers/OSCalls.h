@@ -91,6 +91,7 @@ extern OSSectionCreate { pageprotection anonsize permissions name -- sectionhand
 extern OSMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
 extern OSUnmapView { length vaddr processhandle -- ok }
 extern OSRemapView { pageprotection length vaddr processhandle -- ok }
+extern OSFlushView { length vaddr processhandle -- ok }
 extern OSAllocate { length startva processhandle pageprotection flags -- realva ok }
 
 extern OSMemoryQuery { query -- ok }

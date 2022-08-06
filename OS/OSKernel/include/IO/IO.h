@@ -127,6 +127,17 @@ extern IOFileGetFileControlBlock { fileobject -- fcb }
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }
 
+extern IOScheduleWritebehind { -- }
+extern IOTriggerWritebehind { -- }
+
 externptr IOBootDevice
 
 externptr IOFileControlBlockCacheSize
+
+externptr IOWritebehindTimer
+externptr IOWritebehindEvent
+externptr IOSwapFileCreationEvent
+
+externptr IOCacheInfoBlockDirtyCount
+externptr IOCacheInfoBlockDirtyListHead
+externptr IOCacheInfoBlockDirtyListTail

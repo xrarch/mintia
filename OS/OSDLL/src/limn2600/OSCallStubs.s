@@ -673,6 +673,16 @@ OSMountGetFilesystemName:
 
 	ret
 
+OSFlushModifiedPages:
+.global OSFlushModifiedPages
+
+	li   t0, 55
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSSectionCreate:
 .global OSSectionCreate
 	mov  t1, a0
@@ -680,7 +690,7 @@ OSSectionCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 55
+	li   t0, 56
 	sys  0
 
 	mov  a1, t2
@@ -698,7 +708,7 @@ OSMapView:
 	mov  a0, long [sp + 8]
 	mov  a1, long [sp + 12]
 
-	li   t0, 56
+	li   t0, 57
 	sys  0
 
 	mov  a1, t2
@@ -712,7 +722,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 57
+	li   t0, 58
 	sys  0
 
 	mov  a0, t1
@@ -726,7 +736,7 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 58
+	li   t0, 59
 	sys  0
 
 	mov  a0, t1
@@ -741,7 +751,7 @@ OSAllocate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 59
+	li   t0, 60
 	sys  0
 
 	mov  a1, t2
@@ -753,7 +763,7 @@ OSMemoryQuery:
 .global OSMemoryQuery
 	mov  t1, a0
 
-	li   t0, 60
+	li   t0, 61
 	sys  0
 
 	mov  a0, t1
@@ -762,16 +772,6 @@ OSMemoryQuery:
 
 OSWorkingSetPurge:
 .global OSWorkingSetPurge
-
-	li   t0, 61
-	sys  0
-
-	mov  a0, t1
-
-	ret
-
-OSFlushModifiedPages:
-.global OSFlushModifiedPages
 
 	li   t0, 62
 	sys  0

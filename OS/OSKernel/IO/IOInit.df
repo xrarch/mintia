@@ -53,6 +53,12 @@ public IOFileControlBlockCacheSize
 buffer IOMountListMutex KeMutex_SIZEOF
 public IOMountListMutex
 
+buffer IOWritebehindTimer KeTimer_SIZEOF
+public IOWritebehindTimer
+
+buffer IOWritebehindEvent KeEvent_SIZEOF
+public IOWritebehindEvent
+
 fn IOInitPhase1 { -- }
 	fnsection "INIT$text"
 
@@ -74,6 +80,8 @@ fn IOInitPhase1 { -- }
 	IOFileControlBlockCacheSize@
 	IOFileControlBlockMaximum@
 	"caching %d FCBs (~%d bytes)\n" "IOInitPhase1" HALLog
+
+	8 IOFileControlBlockMaximum!
 
 	auto ok
 	auto handle
@@ -149,6 +157,19 @@ fn IOInitPhase1 { -- }
 	IOMountListMutex // mutex
 	KeMutexInitialize
 
+	// initialize writebehind timer
+
+	"IOWritebehindTimer" // name
+	0 // function
+	IOWritebehindTimer // timer
+	KeTimerInitialize
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"IOWritebehindEvent" // name
+	IOWritebehindEvent // event
+	KeEventInitialize
+
 	// initialize drivers
 
 	STAGE_THREAD HALLoaderInfo@ HALDriverInit
@@ -164,6 +185,19 @@ fn IOInitPhase1 { -- }
 
 	if (ok@)
 		ok@ "IOInitPhase1: couldn't create 'FSSync' thread (%i)\n" KeCrash
+	end
+
+	0 // context1
+	0 // context2
+	pointerof IOWritebehindWorker // startfunc
+	0 // creationflags
+	ACCESS_OWNER_ALL // permissions
+	"IOWritebehind" // name
+	PsSystemProcess@ // processobject
+	PsThreadCreateObject ok! drop
+
+	if (ok@)
+		ok@ "IOInitPhase1: couldn't create 'IOWritebehind' thread (%i)\n" KeCrash
 	end
 
 	IOBootDeviceMount

@@ -29,6 +29,8 @@
 
 buffer IOFilesystemSyncTimer KeTimer_SIZEOF
 
+const IOWRITEBEHINDINTERVAL 15000
+
 const IOFSSYNCINTERVAL 5000
 
 const IOSWAPFILECONTRACTINTERVAL 30000
@@ -81,7 +83,7 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 		if (DEBUGCHECKS)
 			if (reason@ 0 s<)
 				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "MmBalanceSetManager: failed to wait on low memory event (%i)\n" KeCrash
+					reason@ "IOFilesystemSyncWorker: failed to wait on event (%i)\n" KeCrash
 				end
 			end
 		end
@@ -110,4 +112,114 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 			IOSwapFileExtend
 		end
 	end
+end
+
+fn IOWritebehindWorker { context1 context2 -- }
+	PRIORITY_LOWREALTIME // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	auto objecttable
+	8 alloc objecttable!
+
+	IOWritebehindTimer objecttable@!
+	IOWritebehindEvent objecttable@ 4 + !
+
+	while (1)
+		auto reason
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAITANY // waittype
+		60000 // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		KeThreadWaitForMultipleObjects reason!
+
+		if (DEBUGCHECKS)
+			if (reason@ 0 s<)
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "IOWritebehindWorker: failed to wait on event (%i)\n" KeCrash
+				end
+			end
+		end
+
+		auto modcount
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		IOCacheInfoBlockDirtyCount@ modcount!
+		0 IOCacheInfoBlockDirtyCount!
+
+		rs@ HALCPUInterruptRestore
+
+		while (modcount@)
+			auto cacheblock
+
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			IOCacheInfoBlockDirtyListHead@ cacheblock!
+
+			if (cacheblock@ ~~)
+				ipl@ KeIPLLower
+				break
+			end
+
+			0 cacheblock@ IOCacheInfoBlock_ModifiedPageCount + !
+
+			auto n
+			cacheblock@ IOCacheInfoBlock_Next + @ n!
+
+			n@ IOCacheInfoBlockDirtyListHead!
+
+			if (n@ ~~)
+				0 IOCacheInfoBlockDirtyListTail!
+			end else
+				0 n@ IOCacheInfoBlock_Prev + !
+			end
+
+			ipl@ KeIPLLower
+
+			cacheblock@ IOCacheInfoBlockFlush drop
+
+			cacheblock@ IOCacheInfoBlockDereference drop
+
+			1 modcount -=
+		end
+
+		if (reason@ 0 ==)
+			IOWritebehindTimer KeTimerReset drop
+		end
+	end
+end
+
+fn IOScheduleWritebehind { -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IOScheduleWritebehind: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	if (IOWritebehindTimer KeTimer_Enqueued + @ ~~)
+		0 // context1
+		0 // context2
+		IOWRITEBEHINDINTERVAL // interval
+		IOWritebehindTimer
+		KeTimerEnqueue
+	end
+end
+
+fn IOTriggerWritebehind { -- }
+	fnsection "PAGE$text"
+
+	// artifically signal the dirty page event to sweep all the dirty
+	// pages to disk. returns asynchronously, up to the caller to query the
+	// dirty page count and figure out when they've all been written.
+
+	0 // priboost
+	IOWritebehindEvent // event
+	KeEventSignal
 end

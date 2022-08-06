@@ -7,6 +7,8 @@ struct OSMemoryInformation
 	4 FileCachePageCount
 	4 AnonymousPageCount
 
+	4 DirtyFileCount
+
 	4 SwapPageTotalCount
 	4 SwapPageUsedCount
 	4 SwapPagePeakCount

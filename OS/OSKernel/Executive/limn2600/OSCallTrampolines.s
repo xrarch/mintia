@@ -56,6 +56,7 @@
 .extern OSMountCountQuery
 .extern OSMountUpdateFlags
 .extern OSMountGetFilesystemName
+.extern OSFlushModifiedPages
 .extern OSSectionCreate
 .extern OSMapView
 .extern OSUnmapView
@@ -63,7 +64,6 @@
 .extern OSAllocate
 .extern OSMemoryQuery
 .extern OSWorkingSetPurge
-.extern OSFlushModifiedPages
 .extern OSSynchronizeIcache
 .extern OSProcessCreate
 .extern OSProcessSignal
@@ -156,14 +156,14 @@ OSCallTable:
 	.dl OSTOSMountCountQuery                             ;52
 	.dl OSTOSMountUpdateFlags                            ;53
 	.dl OSTOSMountGetFilesystemName                      ;54
-	.dl OSTOSSectionCreate                               ;55
-	.dl OSTOSMapView                                     ;56
-	.dl OSTOSUnmapView                                   ;57
-	.dl OSTOSRemapView                                   ;58
-	.dl OSTOSAllocate                                    ;59
-	.dl OSTOSMemoryQuery                                 ;60
-	.dl OSTOSWorkingSetPurge                             ;61
-	.dl OSTOSFlushModifiedPages                          ;62
+	.dl OSTOSFlushModifiedPages                          ;55
+	.dl OSTOSSectionCreate                               ;56
+	.dl OSTOSMapView                                     ;57
+	.dl OSTOSUnmapView                                   ;58
+	.dl OSTOSRemapView                                   ;59
+	.dl OSTOSAllocate                                    ;60
+	.dl OSTOSMemoryQuery                                 ;61
+	.dl OSTOSWorkingSetPurge                             ;62
 	.dl OSTOSSynchronizeIcache                           ;63
 	.dl OSTOSProcessCreate                               ;64
 	.dl OSTOSProcessSignal                               ;65
@@ -1033,6 +1033,19 @@ OSTOSMountGetFilesystemName:
 	addi sp, sp, 4
 	ret
 
+OSTOSFlushModifiedPages:
+.global OSTOSFlushModifiedPages
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSFlushModifiedPages
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
 OSTOSSectionCreate:
 .global OSTOSSectionCreate
 	subi sp, sp, 4
@@ -1152,19 +1165,6 @@ OSTOSWorkingSetPurge:
 	mov  long [sp], lr
 
 	jal  OSWorkingSetPurge
-
-	mov  long [s17 + 4], a0 ;t1
-
-	mov  lr, long [sp]
-	addi sp, sp, 4
-	ret
-
-OSTOSFlushModifiedPages:
-.global OSTOSFlushModifiedPages
-	subi sp, sp, 4
-	mov  long [sp], lr
-
-	jal  OSFlushModifiedPages
 
 	mov  long [s17 + 4], a0 ;t1
 

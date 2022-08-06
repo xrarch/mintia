@@ -683,3 +683,52 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		ipl@ KeIPLLower
 	end
 end
+
+fn IOCachePageModified { pfdbe -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	auto fcb
+	pfdbe@ IOPageFrameEntryCache_FCB + @ fcb!
+
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	auto oldcount
+	cacheblock@ IOCacheInfoBlock_ModifiedPageCount + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_ModifiedPageCount + !
+
+	if (oldcount@ ~~)
+		// add the cacheblock to the dirty list and enqueue the writebehind
+		// timer.
+
+		cacheblock@ IOCacheInfoBlockReference drop
+
+		1 IOCacheInfoBlockDirtyCount +=
+
+		auto t
+		IOCacheInfoBlockDirtyListTail@ t!
+
+		if (t@)
+			cacheblock@ t@ IOCacheInfoBlock_Next + !
+		end else
+			cacheblock@ IOCacheInfoBlockDirtyListHead!
+		end
+
+		0 cacheblock@ IOCacheInfoBlock_Next + !
+		t@ cacheblock@ IOCacheInfoBlock_Prev + !
+
+		cacheblock@ IOCacheInfoBlockDirtyListTail!
+
+		IOScheduleWritebehind
+	end
+
+	ipl@ KeIPLLower
+end

@@ -123,8 +123,15 @@ fn MmModifiedPageWriter { context1 context2 -- }
 	auto ftransfer
 	0 ftransfer!
 
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	IOSwapFileCreationEvent
+	KeThreadWaitForObject drop
+
 	// the page writer thread. writes out modified pages and slaps them on the
-	// evictable list. does this when it is asked to and also every 30 seconds
+	// evictable list. does this when memory is low or there are too many
+	// modified pages.
 
 	while (1)
 		auto ok
@@ -132,7 +139,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 		KERNELMODE // waitmode
 		0 // alertable
-		30000 // timeout
+		OSWAIT_TIMEOUTINFINITE // timeout
 		MmModifiedPageEvent // object
 		KeThreadWaitForObject waitok!
 
@@ -169,32 +176,6 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 			if (pfdbe@)
 				if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
-					auto ignore
-					0 ignore!
-
-					if (IOSwapFileCount@ ~~)
-						1 ignore!
-					end elseif (waitok@ STATUS_WAIT_TIMEOUT ==)
-						if (MmEvictablePageCount@ MmPageFreeCount@ + MmPageFreeCountSufficient@ >=)
-							1 ignore!
-						end
-					end
-
-					if (ignore@)
-						// no swapfiles yet, ignore this one.
-						// ref and deref to move it to the back of the list.
-
-						pfdbe@ MmEvictablePageReference drop
-
-						ipl@ KeIPLLower
-
-						pfdbe@ MmEvictablePageDereference drop
-
-						1 modcount -=
-
-						continue
-					end
-
 					if (transfer@ ~~)
 						anontransfers@ IOTransferTable_FreeListHead + @ transfer!
 
@@ -289,14 +270,4 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			0 transfer!
 		end
 	end
-end
-
-fn MmFlushModifiedPages { -- }
-	// artifically signal the dirty page event to sweep all the dirty
-	// pages to disk. returns asynchronously, up to the caller to query the
-	// dirty page count and figure out when they've all been written.
-
-	0 // priboost
-	MmModifiedPageEvent // event
-	KeEventSignal
 end

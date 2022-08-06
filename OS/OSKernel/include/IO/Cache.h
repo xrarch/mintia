@@ -1,4 +1,6 @@
 struct IOCacheInfoBlock
+	4 References
+
 	4 MapCount
 	4 Flags
 

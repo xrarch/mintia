@@ -41,9 +41,43 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 		return
 	end
 
+	1 cacheblock@ IOCacheInfoBlock_References + !
+
 	0 cacheblock@ IOCacheInfoBlock_MapCount + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
 	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
+end
+
+fn IOCacheInfoBlockReference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_References + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"IOCacheInfoBlockDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+
+	if (oldcount@ 1 ==)
+		cacheblock@ MmFree
+	end
 end
 
 fn IOCacheInfoBlockTryIncrementMap { cacheblock -- oldcount ok }
@@ -251,7 +285,7 @@ fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 	IOCacheInfoBlockTruncate ok!
 
 	if (ok@ ~~)
-		cacheblock@ MmFree
+		cacheblock@ IOCacheInfoBlockDereference drop
 	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop

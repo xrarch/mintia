@@ -26,8 +26,8 @@ extern IOCacheDumpInfo { cacheblock -- }
 
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
 
-extern IOCacheInfoBlockTryReference { cacheblock -- oldcount ok }
-extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
+extern IOCacheInfoBlockTryIncrementMap { cacheblock -- oldcount ok }
+extern IOCacheInfoBlockDecrementMap { cacheblock -- oldcount }
 
 extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }

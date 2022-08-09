@@ -30,9 +30,9 @@ HALCPUFastDrawGlyphBackwards: ;lowest bit is leftmost
 	mov  t4, long [sp + 12]
 
 .nopix:
-	mov  int [a2], t4
+	mov  byte [a2], t4
 
-	addi a2, a2, 2
+	addi a2, a2, 1
 	bne  t1, .xloop
 
 	addi a0, a0, 1
@@ -71,9 +71,9 @@ HALCPUFastDrawGlyph: ;highest bit is leftmost
 	mov  t4, long [sp + 12]
 
 .nopix:
-	mov  int [a2], t4
+	mov  byte [a2], t4
 
-	addi a2, a2, 2
+	addi a2, a2, 1
 	bne  t1, .xloop
 
 	addi a0, a0, 1

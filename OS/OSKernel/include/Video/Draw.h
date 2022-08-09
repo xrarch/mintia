@@ -2,7 +2,7 @@ extern KVInit { -- }
 
 extern KVQuery { -- w h ok }
 
-extern KVRGB24ToNative { rgb24a -- nativecolor }
+extern KVI8ToNative { i8 -- nativecolor }
 
 extern KVClearScreen { nativecolor -- }
 

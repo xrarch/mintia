@@ -487,6 +487,22 @@ fn CoConsoleCook { console -- }
 						EXRINGDONTWAIT // waitonfull
 						outputbuffer@ // ringbuffer
 						ExRingBufferWriteValue drop drop
+					end elseif (c@ '\n' ==)
+						'\r' // value
+						1 // overwrite
+						0 // timeout
+						KERNELMODE // lastmode
+						EXRINGDONTWAIT // waitonfull
+						outputbuffer@ // ringbuffer
+						ExRingBufferWriteValue drop drop
+
+						'\n' // value
+						1 // overwrite
+						0 // timeout
+						KERNELMODE // lastmode
+						EXRINGDONTWAIT // waitonfull
+						outputbuffer@ // ringbuffer
+						ExRingBufferWriteValue drop drop
 					end else
 						c@ // value
 						1 // overwrite
@@ -605,6 +621,54 @@ fn CoConsoleRead { timeout flags length buffer lastmode console -- bytesread ok 
 	end
 end
 
+fn CoConsoleWriteCharacter { c lastmode console -- ok }
+	auto outputbuffer
+	console@ CoConsole_OutputBuffer + @ outputbuffer!
+
+	auto outputfunc
+	console@ CoConsole_OutputFunction + @ outputfunc!
+
+	c@ // value
+	0 // overwrite
+	0 // timeout
+	lastmode@ // lastmode
+	EXRINGDONTWAIT // waitonfull
+	outputbuffer@ // ringbuffer
+	ExRingBufferWriteValue ok! drop
+
+	while (ok@)
+		if (ok@ STATUS_WAIT_TIMEOUT ~=)
+			if (ok@ STATUS_RING_FULL ~=)
+				break
+			end
+		end
+
+		// ringbuffer full. call console output function and/or wake up
+		// host to try to empty it out.
+
+		0 console@ CoConsoleDoOutput
+
+		lastmode@ // mode
+		1 // alertable
+		KeThreadCurrent@ // thread
+		KeThreadIsKilled ok!
+
+		if (ok@)
+			return
+		end
+
+		// try again. this time sleep with a timeout.
+
+		c@ // value
+		0 // overwrite
+		50 // timeout
+		lastmode@ // lastmode
+		EXRINGWAIT // waitonfull
+		outputbuffer@ // ringbuffer
+		ExRingBufferWriteValue ok! drop
+	end
+end
+
 fn CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
 	fnsection "PAGE$text"
 
@@ -613,11 +677,8 @@ fn CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
 		return
 	end
 
-	auto outputbuffer
-	console@ CoConsole_OutputBuffer + @ outputbuffer!
-
-	auto outputfunc
-	console@ CoConsole_OutputFunction + @ outputfunc!
+	auto mode
+	console@ CoConsole_Mode + @ mode!
 
 	auto diff
 	0 diff!
@@ -636,46 +697,32 @@ fn CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
 			buffer@ gb c!
 		end
 
-		c@ // value
-		0 // overwrite
-		0 // timeout
-		lastmode@ // lastmode
-		EXRINGDONTWAIT // waitonfull
-		outputbuffer@ // ringbuffer
-		ExRingBufferWriteValue ok! drop
-
-		ok@ ~~ diff!
-
-		while (ok@)
-			if (ok@ STATUS_WAIT_TIMEOUT ~=)
-				if (ok@ STATUS_RING_FULL ~=)
-					break
-				end
-			end
-
-			// ringbuffer full. call console output function and/or wake up
-			// host to try to empty it out.
-
-			0 console@ CoConsoleDoOutput
-
-			lastmode@ // mode
-			1 // alertable
-			KeThreadCurrent@ // thread
-			KeThreadIsKilled ok!
+		if (c@ '\n' == mode@ OSCONSOLEMODE_RAW & ~~ &&)
+			'\r' // c
+			lastmode@ // lastmode
+			console@ // console
+			CoConsoleWriteCharacter ok!
 
 			if (ok@)
+				if (byteswritten@)
+					0 console@ CoConsoleDoOutput
+				end
+
 				return
 			end
+		end
 
-			// try again. this time sleep with a timeout.
+		c@ // c
+		lastmode@ // lastmode
+		console@ // console
+		CoConsoleWriteCharacter ok!
 
-			c@ // value
-			0 // overwrite
-			50 // timeout
-			lastmode@ // lastmode
-			EXRINGWAIT // waitonfull
-			outputbuffer@ // ringbuffer
-			ExRingBufferWriteValue ok! drop
+		if (ok@)
+			if (byteswritten@)
+				0 console@ CoConsoleDoOutput
+			end
+
+			return
 		end
 
 		1 byteswritten +=
@@ -683,7 +730,7 @@ fn CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
 		1 length -=
 	end
 
-	if (diff@)
+	if (byteswritten@)
 		0 console@ CoConsoleDoOutput
 	end
 end

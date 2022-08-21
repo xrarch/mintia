@@ -1,0 +1,166 @@
+//
+// Implements a generic typeahead buffer. Useful in any situation where a low-
+// speed input device (like a teletype, mouse, or keyboard) requires buffering.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALDriver.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn IOTypeaheadBufferInitialize { sizelog valuesizelog quotablock pri header -- ok }
+	auto entries
+	1 sizelog@ << entries!
+
+	auto size
+	entries@ valuesizelog@ << size!
+
+	auto qcharge
+	size@ MmChargeBytesGet qcharge!
+
+	0 ok!
+
+	if (quotablock@)
+		// charge quota for buffer
+
+		if (pri@ PAGED &)
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockChargePaged ok!
+		end else
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockCharge ok!
+		end
+
+		if (ok@)
+			return
+		end
+
+		quotablock@ MmQuotaBlockReference
+	end
+
+	// allocate buffer
+
+	auto buf
+	size@ // size
+	'IOTa' // tag
+	pri@ // flags
+	MmAllocWithTag ok! buf!
+
+	if (ok@)
+		if (quotablock@)
+			if (pri@ PAGED &)
+				qcharge@ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockUnchargePaged
+			end else
+				qcharge@ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockUncharge
+			end
+
+			quotablock@ MmQuotaBlockDereference
+		end
+
+		return
+	end
+
+	buf@ header@ IOTypeaheadBufferHeader_Buffer + !
+
+	// initialize other header fields
+
+	pri@ header@ IOTypeaheadBufferHeader_Paged + !
+	size@ header@ IOTypeaheadBufferHeader_BufferSize + !
+	entries@ header@ IOTypeaheadBufferHeader_Entries + !
+	0 header@ IOTypeaheadBufferHeader_ReadIndex + !
+	0 header@ IOTypeaheadBufferHeader_WriteIndex + !
+	valuesizelog@ header@ IOTypeaheadBufferHeader_ValueSizeLog + !
+	quotablock@ header@ IOTypeaheadBufferHeader_QuotaBlock + !
+
+	0 header@ IOTypeaheadBufferHeader_UserBuffer + !
+	0 header@ IOTypeaheadBufferHeader_UserBufferPointer + !
+	0 header@ IOTypeaheadBufferHeader_UserTransferLength + !
+end
+
+fn IOTypeaheadBufferUninitialize { header -- }
+	auto buf
+	header@ IOTypeaheadBufferHeader_Buffer + @ buf!
+
+	auto bufsize
+	header@ IOTypeaheadBufferHeader_BufferSize + @ bufsize!
+
+	auto pri
+	header@ IOTypeaheadBufferHeader_Paged + @ pri!
+
+	auto quotablock
+	header@ IOTypeaheadBufferHeader_QuotaBlock + @ quotablock!
+
+	auto qcharge
+	bufsize@ MmChargeBytesGet qcharge!
+
+	if (quotablock@)
+		if (pri@ PAGED &)
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUnchargePaged
+		end else
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUncharge
+		end
+
+		quotablock@ MmQuotaBlockDereference
+	end
+
+	buf@ MmFree
+end
+
+fn IOTypeaheadBufferPutValue { value header -- valueptr ok }
+	// assumes synchronization from above thru mutex or elevated IPL.
+
+	// put a value into the typeahead buffer, and return a pointer to that
+	// value in case the caller wants to put extra information there. if the
+	// typeahead buffer is full, report this condition. if a user buffer has
+	// been associated with the typeahead buffer, then insert the value there
+	// instead. this functionality requires the user buffer to have been
+	// locked into memory iff the typeahead buffer is synchronized with
+	// elevated IPL, as is done when it is accessed from interrupt context,
+	// etc. if there is a user buffer and this action fills it up, report this
+	// to the caller so it can complete that request appropriately.
+
+	// TODO report when buffer is ~80% full so that serial driver can send an
+	// XOFF control character.
+
+
+end
+
+fn IOTypeaheadBufferCopyOut { bytestocopy buf header -- bytescopied ok }
+	// assumes synchronization from above thru mutex or elevated IPL.
+
+	// copy as many bytes as possible from the typeahead buffer into the given
+	// buffer. when the typeahead buffer has been emptied, atomically switch
+	// it to point to the user buffer, so that future PutValues will slap them
+	// into that buffer instead of the typeahead buffer. report this to the
+	// caller so he can wait for the transfer to fully complete in whatever
+	// consumer-specific way that needs to be done in. 
+end

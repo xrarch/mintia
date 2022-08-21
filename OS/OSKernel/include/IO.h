@@ -7,3 +7,4 @@
 #include "<inc>/IO/Cache.h"
 #include "<inc>/IO/Filesystem.h"
 #include "<inc>/IO/SwapFile.h"
+#include "<inc>/IO/TypeaheadBuffer.h"

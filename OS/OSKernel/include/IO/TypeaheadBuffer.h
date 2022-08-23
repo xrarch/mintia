@@ -10,6 +10,6 @@ struct IOTypeaheadBufferHeader
 	4 QuotaBlock
 
 	4 UserBuffer
-	4 UserBufferPointer
+	4 UserBufferIndex
 	4 UserTransferLength
 endstruct

@@ -70,6 +70,6 @@ const STATUS_TOO_MANY_SWAPFILES      -68
 const STATUS_ALREADY_ENQUEUED        -69
 const STATUS_NOT_ENQUEUED            -70
 const STATUS_STRIPPED_EXECUTABLE     -71
-const STATUS_IO_CONDITION            -72
+const STATUS_OTHER_CONDITION         -72
 
 extern OSStatusGetName { status -- name }

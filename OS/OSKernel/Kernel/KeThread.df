@@ -108,11 +108,11 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_IgnoreKill + !
 
 	0 thread@ KeThread_KilledStatus + !
-	0 thread@ KeThread_Killed + !
 
 	0 thread@ KeThread_Suspended + !
 
 	if (process@ KeProcess_SignalThread + @ ~~)
+		// this is synchronized by the CreateDeleteMutex
 		thread@ process@ KeProcess_SignalThread + !
 	end
 
@@ -136,7 +136,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	"NA" 0 thread@ KeThread_Timer + KeTimerInitialize
 
-	0 thread@ KeThread_ExceptionSignals + !
+	0 thread@ KeThread_Signals + !
+	0 thread@ KeThread_SignalAcceptMask + !
 
 	0 thread@ KeThread_TrapFrame + !
 
@@ -227,20 +228,15 @@ fn KeThreadAcceptKill { thread -- oldcount }
 end
 
 fn KeThreadTerminate { status thread -- }
-	1 thread@ KeThread_Killed + !
 	status@ thread@ KeThread_KilledStatus + !
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
 
 	OSSIGNAL_KILL // signal
 	thread@ // thread
-	KeThreadWakeForSignal
-
-	ipl@ KeIPLLower
+	KeThreadSignal drop
 end
 
 fn KeThreadSuspend { thread -- }
+	// XXX this would not work at all in SMP. IPI needed here.
 	1 thread@ KeThread_Suspended + !
 end
 
@@ -257,7 +253,49 @@ fn KeThreadResume { thread -- }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadWakeForSignal { sig thread -- }
+fn KeThreadMaskSignal { signal thread -- ok }
+	if (signal@ ~~)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	if (signal@ 32 >=)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	0 ok!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+	1 signal@ << ~ thread@ KeThread_SignalAcceptMask + &=
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeThreadUnmaskSignal { signal thread -- ok }
+	if (signal@ ~~)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	if (signal@ 32 >=)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 signal@ << thread@ KeThread_SignalAcceptMask + |=
+
+	thread@ KeThreadWakeForSignal
+
+	ipl@ KeIPLLower
+end
+
+fn KeThreadWakeForSignal { thread -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KeThreadWakeForSignal: ipl != IPLDPC\n" KeCrash
@@ -266,15 +304,20 @@ fn KeThreadWakeForSignal { sig thread -- }
 
 	// determine whether we need to wake the thread up
 
+	if (thread@ KeThread_IgnoreKill + @)
+		// no
+		return
+	end
+
+	auto sig
+	thread@ KeThread_Signals + @ sig!
+
 	auto status
 	if (sig@ 1 OSSIGNAL_KILL << &)
 		STATUS_KILLED status!
-	end else
+	end elseif (sig@ thread@ KeThread_SignalAcceptMask + @ &)
 		STATUS_SIGNALLED status!
-	end
-
-	if (thread@ KeThread_IgnoreKill + @)
-		// no
+	end else
 		return
 	end
 
@@ -330,19 +373,12 @@ fn KeThreadNextSignal { thread -- signum }
 	// assumes IPLDPC or equivalent.
 
 	auto excsignals
-	thread@ KeThread_ExceptionSignals + @ excsignals!
-
-	auto signals
-	thread@ KeThread_Process + @ KeProcess_Signaled + @ signals!
+	thread@ KeThread_Signals + @ excsignals!
 
 	0 signum!
 
 	while (signum@ 32 <)
 		if (excsignals@ 1 signum@ << &)
-			return
-		end
-
-		if (signals@ 1 signum@ << &)
 			return
 		end
 
@@ -369,23 +405,19 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		if (mode@ KERNELMODE ==)
 			// kernel mode unalertable can block all signals
 			0 ok!
-
 			return
 		end
-	end
-
-	if (thread@ KeThread_Killed + @)
-		// thread was explicitly terminated
-		STATUS_KILLED ok!
-
-		return
 	end
 
 	auto process
 	thread@ KeThread_Process + @ process!
 
 	auto sig
-	process@ KeProcess_Signaled + @ thread@ KeThread_ExceptionSignals + @ | sig!
+	thread@ KeThread_Signals + @ sig!
+
+	if (process@ KeProcess_Terminated + @)
+		OSSIGNAL_KILL sig |=
+	end
 
 	if (sig@ ~~)
 		// no signals, return now
@@ -401,17 +433,6 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		return
 	end
 
-	if (process@ KeProcess_SignalThread + @ thread@ ~=)
-		thread@ KeThread_ExceptionSignals + @ sig!
-
-		if (sig@ ~~)
-			// not the designated signal handling thread, ignore
-			0 ok!
-
-			return
-		end
-	end
-
 	if (alertable@ ~~)
 		// usermode unalertable can block all signals except OSSIGNAL_KILL
 		0 ok!
@@ -419,14 +440,14 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		return
 	end
 
-	if (process@ KeProcess_AcceptMask + @ sig@ &)
+	if (thread@ KeThread_SignalAcceptMask + @ sig@ &)
 		STATUS_SIGNALLED ok!
 	end else
 		0 ok!
 	end
 end
 
-fn KeThreadException { signal thread -- ok }
+fn KeThreadSignal { signal thread -- ok }
 	if (signal@ ~~)
 		STATUS_INVALID_ARGUMENT ok!
 		return
@@ -437,7 +458,14 @@ fn KeThreadException { signal thread -- ok }
 		return
 	end
 
-	1 signal@ << thread@ KeThread_ExceptionSignals + |=
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 signal@ << thread@ KeThread_Signals + |=
+
+	thread@ KeThreadWakeForSignal
+
+	ipl@ KeIPLLower
 end
 
 fn KeThreadEnqueue { front thread -- }

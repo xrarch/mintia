@@ -72,8 +72,6 @@
 .extern OSProcessQuery
 .extern OSProcessQueryByPID
 .extern OSProcessReadStatus
-.extern OSProcessMaskSignal
-.extern OSProcessUnmaskSignal
 .extern OSProcessSetConsoleGroup
 .extern OSProcessClearConsoleGroup
 .extern OSProcessSignalActivation
@@ -83,7 +81,6 @@
 .extern OSProcessQueryAll
 .extern OSSetQuota
 .extern OSQuotaQuery
-.extern OSThreadException
 .extern OSThreadSetFilePermissions
 .extern OSThreadSleep
 .extern OSThreadCreate
@@ -92,6 +89,9 @@
 .extern OSThreadResume
 .extern OSThreadReadStatus
 .extern OSThreadQuery
+.extern OSThreadSignal
+.extern OSThreadMaskSignal
+.extern OSThreadUnmaskSignal
 .extern OSSetSystemConsole
 .extern OSConsoleSignal
 .extern OSAmIAdmin
@@ -173,26 +173,26 @@ OSCallTable:
 	.dl OSTOSProcessQuery                                ;68
 	.dl OSTOSProcessQueryByPID                           ;69
 	.dl OSTOSProcessReadStatus                           ;70
-	.dl OSTOSProcessMaskSignal                           ;71
-	.dl OSTOSProcessUnmaskSignal                         ;72
-	.dl OSTOSProcessSetConsoleGroup                      ;73
-	.dl OSTOSProcessClearConsoleGroup                    ;74
-	.dl OSTOSProcessSignalActivation                     ;75
-	.dl OSTOSProcessWaitForActivation                    ;76
-	.dl OSTOSProcessExit                                 ;77
-	.dl OSTOSProcessCountQuery                           ;78
-	.dl OSTOSProcessQueryAll                             ;79
-	.dl OSTOSSetQuota                                    ;80
-	.dl OSTOSQuotaQuery                                  ;81
-	.dl OSTOSThreadException                             ;82
-	.dl OSTOSThreadSetFilePermissions                    ;83
-	.dl OSTOSThreadSleep                                 ;84
-	.dl OSTOSThreadCreate                                ;85
-	.dl OSTOSThreadTerminate                             ;86
-	.dl OSTOSThreadSuspend                               ;87
-	.dl OSTOSThreadResume                                ;88
-	.dl OSTOSThreadReadStatus                            ;89
-	.dl OSTOSThreadQuery                                 ;90
+	.dl OSTOSProcessSetConsoleGroup                      ;71
+	.dl OSTOSProcessClearConsoleGroup                    ;72
+	.dl OSTOSProcessSignalActivation                     ;73
+	.dl OSTOSProcessWaitForActivation                    ;74
+	.dl OSTOSProcessExit                                 ;75
+	.dl OSTOSProcessCountQuery                           ;76
+	.dl OSTOSProcessQueryAll                             ;77
+	.dl OSTOSSetQuota                                    ;78
+	.dl OSTOSQuotaQuery                                  ;79
+	.dl OSTOSThreadSetFilePermissions                    ;80
+	.dl OSTOSThreadSleep                                 ;81
+	.dl OSTOSThreadCreate                                ;82
+	.dl OSTOSThreadTerminate                             ;83
+	.dl OSTOSThreadSuspend                               ;84
+	.dl OSTOSThreadResume                                ;85
+	.dl OSTOSThreadReadStatus                            ;86
+	.dl OSTOSThreadQuery                                 ;87
+	.dl OSTOSThreadSignal                                ;88
+	.dl OSTOSThreadMaskSignal                            ;89
+	.dl OSTOSThreadUnmaskSignal                          ;90
 	.dl OSTOSSetSystemConsole                            ;91
 	.dl OSTOSConsoleSignal                               ;92
 	.dl OSTOSAmIAdmin                                    ;93
@@ -1296,36 +1296,6 @@ OSTOSProcessReadStatus:
 	addi sp, sp, 4
 	ret
 
-OSTOSProcessMaskSignal:
-.global OSTOSProcessMaskSignal
-	subi sp, sp, 4
-	mov  long [sp], lr
-	mov  a0, long [s17 + 4] ;t1
-	mov  a1, long [s17 + 8] ;t2
-
-	jal  OSProcessMaskSignal
-
-	mov  long [s17 + 4], a0 ;t1
-
-	mov  lr, long [sp]
-	addi sp, sp, 4
-	ret
-
-OSTOSProcessUnmaskSignal:
-.global OSTOSProcessUnmaskSignal
-	subi sp, sp, 4
-	mov  long [sp], lr
-	mov  a0, long [s17 + 4] ;t1
-	mov  a1, long [s17 + 8] ;t2
-
-	jal  OSProcessUnmaskSignal
-
-	mov  long [s17 + 4], a0 ;t1
-
-	mov  lr, long [sp]
-	addi sp, sp, 4
-	ret
-
 OSTOSProcessSetConsoleGroup:
 .global OSTOSProcessSetConsoleGroup
 	subi sp, sp, 4
@@ -1458,20 +1428,6 @@ OSTOSQuotaQuery:
 	addi sp, sp, 4
 	ret
 
-OSTOSThreadException:
-.global OSTOSThreadException
-	subi sp, sp, 4
-	mov  long [sp], lr
-	mov  a0, long [s17 + 4] ;t1
-
-	jal  OSThreadException
-
-	mov  long [s17 + 4], a0 ;t1
-
-	mov  lr, long [sp]
-	addi sp, sp, 4
-	ret
-
 OSTOSThreadSetFilePermissions:
 .global OSTOSThreadSetFilePermissions
 	subi sp, sp, 4
@@ -1590,6 +1546,51 @@ OSTOSThreadQuery:
 	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSThreadQuery
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadSignal:
+.global OSTOSThreadSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+
+	jal  OSThreadSignal
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadMaskSignal:
+.global OSTOSThreadMaskSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+
+	jal  OSThreadMaskSignal
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadUnmaskSignal:
+.global OSTOSThreadUnmaskSignal
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+
+	jal  OSThreadUnmaskSignal
 
 	mov  long [s17 + 4], a0 ;t1
 

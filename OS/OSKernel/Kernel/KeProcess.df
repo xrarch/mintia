@@ -28,13 +28,6 @@ fn KeProcessInitialize { name asid parentprocess process -- }
 	PRIORITY_DEFAULT process@ KeProcess_BasePriority + !
 
 	0 process@ KeProcess_SignalThread + !
-	0 process@ KeProcess_Signaled + !
-
-	if (parentprocess@)
-		parentprocess@ KeProcess_AcceptMask + @ process@ KeProcess_AcceptMask + !
-	end else
-		0 process@ KeProcess_AcceptMask + !
-	end
 
 	0 process@ KeProcess_Terminated + !
 	0 process@ KeProcess_KilledStatus + !
@@ -84,114 +77,24 @@ fn KeProcessSignal { signal process -- ok }
 		return
 	end
 
-	if (signal@ OSSIGNAL_KILL ~=)
-		if (process@ KeProcess_AcceptMask + @ 1 signal@ << & ~~)
-			ipl@ KeIPLLower
-			return
-		end
-	end
-
-	1 signal@ << process@ KeProcess_Signaled + |=
-
-	process@ KeProcessWakeForSignal
-
-	ipl@ KeIPLLower
-end
-
-fn KeProcessMaskSignal { signal process -- ok }
-	if (signal@ ~~)
-		STATUS_INVALID_ARGUMENT ok!
-		return
-	end
-
-	if (signal@ 32 >=)
-		STATUS_INVALID_ARGUMENT ok!
-		return
-	end
-
-	0 ok!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-	1 signal@ << ~ process@ KeProcess_AcceptMask + &=
-	rs@ HALCPUInterruptRestore
-end
-
-fn KeProcessUnmaskSignal { signal process -- ok }
-	if (signal@ ~~)
-		STATUS_INVALID_ARGUMENT ok!
-		return
-	end
-
-	if (signal@ 32 >=)
-		STATUS_INVALID_ARGUMENT ok!
-		return
-	end
-
-	0 ok!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	1 signal@ << process@ KeProcess_AcceptMask + |=
-
-	process@ KeProcessWakeForSignal
-
-	ipl@ KeIPLLower
-end
-
-fn KeProcessWakeForSignal { process -- }
-	// should be called whenever signal state or acceptmask is changed
-
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeProcessWakeForSignal: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	auto signalthread
-	process@ KeProcess_SignalThread + @ signalthread!
-
-	auto sig
-	process@ KeProcess_Signaled + @ sig!
-
-	auto wakeall
-
-	if (sig@ 1 OSSIGNAL_KILL << &)
-		1 wakeall!
-	end elseif (process@ KeProcess_AcceptMask + @ sig@ &)
-		0 wakeall!
-	end else
-		// no signals that are being accepted, do nothing
-		return
-	end
-
-	if (wakeall@ ~~)
-		// wake only the signal thread
-
-		if (signalthread@ KeThread_Suspended + @)
-			signalthread@ KeThreadResume
-		end else
-			sig@ // sig
-			signalthread@ // thread
-			KeThreadWakeForSignal
-		end
-	end else
-		// wake all threads
-
+	if (signal@ OSSIGNAL_KILL ==)
 		auto thread
 		process@ KeProcess_ThreadListHead + @ thread!
 
 		while (thread@)
-			if (thread@ KeThread_Suspended + @)
-				thread@ KeThreadResume
-			end else
-				sig@ // sig
-				thread@ // thread
-				KeThreadWakeForSignal
-			end
+			OSSIGNAL_KILL // signal
+			thread@ // thread
+			KeThreadSignal drop
 
 			thread@ KeThread_ProcessNext + @ thread!
 		end
+
+		1 process@ KeProcess_Terminated + !
+	end else
+		signal@ // signal
+		process@ KeProcess_SignalThread + @ // thread
+		KeThreadSignal drop
 	end
+
+	ipl@ KeIPLLower
 end

@@ -61,6 +61,8 @@ struct OSThreadEnvironmentBlock
 	4 StackTop
 	4 StackBottom
 	4 StackHasGuardPage
+
+	(32 4 *) SignalActions
 endstruct
 
 struct OSCreationParams

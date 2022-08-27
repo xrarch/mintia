@@ -29,8 +29,6 @@ struct KeProcess
 	4 BasePriority
 
 	4 SignalThread
-	4 Signaled
-	4 AcceptMask
 
 	4 Terminated
 	4 KilledStatus
@@ -99,7 +97,6 @@ struct KeThread
 
 	4 IgnoreKill
 
-	4 Killed
 	4 KilledStatus
 
 	4 Suspended
@@ -123,7 +120,8 @@ struct KeThread
 	4 SafeAccessAbort
 	4 SafeAccessSP
 
-	4 ExceptionSignals
+	4 Signals
+	4 SignalAcceptMask
 
 	4 TrapFrame
 
@@ -153,9 +151,6 @@ extern KeProcessInitialize { name asid parentprocess process -- }
 extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
 
-extern KeProcessMaskSignal { signal process -- ok }
-extern KeProcessUnmaskSignal { signal process -- ok }
-
 externptr KeProcessListHead
 externptr KeProcessIdleProcess
 
@@ -163,11 +158,13 @@ extern KeThreadInitialize { context1 context2 startfunc process kstack name thre
 extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }
-extern KeThreadException { signal thread -- ok }
+extern KeThreadSignal { signal thread -- ok }
 extern KeThreadTerminate { status thread -- }
 extern KeThreadSuspend { thread -- }
 extern KeThreadResume { thread -- }
-extern KeThreadWakeForSignal { sig thread -- }
+extern KeThreadWakeForSignal { thread -- }
+extern KeThreadMaskSignal { signal thread -- ok }
+extern KeThreadUnmaskSignal { signal thread -- ok }
 extern KeThreadRundown { thread -- }
 extern KeThreadNextSignal { thread -- signum }
 extern KeThreadIsKilled { mode alertable thread -- ok }

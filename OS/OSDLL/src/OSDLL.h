@@ -20,7 +20,7 @@ struct OSPEBs
 	4 CurrentDirectory
 	4 UMask
 
-	(32 4 *) SignalActions
+	(32 4 *) InitialSignalActions
 endstruct
 
 extern DLLFindEnvironmentVariable { name envblock -- entry env ok }

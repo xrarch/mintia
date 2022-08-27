@@ -176,9 +176,6 @@ extern PsProcessInformationQuery { processhandle query -- ok }
 extern PsProcessInformationQueryByPID { pid query -- ok }
 extern PsProcessQueryAll { buffer maxquery -- count ok }
 
-extern PsProcessMaskSignal { signal processhandle -- ok }
-extern PsProcessUnmaskSignal { signal processhandle -- ok }
-
 extern PsProcessSetConsoleGroup { filehandle processhandle -- ok }
 extern PsProcessClearConsoleGroup { processhandle -- ok }
 
@@ -194,6 +191,11 @@ extern PsThreadExit { -- }
 
 extern PsThreadTerminateObject { status threadobject -- ok }
 extern PsThreadTerminate { status threadhandle -- ok }
+
+extern PsThreadSignal { signal threadhandle -- ok }
+
+extern PsThreadMaskSignal { signal threadhandle -- ok }
+extern PsThreadUnmaskSignal { signal threadhandle -- ok }
 
 extern PsProcessGetUID { process -- uid }
 extern PsProcessGetGID { process -- gid }

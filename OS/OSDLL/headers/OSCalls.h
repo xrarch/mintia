@@ -107,8 +107,6 @@ extern OSProcessOpenByPID { access pid -- processhandle ok }
 extern OSProcessQuery { processhandle query -- ok }
 extern OSProcessQueryByPID { pid query -- ok }
 extern OSProcessReadStatus { processhandle -- status ok }
-extern OSProcessMaskSignal { signal processhandle -- ok }
-extern OSProcessUnmaskSignal { signal processhandle -- ok }
 extern OSProcessSetConsoleGroup { filehandle processhandle -- ok }
 extern OSProcessClearConsoleGroup { processhandle -- ok }
 
@@ -123,7 +121,6 @@ extern OSProcessQueryAll { buffer maxquery -- count ok }
 extern OSSetQuota { quota processhandle -- ok }
 extern OSQuotaQuery { query processhandle -- ok }
 
-extern OSThreadException { signal -- ok }
 extern OSThreadSetFilePermissions { filepermissions -- ok }
 extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
@@ -132,6 +129,10 @@ extern OSThreadSuspend { threadhandle -- ok }
 extern OSThreadResume { threadhandle -- ok }
 extern OSThreadReadStatus { threadhandle -- status ok }
 extern OSThreadQuery { threadhandle query -- ok }
+
+extern OSThreadSignal { signal threadhandle -- ok }
+extern OSThreadMaskSignal { signal threadhandle -- ok }
+extern OSThreadUnmaskSignal { signal threadhandle -- ok }
 
 // Co
 extern OSSetSystemConsole { filehandle -- ok }

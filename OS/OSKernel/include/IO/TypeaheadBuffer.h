@@ -3,6 +3,7 @@ struct IOTypeaheadBufferHeader
 
 	4 Buffer
 	4 BufferSize
+	4 RemainingSpace
 	4 Entries
 	4 ReadIndex
 	4 WriteIndex

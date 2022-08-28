@@ -47,6 +47,7 @@ struct SerialRequest
 	4 Buffer
 	4 Length
 	4 SerialPort
+	4 LengthDone
 endstruct
 
 const REQFLAG_WRITE     2
@@ -237,6 +238,12 @@ fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
 		context1@ SerialPort_ReceiveBuffer + // header
 		IOTypeaheadBufferCopyIn ok! drop
 
+		if (currentreq@)
+			if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE & ~~)
+				1 currentreq@ SerialRequest_LengthDone + +=
+			end
+		end
+
 		if (ok@ STATUS_OTHER_CONDITION ==)
 			if (DEBUGCHECKS)
 				if (currentreq@ ~~)
@@ -247,6 +254,8 @@ fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
 					"DriverSerialDPCFunction: not a read request\n" KeCrash
 				end
 			end
+
+			currentreq@ SerialRequest_LengthDone + @ currentreq@ SerialRequest_MDL + @ MmMDLHeader_Length + !
 
 			1 completed!
 		end
@@ -327,7 +336,34 @@ fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
 			len@ currentreq@ SerialRequest_Length + !
 			buf@ currentreq@ SerialRequest_Buffer + !
 		end else
+			currentreq@ SerialRequest_Length + @ len!
+			currentreq@ SerialRequest_Buffer + @ buf!
 
+			auto read
+			len@ // bytestocopy
+			buf@ // buf
+			1 // switch
+			context1@ SerialPort_ReceiveBuffer + // header
+			IOTypeaheadBufferCopyOut ok! read!
+
+			read@ len -=
+
+			if (ok@ ~~)
+				read@ currentreq@ SerialRequest_MDL + @ MmMDLHeader_Length + !
+
+				1 completed!
+
+				continue
+			end
+
+			if (DEBUGCHECKS)
+				if (ok@ STATUS_OTHER_CONDITION ~=)
+					ok@ "DriverSerialDPCFunction: odd %i\n" KeCrash
+				end
+			end
+
+			len@ currentreq@ SerialRequest_Length + !
+			buf@ read@ + currentreq@ SerialRequest_Buffer + !
 		end
 	end
 end
@@ -375,6 +411,7 @@ fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl f
 	buf@        ior@ SerialRequest_Buffer + !
 	len@        ior@ SerialRequest_Length + !
 	serialport@ ior@ SerialRequest_SerialPort + !
+	0           ior@ SerialRequest_LengthDone + !
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -414,8 +451,14 @@ fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl f
 			end
 		end
 
+		read@ ior@ SerialRequest_LengthDone + !
+		len@ ior@ SerialRequest_Length + !
+		buf@ read@ + ior@ SerialRequest_Buffer + !
+
 		ior@ serialport@ SerialPort_RequestListTail + !
 		ior@ serialport@ SerialPort_RequestListHead + !
+
+		0 ok!
 	end else
 		// add our request to the tail of the queue.
 
@@ -470,6 +513,7 @@ fn (IODispatchWriteFunction) DriverSerialWrite { flags kflags offset mdl fcb -- 
 	buf@          ior@ SerialRequest_Buffer + !
 	len@          ior@ SerialRequest_Length + !
 	serialport@   ior@ SerialRequest_SerialPort + !
+	0             ior@ SerialRequest_LengthDone + !
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!

@@ -139,15 +139,14 @@ fn IOTypeaheadBufferCopyIn { bytestocopy buf header -- bytescopied ok }
 	// NOTE -- if bytestocopy is 1, the value of buf is taken to be a literal
 	// character!
 
-	// copy values into the typeahead buffer. if bytestocopy is not a multiple
-	// of the value size for the typeahead buffer, that is a bug. if the
-	// typeahead buffer is full, report this condition. if a user buffer has
-	// been associated with the typeahead buffer, then insert the value there
-	// instead. this functionality requires the user buffer to have been
-	// locked into memory iff the typeahead buffer is synchronized with
-	// elevated IPL, as is done when it is accessed from interrupt context,
-	// etc. if there is a user buffer and this action fills it up, report this
-	// to the caller so it can complete that request appropriately.
+	// copy values into the typeahead buffer. if the typeahead buffer is full,
+	// report this condition. if a user buffer has been associated with the
+	// typeahead buffer, then insert the value there instead. this
+	// functionality requires the user buffer to have been locked into memory
+	// iff the typeahead buffer is synchronized with elevated IPL, as is done
+	// when it is accessed from interrupt context, etc. if there is a user
+	// buffer and this action fills it up, report this to the caller so it can
+	// complete that request appropriately.
 
 	// TODO report when buffer is ~80% full so that serial driver can send an
 	// XOFF control character and potentially save the world.
@@ -222,7 +221,50 @@ fn IOTypeaheadBufferCopyIn { bytestocopy buf header -- bytescopied ok }
 		return
 	end
 
+	auto bufsize
+	header@ IOTypeaheadBufferHeader_BufferSize + @ bufsize!
 
+	auto bufmask
+	bufsize@ 1 - bufmask!
+
+	auto wp
+	header@ IOTypeaheadBufferHeader_WriteIndex + @ wp!
+
+	if (bytestocopy@ 1 ==)
+		buf@ bufp@ wp@ bufmask@ & + sb
+
+		wp@ 1 + header@ IOTypeaheadBufferHeader_WriteIndex + !
+		1 header@ IOTypeaheadBufferHeader_RemainingSpace + -=
+
+		return
+	end
+
+	auto endp
+	wp@ bytescopied@ + endp!
+
+	if (wp@ bufmask@ ~ & endp@ bufmask@ ~ & ==)
+		// doesn't cross the boundary, do a single copy
+
+		bufp@ wp@ bufmask@ & + // dest
+		buf@ // src
+		bytescopied@ // sz
+		memcpy
+	end else
+		// crosses the boundary, do two copies
+
+		bufp@ wp@ bufmask@ & + // dest
+		buf@ // src
+		bufsize@ wp@ bufmask@ & - // sz
+		memcpy
+
+		bufp@ // dest
+		buf@ bufsize@ wp@ bufmask@ & - + // src
+		endp@ bufmask@ & // sz
+		memcpy
+	end
+
+	endp@ header@ IOTypeaheadBufferHeader_WriteIndex + !
+	bytestocopy@ header@ IOTypeaheadBufferHeader_RemainingSpace + -=
 end
 
 fn IOTypeaheadBufferCopyOut { bytestocopy buf switch header -- bytescopied ok }

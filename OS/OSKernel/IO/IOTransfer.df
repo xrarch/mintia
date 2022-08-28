@@ -40,6 +40,19 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 	auto readfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
 
+	auto cancelfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
+
+	auto alertable
+	1 alertable!
+
+	if (cancelfunc@ ~~)
+		OSWAIT_TIMEOUTINFINITE timeout!
+		0 alertable!
+	end
+
+	auto wok
+
 	auto event
 	KeEvent_SIZEOF alloc event!
 
@@ -60,17 +73,19 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 
 		event@ mdl@ MmMDLHeader_Event + !
 
-		auto chunkread
 		timeout@ // timeout
 		flags@ // flags
 		kflags@ // kflags
 		offset@ // offset
 		mdl@ // mdl
 		fcb@ // fcb
-		readfunc@ IODispatchReadFunction ok! chunkread!
+		readfunc@ IODispatchReadFunction ok! drop
 
 		if (ok@)
 			// complete the MDL so we can wait for any fragments to finish
+
+			0 alertable!
+			OSWAIT_TIMEOUTINFINITE timeout!
 
 			ok@ // status
 			0 // priboost
@@ -80,10 +95,15 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			KERNELMODE // waitmode
-			0 // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
+			alertable@ // alertable
+			timeout@ // timeout
 			event@ // object
-			KeThreadWaitForObject drop
+			KeThreadWaitForObject wok!
+
+			if (wok@)
+				wok@ ok!
+				mdl@ cancelfunc@ IODispatchCancelFunction
+			end
 		end
 
 		if (ok@)
@@ -91,9 +111,16 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 			break
 		end
 
-		chunkread@ bytesread +=
+		mdl@ MmMDLHeader_Status + @ ok!
 
-		if (chunkread@ IOTRANSFERMAX <)
+		if (ok@)
+			0 length!
+			break
+		end
+
+		mdl@ MmMDLHeader_Length + @ bytesread +=
+
+		if (mdl@ MmMDLHeader_Length + @ IOTRANSFERMAX <)
 			0 length!
 			break
 		end
@@ -124,10 +151,13 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 		offset@ // offset
 		mdl@ // mdl
 		fcb@ // fcb
-		readfunc@ IODispatchReadFunction ok! bytesread +=
+		readfunc@ IODispatchReadFunction ok! drop
 
 		if (ok@)
 			// complete the MDL so we can wait for any fragments to finish
+
+			0 alertable!
+			OSWAIT_TIMEOUTINFINITE timeout!
 
 			ok@ // status
 			0 // priboost
@@ -137,15 +167,28 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			KERNELMODE // waitmode
-			0 // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
+			alertable@ // alertable
+			timeout@ // timeout
 			event@ // object
-			KeThreadWaitForObject drop
+			KeThreadWaitForObject wok!
+
+			if (wok@)
+				wok@ ok!
+				mdl@ cancelfunc@ IODispatchCancelFunction
+			end
 		end
 
 		if (ok@)
 			return
 		end
+
+		mdl@ MmMDLHeader_Status + @ ok!
+
+		if (ok@)
+			return
+		end
+
+		mdl@ MmMDLHeader_Length + @ bytesread +=
 	end
 end
 
@@ -157,6 +200,18 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+
+	auto cancelfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
+
+	auto alertable
+	1 alertable!
+
+	if (cancelfunc@ ~~)
+		0 alertable!
+	end
+
+	auto wok
 
 	auto event
 	KeEvent_SIZEOF alloc event!
@@ -178,16 +233,17 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 
 		event@ mdl@ MmMDLHeader_Event + !
 
-		auto chunkwritten
 		flags@ // flags
 		kflags@ // kflags
 		offset@ // offset
 		mdl@ // mdl
 		fcb@ // fcb
-		writefunc@ IODispatchWriteFunction ok! chunkwritten!
+		writefunc@ IODispatchWriteFunction ok! drop
 
 		if (ok@)
 			// complete the MDL so we can wait for any fragments to finish
+
+			0 alertable!
 
 			ok@ // status
 			0 // priboost
@@ -197,10 +253,15 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			KERNELMODE // waitmode
-			0 // alertable
+			alertable@ // alertable
 			OSWAIT_TIMEOUTINFINITE // timeout
 			event@ // object
-			KeThreadWaitForObject drop
+			KeThreadWaitForObject wok!
+
+			if (wok@)
+				wok@ ok!
+				mdl@ cancelfunc@ IODispatchCancelFunction
+			end
 		end
 
 		if (ok@)
@@ -215,9 +276,9 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 			break
 		end
 
-		chunkwritten@ byteswritten +=
+		mdl@ MmMDLHeader_Length + @ byteswritten +=
 
-		if (chunkwritten@ IOTRANSFERMAX <)
+		if (mdl@ MmMDLHeader_Length + @ IOTRANSFERMAX <)
 			0 length!
 			break
 		end
@@ -247,10 +308,12 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 		offset@ // offset
 		mdl@ // mdl
 		fcb@ // fcb
-		writefunc@ IODispatchWriteFunction ok! byteswritten +=
+		writefunc@ IODispatchWriteFunction ok! drop
 
 		if (ok@)
 			// complete the MDL so we can wait for any fragments to finish
+
+			0 alertable!
 
 			ok@ // status
 			0 // priboost
@@ -260,10 +323,15 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			KERNELMODE // waitmode
-			0 // alertable
+			alertable@ // alertable
 			OSWAIT_TIMEOUTINFINITE // timeout
 			event@ // object
-			KeThreadWaitForObject drop
+			KeThreadWaitForObject wok!
+
+			if (wok@)
+				wok@ ok!
+				mdl@ cancelfunc@ IODispatchCancelFunction
+			end
 		end
 
 		if (ok@)
@@ -271,5 +339,11 @@ fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
 		end
 
 		mdl@ MmMDLHeader_Status + @ ok!
+
+		if (ok@)
+			return
+		end
+
+		mdl@ MmMDLHeader_Length + @ byteswritten +=
 	end
 end

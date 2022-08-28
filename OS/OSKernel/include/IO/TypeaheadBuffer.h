@@ -12,3 +12,12 @@ struct IOTypeaheadBufferHeader
 	4 UserBufferIndex
 	4 UserTransferLength
 endstruct
+
+extern IOTypeaheadBufferInitialize { sizelog quotablock pri header -- ok }
+extern IOTypeaheadBufferUninitialize { header -- }
+
+extern IOTypeaheadBufferCopyIn { bytestocopy buf header -- bytescopied ok }
+extern IOTypeaheadBufferCopyOut { bytestocopy buf switch header -- bytescopied ok }
+extern IOTypeaheadBufferRubout { header -- value ok }
+
+extern IOTypeaheadBufferComplete { header -- bytescopied }

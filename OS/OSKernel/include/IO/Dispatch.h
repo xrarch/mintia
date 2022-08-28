@@ -1,8 +1,8 @@
 fnptr IODispatchOpenFunction { access fileobject -- ok }
 fnptr IODispatchCloseFunction { access fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg2 arg1 access fcb lastmode -- ret ok }
-fnptr IODispatchReadFunction { timeout flags kflags offset mdl fcb -- bytesread ok }
-fnptr IODispatchWriteFunction { flags kflags offset mdl fcb -- byteswritten ok }
+fnptr IODispatchReadFunction { timeout flags kflags offset mdl fcb -- ok }
+fnptr IODispatchWriteFunction { flags kflags offset mdl fcb -- ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
 fnptr IODispatchDeleteFunction { fcb -- }

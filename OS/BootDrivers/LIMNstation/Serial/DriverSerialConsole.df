@@ -7,6 +7,7 @@
 #include "<ll>/OSDLL/OS.h"
 
 #include "<inc>/HALLog.h"
+#include "<inc>/HALMap.h"
 #include "<inc>/HALDriver.h"
 #include "<inc>/HALRTC.h"
 #include "<inc>/HALLIMNstationCitron.h"
@@ -28,9 +29,71 @@
 struct SerialPort
 	4 PortCMD
 	4 PortData
-	4 TransmitBuffer
 	KeDPC_SIZEOF DPC
+
+	4 RequestListHead
+	4 RequestListTail
+
+	IOTypeaheadBufferHeader_SIZEOF ReceiveBuffer
 endstruct
+
+// must be <=32 bytes to fit in the MDL DriverGoWild area
+struct SerialRequest
+	4 Next
+	4 Prev
+
+	4 Flags
+	4 MDL
+	4 Buffer
+	4 Length
+	4 SerialPort
+endstruct
+
+const REQFLAG_WRITE     2
+
+table DriverSerialDispatch
+	0                                    // open
+	0                                    // close
+	0                                    // iocontrol
+	pointerof DriverSerialRead           // read
+	pointerof DriverSerialWrite          // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	0                                    // readblock
+	0                                    // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reclaim fcb
+	pointerof DriverSerialCancel         // cancel request
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverSerial
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"serial"                             // name
+	OSFILETYPE_CHARDEVICE                // type
+	pointerof DriverSerialDispatch       // dispatch table
+	SerialPort_SIZEOF                    // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
 
 const SERIALA_PORTCMD   0x10
 const SERIALA_PORTDATA  0x11
@@ -53,65 +116,38 @@ fn SerialCreate { name intn cmdport dataport -- deviceobject }
 
 	auto ok
 
-	auto rawbuffer
-	10 // sizelog (2^10 = 1024 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLSERIAL // synchipl
-	0 // quotablock
-	ExRingBufferCreate ok! rawbuffer!
+	name@ // name
+	0 // sizeinbytes
+	DriverSerial // driver
+	ACCESS_OWNER_READ ACCESS_GROUP_READ | ACCESS_OWNER_WRITE | ACCESS_GROUP_WRITE | // permissions
+	IODeviceCreate ok! deviceobject!
 
 	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
-	end
-
-	auto transmitbuffer
-	7 // sizelog (2^7 = 128 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLSERIAL // synchipl
-	0 // quotablock
-	ExRingBufferCreate ok! transmitbuffer!
-
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
 	end
 
 	auto serialport
-	SerialPort_SIZEOF // bytes
-	'Sril' // tag
-	MUSTSUCCEED // flags
-	MmAllocWithTag ok! serialport!
+	deviceobject@ IODeviceGetExtension serialport!
+
+	9 // sizelog (2^9 = 512 bytes)
+	0 // quotablock
+	MUSTSUCCEED // pri
+	serialport@ SerialPort_ReceiveBuffer + // header
+	IOTypeaheadBufferInitialize ok!
 
 	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
 	end
 
 	cmdport@  serialport@ SerialPort_PortCMD + !
 	dataport@ serialport@ SerialPort_PortData + !
 
-	transmitbuffer@ serialport@ SerialPort_TransmitBuffer + !
+	0 serialport@ SerialPort_RequestListHead + !
+	0 serialport@ SerialPort_RequestListTail + !
 
 	pointerof DriverSerialDPCFunction // function
 	serialport@ SerialPort_DPC + // dpc
 	KeDPCInitialize
-
-	pointerof DriverSerialConsoleOutput // outputfunc
-	serialport@ // context
-	rawbuffer@ // rawbuffer
-	0 // quotablock
-	name@ // name
-	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-	1 // permanent
-	CoConsoleCreateObject ok! deviceobject! drop
-
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
-	end
-
-	deviceobject@ IODeviceDirectoryInsert ok!
-
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
-	end
 end
 
 fn (FDriverInit) DriverInit { stage -- ok }
@@ -119,7 +155,6 @@ fn (FDriverInit) DriverInit { stage -- ok }
 
 	if (stage@ STAGE_THREAD ==)
 		auto deviceobject
-		auto syscons
 
 		"ttyS0" // name
 		SERIALA_INTERRUPT // intn
@@ -127,8 +162,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		SERIALA_PORTDATA // dataport
 		SerialCreate deviceobject!
 
-		deviceobject@ SerialPortA!
-		deviceobject@ IODeviceGetExtension syscons!
+		deviceobject@ IODeviceGetExtension SerialPortA!
 
 		"ttyS1" // name
 		SERIALB_INTERRUPT // intn
@@ -136,7 +170,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		SERIALB_PORTDATA // dataport
 		SerialCreate deviceobject!
 
-		deviceobject@ SerialPortB!
+		deviceobject@ IODeviceGetExtension SerialPortB!
 
 		// register interrupts and start interrupting
 
@@ -157,101 +191,6 @@ fn (FDriverInit) DriverInit { stage -- ok }
 	0 ok!
 end
 
-fn SerialPutc { c s dontblock -- }
-	// TODO see if we can make this work without the intermediate
-	// transmitbuffer between the outputbuffer and the serial port.
-
-	auto ringbuffer
-	0 ringbuffer!
-
-	auto ipl
-	IPLSERIAL KeIPLRaise ipl!
-
-	if (s@ SerialPort_PortCMD + @ HALLIMNstationCitronInb
-		s@ SerialPort_TransmitBuffer + @ ExRingBufferIsEmpty ~~ ||)
-		// serial port not ready to transmit more characters, OR there are
-		// pending characters in the transmit buffer. we have to put the
-		// character in the transmit buffer in the latter case otherwise we
-		// will end up desynchronized from what the interrupt handler is
-		// doing and send characters in the wrong order.
-
-		ipl@ KeIPLLower
-
-		s@ SerialPort_TransmitBuffer + @ ringbuffer!
-
-		c@ // value
-		0 // overwrite
-		OSWAIT_TIMEOUTINFINITE // timeout
-		KERNELMODE // lastmode
-		dontblock@ ~~ // waitonfull
-		ringbuffer@ // ringbuffer
-		ExRingBufferWriteValue drop drop
-
-		IPLSERIAL KeIPLRaise ipl!
-	end else
-		c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-	end
-
-	if (ringbuffer@)
-		// we inserted a character into the ringbuffer.
-		// we had to dip below IPLSERIAL to do that since it might have
-		// blocked, so now we have to do some of the work of the interrupt
-		// handler, which may not have gotten a chance to run properly.
-
-		auto wrote
-		0 wrote!
-
-		while (1)
-			if (s@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-				// serial port not ready to transmit more characters
-
-				break
-			end
-
-			auto ok
-			0 // timeout
-			KERNELMODE // lastmode
-			EXRINGDONTWAIT // waitonempty
-			ringbuffer@ // ringbuffer
-			ExRingBufferReadValue ok! drop c!
-
-			if (ok@)
-				// no more characters pending transmission
-
-				break
-			end
-
-			1 wrote!
-
-			c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-		end
-
-		if (wrote@)
-			IPLDPC KeIPLLower
-
-			IOBOOSTCONSOLE // priboost
-			ringbuffer@ // ringbuffer
-			ExRingBufferWakeWriter
-		end
-	end
-
-	ipl@ KeIPLLower
-end
-
-fn SerialGetc { s -- c }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	SERIALCMDREAD s@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
-	s@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
-
-	rs@ HALCPUInterruptRestore
-
-	if (c@ 0xFFFF ==)
-		ERR c! return
-	end
-end
-
 fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 	auto serialport
 
@@ -263,105 +202,367 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 		int@ "DriverSerialInterrupt: weird interrupt number %d\n" KeCrash
 	end
 
-	auto console
-	serialport@ IODeviceGetExtension console!
-
-	console@ CoConsoleGetContext serialport!
-
-	auto ringbuf
-	console@ CoConsoleRawBufferGet ringbuf!
-
-	auto c
-	serialport@ SerialGetc c!
-
-	while (c@ ERR ~=)
-		c@ // value
-		1  // overwrite
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonfull
-		ringbuf@ // ringbuffer
-		ExRingBufferWriteValue drop drop
-
-		serialport@ SerialGetc c!
-	end
-
-	auto transmitbuf
-	serialport@ SerialPort_TransmitBuffer + @ transmitbuf!
-
-	while (1)
-		if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-			// serial port not ready to transmit more characters
-
-			break
-		end
-
-		auto ok
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonempty
-		transmitbuf@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
-
-		if (ok@)
-			// no more characters pending transmission
-
-			break
-		end
-
-		c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-	end
-
 	auto dpc
 	serialport@ SerialPort_DPC + dpc!
 
 	if (dpc@ KeDPC_Enqueued + @ ~~)
-		// defer waking up any blocked readers til later,
-		// otherwise we will BSOD since we're at IPLSERIAL
-
-		console@ // context1
-		transmitbuf@ // context2
-		DPCLOWIMPORTANCE // importance
+		serialport@ // context1
+		0 // context2
+		DPCHIGHIMPORTANCE // importance
 		dpc@ // dpc
 		KeDPCEnqueue
 	end
 end
 
 fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
-	context1@ CoConsoleCook
+	auto currentreq
+	context1@ SerialPort_RequestListHead + @ currentreq!
 
-	IOBOOSTCONSOLE // priboost
-	context2@ // ringbuffer
-	ExRingBufferWakeWriter
-end
+	auto completed
+	0 completed!
 
-fn (CoOutputFunction) DriverSerialConsoleOutput { echo console -- ok }
-	auto outputbuffer
-	console@ CoConsoleOutputBufferGet outputbuffer!
-
-	auto serialport
-	console@ CoConsoleGetContext serialport!
-
-	0 ok!
+	auto ok
 
 	while (1)
 		auto c
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonempty
-		outputbuffer@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
+		SERIALCMDREAD context1@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
+		context1@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
 
-		if (ok@)
+		if (c@ 0xFFFF ==)
+			break
+		end
+
+		1 // bytestocopy
+		c@ // buf
+		context1@ SerialPort_ReceiveBuffer + // header
+		IOTypeaheadBufferCopyIn ok! drop
+
+		if (ok@ STATUS_OTHER_CONDITION ==)
+			if (DEBUGCHECKS)
+				if (currentreq@ ~~)
+					"DriverSerialDPCFunction: no read request\n" KeCrash
+				end
+
+				if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE &)
+					"DriverSerialDPCFunction: not a read request\n" KeCrash
+				end
+			end
+
+			1 completed!
+		end
+	end
+
+	auto len
+	auto buf
+
+	if (currentreq@)
+		if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE &)
+			currentreq@ SerialRequest_Length + @ len!
+			currentreq@ SerialRequest_Buffer + @ buf!
+
+			while (len@)
+				if (context1@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+					break
+				end
+
+				buf@ gb context1@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+
+				1 buf +=
+				1 len -=
+			end
+
+			if (len@ ~~)
+				1 completed!
+			end
+
+			buf@ currentreq@ SerialRequest_Buffer + !
+			len@ currentreq@ SerialRequest_Length + !
+		end
+	end
+
+	while (completed@)
+		0 completed!
+
+		0 // status
+		IOBOOSTCONSOLE // priboost
+		currentreq@ SerialRequest_MDL + @ // mdl
+		MmMDLComplete
+
+		currentreq@ SerialRequest_Next + @ currentreq!
+
+		currentreq@ context1@ SerialPort_RequestListHead + !
+
+		if (currentreq@ ~~)
+			0 context1@ SerialPort_RequestListTail + !
 			return
 		end
 
-		if (c@ 0x7F ==)
-			'\b' serialport@ echo@ SerialPutc
-			' ' serialport@ echo@ SerialPutc
-			'\b' serialport@ echo@ SerialPutc
+		0 currentreq@ SerialRequest_Prev + !
+
+		// start next request
+
+		if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE &)
+			currentreq@ SerialRequest_Length + @ len!
+			currentreq@ SerialRequest_Buffer + @ buf!
+
+			while (len@)
+				if (context1@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+					break
+				end
+
+				buf@ gb context1@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+
+				1 buf +=
+				1 len -=
+			end
+
+			if (len@ ~~)
+				// managed to write everything.
+
+				1 completed!
+
+				continue
+			end
+
+			len@ currentreq@ SerialRequest_Length + !
+			buf@ currentreq@ SerialRequest_Buffer + !
 		end else
-			c@ serialport@ echo@ SerialPutc
+
 		end
 	end
+end
+
+fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl fcb -- ok }
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLMap ok!
+
+		if (ok@)
+			mdl@ MmMDLUnpin
+
+			return
+		end
+
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
+	end else
+		// only one page, copy thru identityspace as a time saver
+		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
+	end
+
+	auto serialport
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension serialport!
+
+	auto len
+	mdl@ MmMDLHeader_Length + @ len!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	0           ior@ SerialRequest_Next + !
+	0           ior@ SerialRequest_Prev + !
+	mdl@        ior@ SerialRequest_MDL + !
+	0           ior@ SerialRequest_Flags + !
+	buf@        ior@ SerialRequest_Buffer + !
+	len@        ior@ SerialRequest_Length + !
+	serialport@ ior@ SerialRequest_SerialPort + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto t
+	serialport@ SerialPort_RequestListTail + @ t!
+
+	if (t@ ~~)
+		// no requests, enqueue our request and then read as many characters
+		// as possible.
+
+		auto read
+		len@ // bytestocopy
+		buf@ // buf
+		1 // switch
+		serialport@ SerialPort_ReceiveBuffer + // header
+		IOTypeaheadBufferCopyOut ok! read!
+
+		read@ len -=
+
+		if (ok@ ~~)
+			ipl@ KeIPLLower
+
+			read@ mdl@ MmMDLHeader_Length + !
+
+			0 // status
+			IOBOOSTCONSOLE // priboost
+			mdl@ // mdl
+			MmMDLComplete
+
+			return
+		end
+
+		if (DEBUGCHECKS)
+			if (ok@ STATUS_OTHER_CONDITION ~=)
+				"DriverSerialRead\n" KeCrash
+			end
+		end
+
+		ior@ serialport@ SerialPort_RequestListTail + !
+		ior@ serialport@ SerialPort_RequestListHead + !
+	end else
+		// add our request to the tail of the queue.
+
+		t@ ior@ SerialRequest_Prev + !
+		ior@ t@ SerialRequest_Next + !
+		ior@ serialport@ SerialPort_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn (IODispatchWriteFunction) DriverSerialWrite { flags kflags offset mdl fcb -- ok }
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLMap ok!
+
+		if (ok@)
+			mdl@ MmMDLUnpin
+
+			return
+		end
+
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
+	end else
+		// only one page, copy thru identityspace as a time saver
+		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
+	end
+
+	auto serialport
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension serialport!
+
+	auto len
+	mdl@ MmMDLHeader_Length + @ len!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	0             ior@ SerialRequest_Next + !
+	0             ior@ SerialRequest_Prev + !
+	mdl@          ior@ SerialRequest_MDL + !
+	REQFLAG_WRITE ior@ SerialRequest_Flags + !
+	buf@          ior@ SerialRequest_Buffer + !
+	len@          ior@ SerialRequest_Length + !
+	serialport@   ior@ SerialRequest_SerialPort + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto t
+	serialport@ SerialPort_RequestListTail + @ t!
+
+	if (t@ ~~)
+		// no requests, enqueue our request and then write as many characters
+		// as possible.
+
+		while (len@)
+			if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+				break
+			end
+
+			buf@ gb serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+
+			1 buf +=
+			1 len -=
+		end
+
+		if (len@ ~~)
+			// managed to write everything.
+
+			ipl@ KeIPLLower
+
+			0 // status
+			IOBOOSTCONSOLE // priboost
+			mdl@ // mdl
+			MmMDLComplete
+
+			return
+		end
+
+		buf@ ior@ SerialRequest_Buffer + !
+		len@ ior@ SerialRequest_Length + !
+
+		ior@ serialport@ SerialPort_RequestListTail + !
+		ior@ serialport@ SerialPort_RequestListHead + !
+	end else
+		// add our request to the tail of the queue.
+
+		t@ ior@ SerialRequest_Prev + !
+		ior@ t@ SerialRequest_Next + !
+		ior@ serialport@ SerialPort_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn (IODispatchCancelFunction) DriverSerialCancel { mdl -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ KeIPLLower
+		return
+	end
+
+	auto serialport
+	ior@ SerialRequest_SerialPort + @ serialport!
+
+	if (ior@ SerialRequest_Flags + @ REQFLAG_WRITE & ~~)
+		serialport@ SerialPort_ReceiveBuffer + IOTypeaheadBufferComplete drop
+	end
+
+	auto ls
+	ior@ SerialRequest_Prev + @ ls!
+
+	auto ns
+	ior@ SerialRequest_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ SerialRequest_Next + !
+	end else
+		ns@ serialport@ SerialPort_RequestListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ SerialRequest_Prev + !
+	end else
+		ls@ serialport@ SerialPort_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+
+	STATUS_IO_CANCELLED // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
 end

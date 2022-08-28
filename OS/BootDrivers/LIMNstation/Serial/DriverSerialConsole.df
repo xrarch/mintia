@@ -426,29 +426,31 @@ fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl f
 		auto read
 		len@ // bytestocopy
 		buf@ // buf
-		1 // switch
+		timeout@ 0 ~= // switch
 		serialport@ SerialPort_ReceiveBuffer + // header
 		IOTypeaheadBufferCopyOut ok! read!
 
 		read@ len -=
 
-		if (ok@ ~~)
+		if (ok@ STATUS_OTHER_CONDITION ~=)
 			ipl@ KeIPLLower
+
+			if (ok@ STATUS_RING_EMPTY ==)
+				if (read@)
+					0 ok!
+				end
+			end
 
 			read@ mdl@ MmMDLHeader_Length + !
 
-			0 // status
-			IOBOOSTCONSOLE // priboost
-			mdl@ // mdl
-			MmMDLComplete
+			if (ok@ ~~)
+				0 // status
+				IOBOOSTCONSOLE // priboost
+				mdl@ // mdl
+				MmMDLComplete
+			end
 
 			return
-		end
-
-		if (DEBUGCHECKS)
-			if (ok@ STATUS_OTHER_CONDITION ~=)
-				"DriverSerialRead\n" KeCrash
-			end
 		end
 
 		read@ ior@ SerialRequest_LengthDone + !
@@ -459,12 +461,14 @@ fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl f
 		ior@ serialport@ SerialPort_RequestListHead + !
 
 		0 ok!
-	end else
+	end elseif (timeout@)
 		// add our request to the tail of the queue.
 
 		t@ ior@ SerialRequest_Prev + !
 		ior@ t@ SerialRequest_Next + !
 		ior@ serialport@ SerialPort_RequestListTail + !
+	end else
+		STATUS_RING_EMPTY ok!
 	end
 
 	ipl@ KeIPLLower

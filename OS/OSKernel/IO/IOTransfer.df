@@ -34,8 +34,21 @@
 fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write -- bytes ok }
 	fnsection "PAGE$text"
 
+	auto event
+
+	buffer@ length@ MmMDLGetSize event!
+
 	auto mdl
-	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+	event@ KeEvent_SIZEOF + // bytes
+	'MMDL' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! mdl!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ event@ + event!
 
 	auto func
 
@@ -48,18 +61,19 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 	auto cancelfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
 
+	auto waitmode
+	lastmode@ waitmode!
+
 	auto alertable
 	1 alertable!
 
 	if (cancelfunc@ ~~)
+		KERNELMODE waitmode!
 		OSWAIT_TIMEOUTINFINITE timeout!
 		0 alertable!
 	end
 
 	auto wok
-
-	auto event
-	KeEvent_SIZEOF alloc event!
 
 	0 bytes!
 
@@ -99,6 +113,7 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 			// complete the MDL so we can wait for any fragments to finish
 
 			0 alertable!
+			KERNELMODE waitmode!
 			OSWAIT_TIMEOUTINFINITE timeout!
 
 			ok@ // status
@@ -108,7 +123,7 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 		end
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
+			waitmode@ // waitmode
 			alertable@ // alertable
 			timeout@ // timeout
 			event@ // object
@@ -180,6 +195,7 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 			// complete the MDL so we can wait for any fragments to finish
 
 			0 alertable!
+			KERNELMODE waitmode!
 			OSWAIT_TIMEOUTINFINITE timeout!
 
 			ok@ // status
@@ -189,7 +205,7 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 		end
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
+			waitmode@ // waitmode
 			alertable@ // alertable
 			timeout@ // timeout
 			event@ // object
@@ -201,16 +217,14 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 			end
 		end
 
-		if (ok@)
-			return
+		if (ok@ ~~)
+			mdl@ MmMDLHeader_Status + @ ok!
+
+			if (ok@ ~~)
+				mdl@ MmMDLHeader_Length + @ bytes +=
+			end
 		end
-
-		mdl@ MmMDLHeader_Status + @ ok!
-
-		if (ok@)
-			return
-		end
-
-		mdl@ MmMDLHeader_Length + @ bytes +=
 	end
+
+	mdl@ MmFree
 end

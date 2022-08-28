@@ -31,26 +31,8 @@ struct SerialPort
 	4 PortData
 	KeDPC_SIZEOF DPC
 
-	4 RequestListHead
-	4 RequestListTail
-
-	IOTypeaheadBufferHeader_SIZEOF ReceiveBuffer
+	IOAsyncDeviceHeader_SIZEOF Header
 endstruct
-
-// must be <=32 bytes to fit in the MDL DriverGoWild area
-struct SerialRequest
-	4 Next
-	4 Prev
-
-	4 Flags
-	4 MDL
-	4 Buffer
-	4 Length
-	4 SerialPort
-	4 LengthDone
-endstruct
-
-const REQFLAG_WRITE     2
 
 table DriverSerialDispatch
 	0                                    // open
@@ -73,7 +55,7 @@ table DriverSerialDispatch
 	0                                    // getpageaddr
 	0                                    // delete device object
 	0                                    // reclaim fcb
-	pointerof DriverSerialCancel         // cancel request
+	pointerof IOAsyncDriverCancel        // cancel request
 	0                                    // reserved
 	0                                    // reserved
 endtable
@@ -130,11 +112,13 @@ fn SerialCreate { name intn cmdport dataport -- deviceobject }
 	auto serialport
 	deviceobject@ IODeviceGetExtension serialport!
 
-	9 // sizelog (2^9 = 512 bytes)
-	0 // quotablock
+	serialport@ // context
+	pointerof SerialTX // txfunc
+	pointerof SerialRX // rxfunc
+	7 // rxsizelog (1<<7 = 128)
 	MUSTSUCCEED // pri
-	serialport@ SerialPort_ReceiveBuffer + // header
-	IOTypeaheadBufferInitialize ok!
+	serialport@ SerialPort_Header + // header
+	IOAsyncDeviceInitialize ok!
 
 	if (ok@)
 		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
@@ -143,10 +127,7 @@ fn SerialCreate { name intn cmdport dataport -- deviceobject }
 	cmdport@  serialport@ SerialPort_PortCMD + !
 	dataport@ serialport@ SerialPort_PortData + !
 
-	0 serialport@ SerialPort_RequestListHead + !
-	0 serialport@ SerialPort_RequestListTail + !
-
-	pointerof DriverSerialDPCFunction // function
+	pointerof IOAsyncDPCFunction // function
 	serialport@ SerialPort_DPC + // dpc
 	KeDPCInitialize
 end
@@ -207,7 +188,7 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 	serialport@ SerialPort_DPC + dpc!
 
 	if (dpc@ KeDPC_Enqueued + @ ~~)
-		serialport@ // context1
+		serialport@ SerialPort_Header + // context1
 		0 // context2
 		DPCHIGHIMPORTANCE // importance
 		dpc@ // dpc
@@ -215,402 +196,60 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 	end
 end
 
-fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
-	auto currentreq
-	context1@ SerialPort_RequestListHead + @ currentreq!
-
-	auto completed
-	0 completed!
-
-	auto ok
-
-	while (1)
-		auto c
-		SERIALCMDREAD context1@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
-		context1@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
-
-		if (c@ 0xFFFF ==)
-			break
-		end
-
-		1 // bytestocopy
-		c@ // buf
-		context1@ SerialPort_ReceiveBuffer + // header
-		IOTypeaheadBufferCopyIn ok! drop
-
-		if (currentreq@)
-			if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE & ~~)
-				1 currentreq@ SerialRequest_LengthDone + +=
-			end
-		end
-
-		if (ok@ STATUS_OTHER_CONDITION ==)
-			if (DEBUGCHECKS)
-				if (currentreq@ ~~)
-					"DriverSerialDPCFunction: no read request\n" KeCrash
-				end
-
-				if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE &)
-					"DriverSerialDPCFunction: not a read request\n" KeCrash
-				end
-			end
-
-			currentreq@ SerialRequest_LengthDone + @ currentreq@ SerialRequest_MDL + @ MmMDLHeader_Length + !
-
-			1 completed!
-		end
-	end
-
-	auto len
-	auto buf
-
-	if (currentreq@)
-		if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE &)
-			currentreq@ SerialRequest_Length + @ len!
-			currentreq@ SerialRequest_Buffer + @ buf!
-
-			while (len@)
-				if (context1@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-					break
-				end
-
-				buf@ gb context1@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-
-				1 buf +=
-				1 len -=
-			end
-
-			if (len@ ~~)
-				1 completed!
-			end
-
-			buf@ currentreq@ SerialRequest_Buffer + !
-			len@ currentreq@ SerialRequest_Length + !
-		end
-	end
-
-	while (completed@)
-		0 completed!
-
-		0 // status
-		IOBOOSTCONSOLE // priboost
-		currentreq@ SerialRequest_MDL + @ // mdl
-		MmMDLComplete
-
-		currentreq@ SerialRequest_Next + @ currentreq!
-
-		currentreq@ context1@ SerialPort_RequestListHead + !
-
-		if (currentreq@ ~~)
-			0 context1@ SerialPort_RequestListTail + !
-			return
-		end
-
-		0 currentreq@ SerialRequest_Prev + !
-
-		// start next request
-
-		if (currentreq@ SerialRequest_Flags + @ REQFLAG_WRITE &)
-			currentreq@ SerialRequest_Length + @ len!
-			currentreq@ SerialRequest_Buffer + @ buf!
-
-			while (len@)
-				if (context1@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-					break
-				end
-
-				buf@ gb context1@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-
-				1 buf +=
-				1 len -=
-			end
-
-			if (len@ ~~)
-				// managed to write everything.
-
-				1 completed!
-
-				continue
-			end
-
-			len@ currentreq@ SerialRequest_Length + !
-			buf@ currentreq@ SerialRequest_Buffer + !
-		end else
-			currentreq@ SerialRequest_Length + @ len!
-			currentreq@ SerialRequest_Buffer + @ buf!
-
-			auto read
-			len@ // bytestocopy
-			buf@ // buf
-			1 // switch
-			context1@ SerialPort_ReceiveBuffer + // header
-			IOTypeaheadBufferCopyOut ok! read!
-
-			read@ len -=
-
-			if (ok@ ~~)
-				read@ currentreq@ SerialRequest_MDL + @ MmMDLHeader_Length + !
-
-				1 completed!
-
-				continue
-			end
-
-			if (DEBUGCHECKS)
-				if (ok@ STATUS_OTHER_CONDITION ~=)
-					ok@ "DriverSerialDPCFunction: odd %i\n" KeCrash
-				end
-			end
-
-			len@ currentreq@ SerialRequest_Length + !
-			buf@ read@ + currentreq@ SerialRequest_Buffer + !
-		end
-	end
-end
-
 fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl fcb -- ok }
-	0 // lockforwrite
+	auto header
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension SerialPort_Header + header!
+
+	timeout@ // timeout
+	flags@ // flags
+	kflags@ // kflags
+	offset@ // offset
 	mdl@ // mdl
-	MmMDLPin ok!
-
-	if (ok@)
-		return
-	end
-
-	auto buf
-
-	if (mdl@ MmMDLHeader_Pages + @ 1 >)
-		mdl@ MmMDLMap ok!
-
-		if (ok@)
-			mdl@ MmMDLUnpin
-
-			return
-		end
-
-		mdl@ MmMDLHeader_MappedAddress + @ buf!
-	end else
-		// only one page, copy thru identityspace as a time saver
-		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
-		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
-	end
-
-	auto serialport
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension serialport!
-
-	auto len
-	mdl@ MmMDLHeader_Length + @ len!
-
-	auto ior
-	mdl@ MmMDLHeader_DriverGoWild + ior!
-
-	0           ior@ SerialRequest_Next + !
-	0           ior@ SerialRequest_Prev + !
-	mdl@        ior@ SerialRequest_MDL + !
-	0           ior@ SerialRequest_Flags + !
-	buf@        ior@ SerialRequest_Buffer + !
-	len@        ior@ SerialRequest_Length + !
-	serialport@ ior@ SerialRequest_SerialPort + !
-	0           ior@ SerialRequest_LengthDone + !
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	auto t
-	serialport@ SerialPort_RequestListTail + @ t!
-
-	if (t@ ~~)
-		// no requests, enqueue our request and then read as many characters
-		// as possible.
-
-		auto read
-		len@ // bytestocopy
-		buf@ // buf
-		timeout@ 0 ~= // switch
-		serialport@ SerialPort_ReceiveBuffer + // header
-		IOTypeaheadBufferCopyOut ok! read!
-
-		read@ len -=
-
-		if (ok@ STATUS_OTHER_CONDITION ~=)
-			ipl@ KeIPLLower
-
-			if (ok@ STATUS_RING_EMPTY ==)
-				if (read@)
-					0 ok!
-				end
-			end
-
-			read@ mdl@ MmMDLHeader_Length + !
-
-			if (ok@ ~~)
-				0 // status
-				IOBOOSTCONSOLE // priboost
-				mdl@ // mdl
-				MmMDLComplete
-			end
-
-			return
-		end
-
-		read@ ior@ SerialRequest_LengthDone + !
-		len@ ior@ SerialRequest_Length + !
-		buf@ read@ + ior@ SerialRequest_Buffer + !
-
-		ior@ serialport@ SerialPort_RequestListTail + !
-		ior@ serialport@ SerialPort_RequestListHead + !
-
-		0 ok!
-	end elseif (timeout@)
-		// add our request to the tail of the queue.
-
-		t@ ior@ SerialRequest_Prev + !
-		ior@ t@ SerialRequest_Next + !
-		ior@ serialport@ SerialPort_RequestListTail + !
-	end else
-		STATUS_RING_EMPTY ok!
-	end
-
-	ipl@ KeIPLLower
+	header@ // header
+	IOAsyncDeviceRead ok!
 end
 
 fn (IODispatchWriteFunction) DriverSerialWrite { flags kflags offset mdl fcb -- ok }
-	0 // lockforwrite
+	auto header
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension SerialPort_Header + header!
+
+	flags@ // flags
+	kflags@ // kflags
+	offset@ // offset
 	mdl@ // mdl
-	MmMDLPin ok!
-
-	if (ok@)
-		return
-	end
-
-	auto buf
-
-	if (mdl@ MmMDLHeader_Pages + @ 1 >)
-		mdl@ MmMDLMap ok!
-
-		if (ok@)
-			mdl@ MmMDLUnpin
-
-			return
-		end
-
-		mdl@ MmMDLHeader_MappedAddress + @ buf!
-	end else
-		// only one page, copy thru identityspace as a time saver
-		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
-		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
-	end
-
-	auto serialport
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension serialport!
-
-	auto len
-	mdl@ MmMDLHeader_Length + @ len!
-
-	auto ior
-	mdl@ MmMDLHeader_DriverGoWild + ior!
-
-	0             ior@ SerialRequest_Next + !
-	0             ior@ SerialRequest_Prev + !
-	mdl@          ior@ SerialRequest_MDL + !
-	REQFLAG_WRITE ior@ SerialRequest_Flags + !
-	buf@          ior@ SerialRequest_Buffer + !
-	len@          ior@ SerialRequest_Length + !
-	serialport@   ior@ SerialRequest_SerialPort + !
-	0             ior@ SerialRequest_LengthDone + !
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	auto t
-	serialport@ SerialPort_RequestListTail + @ t!
-
-	if (t@ ~~)
-		// no requests, enqueue our request and then write as many characters
-		// as possible.
-
-		while (len@)
-			if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-				break
-			end
-
-			buf@ gb serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-
-			1 buf +=
-			1 len -=
-		end
-
-		if (len@ ~~)
-			// managed to write everything.
-
-			ipl@ KeIPLLower
-
-			0 // status
-			IOBOOSTCONSOLE // priboost
-			mdl@ // mdl
-			MmMDLComplete
-
-			return
-		end
-
-		buf@ ior@ SerialRequest_Buffer + !
-		len@ ior@ SerialRequest_Length + !
-
-		ior@ serialport@ SerialPort_RequestListTail + !
-		ior@ serialport@ SerialPort_RequestListHead + !
-	end else
-		// add our request to the tail of the queue.
-
-		t@ ior@ SerialRequest_Prev + !
-		ior@ t@ SerialRequest_Next + !
-		ior@ serialport@ SerialPort_RequestListTail + !
-	end
-
-	ipl@ KeIPLLower
+	header@ // header
+	IOAsyncDeviceWrite ok!
 end
 
-fn (IODispatchCancelFunction) DriverSerialCancel { mdl -- }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+fn (IOAsyncTXFunc) SerialTX { buf header -- bytes ok }
+	1 bytes!
 
-	auto ior
-	mdl@ MmMDLHeader_DriverGoWild + ior!
+	auto serialport
+	header@ IOAsyncDeviceHeader_Context + @ serialport!
 
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
-		// already completed, nothing to do
-		ipl@ KeIPLLower
+	if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+		-1 ok!
 		return
 	end
 
+	0 ok!
+
+	buf@ gb serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+end
+
+fn (IOAsyncRXFunc) SerialRX { header -- c bytes ok }
+	1 bytes!
+
 	auto serialport
-	ior@ SerialRequest_SerialPort + @ serialport!
+	header@ IOAsyncDeviceHeader_Context + @ serialport!
 
-	if (ior@ SerialRequest_Flags + @ REQFLAG_WRITE & ~~)
-		serialport@ SerialPort_ReceiveBuffer + IOTypeaheadBufferComplete drop
+	SERIALCMDREAD serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
+	serialport@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
+
+	if (c@ 0xFFFF ==)
+		-1 ok!
+		return
 	end
 
-	auto ls
-	ior@ SerialRequest_Prev + @ ls!
-
-	auto ns
-	ior@ SerialRequest_Next + @ ns!
-
-	if (ls@)
-		ns@ ls@ SerialRequest_Next + !
-	end else
-		ns@ serialport@ SerialPort_RequestListHead + !
-	end
-
-	if (ns@)
-		ls@ ns@ SerialRequest_Prev + !
-	end else
-		ls@ serialport@ SerialPort_RequestListTail + !
-	end
-
-	ipl@ KeIPLLower
-
-	STATUS_IO_CANCELLED // status
-	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	0 ok!
 end

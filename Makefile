@@ -12,7 +12,13 @@ ifndef DEBUGCHECKS
 	DEBUGCHECKS := 0
 endif
 
-export BUILDCONFIG := DEBUGCHECKS=$(DEBUGCHECKS) LIMN2600=1 $(BUILDCONFIG)
+ifndef TARGET
+	TARGET := limn2600
+endif
+
+export TARGET
+
+export BUILDCONFIG := DEBUGCHECKS=$(DEBUGCHECKS) $(TARGET)=1 $(BUILDCONFIG)
 
 export FST        := ../sdk/fstool.sh
 export OBJTOOL    := ../sdk/link.sh
@@ -85,8 +91,8 @@ endif
 
 	make -C $(HELP_DIR)
 
-$(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/dfrt/dfrt.f.o
-	cp ../sdk/lib/dfrt/dfrt.f.o $(SYSBIN_DIR)/Dragonfruit.dll
+$(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/$(TARGET)/dfrt/dfrt.f.o
+	cp ../sdk/lib/$(TARGET)/dfrt/dfrt.f.o $(SYSBIN_DIR)/Dragonfruit.dll
 	$(OBJTOOL) move $(SYSBIN_DIR)/Dragonfruit.dll text=0x80300000,data=text+text_size+align,bss=data+data_size+align
 
 $(DISTIMAGE):

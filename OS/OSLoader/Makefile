@@ -10,7 +10,7 @@ all: OSLoader.a3x
 	make -C LIMNstation
 
 OSLoader.a3x: $(OBJ)
-	$(LD) OSLoader.a3x L/rta3x/_boot.o $(OBJ) L/rta3x/rta3x.o
+	$(LD) OSLoader.a3x LX/limn2600/rta3x/_boot.o $(OBJ) L/rta3x/rta3x.o
 	$(OBJTOOL) move OSLoader.a3x text=0x40400,data=text+text_size,bss=data+data_size
 	cp OSLoader.a3x OSLoader.LOFF
 	$(OBJTOOL) binary -nobss OSLoader.a3x

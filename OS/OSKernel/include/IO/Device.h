@@ -22,7 +22,7 @@ struct IODevice
 	4 Extension
 	4 FileControlBlock
 	4 BlockLog
-	4 IsAConsole
+	4 ConsoleHeader
 
 	4 Reserved1
 	4 Reserved2

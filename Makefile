@@ -93,7 +93,7 @@ endif
 
 $(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/$(TARGET)/dfrt/dfrt.f.o
 	cp ../sdk/lib/$(TARGET)/dfrt/dfrt.f.o $(SYSBIN_DIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(SYSBIN_DIR)/Dragonfruit.dll text=0x80300000,data=text+text_size+align,bss=data+data_size+align
+	$(OBJTOOL) move $(SYSBIN_DIR)/Dragonfruit.dll base=0x80300000
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null

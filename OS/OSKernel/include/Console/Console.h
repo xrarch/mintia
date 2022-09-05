@@ -2,10 +2,6 @@ struct CoConsoleHeader
 	4 ProcessListHead
 	4 Mode
 
-	4 EchoBackspaceCount
-	4 Echo
-	4 EchoFSM
-
 	2 WidthI
 	2 HeightI
 endstruct

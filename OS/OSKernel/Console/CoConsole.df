@@ -31,157 +31,20 @@
 
 #include "<ll>/OSDLL/OSConsoleControl.h"
 
-fn CoConsoleCreateObject { outputfunc context rawbuffer quotablock name permissions permanent -- fileobject deviceobject ok }
+fn CoConsoleInitialize { header -- ok }
 	fnsection "PAGE$text"
 
-	name@ // name
-	0 // sizeinbytes
-	CoDriver // driver
-	permissions@ // permissions
-	permanent@ // permanent
-	IODeviceCreateEx ok! deviceobject!
+	0 header@ CoConsoleHeader_ProcessListHead + !
+	0 header@ CoConsoleHeader_Mode + !
 
-	if (ok@)
-		return
-	end
+	0 header@ CoConsoleHeader_EchoBackspaceCount + !
+	0 header@ CoConsoleHeader_EchoFSM + !
+	0 header@ CoConsoleHeader_Echo + !
 
-	auto console
-	deviceobject@ IODeviceGetExtension console!
+	80 header@ CoConsoleHeader_WidthI + si
+	25 header@ CoConsoleHeader_HeightI + si
 
-	console@ deviceobject@ IODevice_ConsoleHeader + !
-
-	0 console@ CoConsole_Initialized + !
-
-	auto outputbuffer
-	10 // sizelog (2^10 = 1024 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLDPC // synchipl
-	quotablock@ // quotablock
-	ExRingBufferCreate ok! outputbuffer!
-
-	if (ok@)
-		deviceobject@ ObObjectDereferenceByPointer drop
-
-		return
-	end
-
-	auto cookedbuffer
-	10 // sizelog (2^10 = 1024 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLDPC // synchipl
-	quotablock@ // quotablock
-	ExRingBufferCreate ok! cookedbuffer!
-
-	if (ok@)
-		outputbuffer@ // ringbuffer
-		ExRingBufferDelete
-
-		deviceobject@ ObObjectDereferenceByPointer drop
-
-		return
-	end
-
-	if (rawbuffer@)
-		0 console@ CoConsole_RawBufferAllocated + !
-	end else
-		1 console@ CoConsole_RawBufferAllocated + !
-
-		8 // sizelog (2^8 = 256 bytes)
-		0 // valuesizelog (2^0 = 1 byte)
-		IPLDPC // synchipl
-		quotablock@ // quotablock
-		ExRingBufferCreate ok! rawbuffer!
-
-		if (ok@)
-			cookedbuffer@ // ringbuffer
-			ExRingBufferDelete
-
-			outputbuffer@ // ringbuffer
-			ExRingBufferDelete
-
-			deviceobject@ ObObjectDereferenceByPointer drop
-
-			return
-		end
-	end
-
-	auto hostfcb
-	CoDispatch // dispatchtable
-	deviceobject@ // devobj
-	OSFILETYPE_CHARDEVICE // filetype
-	0 // flags
-	IOFileControlBlockCreate ok! hostfcb!
-
-	if (ok@)
-		cookedbuffer@ // ringbuffer
-		ExRingBufferDelete
-
-		outputbuffer@ // ringbuffer
-		ExRingBufferDelete
-
-		if (console@ CoConsole_RawBufferAllocated + @)
-			rawbuffer@ // ringbuffer
-			ExRingBufferDelete
-		end
-
-		deviceobject@ ObObjectDereferenceByPointer drop
-
-		return
-	end
-
-	1 hostfcb@ IOFileControlBlock_FSContext + !
-
-	// bias refcounts for host fileobject
-	deviceobject@ ObObjectReferenceByPointer drop
-	hostfcb@ IOFileControlBlockReference drop
-
-	"ConsoleHost" // openedpath
-	0 // flags
-	ACCESS_OWNER_ALL // permissions
-	hostfcb@ // fcb
-	IOFileCreateObject ok! fileobject!
-
-	if (ok@)
-		// failed, unbias these
-		deviceobject@ ObObjectDereferenceByPointer drop
-		hostfcb@ IOFileControlBlockDereference drop
-
-		-1 // writeout
-		hostfcb@ // fcb
-		IOFileControlBlockDelete
-
-		cookedbuffer@ // ringbuffer
-		ExRingBufferDelete
-
-		outputbuffer@ // ringbuffer
-		ExRingBufferDelete
-
-		if (console@ CoConsole_RawBufferAllocated + @)
-			rawbuffer@ // ringbuffer
-			ExRingBufferDelete
-		end
-
-		deviceobject@ ObObjectDereferenceByPointer drop
-
-		return
-	end
-
-	hostfcb@ console@ CoConsole_HostFCB + !
-	rawbuffer@ console@ CoConsole_RawBuffer + !
-	cookedbuffer@ console@ CoConsole_CookedBuffer + !
-	outputbuffer@ console@ CoConsole_OutputBuffer + !
-	outputfunc@ console@ CoConsole_OutputFunction + !
-	context@ console@ CoConsole_Context + !
-	0 console@ CoConsole_Mode + !
-	0 console@ CoConsole_Detached + !
-	0 console@ CoConsole_ProcessListHead + !
-
-	80 console@ CoConsole_WidthI + si
-	25 console@ CoConsole_HeightI + si
-
-	0 console@ CoConsole_Echoed + !
-
-	1 console@ CoConsole_Initialized + !
+	0 ok!
 end
 
 fn CoConsoleSignal { signal console -- }
@@ -190,7 +53,7 @@ fn CoConsoleSignal { signal console -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	console@ CoConsole_ProcessListHead + @ process!
+	console@ CoConsoleHeader_ProcessListHead + @ process!
 
 	while (process@)
 		signal@ // signal
@@ -230,7 +93,7 @@ fn CoConsoleRemoveProcess { process -- ok }
 	if (ls@)
 		ns@ ls@ PsProcess_ConsoleListNext + !
 	end else
-		ns@ console@ CoConsole_ProcessListHead + !
+		ns@ console@ CoConsoleHeader_ProcessListHead + !
 	end
 
 	if (ns@)
@@ -260,98 +123,24 @@ fn CoConsoleInsertProcess { process consoleobject -- ok }
 	consoleobject@ IODevice_ConsoleHeader + @ console!
 
 	auto h
-	console@ CoConsole_ProcessListHead + @ h!
+	console@ CoConsoleHeader_ProcessListHead + @ h!
 
 	if (h@ ~~)
 		0 process@ PsProcess_ConsoleListNext + !
 		0 process@ PsProcess_ConsoleListPrev + !
 
-		process@ console@ CoConsole_ProcessListHead + !
+		process@ console@ CoConsoleHeader_ProcessListHead + !
 	end else
 		0 process@ PsProcess_ConsoleListPrev + !
 
 		h@ process@ PsProcess_ConsoleListNext + !
 		process@ h@ PsProcess_ConsoleListPrev + !
-		process@ console@ CoConsole_ProcessListHead + !
+		process@ console@ CoConsoleHeader_ProcessListHead + !
 	end
 
 	ipl@ KeIPLLower
 
 	consoleobject@ ObObjectReferenceByPointer drop
-end
-
-fn CoConsoleRawBufferGet { console -- rawbuffer }
-	console@ CoConsole_RawBuffer + @ rawbuffer!
-end
-
-fn CoConsoleOutputBufferGet { console -- outputbuffer }
-	console@ CoConsole_OutputBuffer + @ outputbuffer!
-end
-
-fn CoConsoleGetContext { console -- context }
-	console@ CoConsole_Context + @ context!
-end
-
-const MAXPRINT 0x7E
-
-fn CoConsoleRubout { echo console -- rubbedout }
-	// relies on caller to process echo
-
-	auto cookedbuffer
-	console@ CoConsole_CookedBuffer + @ cookedbuffer!
-
-	auto outputbuffer
-	console@ CoConsole_OutputBuffer + @ outputbuffer!
-
-	auto ok
-	auto c
-
-	cookedbuffer@ // ringbuffer
-	ExRingBufferRubout ok! drop c!
-
-	if (ok@)
-		0 rubbedout!
-		return
-	end
-
-	if (c@ '\n' == c@ 4 == ||) // \n, ^D
-		// replace the character
-
-		c@ // value
-		1 // overwrite
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonfull
-		cookedbuffer@ // ringbuffer
-		ExRingBufferWriteValue drop drop
-
-		0 rubbedout!
-
-		return
-	end
-
-	1 rubbedout!
-
-	if (console@ CoConsole_Mode + @ OSCONSOLEMODE_NOECHO & ~~ echo@ &&)
-		if (c@ MAXPRINT >)
-			return
-		end
-
-		auto rt
-		c@ 0x20 < 1 + rt!
-
-		while (rt@)
-			0x7F // value
-			1 // overwrite
-			0 // timeout
-			KERNELMODE // lastmode
-			EXRINGDONTWAIT // waitonfull
-			outputbuffer@ // ringbuffer
-			ExRingBufferWriteValue drop drop
-
-			1 rt -=
-		end
-	end
 end
 
 table CoCtrl
@@ -372,365 +161,4 @@ table CoCtrl
 	'_'
 	' '
 endtable
-
-fn CoConsoleCook { console -- }
-	auto mode
-	console@ CoConsole_Mode + @ mode!
-
-	auto rawbuffer
-	console@ CoConsole_RawBuffer + @ rawbuffer!
-
-	if (mode@ OSCONSOLEMODE_RAW &)
-		// raw mode, don't cook
-
-		IOBOOSTCONSOLE // priboost
-		rawbuffer@ // ringbuffer
-		ExRingBufferWakeReader
-
-		return
-	end
-
-	auto echo
-	mode@ OSCONSOLEMODE_NOECHO & ~~ echo!
-
-	auto cookedbuffer
-	console@ CoConsole_CookedBuffer + @ cookedbuffer!
-
-	auto outputbuffer
-	console@ CoConsole_OutputBuffer + @ outputbuffer!
-
-	auto outputfunc
-	console@ CoConsole_OutputFunction + @ outputfunc!
-
-	// process contents of raw buffer into cooked buffer.
-	// perform echo if enabled.
-
-	// often called at IPLDPC, can't block.
-
-	auto diff
-	0 diff!
-
-	while (1)
-		auto ok
-		auto c
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonempty
-		rawbuffer@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
-
-		if (ok@)
-			break
-		end
-
-		if (echo@)
-			if (outputbuffer@ ExRingBufferIsFull)
-				// try to make the outputbuffer not full
-				1 console@ CoConsoleDoOutput
-			end
-		end
-
-		if (c@ '\b' ==)
-			if (1 console@ CoConsoleRubout)
-				1 diff!
-			end
-		end elseif (c@ 21 ==) // ^U
-			while (1 console@ CoConsoleRubout)
-				1 diff!
-			end
-		end else
-			c@ // value
-			1 // overwrite
-			0 // timeout
-			KERNELMODE // lastmode
-			EXRINGDONTWAIT // waitonfull
-			cookedbuffer@ // ringbuffer
-			ExRingBufferWriteValue ok! drop
-
-			if (c@ MAXPRINT >)
-				continue
-			end
-
-			if (c@ 3 ==) // ^C
-				while (0 console@ CoConsoleRubout) end
-
-				OSSIGNAL_INT // signal
-				console@ // console
-				CoConsoleSignal
-			end
-
-			if (ok@ ~~)
-				// inserted
-
-				if (c@ '\n' == c@ 4 == ||) // \n, ^D
-					IOBOOSTCONSOLE // priboost
-					cookedbuffer@ // ringbuffer
-					ExRingBufferWakeReader
-				end
-
-				if (echo@)
-					1 diff!
-
-					if (c@ 0x20 < c@ '\n' ~= &&)
-						'^' // value
-						1 // overwrite
-						0 // timeout
-						KERNELMODE // lastmode
-						EXRINGDONTWAIT // waitonfull
-						outputbuffer@ // ringbuffer
-						ExRingBufferWriteValue drop drop
-
-						[c@]CoCtrl@ // value
-						1 // overwrite
-						0 // timeout
-						KERNELMODE // lastmode
-						EXRINGDONTWAIT // waitonfull
-						outputbuffer@ // ringbuffer
-						ExRingBufferWriteValue drop drop
-					end elseif (c@ '\n' ==)
-						'\r' // value
-						1 // overwrite
-						0 // timeout
-						KERNELMODE // lastmode
-						EXRINGDONTWAIT // waitonfull
-						outputbuffer@ // ringbuffer
-						ExRingBufferWriteValue drop drop
-
-						'\n' // value
-						1 // overwrite
-						0 // timeout
-						KERNELMODE // lastmode
-						EXRINGDONTWAIT // waitonfull
-						outputbuffer@ // ringbuffer
-						ExRingBufferWriteValue drop drop
-					end else
-						c@ // value
-						1 // overwrite
-						0 // timeout
-						KERNELMODE // lastmode
-						EXRINGDONTWAIT // waitonfull
-						outputbuffer@ // ringbuffer
-						ExRingBufferWriteValue drop drop
-					end
-				end
-			end
-		end
-	end
-
-	if (diff@)
-		1 console@ CoConsoleDoOutput
-	end
-end
-
-fn CoConsoleDoOutput { echo console -- }
-	auto outputfunc
-	console@ CoConsole_OutputFunction + @ outputfunc!
-
-	auto outputbuffer
-	console@ CoConsole_OutputBuffer + @ outputbuffer!
-
-	if (outputfunc@)
-		echo@ // echo
-		console@ // console
-		outputfunc@ CoOutputFunction drop
-	end
-
-	echo@ console@ CoConsole_Echoed + !
-
-	IOBOOSTCONHOST // priboost
-	outputbuffer@ // ringbuffer
-	ExRingBufferWakeReader
-end
-
-fn CoConsoleRead { timeout flags length buffer lastmode console -- bytesread ok }
-	fnsection "PAGE$text"
-
-	if (console@ CoConsole_Detached + @)
-		STATUS_CONSOLE_HUNG_UP ok!
-		return
-	end
-
-	auto inputbuffer
-
-	auto cooked
-
-	if (console@ CoConsole_Mode + @ OSCONSOLEMODE_RAW &)
-		console@ CoConsole_RawBuffer + @ inputbuffer!
-		0 cooked!
-	end else
-		console@ CoConsole_CookedBuffer + @ inputbuffer!
-		1 cooked!
-	end
-
-	auto waitonempty
-	if (timeout@ ~~)
-		EXRINGDONTWAIT waitonempty!
-	end else
-		EXRINGWAIT waitonempty!
-	end
-
-	0 bytesread!
-
-	while (length@)
-		auto c
-		timeout@ // timeout
-		lastmode@ // lastmode
-		waitonempty@ // waitonempty
-		inputbuffer@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
-
-		if (ok@)
-			return
-		end
-
-		if (cooked@)
-			if (c@ 4 ==) // ^D
-				if (bytesread@ 0 ==)
-					return
-				end
-
-				4 // value
-				inputbuffer@ // ringbuffer
-				ExRingBufferPutBack drop drop
-
-				return
-			end elseif (c@ 3 ==) // ^C
-				continue
-			end
-		end
-
-		if (lastmode@ USERMODE ==)
-			c@ buffer@ KeSafeStoreByte ok!
-
-			if (ok@)
-				return
-			end
-		end else
-			c@ buffer@ sb
-		end
-
-		1 bytesread +=
-		1 buffer +=
-		1 length -=
-
-		if (cooked@)
-			if (c@ '\n' ==)
-				return
-			end
-		end
-	end
-end
-
-fn CoConsoleWriteCharacter { c lastmode console -- ok }
-	auto outputbuffer
-	console@ CoConsole_OutputBuffer + @ outputbuffer!
-
-	auto outputfunc
-	console@ CoConsole_OutputFunction + @ outputfunc!
-
-	c@ // value
-	0 // overwrite
-	0 // timeout
-	lastmode@ // lastmode
-	EXRINGDONTWAIT // waitonfull
-	outputbuffer@ // ringbuffer
-	ExRingBufferWriteValue ok! drop
-
-	while (ok@)
-		if (ok@ STATUS_WAIT_TIMEOUT ~=)
-			if (ok@ STATUS_RING_FULL ~=)
-				break
-			end
-		end
-
-		// ringbuffer full. call console output function and/or wake up
-		// host to try to empty it out.
-
-		0 console@ CoConsoleDoOutput
-
-		lastmode@ // mode
-		1 // alertable
-		KeThreadCurrent@ // thread
-		KeThreadIsKilled ok!
-
-		if (ok@)
-			return
-		end
-
-		// try again. this time sleep with a timeout.
-
-		c@ // value
-		0 // overwrite
-		50 // timeout
-		lastmode@ // lastmode
-		EXRINGWAIT // waitonfull
-		outputbuffer@ // ringbuffer
-		ExRingBufferWriteValue ok! drop
-	end
-end
-
-fn CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
-	fnsection "PAGE$text"
-
-	if (console@ CoConsole_Detached + @)
-		STATUS_CONSOLE_HUNG_UP ok!
-		return
-	end
-
-	auto mode
-	console@ CoConsole_Mode + @ mode!
-
-	auto diff
-	0 diff!
-
-	0 byteswritten!
-
-	while (length@)
-		auto c
-		if (lastmode@ USERMODE ==)
-			buffer@ KeSafeGetByte ok! c!
-
-			if (ok@)
-				break
-			end
-		end else
-			buffer@ gb c!
-		end
-
-		if (c@ '\n' == mode@ OSCONSOLEMODE_RAW & ~~ &&)
-			'\r' // c
-			lastmode@ // lastmode
-			console@ // console
-			CoConsoleWriteCharacter ok!
-
-			if (ok@)
-				if (byteswritten@)
-					0 console@ CoConsoleDoOutput
-				end
-
-				return
-			end
-		end
-
-		c@ // c
-		lastmode@ // lastmode
-		console@ // console
-		CoConsoleWriteCharacter ok!
-
-		if (ok@)
-			if (byteswritten@)
-				0 console@ CoConsoleDoOutput
-			end
-
-			return
-		end
-
-		1 byteswritten +=
-		1 buffer +=
-		1 length -=
-	end
-
-	if (byteswritten@)
-		0 console@ CoConsoleDoOutput
-	end
-end
+public CoCtrl

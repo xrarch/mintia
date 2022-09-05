@@ -29,150 +29,10 @@
 
 #include "<ll>/OSDLL/OSConsoleControl.h"
 
-table CoDispatch
-	0                                    // open
-	0                                    // close
-	pointerof CoConsoleIOControl         // iocontrol
-	pointerof CoConsoleDispatchRead      // read
-	pointerof CoConsoleDispatchWrite     // write
-	0                                    // system control
-	0                                    // parse
-	0                                    // create
-	0                                    // flush
-	pointerof CoConsoleDeleteFileObject  // delete object
-	0                                    // set information
-	0                                    // get information
-	0                                    // rename
-	0                                    // readblock
-	0                                    // writeblock
-	0                                    // truncate
-	0                                    // readdirectory
-	0                                    // getpageaddr
-	pointerof CoConsoleDeleteObject      // delete device object
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-endtable
-public CoDispatch
-
-table CoDriver
-	IOVERSION_MAJOR                      // ioversion major
-	IOVERSION_MINOR                      // ioversion minor
-
-	"console"                            // name
-	OSFILETYPE_CHARDEVICE                // type
-	pointerof CoDispatch                 // dispatch table
-	CoConsole_SIZEOF                     // extension size
-
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-endtable
-public CoDriver
-
-fn (IODispatchDeleteObjectFunction) CoConsoleDeleteFileObject { object -- ok }
+fn CoConsoleIOControl { arg2 arg1 access console lastmode -- ret ok }
 	fnsection "PAGE$text"
 
 	0 ok!
-
-	auto fcb
-	object@ IOFile_FileControlBlock + @ fcb!
-
-	auto deviceobject
-	fcb@ IOFileControlBlock_DeviceObject + @ deviceobject!
-
-	auto console
-	deviceobject@ IODevice_ConsoleHeader + @ console!
-
-	if (fcb@ IOFileControlBlock_FSContext + @)
-		// host fcb! mark console detached
-		1 console@ CoConsole_Detached + !
-
-		OSSIGNAL_HUP // signal
-		console@ // console
-		CoConsoleSignal
-	end
-
-	// forward to generic function
-	object@ IODeviceDeleteFileObject ok!
-end
-
-fn (IODispatchReadFunction) CoConsoleDispatchRead { timeout flags kflags offset mdl fcb -- ok }
-	fnsection "PAGE$text"
-
-	auto deviceobject
-	fcb@ IOFileControlBlock_DeviceObject + @ deviceobject!
-
-	auto console
-	deviceobject@ IODevice_ConsoleHeader + @ console!
-
-	if (fcb@ IOFileControlBlock_FSContext + @)
-		// host fcb, reading from the OutputBuffer
-
-		"CoConsoleRead: TODO\n" KeCrash
-	end else
-		// client fcb, reading from the CookedBuffer or RawBuffer
-
-		timeout@ // timeout
-		flags@ // flags
-		mdl@ MmMDLHeader_Length + @ // length
-		mdl@ MmMDLHeader_VirtualAddress + @ // buffer
-		mdl@ MmMDLHeader_Mode + @ // lastmode
-		console@ // console
-		CoConsoleRead ok! mdl@ MmMDLHeader_Length + !
-	end
-
-	if (ok@ ~~)
-		0 // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end
-end
-
-fn (IODispatchWriteFunction) CoConsoleDispatchWrite { flags kflags offset mdl fcb -- ok }
-	fnsection "PAGE$text"
-
-	auto deviceobject
-	fcb@ IOFileControlBlock_DeviceObject + @ deviceobject!
-
-	auto console
-	deviceobject@ IODevice_ConsoleHeader + @ console!
-
-	if (fcb@ IOFileControlBlock_FSContext + @)
-		// host fcb, writing to the RawBuffer
-
-		"CoConsoleWrite: TODO\n" KeCrash
-	end else
-		// client fcb, writing to the OutputBuffer
-
-		mdl@ MmMDLHeader_Length + @ // length
-		mdl@ MmMDLHeader_VirtualAddress + @ // buffer
-		mdl@ MmMDLHeader_Mode + @ // lastmode
-		console@ // console
-		CoConsoleWrite ok! mdl@ MmMDLHeader_Length + !
-	end
-
-	if (ok@ ~~)
-		0 // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end
-end
-
-fn (IODispatchIOControlFunction) CoConsoleIOControl { arg2 arg1 access fcb lastmode -- ret ok }
-	fnsection "PAGE$text"
-
-	0 ok!
-
-	auto console
-	fcb@ IOFileControlBlockGetDeviceObject IODevice_ConsoleHeader + @ console!
 
 	if (arg1@ OSCONSOLEIOCONTROL_QUERY ==)
 		auto query
@@ -188,9 +48,9 @@ fn (IODispatchIOControlFunction) CoConsoleIOControl { arg2 arg1 access fcb lastm
 			arg2@ query!
 		end
 
-		console@ CoConsole_WidthI + gi query@ OSConsoleQuery_Columns + !
-		console@ CoConsole_HeightI + gi query@ OSConsoleQuery_Rows + !
-		console@ CoConsole_Mode + @ query@ OSConsoleQuery_Mode + !
+		console@ CoConsoleHeader_WidthI + gi query@ OSConsoleQuery_Columns + !
+		console@ CoConsoleHeader_HeightI + gi query@ OSConsoleQuery_Rows + !
+		console@ CoConsoleHeader_Mode + @ query@ OSConsoleQuery_Mode + !
 
 		if (lastmode@ USERMODE ==)
 			arg2@ // dest
@@ -199,32 +59,10 @@ fn (IODispatchIOControlFunction) CoConsoleIOControl { arg2 arg1 access fcb lastm
 			KeSafeCopyOut ok!
 		end
 	end elseif (arg1@ OSCONSOLEIOCONTROL_SETMODE ==)
-		arg2@ console@ CoConsole_Mode + !
+		arg2@ console@ CoConsoleHeader_Mode + !
 	end elseif (arg1@ OSCONSOLEIOCONTROL_RESETMODE ==)
-		0 console@ CoConsole_Mode + !
-	end elseif (arg1@ OSCONSOLEIOCONTROL_EXPEDITE ==)
-		if (console@ CoVideoConsole@ ==)
-			CoVideoConsoleExpediteRedraw
-		end
+		0 console@ CoConsoleHeader_Mode + !
 	end else
 		STATUS_NOT_SUPPORTED ok!
 	end
-end
-
-fn (IODispatchDeleteDeviceObjectFunction) CoConsoleDeleteObject { object -- }
-	fnsection "PAGE$text"
-
-	auto console
-	object@ IODevice_ConsoleHeader + @ console!
-
-	if (console@ CoConsole_Initialized + @ ~~)
-		return
-	end
-
-	console@ CoConsole_CookedBuffer + @ ExRingBufferDelete
-	console@ CoConsole_OutputBuffer + @ ExRingBufferDelete
-
-	-1 // writeout
-	console@ CoConsole_HostFCB + @ // fcb
-	IOFileControlBlockDelete
 end

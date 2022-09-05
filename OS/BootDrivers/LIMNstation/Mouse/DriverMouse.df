@@ -32,11 +32,8 @@ const MOUSECMDRESET 2
 
 struct Mouse
 	4 ID
+	4 EventBuffer
 	KeDPC_SIZEOF DPC
-
-	IOAsyncDeviceHeader_SIZEOF Header
-
-	OSMousePacket_SIZEOF Packet
 endstruct
 
 table DriverMouseDispatch
@@ -59,8 +56,8 @@ table DriverMouseDispatch
 	0                                    // readdirectory
 	0                                    // getpageaddr
 	0                                    // delete device object
-	0                                    // reclaim fcb
-	pointerof IOAsyncDriverCancel        // cancel request
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // reserved
 	0                                    // reserved
 endtable
@@ -126,23 +123,24 @@ fn (HALLIMNstationAmtsuCallbackF) DriverMouseEnumerate { id -- }
 	auto mouse
 	dev@ IODeviceGetExtension mouse!
 
-	pointerof IOAsyncDPCFunction // function
+	pointerof DriverMouseDPCFunction // function
 	mouse@ Mouse_DPC + // dpc
 	KeDPCInitialize
 
 	id@ mouse@ Mouse_ID + !
 
-	mouse@ // context
-	0 // txfunc
-	pointerof DriverMouseRX // rxfunc
-	6 // rxsizelog (1<<6 = 64 bytes (8x8))
-	MUSTSUCCEED // pri
-	mouse@ Mouse_Header + // header
-	IOAsyncDeviceInitialize ok!
+	auto mousebuffer
+	3 // sizelog (2^3 = 8 entries)
+	3 // valuesizelog (2^3 = 8 bytes)
+	IPLINTERACTIVE // synchipl
+	0 // quotablock
+	ExRingBufferCreate ok! mousebuffer!
 
 	if (ok@)
 		ok@ name@ "DriverMouseEnumerate: failed to create %s (%i)\n" KeCrash
 	end
+
+	mousebuffer@ mouse@ Mouse_EventBuffer + !
 
 	mouse@ [id@]MouseTable!
 
@@ -158,7 +156,25 @@ fn (HALLIMNstationAmtsuCallbackF) DriverMouseEnumerate { id -- }
 end
 
 fn (IODispatchReadFunction) DriverMouseRead { timeout flags kflags offset mdl fcb -- ok }
-	if (mdl@ MmMDLHeader_Length + @ OSMousePacket_SIZEOF %)
+	auto mouse
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension mouse!
+
+	auto ringbuf
+	mouse@ Mouse_EventBuffer + @ ringbuf!
+
+	auto lastmode
+	mdl@ MmMDLHeader_Mode + @ lastmode!
+
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto length
+	mdl@ MmMDLHeader_Length + @ length!
+
+	auto bytesread
+	0 bytesread!
+
+	if (length@ OSMousePacket_SIZEOF %)
 		// not a multiple of the mouse event packet size
 
 		STATUS_INVALID_ARGUMENT ok!
@@ -166,16 +182,69 @@ fn (IODispatchReadFunction) DriverMouseRead { timeout flags kflags offset mdl fc
 		return
 	end
 
-	auto header
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension Mouse_Header + header!
+	auto waitonempty
+	EXRINGDONTWAIT waitonempty!
 
-	timeout@ // timeout
-	flags@ // flags
-	kflags@ // kflags
-	offset@ // offset
+	if (timeout@)
+		EXRINGWAIT waitonempty!
+	end
+
+	auto kpacket
+	OSMousePacket_SIZEOF alloc kpacket!
+
+	while (bytesread@ length@ <)
+		auto valueptr
+
+		timeout@ // timeout
+		lastmode@ // lastmode
+		waitonempty@ EXRINGSYNCH | // waitonempty
+		ringbuf@ // ringbuffer
+		ExRingBufferReadValue ok! valueptr! drop
+
+		if (ok@)
+			return
+		end
+
+		// we specified EXRINGSYNCH so we need to remember to lower IPL before
+		// we return.
+
+		if (lastmode@ USERMODE ==)
+			valueptr@@ kpacket@ OSMousePacket_EventType + !
+			valueptr@ 4 + @ kpacket@ OSMousePacket_Info + !
+
+			IPLLOW KeIPLLower
+
+			buffer@ // dest
+			kpacket@ // src
+			OSMousePacket_SIZEOF // size
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				return
+			end
+		end else
+			valueptr@@ buffer@ OSMousePacket_EventType + !
+			valueptr@ 4 + @ buffer@ OSMousePacket_Info + !
+
+			IPLLOW KeIPLLower
+		end
+
+		OSMousePacket_SIZEOF buffer +=
+		OSMousePacket_SIZEOF bytesread +=
+	end
+
+	0 ok!
+
+	0 // status
+	0 // priboost
 	mdl@ // mdl
-	header@ // header
-	IOAsyncDeviceRead ok!
+	MmMDLComplete
+end
+
+fn (DPCFunction) DriverMouseDPCFunction { context1 context2 -- }
+	IOBOOSTMOUSE // priboost
+	context1@ Mouse_EventBuffer + @ // ringbuffer
+	ExRingBufferWakeReader
 end
 
 fn (HALInterruptHandler) DriverMouseInterrupt { trapframe int -- }
@@ -186,6 +255,32 @@ fn (HALInterruptHandler) DriverMouseInterrupt { trapframe int -- }
 
 	[id@]MouseTable@ mouse!
 
+	auto eventbuf
+	mouse@ Mouse_EventBuffer + @ eventbuf!
+
+	auto eventtype
+	auto info
+
+	while (1)
+		mouse@ MouseRead info! eventtype!
+
+		if (eventtype@ ~~)
+			break
+		end
+
+		auto valueptr
+
+		eventtype@ // value
+		1  // overwrite
+		0 // timeout
+		KERNELMODE // lastmode
+		EXRINGDONTWAIT // waitonfull
+		eventbuf@ // ringbuffer
+		ExRingBufferWriteValue drop valueptr!
+
+		info@ valueptr@ 4 + !
+	end
+
 	auto dpc
 	mouse@ Mouse_DPC + dpc!
 
@@ -193,7 +288,7 @@ fn (HALInterruptHandler) DriverMouseInterrupt { trapframe int -- }
 		// defer waking up any blocked readers til later,
 		// otherwise we will BSOD since we're at IPLINTERACTIVE
 
-		mouse@ Mouse_Header + // context1
+		mouse@ // context1
 		0 // context2
 		DPCLOWIMPORTANCE // importance
 		dpc@ // dpc
@@ -201,34 +296,17 @@ fn (HALInterruptHandler) DriverMouseInterrupt { trapframe int -- }
 	end
 end
 
-fn (IOAsyncRXFunc) DriverMouseRX { header -- c bytes ok }
-	OSMousePacket_SIZEOF bytes!
-
-	auto mouse
-	header@ IOAsyncDeviceHeader_Context + @ mouse!
-
-	auto info
-	auto eventtype
+fn MouseRead { mouse -- eventtype info }
+	auto id
+	mouse@ Mouse_ID + @ id!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	mouse@ Mouse_ID + @ HALLIMNstationAmtsuSelect
+	id@ HALLIMNstationAmtsuSelect
 	MOUSECMDREAD HALLIMNstationAmtsuCommand
 	HALLIMNstationAmtsuReadA eventtype!
 	HALLIMNstationAmtsuReadB info!
 
 	rs@ HALCPUInterruptRestore
-
-	if (eventtype@ ~~)
-		-1 ok!
-		return
-	end
-
-	mouse@ Mouse_Packet + c!
-
-	eventtype@ c@ OSMousePacket_EventType + !
-	info@ c@ OSMousePacket_Info + !
-
-	0 ok!
 end

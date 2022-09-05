@@ -30,16 +30,14 @@ struct SerialPort
 	4 PortCMD
 	4 PortData
 	KeDPC_SIZEOF DPC
-
-	IOAsyncDeviceHeader_SIZEOF Header
 endstruct
 
 table DriverSerialDispatch
 	0                                    // open
 	0                                    // close
 	0                                    // iocontrol
-	pointerof DriverSerialRead           // read
-	pointerof DriverSerialWrite          // write
+	0                                    // read
+	0                                    // write
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -55,7 +53,7 @@ table DriverSerialDispatch
 	0                                    // getpageaddr
 	0                                    // delete device object
 	0                                    // reclaim fcb
-	pointerof IOAsyncDriverCancel        // cancel request
+	0                                    // cancel request
 	0                                    // reserved
 	0                                    // reserved
 endtable
@@ -112,22 +110,10 @@ fn SerialCreate { name intn cmdport dataport -- deviceobject }
 	auto serialport
 	deviceobject@ IODeviceGetExtension serialport!
 
-	serialport@ // context
-	pointerof SerialTX // txfunc
-	pointerof SerialRX // rxfunc
-	7 // rxsizelog (1<<7 = 128)
-	MUSTSUCCEED // pri
-	serialport@ SerialPort_Header + // header
-	IOAsyncDeviceInitialize ok!
-
-	if (ok@)
-		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
-	end
-
 	cmdport@  serialport@ SerialPort_PortCMD + !
 	dataport@ serialport@ SerialPort_PortData + !
 
-	pointerof IOAsyncDPCFunction // function
+	0 // function
 	serialport@ SerialPort_DPC + // dpc
 	KeDPCInitialize
 end
@@ -184,6 +170,7 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 		int@ "DriverSerialInterrupt: weird interrupt number %d\n" KeCrash
 	end
 
+#ifdef 0
 	auto dpc
 	serialport@ SerialPort_DPC + dpc!
 
@@ -194,62 +181,5 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 		dpc@ // dpc
 		KeDPCEnqueue
 	end
-end
-
-fn (IODispatchReadFunction) DriverSerialRead { timeout flags kflags offset mdl fcb -- ok }
-	auto header
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension SerialPort_Header + header!
-
-	timeout@ // timeout
-	flags@ // flags
-	kflags@ // kflags
-	offset@ // offset
-	mdl@ // mdl
-	header@ // header
-	IOAsyncDeviceRead ok!
-end
-
-fn (IODispatchWriteFunction) DriverSerialWrite { flags kflags offset mdl fcb -- ok }
-	auto header
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension SerialPort_Header + header!
-
-	flags@ // flags
-	kflags@ // kflags
-	offset@ // offset
-	mdl@ // mdl
-	header@ // header
-	IOAsyncDeviceWrite ok!
-end
-
-fn (IOAsyncTXFunc) SerialTX { buf header -- bytes ok }
-	1 bytes!
-
-	auto serialport
-	header@ IOAsyncDeviceHeader_Context + @ serialport!
-
-	if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-		-1 ok!
-		return
-	end
-
-	0 ok!
-
-	buf@ gb serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-end
-
-fn (IOAsyncRXFunc) SerialRX { header -- c bytes ok }
-	1 bytes!
-
-	auto serialport
-	header@ IOAsyncDeviceHeader_Context + @ serialport!
-
-	SERIALCMDREAD serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
-	serialport@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
-
-	if (c@ 0xFFFF ==)
-		-1 ok!
-		return
-	end
-
-	0 ok!
+#endif
 end

@@ -38,5 +38,7 @@ extern IODeviceDirectoryInsert { deviceobject -- ok }
 extern IODeviceDeleteObject { object -- ok }
 
 extern IODeviceGetExtension { deviceobject -- extension }
+extern IODeviceSetConsoleHeader { console deviceobject -- }
+extern IODeviceGetConsoleHeader { deviceobject -- console }
 extern IODeviceSetBlockLog { blocklog deviceobject -- }
 extern IODeviceGetBlockLog { deviceobject -- blocklog }

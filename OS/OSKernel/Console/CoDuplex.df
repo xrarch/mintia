@@ -1,0 +1,410 @@
+//
+// Implements the duplex pseudodevice driver.
+// Acts like a unix pty or named pipe depending on flags.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/OSDLL/OSConsoleControl.h"
+
+struct CoDuplexBuffer
+	4 Buffer
+	4 BufferSize
+	4 BufferReadIndex
+	4 BufferWriteIndex
+
+	4 UserBuffer
+	4 UserBufferIndex
+	4 UserBufferLength
+endstruct
+
+struct CoDuplex
+	CoConsoleHeader_SIZEOF ConsoleHeader
+
+	// the buffers are named for their perspective to the client in a PTY
+	// set-up.
+
+	CoDuplexBuffer_SIZEOF ReceiveBuffer  // read by client, written by server
+	CoDuplexBuffer_SIZEOF TransmitBuffer // written by client, read by server
+
+	KeMutex_SIZEOF Mutex // only used if paged buffers, otherwise IPL sync
+
+	4 Paged
+	4 QuotaBlock
+
+	4 Flags
+
+	4 Headless
+
+	4 ServerFCB
+endstruct
+
+table CoDuplexDriver
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"Duplex"                             // name
+	OSFILETYPE_CHARDEVICE                // type
+	pointerof CoDuplexDispatch           // dispatch table
+	CoDuplex_SIZEOF                      // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table CoDuplexDispatch
+	0                                    // open
+	0                                    // close
+	pointerof CoDuplexIOControl          // iocontrol
+	pointerof CoDuplexRead               // read
+	pointerof CoDuplexWrite              // write
+	0                                    // unlink
+	0                                    // parse
+	0                                    // delete
+	0                                    // flush
+	pointerof CoDuplexDeleteFileObject   // delete object
+	0                                    // poke
+	0                                    // setsecurity
+	0                                    // rename
+	0                                    // readblock
+	0                                    // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	pointerof CoDuplexDeleteObject       // delete device object
+	0                                    // reclaim fcb
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+fn CoDuplexBufferInitialize { size pri quotablock header -- ok }
+	fnsection "PAGE$text"
+
+	0 header@ CoDuplexBuffer_Buffer + !
+	size@ header@ CoDuplexBuffer_BufferSize + !
+	0 header@ CoDuplexBuffer_BufferReadIndex + !
+	0 header@ CoDuplexBuffer_BufferWriteIndex + !
+
+	0 header@ CoDuplexBuffer_UserBuffer + !
+	0 header@ CoDuplexBuffer_UserBufferIndex + !
+	0 header@ CoDuplexBuffer_UserBufferLength + !
+
+	auto qcharge
+	size@ MmChargeBytesGet qcharge!
+
+	0 ok!
+
+	if (quotablock@)
+		// charge quota for buffer
+
+		if (pri@ PAGED &)
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockChargePaged ok!
+		end else
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockCharge ok!
+		end
+
+		if (ok@)
+			return
+		end
+	end
+
+	// allocate buffer
+
+	auto buf
+	size@ // size
+	'DxBf' // tag
+	pri@ // flags
+	MmAllocWithTag ok! buf!
+
+	if (ok@)
+		if (quotablock@)
+			if (pri@ PAGED &)
+				qcharge@ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockUnchargePaged
+			end else
+				qcharge@ // charge
+				quotablock@ // quotablock
+				MmQuotaBlockUncharge
+			end
+		end
+
+		return
+	end
+
+	buf@ header@ CoDuplexBuffer_Buffer + !
+end
+
+fn CoDuplexBufferUninitialize { pri quotablock header -- }
+	fnsection "PAGE$text"
+
+	auto buf
+	header@ CoDuplexBuffer_Buffer + @ buf!
+
+	auto bufsize
+	header@ CoDuplexBuffer_BufferSize + @ bufsize!
+
+	auto qcharge
+	bufsize@ MmChargeBytesGet qcharge!
+
+	if (quotablock@)
+		if (pri@ PAGED &)
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUnchargePaged
+		end else
+			qcharge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUncharge
+		end
+	end
+
+	buf@ MmFree
+end
+
+fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
+	fnsection "PAGE$text"
+
+	if (flags@ OSDUPLEXFLAG_CONSOLE &)
+		if (flags@ OSDUPLEXFLAG_SIMPLEX &)
+			STATUS_INVALID_ARGUMENT ok!
+			return
+		end
+	end
+
+	name@ // name
+	0 // sizeinbytes
+	CoDuplexDriver // driver
+	permissions@ // permissions
+	permanent@ // permanent
+	IODeviceCreateEx ok! duplexobject!
+
+	if (ok@)
+		return
+	end
+
+	auto duplex
+	duplexobject@ IODeviceGetExtension duplex!
+
+	flags@ duplex@ CoDuplex_Flags + !
+	pri@ duplex@ CoDuplex_Paged + !
+	0 duplex@ CoDuplex_Headless + !
+
+	if (flags@ OSDUPLEXFLAG_CONSOLE &)
+		duplex@ CoDuplex_ConsoleHeader + CoConsoleInitialize
+		duplex@ CoDuplex_ConsoleHeader + duplexobject@ IODevice_ConsoleHeader + !
+	end
+
+	128 // size
+	pri@ // pri
+	quotablock@ // quotablock
+	duplex@ CoDuplex_ReceiveBuffer + // header
+	CoDuplexBufferInitialize ok!
+
+	if (ok@)
+		duplexobject@ IODeviceDeallocateObject
+
+		return
+	end
+
+	if (flags@ OSDUPLEXFLAG_SIMPLEX & ~~)
+		128 // size
+		pri@ // pri
+		quotablock@ // quotablock
+		duplex@ CoDuplex_TransmitBuffer + // header
+		CoDuplexBufferInitialize ok!
+
+		if (ok@)
+			pri@ // pri
+			quotablock@ // quotablock
+			duplex@ CoDuplex_ReceiveBuffer + // header
+			CoDuplexBufferUninitialize
+
+			duplexobject@ IODeviceDeallocateObject
+
+			return
+		end
+	end
+
+	if (pri@ PAGED &)
+		"CoDuplexMutex" // name
+		KERNELMODE // mode
+		duplex@ CoDuplex_Mutex + // mutex
+		KeMutexInitialize
+	end
+
+	auto serverfcb
+	CoDuplexDispatch // dispatchtable
+	duplexobject@ // devobj
+	OSFILETYPE_CHARDEVICE // filetype
+	0 // flags
+	IOFileControlBlockCreate ok! serverfcb!
+
+	if (ok@)
+		pri@ // pri
+		quotablock@ // quotablock
+		duplex@ CoDuplex_ReceiveBuffer + // header
+		CoDuplexBufferUninitialize
+
+		if (flags@ OSDUPLEXFLAG_SIMPLEX & ~~)
+			pri@ // pri
+			quotablock@ // quotablock
+			duplex@ CoDuplex_TransmitBuffer + // header
+			CoDuplexBufferUninitialize
+		end
+
+		duplexobject@ IODeviceDeallocateObject
+
+		return
+	end
+
+	serverfcb@ duplex@ CoDuplex_ServerFCB + !
+
+	"DUPLEXSERVER" // openedpath
+	0 // flags
+	ACCESS_OWNER_ALL // permissions
+	serverfcb@ // fcb
+	IOFileCreateObject ok! fileobject!
+
+	if (ok@)
+		-1 // writeout
+		serverfcb@ // fcb
+		IOFileControlBlockDelete
+
+		pri@ // pri
+		quotablock@ // quotablock
+		duplex@ CoDuplex_ReceiveBuffer + // header
+		CoDuplexBufferUninitialize
+
+		if (flags@ OSDUPLEXFLAG_SIMPLEX & ~~)
+			pri@ // pri
+			quotablock@ // quotablock
+			duplex@ CoDuplex_TransmitBuffer + // header
+			CoDuplexBufferUninitialize
+		end
+
+		duplexobject@ IODeviceDeallocateObject
+
+		return
+	end
+
+	// bias refcounts for server fileobject
+	duplexobject@ ObObjectReferenceByPointer drop
+	serverfcb@ IOFileControlBlockReference drop
+
+	quotablock@ MmQuotaBlockReference
+
+	quotablock@ duplex@ CoDuplex_QuotaBlock + !
+end
+
+fn (IODispatchIOControlFunction) CoDuplexIOControl { arg2 arg1 access fcb lastmode -- ret ok }
+	0 ok!
+	0 ret!
+end
+
+fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	0 // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	0 // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
+	fnsection "PAGE$text"
+
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	auto deviceobject
+	fcb@ IOFileControlBlock_DeviceObject + @ deviceobject!
+
+	auto duplex
+	deviceobject@ IODeviceGetExtension duplex!
+
+	if (fcb@ IOFileControlBlock_FSContext + @)
+		// server fcb! mark duplex headless
+		1 duplex@ CoDuplex_Headless + !
+
+		if (deviceobject@ IODevice_ConsoleHeader + @)
+			OSSIGNAL_HUP // signal
+			deviceobject@ IODevice_ConsoleHeader + @ // console
+			CoConsoleSignal
+		end
+	end
+
+	// forward to generic function
+	object@ IODeviceDeleteFileObject ok!
+end
+
+fn (IODispatchDeleteDeviceObjectFunction) CoDuplexDeleteObject { object -- }
+	fnsection "PAGE$text"
+
+	auto duplex
+	object@ IODeviceGetExtension duplex!
+
+	-1 // writeout
+	duplex@ CoDuplex_ServerFCB + @ // fcb
+	IOFileControlBlockDelete
+
+	duplex@ CoDuplex_Paged + @ // pri
+	duplex@ CoDuplex_QuotaBlock + @ // quotablock
+	duplex@ CoDuplex_ReceiveBuffer + // header
+	CoDuplexBufferUninitialize
+
+	if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX & ~~)
+		duplex@ CoDuplex_Paged + @ // pri
+		duplex@ CoDuplex_QuotaBlock + @ // quotablock
+		duplex@ CoDuplex_TransmitBuffer + // header
+		CoDuplexBufferUninitialize
+	end
+
+	duplex@ CoDuplex_QuotaBlock + @ MmQuotaBlockDereference
+end

@@ -13,3 +13,6 @@ struct OSConsoleQuery
 
 	24 Reserved
 endstruct
+
+const OSDUPLEXFLAG_SIMPLEX 1
+const OSDUPLEXFLAG_CONSOLE 2

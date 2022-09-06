@@ -35,6 +35,7 @@ endstruct
 
 extern IODeviceDirectoryInsert { deviceobject -- ok }
 
+extern IODeviceDeallocateObject { object -- }
 extern IODeviceDeleteObject { object -- ok }
 
 extern IODeviceGetExtension { deviceobject -- extension }

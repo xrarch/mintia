@@ -331,14 +331,60 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 end
 
 fn (IODispatchIOControlFunction) CoDuplexIOControl { arg2 arg1 access fcb lastmode -- ret ok }
+	fnsection "PAGE$text"
+
 	0 ok!
 	0 ret!
+
+	auto duplex
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
+
+	auto console
+	duplex@ IODevice_ConsoleHeader + @ console!
+
+	if (arg1@ OSCONSOLEIOCONTROL_QUERY ==)
+		auto query
+
+		if (lastmode@ USERMODE ==)
+			OSConsoleQuery_SIZEOF alloc query!
+
+			query@ // ptr
+			OSConsoleQuery_SIZEOF // size
+			0 // word
+			memset
+		end else
+			arg2@ query!
+		end
+
+		console@ CoConsoleHeader_WidthI + gi query@ OSConsoleQuery_Columns + !
+		console@ CoConsoleHeader_HeightI + gi query@ OSConsoleQuery_Rows + !
+		console@ CoConsoleHeader_Mode + @ query@ OSConsoleQuery_Mode + !
+
+		if (lastmode@ USERMODE ==)
+			arg2@ // dest
+			query@ // src
+			OSConsoleQuery_SIZEOF // size
+			KeSafeCopyOut ok!
+		end
+	end elseif (arg1@ OSCONSOLEIOCONTROL_SETMODE ==)
+		arg2@ console@ CoConsoleHeader_Mode + !
+	end elseif (arg1@ OSCONSOLEIOCONTROL_RESETMODE ==)
+		0 console@ CoConsoleHeader_Mode + !
+	end else
+		STATUS_NOT_SUPPORTED ok!
+	end
 end
 
 fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
+
+	if (fcb@ IOFileControlBlock_FSContext + @)
+		// server fcb, reading from the transmit buffer
+	end else
+		// client fcb, reading from the receive buffer.
+	end
 
 	0 // status
 	0 // priboost
@@ -350,6 +396,15 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
+
+	if (fcb@ IOFileControlBlock_FSContext + @)
+		// server fcb, writing to the receive buffer.
+		// if echo is enabled, that must be performed here.
+		// ^C, ^D, etc processing is also needed.
+	end else
+		// client fcb, writing to the transmit buffer.
+		// if cooked, processing such as \n -> \r\n is required.
+	end
 
 	0 // status
 	0 // priboost

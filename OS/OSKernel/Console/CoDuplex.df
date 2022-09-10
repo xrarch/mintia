@@ -32,9 +32,10 @@
 
 struct CoDuplexBuffer
 	4 Buffer
-	4 BufferSize
-	4 BufferReadIndex
-	4 BufferWriteIndex
+	4 Size
+	4 ReadIndex
+	4 WriteIndex
+	4 RemainingSpace
 
 	4 UserBuffer
 	4 UserBufferIndex
@@ -119,9 +120,10 @@ fn CoDuplexBufferInitialize { size pri quotablock header -- ok }
 	fnsection "PAGE$text"
 
 	0 header@ CoDuplexBuffer_Buffer + !
-	size@ header@ CoDuplexBuffer_BufferSize + !
-	0 header@ CoDuplexBuffer_BufferReadIndex + !
-	0 header@ CoDuplexBuffer_BufferWriteIndex + !
+	size@ header@ CoDuplexBuffer_Size + !
+	0 header@ CoDuplexBuffer_ReadIndex + !
+	0 header@ CoDuplexBuffer_WriteIndex + !
+	size@ header@ CoDuplexBuffer_RemainingSpace + !
 
 	0 header@ CoDuplexBuffer_UserBuffer + !
 	0 header@ CoDuplexBuffer_UserBufferIndex + !
@@ -184,7 +186,7 @@ fn CoDuplexBufferUninitialize { pri quotablock header -- }
 	header@ CoDuplexBuffer_Buffer + @ buf!
 
 	auto bufsize
-	header@ CoDuplexBuffer_BufferSize + @ bufsize!
+	header@ CoDuplexBuffer_Size + @ bufsize!
 
 	auto qcharge
 	bufsize@ MmChargeBytesGet qcharge!
@@ -421,6 +423,15 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 
 	0 ok!
 
+	if (mdl@ MmMDLHeader_Length + @ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
 	1 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
@@ -429,59 +440,129 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		return
 	end
 
+	auto buf
+
 	if (mdl@ MmMDLHeader_Pages + @ 1 >)
 		mdl@ MmMDLMap ok!
 
 		if (ok@)
-			mdl@ MmMDLUnpin
-
 			return
 		end
+
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
 	end else
 		// only one page, copy thru identityspace as a time saver
 		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
-		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & +
-		mdl@ MmMDLHeader_MappedAddress + !
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
 	end
-
-	auto isserver
-	fcb@ IOFileControlBlock_FSContext + @ isserver!
 
 	auto duplex
 	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
 
-	auto buf
+	// here, cooked defines whether encountering a \n or ^D causes an instant
+	// completion or not.
+
+	auto cooked
+
+	if (fcb@ IOFileControlBlock_FSContext + @)
+		0 cooked!
+	end elseif (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+		0 cooked!
+	end else
+		1 cooked!
+	end
+
+	auto header
 
 	auto ipl
 	duplex@ CoDuplexLock ok! ipl!
 
 	if (ok@)
-		if (mdl@ MmMDLHeader_Pages + @ 1 >)
-			mdl@ MmMDLUnmap
-		end
-
-		mdl@ MmMDLUnpin
-
 		return
 	end
 
-	if (isserver@)
+	if (fcb@ IOFileControlBlock_FSContext + @)
 		// server fcb, reading from the transmit buffer. this may pend.
-		duplex@ CoDuplex_TransmitBuffer + buf!		
+		duplex@ CoDuplex_TransmitBuffer + header!		
 	end else
 		// client fcb, reading from the receive buffer. this may pend.
-		duplex@ CoDuplex_ReceiveBuffer + buf!
+		duplex@ CoDuplex_ReceiveBuffer + header!
 	end
 
+	// read as much as possible from the buffer. if this completes, cool.
+	// if it does not complete, then we need to enqueue the request.
 
+	auto rp
+	header@ CoDuplexBuffer_ReadIndex + @ rp!
+
+	auto bytecnt
+	header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
+
+	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+		mdl@ MmMDLHeader_Length + @ bytecnt!
+	end elseif (mdl@ MmMDLHeader_Length + @ bytecnt@ >)
+		if (timeout@)
+			STATUS_OTHER_CONDITION ok!
+		end else
+			STATUS_RING_EMPTY ok!
+		end
+	end
+
+	if (bytecnt@)
+		auto bufp
+		header@ CoDuplexBuffer_Buffer + @ bufp!
+
+		auto bufsize
+		header@ CoDuplexBuffer_Size + @ bufsize!
+
+		auto bufmask
+		bufsize@ 1 - bufmask!
+
+		auto endp
+		rp@ bytecnt@ + endp!
+
+		// TODO do a special copy if cooked to be able to catch \n and ^D
+
+		if (rp@ bufmask@ ~ & endp@ bufmask@ ~ & ==)
+			// doesn't cross the boundary, do a single copy
+
+			buf@ // dest
+			bufp@ rp@ bufmask@ & + // src
+			bytecnt@ // sz
+			memcpy
+		end else
+			// crosses the boundary, do two copies
+
+			buf@ // dest
+			bufp@ rp@ bufmask@ & + // src
+			bufsize@ rp@ bufmask@ & - // sz
+			memcpy
+
+			buf@ bufsize@ rp@ bufmask@ & - + // dest
+			bufp@ // src
+			endp@ bufmask@ & // sz
+			memcpy
+		end
+
+		endp@ header@ CoDuplexBuffer_ReadIndex + !
+		bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
+	end
+
+	if (ok@ STATUS_OTHER_CONDITION ==)
+		// switch to user buffer.
+
+		buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
+		0 header@ CoDuplexBuffer_UserBufferIndex + !
+		mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
+
+		// enqueue the request.
+
+		// TODO enqueue the request
+	end elseif (ok@ ~~)
+		// TODO unlock the duplex & complete the request
+	end
 
 	ipl@ duplex@ CoDuplexUnlock
-
-	if (mdl@ MmMDLHeader_Pages + @ 1 >)
-		mdl@ MmMDLUnmap
-	end
-
-	mdl@ MmMDLUnpin
 end
 
 fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }

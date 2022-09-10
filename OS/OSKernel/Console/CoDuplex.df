@@ -60,6 +60,15 @@ struct CoDuplex
 	4 Headless
 
 	4 ServerFCB
+
+	4 ServerReadListHead
+	4 ServerReadListTail
+
+	4 ClientReadListHead
+	4 ClientReadListTail
+
+	4 ClientWriteListHead
+	4 ClientWriteListTail
 endstruct
 
 table CoDuplexDriver
@@ -195,6 +204,29 @@ fn CoDuplexBufferUninitialize { pri quotablock header -- }
 	buf@ MmFree
 end
 
+fn CoDuplexLock { duplex -- ipl ok }
+	if (duplex@ CoDuplex_Flags + @ PAGED &)
+		KERNELMODE // waitmode
+		1 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		duplex@ CoDuplex_Mutex + // object
+		KeThreadWaitForObject ok!
+	end else
+		IPLDPC KeIPLRaise ipl!
+		0 ok!
+	end
+end
+
+fn CoDuplexUnlock { ipl duplex -- }
+	if (duplex@ CoDuplex_Flags + @ PAGED &)
+		0 // abandon
+		duplex@ CoDuplex_Mutex + // mutex
+		KeMutexRelease drop
+	end else
+		ipl@ KeIPLLower
+	end
+end
+
 fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
 	fnsection "PAGE$text"
 
@@ -222,6 +254,15 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 	flags@ duplex@ CoDuplex_Flags + !
 	pri@ duplex@ CoDuplex_Paged + !
 	0 duplex@ CoDuplex_Headless + !
+
+	0 duplex@ CoDuplex_ServerReadListHead + !
+	0 duplex@ CoDuplex_ServerReadListTail + !
+
+	0 duplex@ CoDuplex_ClientReadListHead + !
+	0 duplex@ CoDuplex_ClientReadListTail + !
+
+	0 duplex@ CoDuplex_ClientWriteListHead + !
+	0 duplex@ CoDuplex_ClientWriteListTail + !
 
 	if (flags@ OSDUPLEXFLAG_CONSOLE &)
 		duplex@ CoDuplex_ConsoleHeader + CoConsoleInitialize
@@ -380,16 +421,67 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 
 	0 ok!
 
-	if (fcb@ IOFileControlBlock_FSContext + @)
-		// server fcb, reading from the transmit buffer
-	end else
-		// client fcb, reading from the receive buffer.
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
 	end
 
-	0 // status
-	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLMap ok!
+
+		if (ok@)
+			mdl@ MmMDLUnpin
+
+			return
+		end
+	end else
+		// only one page, copy thru identityspace as a time saver
+		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & +
+		mdl@ MmMDLHeader_MappedAddress + !
+	end
+
+	auto isserver
+	fcb@ IOFileControlBlock_FSContext + @ isserver!
+
+	auto duplex
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
+
+	auto buf
+
+	auto ipl
+	duplex@ CoDuplexLock ok! ipl!
+
+	if (ok@)
+		if (mdl@ MmMDLHeader_Pages + @ 1 >)
+			mdl@ MmMDLUnmap
+		end
+
+		mdl@ MmMDLUnpin
+
+		return
+	end
+
+	if (isserver@)
+		// server fcb, reading from the transmit buffer. this may pend.
+		duplex@ CoDuplex_TransmitBuffer + buf!		
+	end else
+		// client fcb, reading from the receive buffer. this may pend.
+		duplex@ CoDuplex_ReceiveBuffer + buf!
+	end
+
+
+
+	ipl@ duplex@ CoDuplexUnlock
+
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLUnmap
+	end
+
+	mdl@ MmMDLUnpin
 end
 
 fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
@@ -398,11 +490,20 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 	0 ok!
 
 	if (fcb@ IOFileControlBlock_FSContext + @)
-		// server fcb, writing to the receive buffer.
+		// server fcb, writing to the receive buffer, or directly into the
+		// client's buffer. this does not pend since clients can't be trusted
+		// to read data in a timely manner. if necessary it will just
+		// overwrite old data.
+		//
 		// if echo is enabled, that must be performed here.
-		// ^C, ^D, etc processing is also needed.
+		// ^C, ^D, ^U, etc processing is also needed.
+
+
 	end else
-		// client fcb, writing to the transmit buffer.
+		// client fcb, writing to the transmit buffer, or directly into the
+		// server's buffer. this may pend because the server is assumed to be
+		// trusted to read and process the data in a timely manner.
+		//
 		// if cooked, processing such as \n -> \r\n is required.
 	end
 

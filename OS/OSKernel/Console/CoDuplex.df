@@ -426,11 +426,13 @@ struct CoDuplexRequest
 	4 MDL
 	4 Duplex
 	4 LengthDone
+	4 Buffer
+	4 Length
 endstruct
 
 const REQFLAG_WRITE  1
 
-fn CoDuplexEnqueueRequest { flags isserver mdl duplex -- }
+fn CoDuplexEnqueueRequest { buf length flags isserver mdl duplex -- }
 	auto req
 	mdl@ MmMDLHeader_DriverGoWild + req!
 
@@ -439,6 +441,8 @@ fn CoDuplexEnqueueRequest { flags isserver mdl duplex -- }
 	duplex@ req@ CoDuplexRequest_Duplex + !
 	0 req@ CoDuplexRequest_LengthDone + !
 	0 req@ CoDuplexRequest_Next + !
+	buf@ req@ CoDuplexRequest_Buffer + !
+	length@ req@ CoDuplexRequest_Length + !
 
 	auto t
 
@@ -500,13 +504,7 @@ fn CoDuplexCookedCopy { dest src sz -- bytecnt done }
 		1 bytecnt +=
 
 		if (src@ gb 4 ==) // ^D
-			if (bytecnt@ 1 ==)
-				0 bytecnt!
-				DONE_NORMAL done!
-			end else
-				DONE_CTRLD done!
-			end
-
+			DONE_CTRLD done!
 			return
 		end
 
@@ -524,10 +522,366 @@ fn CoDuplexCookedCopy { dest src sz -- bytecnt done }
 	end
 end
 
+fn CoDuplexCookedCopyClient { dest src sz -- bytecnt done }
+	0 done!
+	0 bytecnt!
+
+	while (sz@)
+		if (src@ gb '\n' ==)
+			// needs to be turned into \r\n.
+
+			if (sz@ 2 <)
+				// not enough room in server buffer!
+				// finish early so we don't lose this.
+
+				DONE_NORMAL done!
+				return
+			end
+
+			'\r' dest@ sb
+			'\n' dest@ 1 + sb
+
+			1 dest +=
+			2 bytecnt +=
+			2 sz -=
+		end else
+			src@ gb dest@ sb
+			1 bytecnt +=
+			1 dest +=
+			1 sz -=
+		end
+
+		1 src +=
+	end
+end
+
+fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	// server fcb, reading from the transmit buffer and/or client buffers.
+	// this may pend.
+
+	auto done
+	0 done!
+
+	0 ok!
+
+	auto bytecnt
+	0 bytecnt!
+
+	if (duplex@ CoDuplex_ServerReadListHead + @)
+		// if there's a pending request already, then that means the transmit
+		// buffer and any client buffers have all been drained.
+
+		if (timeout@)
+			STATUS_OTHER_CONDITION ok!
+		end else
+			STATUS_RING_EMPTY ok!
+		end
+	end else
+		// read as much as possible from the buffer. if this completes, cool.
+		// if it does not complete, then we need to look for pending client
+		// buffers. if that completes, cool. if not, we need to enqueue the
+		// request.
+
+		auto header
+		duplex@ CoDuplex_TransmitBuffer + header!
+
+		auto rp
+		header@ CoDuplexBuffer_ReadIndex + @ rp!
+
+		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
+
+		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+			mdl@ MmMDLHeader_Length + @ bytecnt!
+			1 done!
+		end
+
+		if (bytecnt@)
+			auto bufp
+			header@ CoDuplexBuffer_Buffer + @ bufp!
+
+			auto bufsize
+			header@ CoDuplexBuffer_Size + @ bufsize!
+
+			auto bufmask
+			bufsize@ 1 - bufmask!
+
+			if (rp@ bufmask@ ~ & rp@ bytecnt@ + bufmask@ ~ & ==)
+				// doesn't cross the boundary, do a single copy
+
+				buf@ // dest
+				bufp@ rp@ bufmask@ & + // src
+				bytecnt@ // sz
+				memcpy
+			end else
+				// crosses the boundary, do two copies
+
+				buf@ // dest
+				bufp@ rp@ bufmask@ & + // src
+				bufsize@ rp@ bufmask@ & - // sz
+				memcpy
+
+				buf@ bufsize@ rp@ bufmask@ & - + // dest
+				bufp@ // src
+				rp@ bytecnt@ + bufmask@ & // sz
+				memcpy
+			end
+
+			rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+			bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
+		end
+
+		// bytecnt now contains the amount of bytes that have been read.
+
+		// try to complete as many client writes as possible by reading
+		// from their buffer.
+
+		while (done@ ~~)
+			auto req
+			duplex@ CoDuplex_ClientWriteListHead + @ req!
+
+			if (req@ ~~)
+				break
+			end
+
+			// calculate available bytes in buffer.
+
+			header@ CoDuplexBuffer_UserBufferLength + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
+
+			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
+				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+				1 done!
+			end
+
+			if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				buf@ bytecnt@ + // dest
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + // src
+				rp@ // sz
+				memcpy
+			end else
+				buf@ bytecnt@ + // dest
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + // src
+				rp@ // sz
+				CoDuplexCookedCopyClient done |= rp!
+			end
+
+			rp@ bytecnt +=
+			rp@ header@ CoDuplexBuffer_UserBufferIndex + +=
+
+			if (header@ CoDuplexBuffer_UserBufferIndex + @
+				header@ CoDuplexBuffer_UserBufferLength + @ ==)
+
+				// complete the client MDL.
+
+				0 // status
+				0 // priboost
+				req@ CoDuplexRequest_MDL + @ // mdl
+				MmMDLComplete
+
+				// unlink the client request.
+
+				req@ CoDuplexRequest_Next + @ req!
+
+				req@ duplex@ CoDuplex_ClientWriteListHead + !
+
+				if (req@)
+					0 req@ CoDuplexRequest_Prev + !
+
+					req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
+					0 header@ CoDuplexBuffer_UserBufferIndex + !
+					req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+				end else
+					0 duplex@ CoDuplex_ClientWriteListTail + !
+				end
+			end
+		end
+
+		if (done@ ~~)
+			if (timeout@)
+				// switch to user buffer.
+
+				buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
+				0 header@ CoDuplexBuffer_UserBufferIndex + !
+				mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
+
+				STATUS_OTHER_CONDITION ok!
+			end else
+				STATUS_RING_EMPTY ok!
+			end
+		end
+	end
+
+	if (ok@ STATUS_OTHER_CONDITION ==)
+		// enqueue the request at the tail of the appropriate queue.
+
+		buf@ bytecnt@ + // buf
+		mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
+		0 // flags
+		1 // isserver
+		mdl@ // mdl
+		duplex@ // duplex
+		CoDuplexEnqueueRequest
+	end
+end
+
+fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	// client fcb, reading from the receive buffer.
+	// this may pend.
+
+	auto done
+	0 done!
+
+	0 ok!
+
+	auto bytecnt
+	0 bytecnt!
+
+	if (duplex@ CoDuplex_ClientReadListHead + @)
+		// if there's a pending request already, then that means the receive
+		// buffer has been drained.
+
+		if (timeout@)
+			STATUS_OTHER_CONDITION ok!
+		end else
+			STATUS_RING_EMPTY ok!
+		end
+	end else
+		// read as much as possible from the buffer. if this completes, cool.
+		// if it does not complete, then we need to enqueue the request.
+
+		auto header
+		duplex@ CoDuplex_ReceiveBuffer + header!
+
+		auto rp
+		header@ CoDuplexBuffer_ReadIndex + @ rp!
+
+		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
+
+		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+			mdl@ MmMDLHeader_Length + @ bytecnt!
+			1 done!
+		end
+
+		if (bytecnt@)
+			auto bufp
+			header@ CoDuplexBuffer_Buffer + @ bufp!
+
+			auto bufsize
+			header@ CoDuplexBuffer_Size + @ bufsize!
+
+			auto bufmask
+			bufsize@ 1 - bufmask!
+
+			if (rp@ bufmask@ ~ & rp@ bytecnt@ + bufmask@ ~ & ==)
+				// doesn't cross the boundary, do a single copy
+
+				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bytecnt@ // sz
+					memcpy
+				end else
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					CoDuplexCookedCopy done |= bytecnt!
+				end
+			end else
+				// crosses the boundary, do two copies
+
+				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					memcpy
+
+					buf@ bufsize@ rp@ bufmask@ & - + // dest
+					bufp@ // src
+					rp@ bytecnt@ + bufmask@ & // sz
+					memcpy
+				end else
+					auto bc
+
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					CoDuplexCookedCopy done |= bc!
+
+					if (done@ ~~)
+						buf@ bufsize@ rp@ bufmask@ & - + // dest
+						bufp@ // src
+						rp@ bytecnt@ + bufmask@ & // sz
+						CoDuplexCookedCopy done |= bc +=
+					end
+
+					bc@ bytecnt!
+				end
+			end
+
+			if (done@ DONE_CTRLD &)
+				if (bytecnt@ 1 >)
+					rp@ bytecnt@ + 1 - header@ CoDuplexBuffer_ReadIndex + !
+				end else
+					rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+				end
+			end else
+				rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+			end
+
+			bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
+		end
+
+		// bytecnt now contains the amount of bytes that have been read.
+
+		if (done@ ~~)
+			if (timeout@)
+				// switch to user buffer.
+
+				buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
+				0 header@ CoDuplexBuffer_UserBufferIndex + !
+				mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
+
+				STATUS_OTHER_CONDITION ok!
+			end else
+				STATUS_RING_EMPTY ok!
+			end
+		end else
+			if (done@ DONE_CTRLD &)
+				1 bytecnt -=
+			end
+
+			bytecnt@ mdl@ MmMDLHeader_Length + !
+		end
+	end
+
+	if (ok@ STATUS_OTHER_CONDITION ==)
+		// enqueue the request at the tail of the appropriate queue.
+
+		buf@ bytecnt@ + // buf
+		mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
+		0 // flags
+		0 // isserver
+		mdl@ // mdl
+		duplex@ // duplex
+		CoDuplexEnqueueRequest
+	end
+end
+
 fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
+
+	auto duplex
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
 
 	if (mdl@ MmMDLHeader_Length + @ ~~)
 		0 // status
@@ -536,6 +890,13 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		MmMDLComplete
 
 		return
+	end
+
+	if (fcb@ IOFileControlBlock_FSContext + @)
+		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
+			STATUS_FORBIDDEN_OPERATION ok!
+			return
+		end
 	end
 
 	1 // lockforwrite
@@ -562,27 +923,6 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
 	end
 
-	auto duplex
-	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
-
-	// here, cooked defines whether encountering a \n or ^D causes an instant
-	// completion or not.
-
-	auto cooked
-
-	if (fcb@ IOFileControlBlock_FSContext + @)
-		0 cooked!
-	end elseif (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
-		0 cooked!
-	end else
-		1 cooked!
-	end
-
-	auto done
-	0 done!
-
-	auto header
-
 	auto ipl
 	duplex@ CoDuplexLock ok! ipl!
 
@@ -590,146 +930,23 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		return
 	end
 
-	// NOTE this is all broken because i forgor about the fact that the server
-	// needs to directly yoink from the client, or client directly yoinking
-	// from server buffer...
-
 	if (fcb@ IOFileControlBlock_FSContext + @)
-		// server fcb, reading from the transmit buffer. this may pend.
-		
-		duplex@ CoDuplex_TransmitBuffer + header!
-
-		if (duplex@ CoDuplex_ServerReadListHead + @)
-			if (timeout@)
-				STATUS_OTHER_CONDITION ok!
-			end else
-				STATUS_RING_EMPTY ok!
-			end
-		end
-	end else
-		// client fcb, reading from the receive buffer. this may pend.
-
-		duplex@ CoDuplex_ReceiveBuffer + header!
-
-		if (duplex@ CoDuplex_ClientReadListHead + @)
-			if (timeout@)
-				STATUS_OTHER_CONDITION ok!
-			end else
-				STATUS_RING_EMPTY ok!
-			end
-		end
-	end
-
-	if (ok@ ~~)
-		// read as much as possible from the buffer. if this completes, cool.
-		// if it does not complete, then we need to enqueue the request.
-
-		auto rp
-		header@ CoDuplexBuffer_ReadIndex + @ rp!
-
-		auto bytecnt
-		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
-
-		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
-			mdl@ MmMDLHeader_Length + @ bytecnt!
-			1 done!
-		end
-
-		if (bytecnt@)
-			auto bufp
-			header@ CoDuplexBuffer_Buffer + @ bufp!
-
-			auto bufsize
-			header@ CoDuplexBuffer_Size + @ bufsize!
-
-			auto bufmask
-			bufsize@ 1 - bufmask!
-
-			// TODO do a special copy if cooked to be able to catch \n and ^D
-
-			if (rp@ bufmask@ ~ & rp@ bytecnt@ + bufmask@ ~ & ==)
-				// doesn't cross the boundary, do a single copy
-
-				if (cooked@)
-					buf@ // dest
-					bufp@ rp@ bufmask@ & + // src
-					bytecnt@ // sz
-					CoDuplexCookedCopy done |= bytecnt!
-				end else
-					buf@ // dest
-					bufp@ rp@ bufmask@ & + // src
-					bytecnt@ // sz
-					memcpy
-				end
-			end else
-				// crosses the boundary, do two copies
-
-				if (cooked@)
-					buf@ // dest
-					bufp@ rp@ bufmask@ & + // src
-					bufsize@ rp@ bufmask@ & - // sz
-					CoDuplexCookedCopy done |= kflags!
-
-					if (done@ ~~)
-						buf@ bufsize@ rp@ bufmask@ & - + // dest
-						bufp@ // src
-						rp@ bytecnt@ + bufmask@ & // sz
-						CoDuplexCookedCopy done |= kflags +=
-					end
-
-					kflags@ bytecnt!
-				end else
-					buf@ // dest
-					bufp@ rp@ bufmask@ & + // src
-					bufsize@ rp@ bufmask@ & - // sz
-					memcpy
-
-					buf@ bufsize@ rp@ bufmask@ & - + // dest
-					bufp@ // src
-					rp@ bytecnt@ + bufmask@ & // sz
-					memcpy
-				end
-			end
-
-			rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
-			bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
-		end
-
-		if (done@ ~~)
-			if (timeout@)
-				// switch to user buffer.
-
-				buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
-
-				STATUS_OTHER_CONDITION ok!
-			end else
-				STATUS_RING_EMPTY ok!
-			end
-		end
-	end
-
-	if (ok@ STATUS_OTHER_CONDITION ==)
-		// enqueue the request at the tail of the appropriate queue.
-
-		0 // flags
-		fcb@ IOFileControlBlock_FSContext + @ // isserver
+		buf@ // buf
+		timeout@ // timeout
 		mdl@ // mdl
 		duplex@ // duplex
-		CoDuplexEnqueueRequest
+		CoDuplexServerRead ok!
+	end else
+		buf@ // buf
+		timeout@ // timeout
+		mdl@ // mdl
+		duplex@ // duplex
+		CoDuplexClientRead ok!
 	end
 
 	ipl@ duplex@ CoDuplexUnlock
 
 	if (ok@ ~~)
-		if (done@ DONE_CTRLD &)
-			// ignore the ^D
-			1 bytecnt -=
-		end
-
-		bytecnt@ mdl@ MmMDLHeader_Length + !
-
 		0 // status
 		0 // priboost
 		mdl@ // mdl

@@ -269,6 +269,8 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 	if (flags@ OSDUPLEXFLAG_CONSOLE &)
 		duplex@ CoDuplex_ConsoleHeader + CoConsoleInitialize
 		duplex@ CoDuplex_ConsoleHeader + duplexobject@ IODevice_ConsoleHeader + !
+	end else
+		OSCONSOLEMODE_RAW OSCONSOLEMODE_NOECHO | duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + !
 	end
 
 	128 // size
@@ -843,13 +845,15 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 
 		if (done@ ~~)
 			if (timeout@)
-				// switch to user buffer.
+				if (duplex@ CoDuplex_Headless + @ ~~)
+					// switch to user buffer.
 
-				buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
+					buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
+					0 header@ CoDuplexBuffer_UserBufferIndex + !
+					mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
 
-				STATUS_OTHER_CONDITION ok!
+					STATUS_OTHER_CONDITION ok!
+				end
 			end else
 				STATUS_RING_EMPTY ok!
 			end
@@ -873,6 +877,26 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 		duplex@ // duplex
 		CoDuplexEnqueueRequest
 	end
+end
+
+fn CoDuplexServerWrite { buf mdl duplex -- ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	// server fcb, writing to the receive buffer and/or client buffers.
+	// if this is a console, this will not pend because the client can't be
+	// expected to read characters promptly. otherwise it may pend.
+
+
+end
+
+fn CoDuplexClientWrite { buf mdl duplex -- ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	// client fcb, writing to the transmit buffer and/or server buffers.
+	// this may pend.
+
 end
 
 fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -- ok }
@@ -937,6 +961,19 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		duplex@ // duplex
 		CoDuplexServerRead ok!
 	end else
+		if (duplex@ CoDuplex_Headless + @)
+			ipl@ duplex@ CoDuplexUnlock
+
+			0 mdl@ MmMDLHeader_Length + !
+
+			0 // status
+			0 // priboost
+			mdl@ // mdl
+			MmMDLComplete
+
+			return
+		end
+
 		buf@ // buf
 		timeout@ // timeout
 		mdl@ // mdl
@@ -962,28 +999,82 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 
 	0 ok!
 
-	if (fcb@ IOFileControlBlock_FSContext + @)
-		// server fcb, writing to the receive buffer, or directly into the
-		// client's buffer. this does not pend since clients can't be trusted
-		// to read data in a timely manner. if necessary it will just
-		// overwrite old data.
-		//
-		// if echo is enabled, that must be performed here.
-		// ^C, ^D, ^U, etc processing is also needed.
+	auto duplex
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
 
+	if (mdl@ MmMDLHeader_Length + @ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
 
-	end else
-		// client fcb, writing to the transmit buffer, or directly into the
-		// server's buffer. this may pend because the server is assumed to be
-		// trusted to read and process the data in a timely manner.
-		//
-		// if cooked, processing such as \n -> \r\n is required.
+		return
 	end
 
-	0 // status
-	0 // priboost
+	if (fcb@ IOFileControlBlock_FSContext + @ ~~)
+		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
+			STATUS_FORBIDDEN_OPERATION ok!
+			return
+		end elseif (duplex@ CoDuplex_Headless + @)
+			STATUS_CONSOLE_HUNG_UP ok!
+			return
+		end
+	end
+
+	0 // lockforwrite
 	mdl@ // mdl
-	MmMDLComplete
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLMap ok!
+
+		if (ok@)
+			return
+		end
+
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
+	end else
+		// only one page, copy thru identityspace as a time saver
+		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
+	end
+
+	auto ipl
+	duplex@ CoDuplexLock ok! ipl!
+
+	if (ok@)
+		return
+	end
+
+	if (fcb@ IOFileControlBlock_FSContext + @)
+		buf@ // buf
+		mdl@ // mdl
+		duplex@ // duplex
+		CoDuplexServerWrite ok!
+	end else
+		buf@ // buf
+		mdl@ // mdl
+		duplex@ // duplex
+		CoDuplexClientWrite ok!
+	end
+
+	ipl@ duplex@ CoDuplexUnlock
+
+	if (ok@ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end elseif (ok@ STATUS_OTHER_CONDITION ==)
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
 end
 
 fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
@@ -999,8 +1090,40 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 	deviceobject@ IODeviceGetExtension duplex!
 
 	if (fcb@ IOFileControlBlock_FSContext + @)
-		// server fcb! mark duplex headless
+		// server fcb! mark duplex headless and satisfy any pending requests.
+
+		auto ipl
+		duplex@ CoDuplexLock drop ipl!
+
 		1 duplex@ CoDuplex_Headless + !
+
+		auto req
+		duplex@ CoDuplex_ClientWriteListHead + @ req!
+
+		while (req@)
+			STATUS_CONSOLE_HUNG_UP // status
+			0 // priboost
+			req@ CoDuplexRequest_MDL + @ // mdl
+			MmMDLComplete
+
+			req@ CoDuplexRequest_Next + @ req!
+		end
+
+		duplex@ CoDuplex_ClientReadListHead + @ req!
+
+		while (req@)
+			req@ CoDuplexRequest_LengthDone + @
+			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+
+			0 // status
+			0 // priboost
+			req@ CoDuplexRequest_MDL + @ // mdl
+			MmMDLComplete
+
+			req@ CoDuplexRequest_Next + @ req!
+		end
+
+		ipl@ duplex@ CoDuplexUnlock
 
 		if (deviceobject@ IODevice_ConsoleHeader + @)
 			OSSIGNAL_HUP // signal

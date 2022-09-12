@@ -1,5 +1,5 @@
 externptr CoVideoConsole
-externptr CoVideoConsoleRawBuffer
+externptr CoVideoConsoleInputDevice
 
 extern CoVideoConsoleInit { -- }
 extern CoVideoConsoleExpediteRedraw { -- }

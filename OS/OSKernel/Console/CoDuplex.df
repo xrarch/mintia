@@ -162,7 +162,7 @@ fn CoDuplexBufferInitialize { size pri quotablock header -- ok }
 	auto buf
 	size@ // size
 	'DxBf' // tag
-	pri@ // flags
+	pri@ CANBLOCK | // flags
 	MmAllocWithTag ok! buf!
 
 	if (ok@)
@@ -351,6 +351,8 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 		return
 	end
 
+	1 serverfcb@ IOFileControlBlock_FSContext + !
+
 	serverfcb@ duplex@ CoDuplex_ServerFCB + !
 
 	"DUPLEXSERVER" // openedpath
@@ -385,7 +387,9 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 	duplexobject@ ObObjectReferenceByPointer drop
 	serverfcb@ IOFileControlBlockReference drop
 
-	quotablock@ MmQuotaBlockReference
+	if (quotablock@)
+		quotablock@ MmQuotaBlockReference
+	end
 
 	quotablock@ duplex@ CoDuplex_QuotaBlock + !
 end
@@ -400,7 +404,7 @@ fn (IODispatchIOControlFunction) CoDuplexIOControl { arg2 arg1 access fcb lastmo
 	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
 
 	auto console
-	duplex@ IODevice_ConsoleHeader + @ console!
+	fcb@ IOFileControlBlockGetDeviceObject IODevice_ConsoleHeader + @ console!
 
 	if (console@ ~~)
 		STATUS_NOT_SUPPORTED ok!
@@ -556,6 +560,10 @@ end
 fn CoDuplexCookedCopyClient { dest src sz duplex -- bufread bytecnt }
 	0 bytecnt!
 	0 bufread!
+
+	if (sz@ ~~)
+		"hm\n" KeCrash
+	end
 
 	while (sz@)
 		if (src@ gb '\n' ==)
@@ -1018,11 +1026,13 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 	0 ok!
 
-	if (c@ 3 ==)
+	if (c@ 3 ==) // ^C
 		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW & ~~)
 			OSSIGNAL_INT // signal
 			duplex@ CoDuplex_ConsoleHeader + // console
 			CoConsoleSignal
+
+			3 duplex@ CoDuplexEcho
 
 			return
 		end
@@ -1058,31 +1068,88 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 			header@ CoDuplexBuffer_UserBuffer + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
 
+			1 header@ CoDuplexBuffer_UserBufferIndex + +=
+
 			DONE_NORMAL done |=
 		end elseif (c@ '\n' ==)
 			'\n'
 			header@ CoDuplexBuffer_UserBuffer + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
 
+			1 header@ CoDuplexBuffer_UserBufferIndex + +=
+
+			'\r' duplex@ CoDuplexEcho
+			'\n' duplex@ CoDuplexEcho
+
 			DONE_NORMAL clientdone |=
 			DONE_NORMAL done |=
-		end elseif (c@ 4 ==)
+		end elseif (c@ '\b' ==)
+			// backspace.
+
+			if (header@ CoDuplexBuffer_UserBufferIndex + @)
+				1 header@ CoDuplexBuffer_UserBufferIndex + -=
+
+				req@ CoDuplexRequest_Buffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + gb // c
+				duplex@ // duplex
+				CoDuplexEchoRubout
+			end elseif (req@ CoDuplexRequest_LengthDone + @)
+				1 req@ CoDuplexRequest_LengthDone + -=
+				1 req@ CoDuplexRequest_Buffer + -=
+				1 req@ CoDuplexRequest_Length + +=
+
+				req@ CoDuplexRequest_Buffer + @ gb // c
+				duplex@ // duplex
+				CoDuplexEchoRubout
+			end
+
+			DONE_NORMAL done |=
+		end elseif (c@ 21 ==) // ^U
+			// erase line.
+
+			while (1)
+				if (header@ CoDuplexBuffer_UserBufferIndex + @)
+					1 header@ CoDuplexBuffer_UserBufferIndex + -=
+
+					req@ CoDuplexRequest_Buffer + @
+					header@ CoDuplexBuffer_UserBufferIndex + @ + gb // c
+					duplex@ // duplex
+					CoDuplexEchoRubout
+				end elseif (req@ CoDuplexRequest_LengthDone + @)
+					1 req@ CoDuplexRequest_LengthDone + -=
+					1 req@ CoDuplexRequest_Buffer + -=
+					1 req@ CoDuplexRequest_Length + +=
+
+					req@ CoDuplexRequest_Buffer + @ gb // c
+					duplex@ // duplex
+					CoDuplexEchoRubout
+				end else
+					break
+				end
+			end
+
+			DONE_NORMAL done |=
+		end elseif (c@ 4 ==) // ^D
 			DONE_CTRLD clientdone |=
 		end else
 			c@
 			header@ CoDuplexBuffer_UserBuffer + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
 
+			1 header@ CoDuplexBuffer_UserBufferIndex + +=
+
+			c@ duplex@ CoDuplexEcho
+
 			DONE_NORMAL done |=
 		end
 
 		if (clientdone@ DONE_CTRLD &)
 			if (header@ CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ +)
+				req@ CoDuplexRequest_LengthDone + @ + ~~)
 				DONE_NORMAL done |=
+
+				c@ duplex@ CoDuplexEcho
 			end
-		end else
-			1 header@ CoDuplexBuffer_UserBufferIndex + +=
 		end
 
 		if (header@ CoDuplexBuffer_UserBufferIndex + @
@@ -1138,12 +1205,109 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 			auto index
 			header@ CoDuplexBuffer_WriteIndex + @ index!
 
-			c@
-			bufp@ index@ bufmask@ & + sb
+			if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				c@
+				bufp@ index@ bufmask@ & + sb
 
-			index@ 1 + header@ CoDuplexBuffer_WriteIndex + !
-			1 header@ CoDuplexBuffer_RemainingSpace + -=
+				index@ 1 + header@ CoDuplexBuffer_WriteIndex + !
+				1 header@ CoDuplexBuffer_RemainingSpace + -=
+			end elseif (c@ '\b' ==)
+				if (header@ CoDuplexBuffer_RemainingSpace + @ bufsize@ <)
+					index@ 1 - header@ CoDuplexBuffer_WriteIndex + !
+					1 header@ CoDuplexBuffer_RemainingSpace + +=
+
+					bufp@ index@ 1 - bufmask@ & + gb // c
+					duplex@ // duplex
+					CoDuplexEchoRubout
+				end
+			end elseif (c@ 21 ==) // ^U
+				while (header@ CoDuplexBuffer_RemainingSpace + @ bufsize@ <)
+					1 header@ CoDuplexBuffer_WriteIndex + -=
+					1 header@ CoDuplexBuffer_RemainingSpace + +=
+
+					bufp@ header@ CoDuplexBuffer_WriteIndex + @ bufmask@ & + gb // c
+					duplex@ // duplex
+					CoDuplexEchoRubout
+				end
+			end else
+				c@
+				bufp@ index@ bufmask@ & + sb
+
+				index@ 1 + header@ CoDuplexBuffer_WriteIndex + !
+				1 header@ CoDuplexBuffer_RemainingSpace + -=
+
+				if (c@ '\n' ==)
+					'\r' duplex@ CoDuplexEcho
+					'\n' duplex@ CoDuplexEcho
+				end else
+					c@ duplex@ CoDuplexEcho
+				end
+			end
 		end
+	end
+end
+
+fn CoDuplexEcho { c duplex -- }
+	if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_NOECHO &)
+		return
+	end
+
+	if (c@ 0x20 <)
+		'^' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		[c@]CoCtrl@ // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+	end elseif (c@ 0x7F <)
+		c@ // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+	end
+end
+
+fn CoDuplexEchoRubout { c duplex -- }
+	if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_NOECHO &)
+		return
+	end
+
+	if (c@ 0x20 <)
+		'\b' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		' ' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		'\b' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		'\b' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		' ' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		'\b' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+	end elseif (c@ 0x7F <)
+		'\b' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		' ' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
+
+		'\b' // c
+		duplex@ // duplex
+		CoDuplexWriteCharacter drop
 	end
 end
 
@@ -1425,6 +1589,12 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 
 				DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
 			end
+		end else
+			c@
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+			DONE_NORMAL done!
 		end
 
 		bufwritten@ header@ CoDuplexBuffer_UserBufferIndex + +=
@@ -1501,6 +1671,11 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 
 					DONE_NORMAL done!
 				end
+			end else
+				c@
+				bufp@ index@ bufmask@ & + sb
+
+				DONE_NORMAL done!
 			end
 
 			index@ bufwritten@ + header@ CoDuplexBuffer_WriteIndex + !
@@ -1654,14 +1829,14 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 					bufp@ index@ bufmask@ & + // dest
-					buf@ // src
+					buf@ bytecnt@ + // src
 					rp@ // sz
 					memcpy
 
 					rp@ bufwritten!
 				end else
 					bufp@ index@ bufmask@ & + // dest
-					buf@ // src
+					buf@ bytecnt@ + // src
 					rp@ // sz
 					duplex@ // duplex
 					CoDuplexCookedCopyClient rp! bufwritten!
@@ -1671,25 +1846,25 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 					bufp@ index@ bufmask@ & + // dest
-					buf@ // src
+					buf@ bytecnt@ + // src
 					bufsize@ index@ bufmask@ & - // sz
 					memcpy
 
 					bufp@ // dest
-					buf@ bufsize@ index@ bufmask@ & - + // src
+					buf@ bytecnt@ + bufsize@ index@ bufmask@ & - + // src
 					endp@ bufmask@ & // sz
 					memcpy
 
 					rp@ bufwritten!
 				end else
 					bufp@ index@ bufmask@ & + // dest
-					buf@ // src
+					buf@ bytecnt@ + // src
 					bufsize@ index@ bufmask@ & - // sz
 					duplex@ // duplex
 					CoDuplexCookedCopyClient rp! bufwritten!
 
 					bufp@ // dest
-					buf@ bufsize@ index@ bufmask@ & - + // src
+					buf@ bytecnt@ + bufsize@ index@ bufmask@ & - + // src
 					endp@ bufmask@ & // sz
 					duplex@ // duplex
 					CoDuplexCookedCopyClient rp += bufwritten +=
@@ -1699,6 +1874,7 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 			index@ rp@ + header@ CoDuplexBuffer_WriteIndex + !
 			rp@ header@ CoDuplexBuffer_RemainingSpace + -=
 
+			bufwritten@ rp@ "rp=%d bufwritten=%d\n" Printf
 			bufwritten@ bytecnt +=
 
 			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
@@ -1708,6 +1884,10 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 		if (done@ ~~)
 			// enqueue the request.
+
+			mdl@ MmMDLHeader_Length + @ bytecnt@ -
+			bytecnt@
+			"enqueued write with %d done, %d left\n" Printf
 
 			bytecnt@ // lengthdone
 			buf@ bytecnt@ + // buf

@@ -214,7 +214,7 @@ fn CoDuplexBufferUninitialize { pri quotablock header -- }
 end
 
 fn CoDuplexLock { duplex -- ipl ok }
-	if (duplex@ CoDuplex_Flags + @ PAGED &)
+	if (duplex@ CoDuplex_Paged + @ PAGED &)
 		KERNELMODE // waitmode
 		1 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
@@ -227,7 +227,7 @@ fn CoDuplexLock { duplex -- ipl ok }
 end
 
 fn CoDuplexUnlock { ipl duplex -- }
-	if (duplex@ CoDuplex_Flags + @ PAGED &)
+	if (duplex@ CoDuplex_Paged + @ PAGED &)
 		0 // abandon
 		duplex@ CoDuplex_Mutex + // mutex
 		KeMutexRelease drop
@@ -682,9 +682,8 @@ fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
 
 		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
 
-		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <=)
+		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
 			mdl@ MmMDLHeader_Length + @ bytecnt!
-			1 done!
 		end
 
 		if (bytecnt@)
@@ -720,6 +719,10 @@ fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
 
 			rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
 			bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
+
+			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+				DONE_NORMAL done |=
+			end
 		end
 
 		// bytecnt now contains the amount of bytes that have been read.
@@ -896,7 +899,7 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 				end else
 					buf@ // dest
 					bufp@ rp@ bufmask@ & + // src
-					bufsize@ rp@ bufmask@ & - // sz
+					bytecnt@ // sz
 					CoDuplexCookedCopy done |= bytecnt!
 				end
 			end else
@@ -934,14 +937,15 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 			if (done@ DONE_CTRLD &)
 				if (bytecnt@ 1 >)
 					rp@ bytecnt@ + 1 - header@ CoDuplexBuffer_ReadIndex + !
+					bytecnt@ 1 - header@ CoDuplexBuffer_RemainingSpace + +=
 				end else
 					rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+					bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
 				end
 			end else
 				rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+				bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
 			end
-
-			bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
 
 			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
 				DONE_NORMAL done |=

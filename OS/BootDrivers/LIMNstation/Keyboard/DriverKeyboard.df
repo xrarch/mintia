@@ -6,6 +6,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "<inc>/HALMap.h"
 #include "<inc>/HALLog.h"
 #include "<inc>/HALDriver.h"
 #include "<inc>/HALRTC.h"
@@ -33,13 +34,33 @@ const KEYBD_CTRL  2
 const KEYBD_CAPS  4
 const KEYBD_ARROW 8
 
+const SCANCODEBUFFERSIZE 32 // must be power of two
+
 struct Keyboard
 	4 ID
-	4 ScanCodeBuffer
-	4 RawBuffer
+
+	(SCANCODEBUFFERSIZE) ScanCodeBuffer
+
+	4 ReadIndex
+	4 WriteIndex
+	4 Remaining
+
 	4 States
 	4 PendingArrowKey
 	KeDPC_SIZEOF DPC
+
+	4 RequestListHead
+	4 RequestListTail
+endstruct
+
+struct KeyboardRequest
+	4 Next
+	4 Prev
+
+	4 Keyboard
+	4 MDL
+	4 Buffer
+	4 Length
 endstruct
 
 table DriverKeyboardDispatch
@@ -62,8 +83,8 @@ table DriverKeyboardDispatch
 	0                                    // readdirectory
 	0                                    // getpageaddr
 	0                                    // delete device object
-	0                                    // reserved
-	0                                    // reserved
+	0                                    // reclaim fcb
+	pointerof DriverKeyboardCancel       // cancel request
 	0                                    // reserved
 	0                                    // reserved
 endtable
@@ -138,24 +159,17 @@ fn (HALLIMNstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
 	0 keyboard@ Keyboard_States + !
 	0 keyboard@ Keyboard_PendingArrowKey + !
 
+	0 keyboard@ Keyboard_RequestListHead + !
+	0 keyboard@ Keyboard_RequestListTail + !
+
+	0 keyboard@ Keyboard_ReadIndex + !
+	0 keyboard@ Keyboard_WriteIndex + !
+	SCANCODEBUFFERSIZE keyboard@ Keyboard_Remaining + !
+
 	if (CoVideoConsoleInputDevice@ ~~)
 		// no device specified as video console input buffer, make that us
-
 		keyboard@ CoVideoConsoleInputDevice!
 	end
-
-	auto scanbuffer
-	8 // sizelog (2^8 = 256 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLDPC // synchipl
-	0 // quotablock
-	ExRingBufferCreate ok! scanbuffer!
-
-	if (ok@)
-		ok@ name@ "DriverKeyboardEnumerate: failed to create %s (%i)\n" KeCrash
-	end
-
-	scanbuffer@ keyboard@ Keyboard_ScanCodeBuffer + !
 
 	keyboard@ [id@]KeyboardTable!
 
@@ -171,61 +185,168 @@ fn (HALLIMNstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
 end
 
 fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl fcb -- ok }
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
-
-	auto length
-	mdl@ MmMDLHeader_Length + @ length!
-
-	auto lastmode
-	mdl@ MmMDLHeader_Mode + @ lastmode!
+	0 ok!
 
 	auto keyboard
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension keyboard!
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension keyboard!
 
-	auto ringbuf
-	keyboard@ Keyboard_ScanCodeBuffer + @ ringbuf!
+	if (mdl@ MmMDLHeader_Length + @ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
 
-	auto bytesread
-	0 bytesread!
-
-	auto waitonempty
-	EXRINGDONTWAIT waitonempty!
-
-	if (timeout@)
-		EXRINGWAIT waitonempty!
+		return
 	end
 
-	while (bytesread@ length@ <)
-		auto c
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
 
-		timeout@ // timeout
-		lastmode@ // lastmode
-		waitonempty@ // waitonempty
-		ringbuf@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLMap ok!
 
 		if (ok@)
 			return
 		end
 
-		if (lastmode@ USERMODE ==)
-			c@ buffer@ KeSafeStoreByte ok!
-
-			if (ok@)
-				return
-			end
-		end else
-			c@ buffer@ sb
-		end
-
-		1 buffer +=
-		1 bytesread +=
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
+	end else
+		// only one page, copy thru identityspace as a time saver
+		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
 	end
 
-	0 ok!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	0 // status
+	auto rp
+	keyboard@ Keyboard_ReadIndex + @ rp!
+
+	auto bytecnt
+	keyboard@ Keyboard_WriteIndex + @ rp@ - bytecnt!
+
+	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+		mdl@ MmMDLHeader_Length + @ bytecnt!
+	end
+
+	if (bytecnt@)
+		auto endp
+		rp@ bytecnt@ + endp!
+
+		if (rp@ SCANCODEBUFFERSIZE 1 - ~ & endp@ SCANCODEBUFFERSIZE 1 - ~ & ==)
+			// doesn't cross the boundary, do a single copy
+
+			buf@ // dest
+			keyboard@ Keyboard_ScanCodeBuffer + rp@ SCANCODEBUFFERSIZE 1 - & + // src
+			bytecnt@ // sz
+			memcpy
+		end else
+			// crosses the boundary, do two copies
+
+			buf@ // dest
+			keyboard@ Keyboard_ScanCodeBuffer + rp@ SCANCODEBUFFERSIZE 1 - & + // src
+			SCANCODEBUFFERSIZE rp@ SCANCODEBUFFERSIZE 1 - & - // sz
+			memcpy
+
+			buf@ SCANCODEBUFFERSIZE rp@ SCANCODEBUFFERSIZE 1 - & - + // dest
+			keyboard@ Keyboard_ScanCodeBuffer + // src
+			endp@ SCANCODEBUFFERSIZE 1 - & // sz
+			memcpy
+		end
+
+		endp@ keyboard@ Keyboard_ReadIndex + !
+		bytecnt@ keyboard@ Keyboard_Remaining + +=
+	end
+
+	if (bytecnt@ mdl@ MmMDLHeader_Length + @ ~=)
+		if (timeout@)
+			// enqueue
+
+			STATUS_OTHER_CONDITION ok!
+
+			auto ior
+			mdl@ MmMDLHeader_DriverGoWild + ior!
+
+			keyboard@ ior@ KeyboardRequest_Keyboard + !
+			mdl@ ior@ KeyboardRequest_MDL + !
+			buf@ bytecnt@ + ior@ KeyboardRequest_Buffer + !
+			mdl@ MmMDLHeader_Length + @ bytecnt@ - ior@ KeyboardRequest_Length + !
+
+			0 ior@ KeyboardRequest_Next + !
+
+			auto t
+			keyboard@ Keyboard_RequestListTail + @ t!
+
+			t@ ior@ KeyboardRequest_Prev + !
+
+			if (t@ ~~)
+				ior@ keyboard@ Keyboard_RequestListHead + !
+				ior@ keyboard@ Keyboard_RequestListTail + !
+			end else
+				ior@ t@ KeyboardRequest_Next + !
+			end
+		end else
+			bytecnt@ mdl@ MmMDLHeader_Length + !
+		end
+	end
+
+	ipl@ KeIPLLower
+
+	if (ok@ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end elseif (ok@ STATUS_OTHER_CONDITION ==)
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
+end
+
+fn (IODispatchCancelFunction) DriverKeyboardCancel { mdl -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ KeIPLLower
+		return
+	end
+
+	auto keyboard
+	ior@ KeyboardRequest_Keyboard + @ keyboard!
+
+	auto ls
+	auto ns
+
+	ior@ KeyboardRequest_Prev + @ ls!
+	ior@ KeyboardRequest_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ KeyboardRequest_Next + !
+	end else
+		ns@ keyboard@ Keyboard_RequestListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ KeyboardRequest_Prev + !
+	end else
+		ls@ keyboard@ Keyboard_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+
+	STATUS_IO_CANCELLED // status
 	0 // priboost
 	mdl@ // mdl
 	MmMDLComplete
@@ -233,7 +354,7 @@ end
 
 fn (DPCFunction) DriverKeyboardDPCFunction { context1 context2 -- }
 	auto scanbuf
-	context1@ Keyboard_ScanCodeBuffer + @ scanbuf!
+	context1@ Keyboard_ScanCodeBuffer + scanbuf!
 
 	auto c
 	auto scan
@@ -250,13 +371,43 @@ fn (DPCFunction) DriverKeyboardDPCFunction { context1 context2 -- }
 				scan@ 0xFF & 0x80 | scan!
 			end
 
-			scan@ // value
-			1  // overwrite
-			0 // timeout
-			KERNELMODE // lastmode
-			EXRINGDONTWAIT // waitonfull
-			scanbuf@ // ringbuffer
-			ExRingBufferWriteValue drop drop
+			auto req
+			context1@ Keyboard_RequestListHead + @ req!
+
+			if (req@)
+				scan@ req@ KeyboardRequest_Buffer + @ sb
+				1 req@ KeyboardRequest_Buffer + +=
+				1 req@ KeyboardRequest_Length + -=
+
+				if (req@ KeyboardRequest_Length + @ ~~)
+					// complete the client MDL.
+
+					0 // status
+					0 // priboost
+					req@ KeyboardRequest_MDL + @ // mdl
+					MmMDLComplete
+
+					// unlink the client request.
+
+					req@ KeyboardRequest_Next + @ req!
+
+					req@ context1@ Keyboard_RequestListHead + !
+
+					if (req@)
+						0 req@ KeyboardRequest_Prev + !
+					end else
+						0 context1@ Keyboard_RequestListTail + !
+					end
+				end
+			end elseif (context1@ Keyboard_Remaining + @)
+				// insert into the buffer
+
+				scan@
+				scanbuf@ context1@ Keyboard_WriteIndex + @ SCANCODEBUFFERSIZE 1 - & + sb
+
+				1 context1@ Keyboard_Remaining + -=
+				1 context1@ Keyboard_WriteIndex + +=
+			end
 		end
 
 		if (CoVideoConsoleInputDevice@ context1@ ==)
@@ -269,10 +420,6 @@ fn (DPCFunction) DriverKeyboardDPCFunction { context1 context2 -- }
 			end
 		end
 	end
-
-	IOBOOSTKEYBOARD // priboost
-	context1@ Keyboard_ScanCodeBuffer + @ // ringbuffer
-	ExRingBufferWakeReader
 end
 
 fn (HALInterruptHandler) DriverKeyboardInterrupt { trapframe int -- }

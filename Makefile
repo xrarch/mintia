@@ -1,4 +1,4 @@
-export REPO       := $(PWD)
+export REPO       := $(shell pwd)
 export BUILDROOT  := $(REPO)/Root
 export SYSROOT    := mintia
 export BINROOT    := mintia/bin
@@ -94,7 +94,7 @@ $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o
 	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)
 	$(LNK) move $(DFLIBBIN) base=0x80300000
 
-$(PROJECTS): $(DISTIMAGE)
+$(PROJECTS): $(DISTIMAGE) OSDLL
 	make -C OS/$@
 
 $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll: OSDLL

@@ -36,4 +36,4 @@ endif
 	$(ASM) $< $@
 
 cleanup:
-	rm -f ${OBJ} $(FULLOUTPUTFILE)
+	rm -f ${OBJ} ${SOBJ} $(FULLOUTPUTFILE)

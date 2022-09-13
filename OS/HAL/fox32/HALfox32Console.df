@@ -1,0 +1,139 @@
+//
+// Implements the platform-dependent part of the HAL console.
+//
+
+#include "<df>/dragonfruit.h"
+#include "../../OSLoader/OSLoaderGlobal.h"
+
+#include "<inc>/HALConsole.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+externptr HALfox32IndexPalette
+
+table Palette
+	255 // 0: white
+	249 // 1: yellow
+	121 // 2: orange
+	24  // 3: red
+	27  // 4: magenta
+	12  // 5: purple
+	4   // 6: blue 
+	166 // 7: cyan
+	161 // 8: green
+	96  // 9: dark green
+	40  // 10: brown
+	114 // 11: tan
+	222 // 12: light gray
+	148 // 13: gray
+	74  // 14: dark gray
+	0   // 15: black
+endtable
+
+var FBAddr 0
+var FBSize 0
+var FBModulo 0
+
+extern HALCPUFastDrawGlyph { fg width bg height start mod bmp -- }
+extern HALCPUFastDrawGlyphBackwards { fg width bg height start mod bmp -- }
+
+fn HALPlatformConsoleDrawChar { bmp x y -- }
+	if (HALConsoleFontFlags@ HCFFLAG_REVERSE &)
+		[[CONSOLEFG]Palette@]HALfox32IndexPalette@ // fg
+		HALConsoleFontWidth@ // width
+		[[CONSOLEBG]Palette@]HALfox32IndexPalette@ // bg
+		HALConsoleFontHeight@ // height
+		y@ HALConsoleWidthPix@ * x@ + FBAddr@ + // start
+		FBModulo@ // mod
+		bmp@ // bmp
+		HALCPUFastDrawGlyphBackwards
+	end else
+		[[CONSOLEFG]Palette@]HALfox32IndexPalette@ // fg
+		HALConsoleFontWidth@ // width
+		[[CONSOLEBG]Palette@]HALfox32IndexPalette@ // bg
+		HALConsoleFontHeight@ // height
+		y@ HALConsoleWidthPix@ * x@ + FBAddr@ + // start
+		FBModulo@ // mod
+		bmp@ // bmp
+		HALCPUFastDrawGlyph
+	end
+end
+
+externptr HALLoaderInfo
+
+fn HALPlatformConsoleShutter { -- }
+	// do a cool shutter effect on the framebuffer
+
+	auto size
+	FBSize@ size!
+
+	auto addr
+	FBAddr@ addr!
+
+	auto height
+	HALConsoleHeightPix@ height!
+
+	while (height@)
+		auto width
+		HALConsoleWidthPix@ width!
+
+		auto off
+		height@ 1 & 4 * off!
+
+		while (width@ 1 >=)
+			0 addr@ off@ + !
+
+			8 width -=
+			8 addr +=
+		end
+
+		1 height -=
+	end
+end
+
+fn HALPlatformConsoleClear { color -- }
+	auto c
+	[[color@]Palette@]HALfox32IndexPalette@ c!
+
+	FBAddr@ FBSize@ c@ memset
+end
+
+fn HALPlatformConsoleScroll { color -- }
+	auto c
+	[[color@]Palette@]HALfox32IndexPalette@ c!
+
+	auto marginbytes
+	HALConsoleFontHeight@ HALConsoleWidthPix@ * marginbytes!
+
+	auto scrollbytes
+	FBSize@ marginbytes@ - scrollbytes!
+
+	auto fb
+	FBAddr@ fb!
+
+	fb@ // dest
+	fb@ marginbytes@ + // src
+	scrollbytes@ // size
+	memcpy
+
+	fb@ scrollbytes@ + // ptr
+	marginbytes@ // size
+	c@ // word
+	memset
+end
+
+fn HALPlatformConsoleInit { ldrinfo wantmode -- havemode }
+	if (wantmode@ CONSOLEMODESCREEN ==)
+		if (ldrinfo@ LdrInfo_HALConsoleFBFormat + @ OSBOOTFBFORMAT_RGBA32 ~=)
+			CONSOLEMODETTY havemode!
+		end else
+			ldrinfo@ LdrInfo_HALConsoleFBAddr + @ FBAddr!
+			HALConsoleWidthPix@ HALConsoleHeightPix@ * FBSize!
+			HALConsoleWidthPix@ HALConsoleFontWidth@ - FBModulo!
+
+			wantmode@ havemode!
+		end
+	end else
+		wantmode@ havemode!
+	end
+end

@@ -123,6 +123,8 @@ $(BUILDROOT)/$(BINROOT):
 	mkdir -p $(BUILDROOT)/$(BINROOT)
 
 cleanup:
+	rm -f build/*.img
+
 	rm -f $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	rm -f $(DFLIBBIN)
 

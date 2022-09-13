@@ -25,6 +25,7 @@ extern CoDuplexObjectCreate { context txfunc flags pri quotablock permanent name
 
 extern CoDuplexInputCharacter { c duplex -- ok }
 extern CoDuplexReadTransmitCharacter { duplex -- c ok }
+extern CoDuplexWriteCharacter { c duplex -- ok }
 
 extern CoDuplexGetContext { duplex -- context }
 

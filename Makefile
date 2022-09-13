@@ -94,7 +94,7 @@ $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o
 	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)
 	$(LNK) move $(DFLIBBIN) base=0x80300000
 
-$(PROJECTS): $(DISTIMAGE) OSDLL
+$(PROJECTS): $(DISTIMAGE) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	make -C OS/$@
 
 $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll: OSDLL

@@ -153,10 +153,10 @@ AisixFSBoot:
 ;a1 - buffer
 ReadBlock:
 	add a0, 4
-    mov t0, 0x80002000
-    mov t1, 0x80003001 ; hardcoded as disk 1
-    out t0, a1
-    out t1, a0
+	mov t0, 0x80002000
+	mov t1, 0x80003001 ; hardcoded as disk 1
+	out t0, a1
+	out t1, a0
 	ret
 
 .align 512            ;fill rest of disk block with zeroes

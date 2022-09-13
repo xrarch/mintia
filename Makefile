@@ -76,8 +76,11 @@ BUILDCONFIG += DEBUGCHECKS=$(DEBUGCHECKS) $(PLATFORM)=1 $(ARCHITECTURE)=1 target
 DFC += $(BUILDCONFIG)
 ASM += target=$(ARCHITECTURE)
 
+ifndef PROJECT
+	PROJECT := $(PROJECTS) $(KERNELMODULES) $(COMMANDS)
+endif
 
-all: $(DISTIMAGE) $(PROJECTS) $(DFLIBBIN) $(KERNELMODULES) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll $(COMMANDS) $(shell rm -f DELTA)
+all: $(PROJECT) $(shell rm -f DELTA)
 	$(FSTOOL) udf / DELTA
 
 $(DISTIMAGE):
@@ -89,10 +92,10 @@ $(DISTIMAGE):
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) ud / TextManifest
 
-$(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o
-	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(REPO)/DELTA
+$(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE)
 	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)
 	$(LNK) move $(DFLIBBIN) base=0x80300000
+	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(REPO)/DELTA
 
 $(PROJECTS): $(DISTIMAGE) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	make -C OS/$@
@@ -110,10 +113,10 @@ HAL/$(PLATFORM): $(DFLIBBIN)
 
 OSKernel: HAL/$(PLATFORM)
 
-$(KERNELMODULES): HAL/$(PLATFORM) OSKernel $(BUILDROOT)/$(DRIVERROOT)
+$(KERNELMODULES): $(DISTIMAGE) HAL/$(PLATFORM) OSKernel $(BUILDROOT)/$(DRIVERROOT)
 	make -C OS/$@
 
-$(COMMANDS): $(BUILDROOT)/$(BINROOT) OSDLL $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+$(COMMANDS): $(DISTIMAGE) $(BUILDROOT)/$(BINROOT) OSDLL $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	make -C $@
 
 $(BUILDROOT)/$(DRIVERROOT):
@@ -123,7 +126,7 @@ $(BUILDROOT)/$(BINROOT):
 	mkdir -p $(BUILDROOT)/$(BINROOT)
 
 cleanup:
-	rm -f build/*.img
+	rm -f $(DISTIMAGE)
 
 	rm -f $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	rm -f $(DFLIBBIN)

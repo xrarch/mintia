@@ -1,0 +1,236 @@
+//
+// Implements virtual address space management for fox32.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "../OSLoader.h"
+
+var LdrPlatformKernelPageDirectory 0
+public LdrPlatformKernelPageDirectory
+
+extern LdrFox32MapEnablePaging { -- }
+
+fn LdrFox32MapInit { -- }
+	// create page directory
+
+	auto ok
+	auto desc
+
+	1 // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrFox32MapInit: failed to allocate page directory (%i)\n" LdrCrash
+	end
+
+	auto addr
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << addr!
+
+	addr@ // ptr
+	PAGESIZE // size
+	0 // word
+	memset
+
+	addr@ LdrPlatformKernelPageDirectory!
+
+	// identity map each memory descriptor at 0 and at IDENTITYSPACE
+
+	LdrMemoryDescriptorListHead@ desc!
+
+	while (desc@)
+		if (desc@ LdrMemoryDescriptor_OriginalDescriptor + @)
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // vaddr
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+			desc@ LdrMemoryDescriptor_OriginalExtent + @ // pages
+			0 // noncached
+			1 // reclaimablept
+			LdrPlatformMapRange
+
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << IDENTITYSPACE | // vaddr
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+			desc@ LdrMemoryDescriptor_OriginalExtent + @ // pages
+			0 // noncached
+			0 // reclaimablept
+			LdrPlatformMapRange
+		end
+
+		desc@ LdrMemoryDescriptor_Next + @ IDENTITYSPACEMASK & desc!
+	end
+
+	auto pdi
+	POOLSPACE 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	POOLSPACESIZE 22 >> // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrFox32MapInit: failed to allocate POOLSPACE page tables (%i)\n" LdrCrash
+	end
+
+	auto i
+	0 i!
+
+	auto pfn
+	desc@ LdrMemoryDescriptor_StartPFN + @ pfn!
+
+	while (i@ POOLSPACESIZE 22 >> <)
+		pfn@ 5 << PTE_V | pdi@!
+
+		pfn@ PAGESHIFT << // ptr
+		PAGESIZE // size
+		PTE_INVALID_KPAGE // word
+		memset
+
+		1 pfn +=
+		4 pdi +=
+		1 i +=
+	end
+
+	// enable paging
+
+	LdrFox32MapEnablePaging
+end
+
+extern LdrFox32MapFlushTLBAll { -- }
+
+asm "
+
+LdrFox32MapFlushTLBAll:
+.global LdrFox32MapFlushTLBAll
+	tlb [LdrPlatformKernelPageDirectory]
+	ret
+
+LdrFox32MapExit:
+.global LdrFox32MapExit
+	mcl
+	ret
+
+LdrFox32MapEnablePaging:
+	tlb [LdrPlatformKernelPageDirectory]
+	mse
+	ret
+
+SavedSP:
+	.dl 0
+
+LdrFox32StartSystem:
+.global LdrFox32StartSystem
+	mov t1, sp
+	mov [SavedSP], sp
+
+	mov sp, [LdrInterruptStackTop]
+
+	push 0
+	push 0
+
+	mov a0, [LdrInfoBlock]
+
+	mov t0, [LdrInfoBlock]
+	add t0, LdrInfo_ReturnSP
+	mov [t0], t1
+
+	call [LdrSystemEntryPoint]
+
+	mov sp, [SavedSP]
+	ret
+
+"
+
+fn LdrPlatformMapRange { vaddr phyaddr pages noncached reclaimablept -- }
+	while (pages@)
+		vaddr@ // vaddr
+		phyaddr@ // phyaddr
+		noncached@ // noncached
+		reclaimablept@ // reclaimablept
+		LdrPlatformMapPage
+
+		PAGESIZE vaddr +=
+		PAGESIZE phyaddr +=
+		1 pages -=
+	end
+end
+
+const PTE_V  1
+const PTE_W  2
+
+const PTE_KPAGE (PTE_V PTE_W |)
+const PTE_INVALID_KPAGE 0
+
+fn LdrPlatformMapPage { vaddr phyaddr noncached reclaimablept -- }
+	auto pdi
+	vaddr@ 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	auto pt
+	pdi@@ PAGENUMBERMASK & pt!
+
+	if (pt@ 0 ==)
+		// allocate a page table
+
+		auto desc
+		auto ok
+
+		if (reclaimablept@)
+			1 // pages
+			OSLOADERMEM_RECLAIMABLE // type
+			LdrMemoryAllocatePhysicalRange ok! desc!
+		end else		
+			1 // pages
+			OSLOADERMEM_USED // type
+			LdrMemoryAllocatePhysicalRange ok! desc!
+		end
+
+		if (ok@)
+			ok@ "LdrPlatformMapPage: failed to allocate page table (%i)\n" LdrCrash
+		end
+
+		desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << pt!
+
+		pt@ // ptr
+		PAGESIZE // size
+		PTE_INVALID_KPAGE // word
+		memset
+
+		pt@ PTE_V | pdi@!
+	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + pdi!
+
+	if (pdi@@ PTE_V &)
+		vaddr@ PAGESHIFT >> "LdrPlatformMapPage: vpn %x is already mapped!\n" LdrCrash
+	end
+
+	auto flags
+	PTE_KPAGE flags!
+
+	phyaddr@ flags@ | pdi@!
+end
+
+fn LdrPlatformVirtualToPhysical { vaddr -- phyaddr ok }
+	0 ok!
+
+	auto ent
+	vaddr@ 22 >> 2 << LdrPlatformKernelPageDirectory@ + ent!
+
+	auto pt
+	ent@@ PAGENUMBERMASK & pt!
+
+	auto pfdbe
+
+	if (pt@ 0 ==)
+		// no such PTE.
+		-1 ok!
+		return
+	end
+
+	auto pte
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + @ pte!
+
+	if (pte@ PTE_V & ~~)
+		-1 ok!
+	end
+
+	pte@ PAGENUMBERMASK & phyaddr!
+end

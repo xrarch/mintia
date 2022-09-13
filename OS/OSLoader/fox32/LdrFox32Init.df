@@ -1,0 +1,401 @@
+//
+// Implements the fox32-specific part of bootloader initialization.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "../OSLoader.h"
+#include "fox32.h"
+
+buffer LdrArgsBuffer 256
+public LdrArgsBuffer
+
+var LdrPlatformHALName 0
+public LdrPlatformHALName
+
+fn ArgsInit { argp -- }
+	auto p
+	LdrArgsBuffer p!
+
+	auto l
+	0 l!
+
+	auto esc
+	0 esc!
+
+	if (argp@ ~~)
+		return
+	end
+
+	while (argp@ gb)
+		if (l@ 255 >=)
+			1 p -=
+
+			while (p@ gb)
+				0 p@ sb
+				1 p -=
+			end
+
+			return
+		end
+
+		if (esc@)
+			0 esc!
+			argp@ gb p@ sb
+			1 p +=
+			1 l +=
+		end elseif (argp@ gb ' ' ==)
+			0 p@ sb
+			1 p +=
+			1 l +=
+		end elseif (argp@ gb '\\' ==)
+			1 esc!
+		end else
+			argp@ gb p@ sb
+			1 p +=
+			1 l +=
+		end
+
+		1 argp +=
+	end
+
+	0 p@ sb
+end
+
+extern LdrFox32VideoInit { -- }
+
+fn Main { -- ret }
+	// clear BSS section
+
+	pointerof _bss
+	pointerof _bss_end pointerof _bss -
+	0 memset
+
+	LdrFox32ResetHW
+
+	LdrFox32VideoInit
+
+	// convert arguments to HAL-preferred format
+
+	0 ArgsInit
+
+	// get HAL name
+
+	"HALfox32.dll" LdrPlatformHALName!
+
+	// call generic bootloader entrypoint
+
+	LdrMain ret!
+
+	ret@ LdrExit
+end
+
+const LDRINITIALHEAPSIZE 8192
+
+fn LdrFox32BuildDescriptors { -- }
+	// build descriptors to match the fox32 free memory layout.
+
+	64 1024 * 1024 * LdrMemoryTotalRAM!
+
+	// initialize the heap as a 16KB chunk at the end of the first memory
+	// descriptor.
+
+	0x4000000 LDRINITIALHEAPSIZE - LdrHeapPointer!
+	0x4000000 LdrHeapTop!
+
+	auto rtop
+	pointerof _bss_end 0xFFF + 0xFFFFF000 & rtop!
+
+	auto ok
+	auto ldrdesc
+
+	// allocate the descriptor for the zero page.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_USED ldrdesc@ LdrMemoryDescriptor_Type + !
+	0 ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	1 ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ LdrMemoryDescriptorListHead!
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the reclaimable memory range containing the
+	// bootloader memory.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
+	1 ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	rtop@ PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	rtop@ PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the first free range.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_FREE ldrdesc@ LdrMemoryDescriptor_Type + !
+	rtop@ PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	FRAMEBUFFER rtop@ - PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	FRAMEBUFFER rtop@ - PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the bootloader stack.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
+	FRAMEBUFFER PAGESIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	1 ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the framebuffer.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_USED ldrdesc@ LdrMemoryDescriptor_Type + !
+	FRAMEBUFFER PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	FRAMEBUFFER_SIZE PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	FRAMEBUFFER_SIZE PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the second free range.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_FREE ldrdesc@ LdrMemoryDescriptor_Type + !
+	FRAMEBUFFER_END PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	0x4000000 LDRINITIALHEAPSIZE - FRAMEBUFFER_END - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	0x4000000 LDRINITIALHEAPSIZE - FRAMEBUFFER_END - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+
+	// allocate the descriptor for the heap.
+
+	LdrMemoryDescriptor_SIZEOF // size
+	LdrMemoryAllocate ok! ldrdesc!
+
+	if (ok@)
+		ok@ "LdrFox32BuildDescriptors: failed to allocate descriptor (%i)\n" LdrCrash
+	end
+
+	0 ldrdesc@ LdrMemoryDescriptor_Next + !
+	OSLOADERMEM_RECLAIMABLE ldrdesc@ LdrMemoryDescriptor_Type + !
+	0x4000000 LDRINITIALHEAPSIZE - PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_StartPFN + !
+	LDRINITIALHEAPSIZE PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_Pages + !
+
+	1 ldrdesc@ LdrMemoryDescriptor_OriginalDescriptor + !
+	LDRINITIALHEAPSIZE PAGESHIFT >> ldrdesc@ LdrMemoryDescriptor_OriginalExtent + !
+
+	ldrdesc@ IDENTITYSPACE | LdrMemoryDescriptorListTail@ LdrMemoryDescriptor_Next + !
+	ldrdesc@ LdrMemoryDescriptorListTail!
+end
+
+extern LdrFox32MapInit { -- }
+
+fn LdrPlatformMemoryInit { -- }
+	// build memory descriptors
+
+	LdrFox32BuildDescriptors
+
+	// create IDENTITYSPACE and enable paging
+
+	LdrFox32MapInit
+end
+
+extern LdrFox32MapExit { -- }
+
+fn LdrPlatformExit { ret -- }
+	// disable paging
+
+	LdrFox32MapExit
+
+	// return to firmware
+
+	while (1) end
+end
+
+extern LdrFox32DisableInterrupts { -- }
+
+fn LdrFox32ResetHW { -- }
+	// disable interrupts
+
+	LdrFox32DisableInterrupts
+
+	// disable overlays
+
+	auto ovid
+	0 ovid!
+
+	auto count
+	32 count!
+
+	while (count@)
+		0 // value
+		0x80000300 ovid@ | // port
+		LdrFox32Out
+
+		1 count -=
+		1 ovid +=
+	end
+end
+
+fn LdrPlatformIOInit { bootdevname -- }
+	auto ok
+
+	1 LdrBootDevice LdrFile_DriverContext + !
+	512 LdrBootDevice LdrFile_BlockSize + !
+	pointerof LdrFox32ReadDisk LdrBootDevice LdrFile_ReadFunction + !
+
+	LdrBootDeviceName "dks1s0" strcpy
+
+	// map MMIO areas
+
+	auto devaddr
+
+	FRAMEBUFFER_WIDTH FRAMEBUFFER_HEIGHT * 4 * PAGEOFFSETMASK + PAGESHIFT >> // pages
+	FRAMEBUFFER // phyaddr
+	LDRMEM_WRITECOMBINE // noncached
+	LdrMemoryMapIORegion ok! devaddr!
+
+	if (ok@ ~~)
+		if (DEBUGCHECKS)
+			devaddr@ "LdrPlatformIOInit: HAL console @ 0x%08x\n" Printf
+		end
+
+		FRAMEBUFFER_WIDTH     LdrInfoBlock LdrInfo_HALConsoleFBWidth + !
+		FRAMEBUFFER_HEIGHT    LdrInfoBlock LdrInfo_HALConsoleFBHeight + !
+		OSBOOTFBFORMAT_RGBA32 LdrInfoBlock LdrInfo_HALConsoleFBFormat + !
+		devaddr@              LdrInfoBlock LdrInfo_HALConsoleFBAddr + !
+	end
+end
+
+fn LdrPlatformBootDriversLoadAll { -- }
+	// load all the fox32 drivers
+end
+
+extern LdrFox32StartSystem { -- }
+
+fn LdrPlatformStartSystem { -- }
+	LdrFox32StartSystem
+end
+
+const PORT_SET_BUFFER  0x80002000
+const PORT_READ_SECTOR 0x80003000
+
+extern LdrFox32Out { value port -- }
+extern LdrFox32In { port -- value }
+
+fn (LdrReadFunction) LdrFox32ReadDisk { length buf offset file -- bytesread ok }
+	auto blocksize
+	file@ LdrFile_BlockSize + @ blocksize!
+
+	if (buf@ blocksize@ %)
+		LDRSTATUS_UNALIGNED ok!
+		return
+	end
+
+	if (length@ blocksize@ %)
+		LDRSTATUS_UNALIGNED ok!
+		return
+	end
+
+	IDENTITYSPACEMASK buf &=
+
+	0 ok!
+
+	0 bytesread!
+
+	while (bytesread@ length@ <)
+		buf@ // value
+		PORT_SET_BUFFER // port
+		LdrFox32Out
+
+		offset@ blocksize@ / 4 + // value
+		PORT_READ_SECTOR file@ LdrFile_DriverContext + @ | // port
+		LdrFox32Out
+
+		blocksize@ buf +=
+		blocksize@ bytesread +=
+		blocksize@ offset +=
+	end
+end
+
+asm "
+
+; value port --
+LdrFox32Out:
+	out a0, a1
+	ret
+
+; port -- value
+LdrFox32In:
+	in a0, a0
+	ret
+
+LdrFox32DisableInterrupts:
+	icl
+	mcl
+	ret
+
+"

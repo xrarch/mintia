@@ -1,9 +1,9 @@
-all: new
+all: .new
 
-new: a3xBootDescriptor.bin AisixFSBoot.bin
+.new: a3xBootDescriptor.bin AisixFSBoot.bin
 	dd if=a3xBootDescriptor.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=5 2>/dev/null
 	dd if=AisixFSBoot.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=7 2>/dev/null
-	touch new
+	touch .new
 
 a3xBootDescriptor.bin: a3xBootDescriptor.s
 	$(ASM) format=flat a3xBootDescriptor.s a3xBootDescriptor.bin

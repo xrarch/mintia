@@ -1,8 +1,8 @@
-all: new
+all: .new
 
-new: AisixFSBoot.bin
+.new: AisixFSBoot.bin
 	dd if=AisixFSBoot.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=7 2>/dev/null
-	touch new
+	touch .new
 
 AisixFSBoot.bin: AisixFSBoot.s
 	$(ASM) AisixFSBoot.s AisixFSBoot.bin

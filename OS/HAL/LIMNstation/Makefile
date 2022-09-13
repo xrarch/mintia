@@ -1,30 +1,15 @@
-DFILES := $(shell find . -type f -name "*.df")
-SFILES := $(shell find . -type f -name "*.s")
-OBJ    := $(DFILES:.df=.o) $(SFILES:.s=.o)
+COMPONENTS := ../HAL .
 
-DC      =  ../../../../sdk/dragonc.sh $(BUILDCONFIG)
-AS      = ../../../../sdk/asm.sh
-OBJTOOL = ../../../../sdk/link.sh
-LD      =  $(OBJTOOL) link
+LINKOPT = -nostubs
 
-SYSBINDIR  = ../../SystemBin
+OUTPUTFILE := $(SYSROOT)/HAL$(PLATFORM).dll
 
-HAL     = $(SYSBINDIR)/HALLIMNstation.dll
+PRELIBS := LX/limn2600/rta3x/_boot.o
+LIBS := L/rta3x/cia3x.o
+DYLIBS := Dragonfruit.dll:$(DFLIBBIN)
 
-DCFLAGS = incdir=./include/:../limn2600/include:../include
+MOVEEXPR := base=0x80101000
 
-all: $(HAL)
+INCDIR := $(HALINCDIR)
 
-$(HAL): $(OBJ) ../HAL/HALhal.o ../limn2600/HALlimn2600.o
-	$(LD) -nostubs $(HAL) LX/limn2600/rta3x/_boot.o $(OBJ) L/rta3x/cia3x.o ../HAL/HALhal.o ../limn2600/HALlimn2600.o -d $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(HAL) base=0x80101000
-	$(OBJTOOL) dystrip $(HAL)
-
-%.o: %.df ./include/*.h ../include/*.h
-	$(DC) $(DCFLAGS) $< $@
-
-%.o: %.s
-	$(AS) $< $@
-
-cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF $(HAL)
+include $(REPO)/Project.mk

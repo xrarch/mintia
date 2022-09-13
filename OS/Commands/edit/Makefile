@@ -1,3 +1,3 @@
 CMDNAME = edit
 
-include ../Command.mk
+include $(REPO)/Command.mk

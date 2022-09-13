@@ -1,3 +1,3 @@
 CMDNAME = pwd
 
-include ../Command.mk
+include $(REPO)/Command.mk

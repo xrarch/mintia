@@ -1,6 +1,6 @@
 COMPONENTS := .
 
-OUTPUTFILE := $(SYSROOT)/SystemInit.exe
+OUTPUTFILE := $(BINROOT)/$(CMDNAME).exe
 
 DYLIBS := OSDLL.dll:$(OSDLLBIN)
 

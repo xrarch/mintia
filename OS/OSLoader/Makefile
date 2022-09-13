@@ -1,23 +1,13 @@
-DFILES := $(shell find . -type f -name "*.df")
-OBJ    := $(DFILES:.df=.o)
+COMPONENTS := . ./$(PLATFORM)
 
-DC      = ../../../sdk/dragonc.sh $(BUILDCONFIG)
-AS      = ../../../sdk/asm.sh
-OBJTOOL = ../../../sdk/link.sh
-LD      =  $(OBJTOOL) link
+OUTPUTFILE := OSLoader.bin
 
-all: OSLoader.a3x
-	make -C LIMNstation
+PRELIBS := LX/limn2600/rta3x/_boot.o
+LIBS := L/rta3x/rta3x.o
 
-OSLoader.a3x: $(OBJ)
-	$(LD) OSLoader.a3x LX/limn2600/rta3x/_boot.o $(OBJ) L/rta3x/rta3x.o
-	$(OBJTOOL) move OSLoader.a3x text=0x40400,data=text+text_size,bss=data+data_size
-	cp OSLoader.a3x OSLoader.LOFF
-	$(OBJTOOL) binary -nobss OSLoader.a3x
+MOVEEXPR := text=0x40400,data=text+text_size,bss=data+data_size
+MKBINARY := yes
 
-%.o: %.df *.h
-	$(DC) $< $@ incdir=./
+INCDIR := ./
 
-cleanup:
-	make -C LIMNstation cleanup
-	rm -f ${OBJ} *.bin *.LOFF *.a3x
+include $(REPO)/Project.mk

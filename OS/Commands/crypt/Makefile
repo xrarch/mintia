@@ -1,3 +1,3 @@
 CMDNAME = crypt
 
-include ../Command.mk
+include $(REPO)/Command.mk

@@ -1,3 +1,3 @@
 CMDNAME = help
 
-include ../Command.mk
+include $(REPO)/Command.mk

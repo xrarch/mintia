@@ -1,3 +1,3 @@
 CMDNAME = mousedemo
 
-include ../Command.mk
+include $(REPO)/Command.mk

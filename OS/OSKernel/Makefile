@@ -1,32 +1,24 @@
-DFILES := $(shell find . -type f -name "*.df")
-HFILES := $(shell find . -type f -name "*.h")
-OBJ    := $(DFILES:.df=.o) $(SFILES:.s=.o)
+COMPONENTS := Console \
+			Executive \
+			FSRTL \
+			IO \
+			Kernel \
+			Memory \
+			Object \
+			Process \
+			Security
 
-DC      = ../../../sdk/dragonc.sh $(BUILDCONFIG)
-AS      = ../../../sdk/asm.sh
-OBJTOOL = ../../../sdk/link.sh
-LD      =  $(OBJTOOL) link
-SYSTOOL = ../../../sdk/gensyscalls.sh
+LINKOPT = -nostubs
 
-SYSBINDIR  = ../SystemBin
+OUTPUTFILE := $(SYSROOT)/OSKernel.exe
 
-DCFLAGS = incdir=./include/:../HAL/include:../HAL/limn2600/include
+DYLIBS := HAL.dll:$(HALBIN) Dragonfruit.dll:$(DFLIBBIN)
 
-all: $(SYSBINDIR)/OSKernel.exe
+MOVEEXPR := base=0x80001000
 
-$(SYSBINDIR)/OSKernel.exe: $(OBJ) ./Executive/limn2600/OSCallTrampolines.o
-	$(LD) -nostubs $(SYSBINDIR)/OSKernel.exe $(OBJ) ./Executive/limn2600/OSCallTrampolines.o -d HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(SYSBINDIR)/OSKernel.exe base=0x80001000
-	$(OBJTOOL) istrip $(SYSBINDIR)/OSKernel.exe
+INCDIR := $(HALINCDIR):./include/
 
-Executive/limn2600/OSCallTrampolines.s: ../OSDLL/headers/OSCalls.h 
-	$(SYSTOOL) ../OSDLL/headers/OSCalls.h NO ./Executive/limn2600/OSCallTrampolines.s
+include $(REPO)/Project.mk
 
-%.o: %.df $(HFILES) ../HAL/include/*.h
-	$(DC) $(DCFLAGS) $< $@
-
-%.o: %.s
-	$(AS) $< $@
-
-cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF $(SYSBINDIR)/OSKernel.exe
+Executive/$(ARCHITECTURE)/OSCallTrampolines.s: $(REPO)/OS/OSDLL/headers/OSCalls.h 
+	$(SYSCALLGEN) $(REPO)/OS/OSDLL/headers/OSCalls.h NO ./Executive/$(ARCHITECTURE)/OSCallTrampolines.s

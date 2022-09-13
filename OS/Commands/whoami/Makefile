@@ -1,3 +1,3 @@
 CMDNAME = whoami
 
-include ../Command.mk
+include $(REPO)/Command.mk

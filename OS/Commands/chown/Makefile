@@ -1,3 +1,3 @@
 CMDNAME = chown
 
-include ../Command.mk
+include $(REPO)/Command.mk

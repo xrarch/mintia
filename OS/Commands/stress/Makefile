@@ -1,3 +1,3 @@
 CMDNAME = stress
 
-include ../Command.mk
+include $(REPO)/Command.mk

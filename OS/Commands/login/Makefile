@@ -1,3 +1,3 @@
 CMDNAME = login
 
-include ../SysCommand.mk
+include $(REPO)/SysCommand.mk

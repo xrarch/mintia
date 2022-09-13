@@ -1,3 +1,3 @@
 CMDNAME = trunc
 
-include ../Command.mk
+include $(REPO)/Command.mk

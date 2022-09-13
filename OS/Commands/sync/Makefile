@@ -1,3 +1,3 @@
 CMDNAME = sync
 
-include ../Command.mk
+include $(REPO)/Command.mk

@@ -1,27 +1,13 @@
-DFILES := $(shell find . -type f -name "*.df")
-SFILES := $(shell find . -type f -name "*.s")
-OBJ    := $(DFILES:.df=.o) $(SFILES:.s=.o)
+COMPONENTS := .
 
-DC      = ../../../../../sdk/dragonc.sh $(BUILDCONFIG)
-AS      = ../../../../../sdk/asm.sh
-OBJTOOL = ../../../../../sdk/link.sh
-LD      =  $(OBJTOOL) link
+LINKOPT = -nostubs
 
-SYSBINDIR  = ../../../SystemBin
+OUTPUTFILE := $(DRIVERROOT)/AISA,serial,1.sys
 
-DCFLAGS = incdir=../../../HAL/include/:../../../HAL/LIMNstation/include:../../../OSKernel/include/
+DYLIBS := HAL.dll:$(HALBIN) Dragonfruit.dll:$(DFLIBBIN) OSKernel.exe:$(KERNBIN)
 
-all: Serial.sys
+MOVEEXPR := base=0x80700000
 
-Serial.sys: $(OBJ)
-	$(LD) -nostubs Serial.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move Serial.sys base=0x80700000
+INCDIR := $(HALINCDIR):$(KERNINCDIR)
 
-%.o: %.df ../../../HAL/include/*.h ../../../HAL/LIMNstation/include/*.h ../../../OSKernel/include/*.h
-	$(DC) $(DCFLAGS) $< $@
-
-%.o: %.s
-	$(AS) $< $@
-
-cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF Serial.sys
+include $(REPO)/Project.mk

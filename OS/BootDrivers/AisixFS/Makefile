@@ -1,27 +1,13 @@
-DFILES := $(shell find . -type f -name "*.df")
-SFILES := $(shell find . -type f -name "*.s")
-OBJ    := $(DFILES:.df=.o) $(SFILES:.s=.o)
+COMPONENTS := .
 
-DC      = ../../../../sdk/dragonc.sh $(BUILDCONFIG)
-AS      = ../../../../sdk/asm.sh
-OBJTOOL = ../../../../sdk/link.sh
-LD      =  $(OBJTOOL) link
+LINKOPT = -nostubs
 
-SYSBINDIR  = ../../SystemBin
+OUTPUTFILE := $(DRIVERROOT)/AisixFS.sys
 
-DCFLAGS = incdir=../../HAL/include/:../../OSKernel/include/
+DYLIBS := HAL.dll:$(HALBIN) Dragonfruit.dll:$(DFLIBBIN) OSKernel.exe:$(KERNBIN)
 
-all: AisixFS.sys
+MOVEEXPR := base=0x80F00000
 
-AisixFS.sys: $(OBJ)
-	$(LD) -nostubs AisixFS.sys $(OBJ) -d $(SYSBINDIR)/OSKernel.exe HAL.dll:$(SYSBINDIR)/HALLIMNstation.dll $(SYSBINDIR)/Dragonfruit.dll
-	$(OBJTOOL) move AisixFS.sys base=0x80F00000
+INCDIR := $(HALINCDIR):$(KERNINCDIR)
 
-%.o: %.df ../../HAL/include/*.h ../../HAL/LIMNstation/include/*.h ../../OSKernel/include/*.h *.h
-	$(DC) $(DCFLAGS) $< $@
-
-%.o: %.s
-	$(AS) $< $@
-
-cleanup:
-	rm -f ${OBJ} *.a3x *.LOFF AisixFS.sys
+include $(REPO)/Project.mk

@@ -1,3 +1,3 @@
 CMDNAME = swapon
 
-include ../Command.mk
+include $(REPO)/Command.mk

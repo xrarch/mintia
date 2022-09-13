@@ -1,106 +1,139 @@
-ifndef SMALLDIST
-	export DISTIMAGE  := ./build/mintia-dist.img
-	export DISTIMGSZ  := 112640 # 52MB
-	export DISKLABEL  := ./build/default.disklabel
-else
-	export DISTIMAGE  := ./build/mintia-small.img
-	export DISTIMGSZ  := 20480 # 10MB
-	export DISKLABEL  := ./build/small.disklabel
+export REPO       := $(PWD)
+export BUILDROOT  := $(REPO)/Root
+export SYSROOT    := mintia
+export BINROOT    := mintia/bin
+export DRIVERROOT := mintia/BootDrivers
+
+ifndef SDK
+	SDK := $(REPO)/../sdk
+endif
+
+ifndef PLATFORM
+	PLATFORM := LIMNstation
 endif
 
 ifndef DEBUGCHECKS
 	DEBUGCHECKS := 0
 endif
 
-ifndef TARGET
-	TARGET := limn2600
-endif
-
-export TARGET
-
-export BUILDCONFIG := DEBUGCHECKS=$(DEBUGCHECKS) $(TARGET)=1 $(BUILDCONFIG)
-
-export FST        := ../sdk/fstool.sh
-export OBJTOOL    := ../sdk/link.sh
-export SYSTOOL    := ../sdk/gensyscalls.sh
-
-export OFFSET     := 4
-
-OS_DIR     := ./OS
-LOAD_DIR   := $(OS_DIR)/OSLoader
-KERN_DIR   := $(OS_DIR)/OSKernel
-SYSBIN_DIR := $(OS_DIR)/SystemBin
-HAL_DIR    := $(OS_DIR)/HAL
-DBG_DIR    := $(OS_DIR)/KDebug
-BR_DIR     := $(OS_DIR)/BootResources
-DRIVER_DIR := $(OS_DIR)/BootDrivers
-RTL_DIR    := $(OS_DIR)/OSDLL
-SYSINIT_DIR:= $(OS_DIR)/SystemInit
-BIN_DIR    := $(OS_DIR)/Bin
-COMMANDS_DIR := $(OS_DIR)/Commands
-HELP_DIR   := $(OS_DIR)/Help
-
-FSTOOL     := $(FST) $(DISTIMAGE) offset=$(OFFSET)
-
-dist: bootable sysfiles
-
-bootable: $(DISTIMAGE)
-	make -C $(LOAD_DIR)
-	dd if=$(LOAD_DIR)/LIMNstation/a3xBootDescriptor.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((1 + $(OFFSET))) 2>/dev/null
-	dd if=$(LOAD_DIR)/LIMNstation/AisixFSBoot.bin of=$(DISTIMAGE) bs=512 conv=notrunc seek=$$((3 + $(OFFSET))) 2>/dev/null
-	$(FSTOOL) u /OSLoader.a3x $(LOAD_DIR)/OSLoader.a3x
-
-sysfiles: $(SYSBIN_DIR)/Dragonfruit.dll $(DISTIMAGE)
-	make -C $(RTL_DIR)
-
-	../sdk/install.sh $(RTL_DIR)
-
-	make -C $(HAL_DIR)
-	$(FSTOOL) u /mintia/BootResources.txt $(OS_DIR)/BootResources.txt
-	$(FSTOOL) u /mintia/BootDrivers.txt $(OS_DIR)/BootDrivers.txt
-ifndef SMALLDIST
-	$(FSTOOL) u /mintia/SystemInit.cfg $(OS_DIR)/SystemInit.cfg
+ifeq ($(DEBUGCHECKS),1)
+	CHKFRE := chk
 else
-	$(FSTOOL) u /mintia/SystemInit.cfg $(OS_DIR)/SystemInit.cfg.small
+	CHKFRE := fre
 endif
-	$(FSTOOL) u /mintia/users.cfg $(OS_DIR)/users.cfg
-	$(FSTOOL) u /mintia/groups.cfg $(OS_DIR)/groups.cfg
 
-	$(FSTOOL) u /mintia/login.cfg $(OS_DIR)/login.cfg
-	$(FSTOOL) chmod /mintia/login.cfg 416
+export CHKFRE
 
-	$(FSTOOL) u /mintia/motd.txt $(OS_DIR)/motd.txt
+export SDK
+export PLATFORM
 
-	$(FSTOOL) u /home/guest/README $(OS_DIR)/README
-	$(FSTOOL) chown /home/guest 50
-	$(FSTOOL) chown /home/guest/README 50
+export DFC := $(SDK)/dragonc.sh
+export LNK := $(SDK)/link.sh
+export ASM := $(SDK)/asm.sh
+export FST := $(SDK)/fstool.sh
 
-	make -C $(KERN_DIR)
-	make -C $(DBG_DIR)
-	make -C $(DRIVER_DIR)
+export KERNINCDIR   := $(REPO)/OS/OSKernel/include/
+export HALINCDIR    := $(REPO)/OS/HAL/include/:$(REPO)/OS/HAL/$(PLATFORM)/include/
 
-	make -C $(SYSINIT_DIR)
+PROJECTS := OSLoader/$(PLATFORM)/bootcode \
+			OSLoader \
+			HAL/$(PLATFORM) \
+			OSKernel \
+			OSDLL \
+			SystemInit \
+			TestDLL
 
-	make -C $(COMMANDS_DIR)
+KERNELMODULES := KDebug \
+				BootDrivers/AisixFS
 
-	make -C $(OS_DIR)/TestDLL
+COMMANDS := $(wildcard OS/Commands/*)
 
-	make -C $(SYSBIN_DIR)
-	make -C $(BIN_DIR)
-	make -C $(BR_DIR)
+include $(PLATFORM).mk
 
-	make -C $(HELP_DIR)
+export SYSCALLGEN := $(SDK)/gensyscalls.sh $(ARCHITECTURE)
 
-$(SYSBIN_DIR)/Dragonfruit.dll: ../sdk/lib/$(TARGET)/dfrt/dfrt.f.o
-	cp ../sdk/lib/$(TARGET)/dfrt/dfrt.f.o $(SYSBIN_DIR)/Dragonfruit.dll
-	$(OBJTOOL) move $(SYSBIN_DIR)/Dragonfruit.dll base=0x80300000
+export HALBIN   := $(BUILDROOT)/$(SYSROOT)/HAL$(PLATFORM).dll.$(ARCHITECTURE).$(CHKFRE)
+export KERNBIN  := $(BUILDROOT)/$(SYSROOT)/OSKernel.exe.$(ARCHITECTURE).$(CHKFRE)
+export DFLIBBIN := $(BUILDROOT)/$(SYSROOT)/Dragonfruit.dll.$(ARCHITECTURE).$(CHKFRE)
+export OSDLLBIN := $(BUILDROOT)/$(SYSROOT)/OSDLL.dll.$(ARCHITECTURE).$(CHKFRE)
+
+ifndef SMALLDIST
+	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE).img
+	export DISTIMGSZ  := 112640 # 52MB
+	export DISKLABEL  := $(REPO)/build/default.disklabel
+else
+	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE)-small.img
+	export DISTIMGSZ  := 20480 # 10MB
+	export DISKLABEL  := $(REPO)/build/small.disklabel
+endif
+
+export FSTOOL := $(FST) $(DISTIMAGE) offset=4
+
+export ARCHITECTURE
+
+BUILDCONFIG += DEBUGCHECKS=$(DEBUGCHECKS) $(PLATFORM)=1 $(ARCHITECTURE)=1 target=$(ARCHITECTURE)
+
+DFC += $(BUILDCONFIG)
+ASM += target=$(ARCHITECTURE)
+
+
+all: $(DISTIMAGE) $(PROJECTS) $(DFLIBBIN) $(KERNELMODULES) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll $(COMMANDS) $(shell rm -f DELTA)
+	$(FSTOOL) udf / DELTA
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null
 	dd if=$(DISKLABEL) of=$(DISTIMAGE) bs=512 count=1 seek=0 conv=notrunc
 	$(FSTOOL) f
+	rm -f OS/OSLoader/$(PLATFORM)/bootcode/new
+	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
+	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
+	$(FSTOOL) ud / TextManifest
+
+$(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o
+	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(REPO)/DELTA
+	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)
+	$(LNK) move $(DFLIBBIN) base=0x80300000
+
+$(PROJECTS): $(DISTIMAGE)
+	make -C OS/$@
+
+$(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll: OSDLL
+	mkdir -p $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)
+	cp $(OSDLLBIN) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+	$(SDK)/install.sh $(REPO)/OS/OSDLL
+
+SystemInit: OSDLL
+
+TestDLL: OSDLL
+
+HAL/$(PLATFORM): $(DFLIBBIN)
+
+OSKernel: HAL/$(PLATFORM)
+
+$(KERNELMODULES): HAL/$(PLATFORM) OSKernel $(DRIVERROOT)
+	make -C OS/$@
+
+$(COMMANDS): $(BINROOT) OSDLL $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+	make -C $@
+
+$(DRIVERROOT):
+	mkdir -p $(DRIVERROOT)
+
+$(BINROOT):
+	mkdir -p $(BINROOT)
 
 cleanup:
-	make -C $(OS_DIR) cleanup
-	rm -f build/*.img
-	rm -f $(SYSBIN_DIR)/*.dll $(SYSBIN_DIR)/*.exe
+	rm -f $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+	rm -f $(DFLIBBIN)
+
+	for dir in $(COMMANDS); do \
+		make -C $$dir cleanup; \
+	done
+
+	for dir in $(PROJECTS); do \
+		make -C OS/$$dir cleanup; \
+	done
+
+	for dir in $(KERNELMODULES); do \
+		make -C OS/$$dir cleanup; \
+	done

@@ -1,3 +1,3 @@
 CMDNAME = reboot
 
-include ../Command.mk
+include $(REPO)/Command.mk

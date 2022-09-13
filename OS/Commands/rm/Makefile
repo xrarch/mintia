@@ -1,3 +1,3 @@
 CMDNAME = rm
 
-include ../Command.mk
+include $(REPO)/Command.mk

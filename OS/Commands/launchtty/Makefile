@@ -1,3 +1,3 @@
 CMDNAME = launchtty
 
-include ../SysCommand.mk
+include $(REPO)/SysCommand.mk

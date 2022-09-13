@@ -1,3 +1,3 @@
 CMDNAME = clear
 
-include ../Command.mk
+include $(REPO)/Command.mk

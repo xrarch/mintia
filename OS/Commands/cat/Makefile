@@ -1,3 +1,3 @@
 CMDNAME = cat
 
-include ../Command.mk
+include $(REPO)/Command.mk

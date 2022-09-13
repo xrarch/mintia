@@ -35,9 +35,10 @@ export FST := $(SDK)/fstool.sh
 export KERNINCDIR   := $(REPO)/OS/OSKernel/include/
 export HALINCDIR    := $(REPO)/OS/HAL/include/:$(REPO)/OS/HAL/$(PLATFORM)/include/
 
-PROJECTS := OSLoader/$(PLATFORM)/bootcode \
-			OSLoader \
-			HAL/$(PLATFORM) \
+BOOTCODE := OSLoader/$(PLATFORM)/bootcode \
+			OSLoader
+
+PROJECTS := HAL/$(PLATFORM) \
 			OSKernel \
 			OSDLL \
 			SystemInit \
@@ -77,7 +78,7 @@ DFC += $(BUILDCONFIG)
 ASM += target=$(ARCHITECTURE)
 
 ifndef PROJECT
-	PROJECT := $(PROJECTS) $(KERNELMODULES) $(COMMANDS)
+	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(COMMANDS)
 endif
 
 all: $(PROJECT) $(shell rm -f DELTA)
@@ -97,7 +98,10 @@ $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE)
 	$(LNK) move $(DFLIBBIN) base=0x80300000
 	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(REPO)/DELTA
 
-$(PROJECTS): $(DISTIMAGE) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+$(BOOTCODE): $(DISTIMAGE)
+	make -C OS/$@
+
+$(PROJECTS): $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	make -C OS/$@
 
 $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll: OSDLL

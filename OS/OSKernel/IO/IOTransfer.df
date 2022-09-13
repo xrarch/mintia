@@ -31,37 +31,56 @@
 // parameters. These may be pretty terrible in some places where situation-
 // specific information is handily available.
 
-fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread ok }
+fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write -- bytes ok }
 	fnsection "PAGE$text"
 
-	auto mdl
-	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+	auto event
 
-	auto readfunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
+	buffer@ length@ MmMDLGetSize event!
+
+	auto mdl
+	event@ KeEvent_SIZEOF + // bytes
+	'MMDL' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! mdl!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ event@ + event!
+
+	auto func
+
+	if (write@)
+		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ func!
+	end else
+		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ func!
+	end
 
 	auto cancelfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
+
+	auto waitmode
+	lastmode@ waitmode!
 
 	auto alertable
 	1 alertable!
 
 	if (cancelfunc@ ~~)
+		KERNELMODE waitmode!
 		OSWAIT_TIMEOUTINFINITE timeout!
 		0 alertable!
 	end
 
 	auto wok
 
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 bytesread!
+	0 bytes!
 
 	while (length@ IOTRANSFERMAX >=)
 		0 // signaled
 		OSEVENT_NOTIF // type
-		"IOReadEvent" // name
+		"IORWEvent" // name
 		event@ // event
 		KeEventInitialize
 
@@ -73,18 +92,28 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 
 		event@ mdl@ MmMDLHeader_Event + !
 
-		timeout@ // timeout
-		flags@ // flags
-		kflags@ // kflags
-		offset@ // offset
-		mdl@ // mdl
-		fcb@ // fcb
-		readfunc@ IODispatchReadFunction ok! drop
+		if (write@)
+			flags@ // flags
+			kflags@ // kflags
+			offset@ // offset
+			mdl@ // mdl
+			fcb@ // fcb
+			func@ IODispatchWriteFunction ok!
+		end else
+			timeout@ // timeout
+			flags@ // flags
+			kflags@ // kflags
+			offset@ // offset
+			mdl@ // mdl
+			fcb@ // fcb
+			func@ IODispatchReadFunction ok!
+		end
 
 		if (ok@)
 			// complete the MDL so we can wait for any fragments to finish
 
 			0 alertable!
+			KERNELMODE waitmode!
 			OSWAIT_TIMEOUTINFINITE timeout!
 
 			ok@ // status
@@ -94,7 +123,7 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 		end
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
+			waitmode@ // waitmode
 			alertable@ // alertable
 			timeout@ // timeout
 			event@ // object
@@ -118,7 +147,7 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 			break
 		end
 
-		mdl@ MmMDLHeader_Length + @ bytesread +=
+		mdl@ MmMDLHeader_Length + @ bytes +=
 
 		if (mdl@ MmMDLHeader_Length + @ IOTRANSFERMAX <)
 			0 length!
@@ -133,7 +162,7 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 	if (length@)
 		0 // signaled
 		OSEVENT_NOTIF // type
-		"IOReadEvent" // name
+		"IORWEvent" // name
 		event@ // event
 		KeEventInitialize
 
@@ -145,18 +174,28 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 
 		event@ mdl@ MmMDLHeader_Event + !
 
-		timeout@ // timeout
-		flags@ // flags
-		kflags@ // kflags
-		offset@ // offset
-		mdl@ // mdl
-		fcb@ // fcb
-		readfunc@ IODispatchReadFunction ok! drop
+		if (write@)
+			flags@ // flags
+			kflags@ // kflags
+			offset@ // offset
+			mdl@ // mdl
+			fcb@ // fcb
+			func@ IODispatchWriteFunction ok!
+		end else
+			timeout@ // timeout
+			flags@ // flags
+			kflags@ // kflags
+			offset@ // offset
+			mdl@ // mdl
+			fcb@ // fcb
+			func@ IODispatchReadFunction ok!
+		end
 
 		if (ok@)
 			// complete the MDL so we can wait for any fragments to finish
 
 			0 alertable!
+			KERNELMODE waitmode!
 			OSWAIT_TIMEOUTINFINITE timeout!
 
 			ok@ // status
@@ -166,7 +205,7 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 		end
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
+			waitmode@ // waitmode
 			alertable@ // alertable
 			timeout@ // timeout
 			event@ // object
@@ -178,172 +217,14 @@ fn IORead { timeout flags kflags length offset buffer fcb lastmode -- bytesread 
 			end
 		end
 
-		if (ok@)
-			return
-		end
+		if (ok@ ~~)
+			mdl@ MmMDLHeader_Status + @ ok!
 
-		mdl@ MmMDLHeader_Status + @ ok!
-
-		if (ok@)
-			return
-		end
-
-		mdl@ MmMDLHeader_Length + @ bytesread +=
-	end
-end
-
-fn IOWrite { flags kflags length offset buffer fcb lastmode -- byteswritten ok }
-	fnsection "PAGE$text"
-
-	auto mdl
-	MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
-
-	auto writefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
-
-	auto cancelfunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
-
-	auto alertable
-	1 alertable!
-
-	if (cancelfunc@ ~~)
-		0 alertable!
-	end
-
-	auto wok
-
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 byteswritten!
-
-	while (length@ IOTRANSFERMAX >=)
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IOWriteEvent" // name
-		event@ // event
-		KeEventInitialize
-
-		lastmode@ // mode
-		IOTRANSFERMAX // length
-		buffer@ // vaddr
-		mdl@ // mdl
-		MmMDLInitialize
-
-		event@ mdl@ MmMDLHeader_Event + !
-
-		flags@ // flags
-		kflags@ // kflags
-		offset@ // offset
-		mdl@ // mdl
-		fcb@ // fcb
-		writefunc@ IODispatchWriteFunction ok! drop
-
-		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
-
-			0 alertable!
-
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end
-
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
-			alertable@ // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
-			event@ // object
-			KeThreadWaitForObject wok!
-
-			if (wok@)
-				wok@ ok!
-				mdl@ cancelfunc@ IODispatchCancelFunction
+			if (ok@ ~~)
+				mdl@ MmMDLHeader_Length + @ bytes +=
 			end
 		end
-
-		if (ok@)
-			0 length!
-			break
-		end
-
-		mdl@ MmMDLHeader_Status + @ ok!
-
-		if (ok@)
-			0 length!
-			break
-		end
-
-		mdl@ MmMDLHeader_Length + @ byteswritten +=
-
-		if (mdl@ MmMDLHeader_Length + @ IOTRANSFERMAX <)
-			0 length!
-			break
-		end
-
-		IOTRANSFERMAX offset +=
-		IOTRANSFERMAX buffer +=
-		IOTRANSFERMAX length -=
 	end
 
-	if (length@)
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IOWriteEvent" // name
-		event@ // event
-		KeEventInitialize
-
-		lastmode@ // mode
-		length@ // length
-		buffer@ // vaddr
-		mdl@ // mdl
-		MmMDLInitialize
-
-		event@ mdl@ MmMDLHeader_Event + !
-
-		flags@ // flags
-		kflags@ // kflags
-		offset@ // offset
-		mdl@ // mdl
-		fcb@ // fcb
-		writefunc@ IODispatchWriteFunction ok! drop
-
-		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
-
-			0 alertable!
-
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end
-
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
-			alertable@ // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
-			event@ // object
-			KeThreadWaitForObject wok!
-
-			if (wok@)
-				wok@ ok!
-				mdl@ cancelfunc@ IODispatchCancelFunction
-			end
-		end
-
-		if (ok@)
-			return
-		end
-
-		mdl@ MmMDLHeader_Status + @ ok!
-
-		if (ok@)
-			return
-		end
-
-		mdl@ MmMDLHeader_Length + @ byteswritten +=
-	end
+	mdl@ MmFree
 end

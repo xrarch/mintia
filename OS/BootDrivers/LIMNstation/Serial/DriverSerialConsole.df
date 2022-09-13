@@ -5,8 +5,10 @@
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
+#include "<ll>/OSDLL/OSConsoleControl.h"
 
 #include "<inc>/HALLog.h"
+#include "<inc>/HALMap.h"
 #include "<inc>/HALDriver.h"
 #include "<inc>/HALRTC.h"
 #include "<inc>/HALLIMNstationCitron.h"
@@ -28,7 +30,6 @@
 struct SerialPort
 	4 PortCMD
 	4 PortData
-	4 TransmitBuffer
 	KeDPC_SIZEOF DPC
 endstruct
 
@@ -51,66 +52,46 @@ const SERIALCMDINTROFF 4
 fn SerialCreate { name intn cmdport dataport -- deviceobject }
 	fnsection "INIT$text"
 
-	auto ok
-
-	auto rawbuffer
-	10 // sizelog (2^10 = 1024 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLSERIAL // synchipl
-	0 // quotablock
-	ExRingBufferCreate ok! rawbuffer!
-
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
-	end
-
-	auto transmitbuffer
-	7 // sizelog (2^7 = 128 bytes)
-	0 // valuesizelog (2^0 = 1 byte)
-	IPLSERIAL // synchipl
-	0 // quotablock
-	ExRingBufferCreate ok! transmitbuffer!
-
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
-	end
-
 	auto serialport
+
 	SerialPort_SIZEOF // bytes
-	'Sril' // tag
-	MUSTSUCCEED // flags
+	'SrlP' // tag
+	0 // flags
 	MmAllocWithTag ok! serialport!
 
 	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
+	end
+
+	auto ok
+
+	serialport@ // context
+	pointerof DriverSerialTX // txfunc
+	OSDUPLEXFLAG_CONSOLE // flags
+	0 // pri
+	0 // quotablock
+	1 // permanent
+	name@ // name
+	ACCESS_OWNER_READ ACCESS_GROUP_READ | ACCESS_OWNER_WRITE | ACCESS_GROUP_WRITE | // permissions
+	CoDuplexObjectCreate ok! drop deviceobject!
+
+	if (ok@)
+		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
 	end
 
 	cmdport@  serialport@ SerialPort_PortCMD + !
 	dataport@ serialport@ SerialPort_PortData + !
 
-	transmitbuffer@ serialport@ SerialPort_TransmitBuffer + !
-
 	pointerof DriverSerialDPCFunction // function
 	serialport@ SerialPort_DPC + // dpc
 	KeDPCInitialize
 
-	pointerof DriverSerialConsoleOutput // outputfunc
-	serialport@ // context
-	rawbuffer@ // rawbuffer
-	0 // quotablock
-	name@ // name
-	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-	1 // permanent
-	CoConsoleCreateObject ok! deviceobject! drop
-
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
-	end
-
 	deviceobject@ IODeviceDirectoryInsert ok!
 
-	if (ok@)
-		ok@ name@ "SerialInit: failed to create %s (%i)\n" KeCrash
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ name@ "SerialCreate: failed to insert %s (%i)\n" KeCrash
+		end
 	end
 end
 
@@ -119,7 +100,6 @@ fn (FDriverInit) DriverInit { stage -- ok }
 
 	if (stage@ STAGE_THREAD ==)
 		auto deviceobject
-		auto syscons
 
 		"ttyS0" // name
 		SERIALA_INTERRUPT // intn
@@ -127,8 +107,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		SERIALA_PORTDATA // dataport
 		SerialCreate deviceobject!
 
-		deviceobject@ SerialPortA!
-		deviceobject@ IODeviceGetExtension syscons!
+		deviceobject@ IODeviceGetExtension SerialPortA!
 
 		"ttyS1" // name
 		SERIALB_INTERRUPT // intn
@@ -136,7 +115,7 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		SERIALB_PORTDATA // dataport
 		SerialCreate deviceobject!
 
-		deviceobject@ SerialPortB!
+		deviceobject@ IODeviceGetExtension SerialPortB!
 
 		// register interrupts and start interrupting
 
@@ -157,101 +136,6 @@ fn (FDriverInit) DriverInit { stage -- ok }
 	0 ok!
 end
 
-fn SerialPutc { c s dontblock -- }
-	// TODO see if we can make this work without the intermediate
-	// transmitbuffer between the outputbuffer and the serial port.
-
-	auto ringbuffer
-	0 ringbuffer!
-
-	auto ipl
-	IPLSERIAL KeIPLRaise ipl!
-
-	if (s@ SerialPort_PortCMD + @ HALLIMNstationCitronInb
-		s@ SerialPort_TransmitBuffer + @ ExRingBufferIsEmpty ~~ ||)
-		// serial port not ready to transmit more characters, OR there are
-		// pending characters in the transmit buffer. we have to put the
-		// character in the transmit buffer in the latter case otherwise we
-		// will end up desynchronized from what the interrupt handler is
-		// doing and send characters in the wrong order.
-
-		ipl@ KeIPLLower
-
-		s@ SerialPort_TransmitBuffer + @ ringbuffer!
-
-		c@ // value
-		0 // overwrite
-		OSWAIT_TIMEOUTINFINITE // timeout
-		KERNELMODE // lastmode
-		dontblock@ ~~ // waitonfull
-		ringbuffer@ // ringbuffer
-		ExRingBufferWriteValue drop drop
-
-		IPLSERIAL KeIPLRaise ipl!
-	end else
-		c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-	end
-
-	if (ringbuffer@)
-		// we inserted a character into the ringbuffer.
-		// we had to dip below IPLSERIAL to do that since it might have
-		// blocked, so now we have to do some of the work of the interrupt
-		// handler, which may not have gotten a chance to run properly.
-
-		auto wrote
-		0 wrote!
-
-		while (1)
-			if (s@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-				// serial port not ready to transmit more characters
-
-				break
-			end
-
-			auto ok
-			0 // timeout
-			KERNELMODE // lastmode
-			EXRINGDONTWAIT // waitonempty
-			ringbuffer@ // ringbuffer
-			ExRingBufferReadValue ok! drop c!
-
-			if (ok@)
-				// no more characters pending transmission
-
-				break
-			end
-
-			1 wrote!
-
-			c@ s@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-		end
-
-		if (wrote@)
-			IPLDPC KeIPLLower
-
-			IOBOOSTCONSOLE // priboost
-			ringbuffer@ // ringbuffer
-			ExRingBufferWakeWriter
-		end
-	end
-
-	ipl@ KeIPLLower
-end
-
-fn SerialGetc { s -- c }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	SERIALCMDREAD s@ SerialPort_PortCMD + @ HALLIMNstationCitronCommand
-	s@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
-
-	rs@ HALCPUInterruptRestore
-
-	if (c@ 0xFFFF ==)
-		ERR c! return
-	end
-end
-
 fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 	auto serialport
 
@@ -263,105 +147,61 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 		int@ "DriverSerialInterrupt: weird interrupt number %d\n" KeCrash
 	end
 
-	auto console
-	serialport@ IODeviceGetExtension console!
-
-	console@ CoConsoleGetContext serialport!
-
-	auto ringbuf
-	console@ CoConsoleRawBufferGet ringbuf!
-
-	auto c
-	serialport@ SerialGetc c!
-
-	while (c@ ERR ~=)
-		c@ // value
-		1  // overwrite
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonfull
-		ringbuf@ // ringbuffer
-		ExRingBufferWriteValue drop drop
-
-		serialport@ SerialGetc c!
-	end
-
-	auto transmitbuf
-	serialport@ SerialPort_TransmitBuffer + @ transmitbuf!
-
-	while (1)
-		if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
-			// serial port not ready to transmit more characters
-
-			break
-		end
-
-		auto ok
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonempty
-		transmitbuf@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
-
-		if (ok@)
-			// no more characters pending transmission
-
-			break
-		end
-
-		c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
-	end
-
 	auto dpc
-	serialport@ SerialPort_DPC + dpc!
+	serialport@ CoDuplexGetContext SerialPort_DPC + dpc!
 
 	if (dpc@ KeDPC_Enqueued + @ ~~)
-		// defer waking up any blocked readers til later,
-		// otherwise we will BSOD since we're at IPLSERIAL
-
-		console@ // context1
-		transmitbuf@ // context2
-		DPCLOWIMPORTANCE // importance
+		serialport@ // context1
+		0 // context2
+		DPCHIGHIMPORTANCE // importance
 		dpc@ // dpc
 		KeDPCEnqueue
 	end
 end
 
 fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
-	context1@ CoConsoleCook
-
-	IOBOOSTCONSOLE // priboost
-	context2@ // ringbuffer
-	ExRingBufferWakeWriter
-end
-
-fn (CoOutputFunction) DriverSerialConsoleOutput { echo console -- ok }
-	auto outputbuffer
-	console@ CoConsoleOutputBufferGet outputbuffer!
-
 	auto serialport
-	console@ CoConsoleGetContext serialport!
-
-	0 ok!
+	context1@ CoDuplexGetContext serialport!
 
 	while (1)
 		auto c
-		0 // timeout
-		KERNELMODE // lastmode
-		EXRINGDONTWAIT // waitonempty
-		outputbuffer@ // ringbuffer
-		ExRingBufferReadValue ok! drop c!
+		serialport@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
+
+		if (c@ 0xFFFF ==)
+			break
+		end
+
+		c@ // c
+		context1@ // duplex
+		CoDuplexInputCharacter drop
+	end
+
+	while (1)
+		if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+			break
+		end
+
+		auto ok
+		context1@ CoDuplexReadTransmitCharacter ok! c!
 
 		if (ok@)
-			return
+			break
 		end
 
-		if (c@ 0x7F ==)
-			'\b' serialport@ echo@ SerialPutc
-			' ' serialport@ echo@ SerialPutc
-			'\b' serialport@ echo@ SerialPutc
-		end else
-			c@ serialport@ echo@ SerialPutc
-		end
+		c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
 	end
+end
+
+fn (CoDuplexTXFunction) DriverSerialTX { c duplex -- ok }
+	auto serialport
+	duplex@ CoDuplexGetContext serialport!
+
+	if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+		-1 ok!
+		return
+	end
+
+	0 ok!
+
+	c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
 end

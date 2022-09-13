@@ -565,7 +565,7 @@ end
 // if caller isn't careful these can lead to some redundant reads and writes.
 // which are slow.
 
-fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb -- bytesread ok }
+fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb -- ok }
 	auto devobj
 	fcb@ IOFileControlBlockGetDeviceObject devobj!
 
@@ -574,10 +574,16 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 
 	0 ok!
 
-	fcb@ IOFileControlBlockGetSize bytesread!
+	auto size
+	fcb@ IOFileControlBlockGetSize size!
 
-	if (offset@ bytesread@ >=)
-		0 bytesread!
+	if (offset@ size@ >=)
+		0 mdl@ MmMDLHeader_Length + !
+	
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
 
 		return
 	end
@@ -589,7 +595,7 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	end
 
 	auto length
-	bytesread@ offset@ -
+	size@ offset@ -
 	mdl@ MmMDLHeader_Length + @
 	min length!
 
@@ -599,7 +605,16 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		return
 	end
 
-	0 bytesread!
+	if (length@ ~~)
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
 
 	1 // lockforwrite
 	mdl@ // mdl
@@ -609,7 +624,7 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		return
 	end
 
-	mdl@ MmMDLHeader_Length + @ bytesread!
+	length@ mdl@ MmMDLHeader_Length + !
 
 	kflags@ DKSKFLAG_READ | // kflags
 	0 // buf
@@ -625,13 +640,11 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	end
 end
 
-fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byteswritten ok }
+fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- ok }
 	auto disk
 	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
 
 	0 ok!
-
-	0 byteswritten!
 
 	auto bytesize
 	fcb@ IOFileControlBlockGetSize bytesize!
@@ -659,6 +672,17 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 		return
 	end
 
+	if (length@ ~~)
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
 	0 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
@@ -667,7 +691,7 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- byt
 		return
 	end
 
-	mdl@ MmMDLHeader_Length + @ byteswritten!
+	length@ mdl@ MmMDLHeader_Length + !
 
 	kflags@ // kflags
 	1 // write

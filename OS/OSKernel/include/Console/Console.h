@@ -1,25 +1,6 @@
-struct CoConsole
-	4 HostFCB
-	// ClientFCB is stored in the FileControlBlock field of the Console's
-	// device object
-
-	4 RawBufferAllocated
-
-	4 RawBuffer
-	4 CookedBuffer
-	4 OutputBuffer
-
-	4 OutputFunction
-
-	4 Detached
-
-	4 Mode
-
-	4 Initialized
-
-	4 Context
-
+struct CoConsoleHeader
 	4 ProcessListHead
+	4 Mode
 
 	4 Echoed
 
@@ -27,26 +8,25 @@ struct CoConsole
 	2 HeightI
 endstruct
 
-externptr CoDispatch
-externptr CoDriver
-
-fnptr CoOutputFunction { echo console -- ok }
+externptr CoCtrl
 
 extern CoConsoleByFileHandle { requiredaccess filehandle -- consoleobject ok }
 
-extern CoConsoleOutputBufferGet { console -- outputbuffer }
-extern CoConsoleRawBufferGet { console -- rawbuffer }
-extern CoConsoleGetContext { console -- context }
-extern CoConsoleCreateObject { outputfunc context rawbuffer quotablock name permissions permanent -- fileobject deviceobject ok }
+extern CoConsoleInitialize { header -- }
 
 extern CoConsoleSignal { signal console -- }
 
 extern CoConsoleRemoveProcess { process -- ok }
 extern CoConsoleInsertProcess { process consoleobject -- ok }
 
-extern CoConsoleCook { console -- }
+extern CoConsoleIOControl { arg2 arg1 access console lastmode -- ret ok }
 
-extern CoConsoleRead { timeout flags length buffer lastmode console -- bytesread ok }
-extern CoConsoleWrite { length buffer lastmode console -- byteswritten ok }
+extern CoDuplexObjectCreate { context txfunc flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
 
-extern CoConsoleDoOutput { echo console -- }
+extern CoDuplexInputCharacter { c duplex -- ok }
+extern CoDuplexReadTransmitCharacter { duplex -- c ok }
+extern CoDuplexWriteCharacter { c duplex -- ok }
+
+extern CoDuplexGetContext { duplex -- context }
+
+fnptr CoDuplexTXFunction { c duplex -- ok }

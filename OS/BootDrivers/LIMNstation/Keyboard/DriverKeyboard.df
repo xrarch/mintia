@@ -138,31 +138,16 @@ fn (HALLIMNstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
 	0 keyboard@ Keyboard_States + !
 	0 keyboard@ Keyboard_PendingArrowKey + !
 
-	if (CoVideoConsoleRawBuffer@ ~~)
-		// no device specified as video console input buffer, allocate it and
-		// make that us
+	if (CoVideoConsoleInputDevice@ ~~)
+		// no device specified as video console input buffer, make that us
 
-		auto rawbuffer
-		8 // sizelog (2^8 = 256 bytes)
-		0 // valuesizelog (2^0 = 1 byte)
-		IPLINTERACTIVE // synchipl
-		0 // quotablock
-		ExRingBufferCreate ok! rawbuffer!
-
-		if (ok@)
-			ok@ name@ "DriverKeyboardEnumerate: failed to create %s (%i)\n" KeCrash
-		end
-
-		rawbuffer@ keyboard@ Keyboard_RawBuffer + !
-		rawbuffer@ CoVideoConsoleRawBuffer!
-	end else
-		0 keyboard@ Keyboard_RawBuffer + !
+		keyboard@ CoVideoConsoleInputDevice!
 	end
 
 	auto scanbuffer
 	8 // sizelog (2^8 = 256 bytes)
 	0 // valuesizelog (2^0 = 1 byte)
-	IPLINTERACTIVE // synchipl
+	IPLDPC // synchipl
 	0 // quotablock
 	ExRingBufferCreate ok! scanbuffer!
 
@@ -185,7 +170,7 @@ fn (HALLIMNstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
 	id@ HALLIMNstationAmtsuSetInterrupt
 end
 
-fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl fcb -- bytesread ok }
+fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl fcb -- ok }
 	auto buffer
 	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
 
@@ -201,6 +186,7 @@ fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl
 	auto ringbuf
 	keyboard@ Keyboard_ScanCodeBuffer + @ ringbuf!
 
+	auto bytesread
 	0 bytesread!
 
 	auto waitonempty
@@ -246,41 +232,14 @@ fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl
 end
 
 fn (DPCFunction) DriverKeyboardDPCFunction { context1 context2 -- }
-	auto console
-	CoVideoConsole@ console!
-
-	if (console@)
-		if (context1@ Keyboard_RawBuffer + @)
-			// there's a rawbuffer which means we're feeding the video
-			// console.
-			console@ CoConsoleCook
-		end
-	end
-
-	IOBOOSTKEYBOARD // priboost
-	context1@ Keyboard_ScanCodeBuffer + @ // ringbuffer
-	ExRingBufferWakeReader
-end
-
-fn (HALInterruptHandler) DriverKeyboardInterrupt { trapframe int -- }
-	auto keyboard
-
-	auto id
-	int@ HALLIMNstationAmtsuIrqToID id!
-
-	[id@]KeyboardTable@ keyboard!
-
 	auto scanbuf
-	keyboard@ Keyboard_ScanCodeBuffer + @ scanbuf!
-
-	auto rawbuf
-	keyboard@ Keyboard_RawBuffer + @ rawbuf!
+	context1@ Keyboard_ScanCodeBuffer + @ scanbuf!
 
 	auto c
 	auto scan
 
 	while (1)
-		keyboard@ KeyboardRead c! scan!
+		context1@ KeyboardRead c! scan!
 
 		if (scan@ -1 ==)
 			break
@@ -300,18 +259,29 @@ fn (HALInterruptHandler) DriverKeyboardInterrupt { trapframe int -- }
 			ExRingBufferWriteValue drop drop
 		end
 
-		if (rawbuf@)
-			if (c@ -1 ~=)
-				c@ // value
-				1  // overwrite
-				0 // timeout
-				KERNELMODE // lastmode
-				EXRINGDONTWAIT // waitonfull
-				rawbuf@ // ringbuffer
-				ExRingBufferWriteValue drop drop
+		if (CoVideoConsoleInputDevice@ context1@ ==)
+			if (CoVideoConsole@)
+				if (c@ -1 ~=)
+					c@ // c
+					CoVideoConsole@ // duplex
+					CoDuplexInputCharacter drop
+				end
 			end
 		end
 	end
+
+	IOBOOSTKEYBOARD // priboost
+	context1@ Keyboard_ScanCodeBuffer + @ // ringbuffer
+	ExRingBufferWakeReader
+end
+
+fn (HALInterruptHandler) DriverKeyboardInterrupt { trapframe int -- }
+	auto keyboard
+
+	auto id
+	int@ HALLIMNstationAmtsuIrqToID id!
+
+	[id@]KeyboardTable@ keyboard!
 
 	auto dpc
 	keyboard@ Keyboard_DPC + dpc!

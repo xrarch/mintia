@@ -22,7 +22,7 @@ struct IODevice
 	4 Extension
 	4 FileControlBlock
 	4 BlockLog
-	4 IsAConsole
+	4 ConsoleHeader
 
 	4 Reserved1
 	4 Reserved2
@@ -35,8 +35,11 @@ endstruct
 
 extern IODeviceDirectoryInsert { deviceobject -- ok }
 
+extern IODeviceDeallocateObject { object -- }
 extern IODeviceDeleteObject { object -- ok }
 
 extern IODeviceGetExtension { deviceobject -- extension }
+extern IODeviceSetConsoleHeader { console deviceobject -- }
+extern IODeviceGetConsoleHeader { deviceobject -- console }
 extern IODeviceSetBlockLog { blocklog deviceobject -- }
 extern IODeviceGetBlockLog { deviceobject -- blocklog }

@@ -29,17 +29,20 @@
 #include "<inc>/Console.h"
 
 #include "<ll>/OSDLL/OS.h"
+#include "<ll>/OSDLL/OSConsoleControl.h"
 
 var CoVideoConsole 0
 public CoVideoConsole
+
+var CoVideoConsoleHeader 0
 
 var CoVideoConsoleFont 0
 
 var CoVideoConsoleTitleFont 0
 
 // set by keyboard driver (or whatever is feeding the video console)
-var CoVideoConsoleRawBuffer 0
-public CoVideoConsoleRawBuffer
+var CoVideoConsoleInputDevice 0
+public CoVideoConsoleInputDevice
 
 var CoVideoConsoleScreenWidth 0
 var CoVideoConsoleScreenHeight 0
@@ -94,6 +97,8 @@ var CoVideoConsoleBG 0
 
 var CoVideoConsoleEscape 0
 
+var CoVideoConsoleServerFile 0
+
 const COVIDEOUPDATEINTERVAL 50
 
 table CoVideoConsoleColorTable
@@ -122,7 +127,7 @@ buffer CoVideoConsoleTimer KeTimer_SIZEOF
 fn CoVideoConsoleInit { -- }
 	fnsection "INIT$text"
 
-	if (CoVideoConsoleRawBuffer@ ~~)
+	if (CoVideoConsoleInputDevice@ ~~)
 		// no input device
 		return
 	end
@@ -178,14 +183,15 @@ fn CoVideoConsoleInit { -- }
 
 	auto deviceobject
 
-	0 // outputfunc
 	0 // context
-	CoVideoConsoleRawBuffer@ // rawbuffer
+	0 // txfunc
+	OSDUPLEXFLAG_CONSOLE // flags
+	0 // pri
 	0 // quotablock
+	1 // permanent
 	"ttyV0" // name
 	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
-	1 // permanent
-	CoConsoleCreateObject ok! deviceobject! drop
+	CoDuplexObjectCreate ok! CoVideoConsoleServerFile! deviceobject!
 
 	if (ok@)
 		return
@@ -198,6 +204,8 @@ fn CoVideoConsoleInit { -- }
 			ok@ "CoVideoConsoleInit: failed to insert ttyV0 (%i)\n" KeCrash
 		end
 	end
+
+	deviceobject@ IODevice_ConsoleHeader + @ CoVideoConsoleHeader!
 
 	if ("-dm" HALArgsCheck)
 		// dark mode per @pitust#8711
@@ -264,8 +272,8 @@ fn CoVideoConsoleInit { -- }
 
 	deviceobject@ IODeviceGetExtension CoVideoConsole!
 
-	CoVideoConsoleColumns@ CoVideoConsole@ CoConsole_WidthI + si
-	CoVideoConsoleRows@ CoVideoConsole@ CoConsole_HeightI + si
+	CoVideoConsoleColumns@ CoVideoConsoleHeader@ CoConsoleHeader_WidthI + si
+	CoVideoConsoleRows@ CoVideoConsoleHeader@ CoConsoleHeader_HeightI + si
 
 	0 // context1
 	0 // context2
@@ -1163,6 +1171,12 @@ fn CoVideoConsoleUpdate { -- }
 	end
 end
 
+buffer CoVideoConsoleMDL (MmMDLHeader_SIZEOF 4 + 4 +)
+
+buffer CoVideoConsoleMDLEvent KeEvent_SIZEOF
+
+buffer CoVideoConsoleCharBuf 256
+
 fn CoVideoConsoleDrawWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME 2 + // priority
 	KeThreadCurrent@ // thread
@@ -1170,13 +1184,44 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
-	auto outputbuffer
-	CoVideoConsole@ CoConsoleOutputBufferGet outputbuffer!
-
 	auto objecttable
 	12 alloc objecttable!
 
-	outputbuffer@ ExRingBuffer_ReaderEvent + objecttable@!
+	auto readmdl
+	CoVideoConsoleMDL readmdl!
+
+	auto fcb
+	CoVideoConsoleServerFile@ IOFile_FileControlBlock + @ fcb!
+
+	auto readfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
+
+	auto event
+	CoVideoConsoleMDLEvent event!
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"CoVideoConsoleOutput" // name
+	event@ // event
+	KeEventInitialize
+
+	KERNELMODE // mode
+	1 // length
+	CoVideoConsoleCharBuf // vaddr
+	readmdl@ // mdl
+	MmMDLInitialize
+
+	event@ readmdl@ MmMDLHeader_Event + !
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	0 // kflags
+	0 // offset
+	readmdl@ // mdl
+	fcb@ // fcb
+	readfunc@ IODispatchReadFunction ok!
+
+	event@ objecttable@ !
 	CoVideoConsoleTimer objecttable@ 4 + !
 	CoVideoConsoleOutputEvent objecttable@ 8 + !
 
@@ -1193,25 +1238,64 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 		KeThreadWaitForMultipleObjects reason!
 
 		if (reason@ 0 ==)
-			auto c
+			auto len
+			auto buf
 
 			while (1)
-				0 // timeout
-				KERNELMODE // lastmode
-				EXRINGDONTWAIT // waitonempty
-				outputbuffer@ // ringbuffer
-				ExRingBufferReadValue ok! drop c!
+				readmdl@ MmMDLHeader_Length + @ len!
+				CoVideoConsoleCharBuf buf!
 
-				if (ok@)
-					break
+				while (len@)
+					buf@ gb CoVideoConsolePutCharacter
+
+					1 buf +=
+					1 len -=
 				end
 
-				c@ CoVideoConsolePutCharacter
+				KERNELMODE // mode
+				256 // length
+				CoVideoConsoleCharBuf // vaddr
+				readmdl@ // mdl
+				MmMDLInitialize
+			
+				0 // timeout
+				0 // flags
+				0 // kflags
+				0 // offset
+				readmdl@ // mdl
+				fcb@ // fcb
+				readfunc@ IODispatchReadFunction drop
+
+				if (readmdl@ MmMDLHeader_Length + @ ~~)
+					break
+				end
 			end
+
+			0 // signaled
+			OSEVENT_SYNCH // type
+			"CoVideoConsoleOutput" // name
+			event@ // event
+			KeEventInitialize
+
+			KERNELMODE // mode
+			1 // length
+			CoVideoConsoleCharBuf // vaddr
+			readmdl@ // mdl
+			MmMDLInitialize
+
+			event@ readmdl@ MmMDLHeader_Event + !
+
+			OSWAIT_TIMEOUTINFINITE // timeout
+			0 // flags
+			0 // kflags
+			0 // offset
+			readmdl@ // mdl
+			fcb@ // fcb
+			readfunc@ IODispatchReadFunction drop
 		end
 
-		if (reason@ 0 ~= CoVideoConsole@ CoConsole_Echoed + @ ||)
-			0 CoVideoConsole@ CoConsole_Echoed + !
+		if (reason@ 0 ~= CoVideoConsoleHeader@ CoConsoleHeader_Echoed + @ ||)
+			0 CoVideoConsoleHeader@ CoConsoleHeader_Echoed + !
 
 			CoVideoConsoleUpdate
 

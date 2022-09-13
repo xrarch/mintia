@@ -5,6 +5,7 @@
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
+#include "<ll>/OSDLL/OSConsoleControl.h"
 
 #include "<inc>/HALLog.h"
 #include "<inc>/HALMap.h"
@@ -32,50 +33,6 @@ struct SerialPort
 	KeDPC_SIZEOF DPC
 endstruct
 
-table DriverSerialDispatch
-	0                                    // open
-	0                                    // close
-	0                                    // iocontrol
-	0                                    // read
-	0                                    // write
-	0                                    // system control
-	0                                    // parse
-	0                                    // create
-	0                                    // flush
-	pointerof IODeviceDeleteFileObject   // delete object
-	0                                    // set information
-	0                                    // get information
-	0                                    // rename
-	0                                    // readblock
-	0                                    // writeblock
-	0                                    // truncate
-	0                                    // readdirectory
-	0                                    // getpageaddr
-	0                                    // delete device object
-	0                                    // reclaim fcb
-	0                                    // cancel request
-	0                                    // reserved
-	0                                    // reserved
-endtable
-
-table DriverSerial
-	IOVERSION_MAJOR                      // ioversion major
-	IOVERSION_MINOR                      // ioversion minor
-
-	"serial"                             // name
-	OSFILETYPE_CHARDEVICE                // type
-	pointerof DriverSerialDispatch       // dispatch table
-	SerialPort_SIZEOF                    // extension size
-
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
-endtable
-
 const SERIALA_PORTCMD   0x10
 const SERIALA_PORTDATA  0x11
 const SERIALA_INTERRUPT 4
@@ -95,27 +52,47 @@ const SERIALCMDINTROFF 4
 fn SerialCreate { name intn cmdport dataport -- deviceobject }
 	fnsection "INIT$text"
 
-	auto ok
+	auto serialport
 
-	name@ // name
-	0 // sizeinbytes
-	DriverSerial // driver
-	ACCESS_OWNER_READ ACCESS_GROUP_READ | ACCESS_OWNER_WRITE | ACCESS_GROUP_WRITE | // permissions
-	IODeviceCreate ok! deviceobject!
+	SerialPort_SIZEOF // bytes
+	'SrlP' // tag
+	0 // flags
+	MmAllocWithTag ok! serialport!
 
 	if (ok@)
 		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
 	end
 
-	auto serialport
-	deviceobject@ IODeviceGetExtension serialport!
+	auto ok
+
+	serialport@ // context
+	pointerof DriverSerialTX // txfunc
+	OSDUPLEXFLAG_CONSOLE // flags
+	0 // pri
+	0 // quotablock
+	1 // permanent
+	name@ // name
+	ACCESS_OWNER_READ ACCESS_GROUP_READ | ACCESS_OWNER_WRITE | ACCESS_GROUP_WRITE | // permissions
+	CoDuplexObjectCreate ok! drop deviceobject!
+
+	if (ok@)
+		ok@ name@ "SerialCreate: failed to create %s (%i)\n" KeCrash
+	end
 
 	cmdport@  serialport@ SerialPort_PortCMD + !
 	dataport@ serialport@ SerialPort_PortData + !
 
-	0 // function
+	pointerof DriverSerialDPCFunction // function
 	serialport@ SerialPort_DPC + // dpc
 	KeDPCInitialize
+
+	deviceobject@ IODeviceDirectoryInsert ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ name@ "SerialCreate: failed to insert %s (%i)\n" KeCrash
+		end
+	end
 end
 
 fn (FDriverInit) DriverInit { stage -- ok }
@@ -170,16 +147,61 @@ fn (HALInterruptHandler) DriverSerialInterrupt { trapframe int -- }
 		int@ "DriverSerialInterrupt: weird interrupt number %d\n" KeCrash
 	end
 
-#ifdef 0
 	auto dpc
-	serialport@ SerialPort_DPC + dpc!
+	serialport@ CoDuplexGetContext SerialPort_DPC + dpc!
 
 	if (dpc@ KeDPC_Enqueued + @ ~~)
-		serialport@ SerialPort_Header + // context1
+		serialport@ // context1
 		0 // context2
 		DPCHIGHIMPORTANCE // importance
 		dpc@ // dpc
 		KeDPCEnqueue
 	end
-#endif
+end
+
+fn (DPCFunction) DriverSerialDPCFunction { context1 context2 -- }
+	auto serialport
+	context1@ CoDuplexGetContext serialport!
+
+	while (1)
+		auto c
+		serialport@ SerialPort_PortData + @ HALLIMNstationCitronIni c!
+
+		if (c@ 0xFFFF ==)
+			break
+		end
+
+		c@ // c
+		context1@ // duplex
+		CoDuplexInputCharacter drop
+	end
+
+	while (1)
+		if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+			break
+		end
+
+		auto ok
+		context1@ CoDuplexReadTransmitCharacter ok! c!
+
+		if (ok@)
+			break
+		end
+
+		c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
+	end
+end
+
+fn (CoDuplexTXFunction) DriverSerialTX { c duplex -- ok }
+	auto serialport
+	duplex@ CoDuplexGetContext serialport!
+
+	if (serialport@ SerialPort_PortCMD + @ HALLIMNstationCitronInb)
+		-1 ok!
+		return
+	end
+
+	0 ok!
+
+	c@ serialport@ SerialPort_PortData + @ HALLIMNstationCitronOutb
 end

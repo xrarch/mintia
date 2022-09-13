@@ -75,6 +75,10 @@ struct CoDuplex
 
 	4 ClientWriteListHead
 	4 ClientWriteListTail
+
+	4 Context
+
+	4 TXFunc
 endstruct
 
 table CoDuplexDriver
@@ -236,7 +240,7 @@ fn CoDuplexUnlock { ipl duplex -- }
 	end
 end
 
-fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
+fn CoDuplexObjectCreate { context txfunc flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
 	fnsection "PAGE$text"
 
 	if (flags@ OSDUPLEXFLAG_CONSOLE &)
@@ -266,6 +270,10 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 
 	auto duplex
 	duplexobject@ IODeviceGetExtension duplex!
+
+	context@ duplex@ CoDuplex_Context + !
+
+	txfunc@ duplex@ CoDuplex_TXFunc + !
 
 	flags@ duplex@ CoDuplex_Flags + !
 	pri@ duplex@ CoDuplex_Paged + !
@@ -394,6 +402,10 @@ fn CoDuplexObjectCreate { flags pri quotablock permanent name permissions -- dup
 	end
 
 	quotablock@ duplex@ CoDuplex_QuotaBlock + !
+end
+
+fn CoDuplexGetContext { duplex -- context }
+	duplex@ CoDuplex_Context + @ context!
 end
 
 fn (IODispatchIOControlFunction) CoDuplexIOControl { arg2 arg1 access fcb lastmode -- ret ok }
@@ -1062,6 +1074,332 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 	end
 end
 
+fn CoDuplexTXCharacter { c txfunc duplex -- done }
+	auto ok
+
+	if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+		c@ // c
+		duplex@ // duplex
+		txfunc@ CoDuplexTXFunction ok!
+
+		if (ok@ ~~)
+			DONE_NORMAL done!
+		end
+	end elseif (c@ '\n' ==)
+		if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+			'\n' // c
+			duplex@ // duplex
+			txfunc@ CoDuplexTXFunction ok!
+
+			if (ok@ ~~)
+				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
+				DONE_NORMAL done!
+			end
+		end else
+			'\r' // c
+			duplex@ // duplex
+			txfunc@ CoDuplexTXFunction ok!
+
+			if (ok@ ~~)
+				'\n' // c
+				duplex@ // duplex
+				txfunc@ CoDuplexTXFunction ok!
+
+				if (ok@)
+					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+				end else
+					DONE_NORMAL done!
+				end
+			end
+		end
+	end else
+		c@ // c
+		duplex@ // duplex
+		txfunc@ CoDuplexTXFunction ok!
+
+		if (ok@ ~~)
+			DONE_NORMAL done!
+		end
+	end
+end
+
+fn CoDuplexWriteCharacter { c duplex -- ok }
+	auto ipl
+	duplex@ CoDuplexLock ok! ipl!
+
+	if (ok@)
+		return
+	end
+
+	// client fcb, writing to the transmit buffer and/or server buffers.
+	// this may pend.
+
+	0 ok!
+
+	// try to satisfy as many server reads as possible.
+	// then resort to filling the transmit buffer.
+
+	auto done
+	0 done!
+
+	auto txfunc
+	duplex@ CoDuplex_TXFunc + @ txfunc!
+
+	if (txfunc@)
+		c@ // c
+		txfunc@ // txfunc
+		duplex@ // duplex
+		CoDuplexTXCharacter done |=
+
+		0 ok!
+	end
+
+	auto header
+	duplex@ CoDuplex_TransmitBuffer + header!
+
+	auto bufwritten
+	1 bufwritten!
+
+	auto rp
+
+	while (done@ ~~)
+		auto req
+		duplex@ CoDuplex_ServerReadListHead + @ req!
+
+		if (req@ ~~)
+			break
+		end
+
+		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+			c@
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+			DONE_NORMAL done!
+		end elseif (c@ '\n' ==)
+			if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+				'\n'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+				DONE_NORMAL done!
+			end elseif (header@ CoDuplexBuffer_UserBufferLength + @
+						header@ CoDuplexBuffer_UserBufferIndex + @ - 1 >)
+				'\r'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+				'\n'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + 1 + sb
+
+				2 bufwritten!
+
+				DONE_NORMAL done!
+			end else
+				'\r'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+				DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+			end
+		end else
+			c@
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+			DONE_NORMAL done!
+		end
+
+		bufwritten@ header@ CoDuplexBuffer_UserBufferIndex + +=
+
+		if (header@ CoDuplexBuffer_UserBufferIndex + @
+			header@ CoDuplexBuffer_UserBufferLength + @ ==)
+
+			// complete the server MDL.
+
+			header@ CoDuplexBuffer_UserBufferIndex + @
+			req@ CoDuplexRequest_LengthDone + @ +
+			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+
+			0 // status
+			0 // priboost
+			req@ CoDuplexRequest_MDL + @ // mdl
+			MmMDLComplete
+
+			// unlink the server request.
+
+			req@ CoDuplexRequest_Next + @ req!
+
+			req@ duplex@ CoDuplex_ServerReadListHead + !
+
+			if (req@)
+				0 req@ CoDuplexRequest_Prev + !
+
+				req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
+				0 header@ CoDuplexBuffer_UserBufferIndex + !
+				req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+			end else
+				0 duplex@ CoDuplex_ServerReadListTail + !
+			end
+		end
+	end
+
+	if (done@ ~~)
+		// try to copy to the transmit buffer.
+
+		auto bufp
+		header@ CoDuplexBuffer_Buffer + @ bufp!
+
+		header@ CoDuplexBuffer_RemainingSpace + @ rp!
+
+		if (rp@)
+			auto bufsize
+			header@ CoDuplexBuffer_Size + @ bufsize!
+
+			auto bufmask
+			bufsize@ 1 - bufmask!
+
+			auto index
+			header@ CoDuplexBuffer_WriteIndex + @ index!
+
+			if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				c@
+				bufp@ index@ bufmask@ & + sb
+
+				DONE_NORMAL done!
+			end elseif (c@ '\n' ==)
+				if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+					'\n'
+					bufp@ index@ bufmask@ & + sb
+
+					DONE_NORMAL done!
+				end elseif (rp@ 1 >)
+					'\r'
+					bufp@ index@ bufmask@ & + sb
+
+					'\n'
+					bufp@ index@ 1 + bufmask@ & + sb
+
+					2 bufwritten!
+
+					DONE_NORMAL done!
+				end
+			end else
+				c@
+				bufp@ index@ bufmask@ & + sb
+
+				DONE_NORMAL done!
+			end
+
+			index@ bufwritten@ + header@ CoDuplexBuffer_WriteIndex + !
+			bufwritten@ header@ CoDuplexBuffer_RemainingSpace + -=
+		end
+	end
+
+	ipl@ duplex@ CoDuplexUnlock
+end
+
+fn CoDuplexReadTransmitCharacter { duplex -- c ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	0 ok!
+
+	// read as much as possible from the buffer. if this completes, cool.
+	// if it does not complete, then we need to look for pending client
+	// buffers. if that completes, cool.
+
+	auto header
+	duplex@ CoDuplex_TransmitBuffer + header!
+
+	auto rp
+	header@ CoDuplexBuffer_ReadIndex + @ rp!
+
+	if (header@ CoDuplexBuffer_WriteIndex + @ rp@ -)
+		auto bufp
+		header@ CoDuplexBuffer_Buffer + @ bufp!
+
+		auto bufsize
+		header@ CoDuplexBuffer_Size + @ bufsize!
+
+		auto bufmask
+		bufsize@ 1 - bufmask!
+
+		bufp@ rp@ bufmask@ & + gb c!
+
+		rp@ 1 + header@ CoDuplexBuffer_ReadIndex + !
+		1 header@ CoDuplexBuffer_RemainingSpace + +=
+
+		return
+	end
+
+	// try to complete as many client writes as possible by reading
+	// from their buffer.
+
+	auto req
+	duplex@ CoDuplex_ClientWriteListHead + @ req!
+
+	if (req@)
+		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + gb c!
+
+			1 header@ CoDuplexBuffer_UserBufferIndex + +=
+		end else
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + gb c!
+
+			if (c@ '\n' ==)
+				if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+					'\n' c!
+					1 header@ CoDuplexBuffer_UserBufferIndex + +=
+				end else
+					'\r' c!
+					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+				end
+			end else
+				1 header@ CoDuplexBuffer_UserBufferIndex + +=
+			end
+		end
+
+		if (header@ CoDuplexBuffer_UserBufferIndex + @
+			header@ CoDuplexBuffer_UserBufferLength + @ ==)
+
+			// complete the client MDL.
+
+			header@ CoDuplexBuffer_UserBufferIndex + @
+			req@ CoDuplexRequest_LengthDone + @ +
+			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+
+			0 // status
+			0 // priboost
+			req@ CoDuplexRequest_MDL + @ // mdl
+			MmMDLComplete
+
+			// unlink the client request.
+
+			req@ CoDuplexRequest_Next + @ req!
+
+			req@ duplex@ CoDuplex_ClientWriteListHead + !
+
+			if (req@)
+				0 req@ CoDuplexRequest_Prev + !
+
+				req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
+				0 header@ CoDuplexBuffer_UserBufferIndex + !
+				req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+			end else
+				0 duplex@ CoDuplex_ClientWriteListTail + !
+			end
+		end
+
+		return
+	end
+
+	-1 ok!
+end
+
 fn CoDuplexInputCharacter { c duplex -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 
@@ -1254,21 +1592,25 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 				1 header@ CoDuplexBuffer_RemainingSpace + -=
 			end elseif (c@ '\b' ==)
 				if (header@ CoDuplexBuffer_RemainingSpace + @ bufsize@ <)
-					index@ 1 - header@ CoDuplexBuffer_WriteIndex + !
-					1 header@ CoDuplexBuffer_RemainingSpace + +=
+					if (bufp@ index@ 1 - bufmask@ & + gb '\n' ~=)
+						index@ 1 - header@ CoDuplexBuffer_WriteIndex + !
+						1 header@ CoDuplexBuffer_RemainingSpace + +=
 
-					bufp@ index@ 1 - bufmask@ & + gb // c
-					duplex@ // duplex
-					CoDuplexEchoRubout
+						bufp@ index@ 1 - bufmask@ & + gb // c
+						duplex@ // duplex
+						CoDuplexEchoRubout
+					end
 				end
 			end elseif (c@ 21 ==) // ^U
 				while (header@ CoDuplexBuffer_RemainingSpace + @ bufsize@ <)
-					1 header@ CoDuplexBuffer_WriteIndex + -=
-					1 header@ CoDuplexBuffer_RemainingSpace + +=
+					if (bufp@ header@ CoDuplexBuffer_WriteIndex + @ 1 - bufmask@ & + gb '\n' ~=)
+						1 header@ CoDuplexBuffer_WriteIndex + -=
+						1 header@ CoDuplexBuffer_RemainingSpace + +=
 
-					bufp@ header@ CoDuplexBuffer_WriteIndex + @ bufmask@ & + gb // c
-					duplex@ // duplex
-					CoDuplexEchoRubout
+						bufp@ header@ CoDuplexBuffer_WriteIndex + @ bufmask@ & + gb // c
+						duplex@ // duplex
+						CoDuplexEchoRubout
+					end
 				end
 			end else
 				c@
@@ -1574,171 +1916,6 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 	end
 end
 
-fn CoDuplexWriteCharacter { c duplex -- ok }
-	auto ipl
-	duplex@ CoDuplexLock ok! ipl!
-
-	if (ok@)
-		return
-	end
-
-	// client fcb, writing to the transmit buffer and/or server buffers.
-	// this may pend.
-
-	0 ok!
-
-	// try to satisfy as many server reads as possible.
-	// then resort to filling the transmit buffer.
-
-	auto header
-	duplex@ CoDuplex_TransmitBuffer + header!
-
-	auto done
-	0 done!
-
-	auto bufwritten
-	1 bufwritten!
-
-	auto rp
-
-	while (done@ ~~)
-		auto req
-		duplex@ CoDuplex_ServerReadListHead + @ req!
-
-		if (req@ ~~)
-			break
-		end
-
-		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
-			c@
-			header@ CoDuplexBuffer_UserBuffer + @
-			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
-
-			DONE_NORMAL done!
-		end elseif (c@ '\n' ==)
-			if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
-				'\n'
-				header@ CoDuplexBuffer_UserBuffer + @
-				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
-
-				DONE_NORMAL done!
-			end elseif (header@ CoDuplexBuffer_UserBufferLength + @
-						header@ CoDuplexBuffer_UserBufferIndex + @ - 1 >)
-				'\r'
-				header@ CoDuplexBuffer_UserBuffer + @
-				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
-
-				'\n'
-				header@ CoDuplexBuffer_UserBuffer + @
-				header@ CoDuplexBuffer_UserBufferIndex + @ + 1 + sb
-
-				2 bufwritten!
-
-				DONE_NORMAL done!
-			end else
-				'\r'
-				header@ CoDuplexBuffer_UserBuffer + @
-				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
-
-				DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
-			end
-		end else
-			c@
-			header@ CoDuplexBuffer_UserBuffer + @
-			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
-
-			DONE_NORMAL done!
-		end
-
-		bufwritten@ header@ CoDuplexBuffer_UserBufferIndex + +=
-
-		if (header@ CoDuplexBuffer_UserBufferIndex + @
-			header@ CoDuplexBuffer_UserBufferLength + @ ==)
-
-			// complete the server MDL.
-
-			header@ CoDuplexBuffer_UserBufferIndex + @
-			req@ CoDuplexRequest_LengthDone + @ +
-			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
-
-			0 // status
-			0 // priboost
-			req@ CoDuplexRequest_MDL + @ // mdl
-			MmMDLComplete
-
-			// unlink the server request.
-
-			req@ CoDuplexRequest_Next + @ req!
-
-			req@ duplex@ CoDuplex_ServerReadListHead + !
-
-			if (req@)
-				0 req@ CoDuplexRequest_Prev + !
-
-				req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
-			end else
-				0 duplex@ CoDuplex_ServerReadListTail + !
-			end
-		end
-	end
-
-	if (done@ ~~)
-		// try to copy to the transmit buffer.
-
-		auto bufp
-		header@ CoDuplexBuffer_Buffer + @ bufp!
-
-		header@ CoDuplexBuffer_RemainingSpace + @ rp!
-
-		if (rp@)
-			auto bufsize
-			header@ CoDuplexBuffer_Size + @ bufsize!
-
-			auto bufmask
-			bufsize@ 1 - bufmask!
-
-			auto index
-			header@ CoDuplexBuffer_WriteIndex + @ index!
-
-			if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
-				c@
-				bufp@ index@ bufmask@ & + sb
-
-				DONE_NORMAL done!
-			end elseif (c@ '\n' ==)
-				if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
-					'\n'
-					bufp@ index@ bufmask@ & + sb
-
-					DONE_NORMAL done!
-				end elseif (rp@ 1 >)
-					'\r'
-					bufp@ index@ bufmask@ & + sb
-
-					'\n'
-					bufp@ index@ 1 + bufmask@ & + sb
-
-					2 bufwritten!
-
-					DONE_NORMAL done!
-				end
-			end else
-				c@
-				bufp@ index@ bufmask@ & + sb
-
-				DONE_NORMAL done!
-			end
-
-			index@ bufwritten@ + header@ CoDuplexBuffer_WriteIndex + !
-			bufwritten@ header@ CoDuplexBuffer_RemainingSpace + -=
-		end
-	end
-
-	ipl@ duplex@ CoDuplexUnlock
-end
-
 fn CoDuplexClientWrite { buf mdl duplex -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
@@ -1764,15 +1941,40 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 		STATUS_OTHER_CONDITION ok!
 	end else
+		auto done
+		0 done!
+
+		auto txfunc
+		duplex@ CoDuplex_TXFunc + @ txfunc!
+
+		if (txfunc@)
+			while (1)
+				if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+					DONE_NORMAL done |=
+					break
+				end
+
+				buf@ bytecnt@ + gb // c
+				txfunc@ // txfunc
+				duplex@ // duplex
+				CoDuplexTXCharacter ok!
+
+				if (ok@ ~~)
+					break
+				end
+
+				0 ok!
+
+				1 bytecnt +=
+			end
+		end
+
 		// try to satisfy as many server reads as possible.
 		// then resort to filling the transmit buffer. then, if we still have
 		// characters, enqueue our own request.
 
 		auto header
 		duplex@ CoDuplex_TransmitBuffer + header!
-
-		auto done
-		0 done!
 
 		auto rp
 
@@ -2242,6 +2444,8 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 			end
 		end
 	end
+
+	DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
 
 	ipl@ KeIPLLower
 

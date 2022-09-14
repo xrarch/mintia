@@ -1,0 +1,87 @@
+//
+// Implements the fox32 system driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALfox32IO.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<ll>/OSDLL/OSStatistics.h"
+#include "<ll>/OSDLL/OSContext.h"
+
+const RTC_PORT 0x80000700
+const RTC_PORT_YEAR  0
+const RTC_PORT_MONTH 1
+const RTC_PORT_DAY   2
+const RTC_PORT_HOUR  3
+const RTC_PORT_MIN   4
+const RTC_PORT_SEC   5
+const RTC_PORT_UPTME 6
+
+fn (HALRTCQueryF) DriverRTCQuery { time -- }
+	auto year
+	RTC_PORT RTC_PORT_YEAR | HALfox32In year!
+
+	auto month
+	RTC_PORT RTC_PORT_MONTH | HALfox32In month!
+
+	if (month@ 2 <=)
+		12 month +=
+		1 year -=
+	end
+
+	auto day
+	RTC_PORT RTC_PORT_DAY | HALfox32In day!
+
+	auto hour
+	RTC_PORT RTC_PORT_HOUR | HALfox32In hour!
+
+	auto min
+	RTC_PORT RTC_PORT_MIN | HALfox32In min!
+
+	auto secpart
+	RTC_PORT RTC_PORT_SEC | HALfox32In secpart!
+
+	// years to days
+	year@ 365 * year@ 4 / + year@ 100 / - year@ 400 / + day +=
+
+	// months to days
+	month@ 30 * month@ 1 + 3 * 5 / + day +=
+
+	// unix epoch
+	719561 day -=
+
+	day@ 86400 * secpart +=
+
+	hour@ 3600 * min@ 60 * + secpart +=
+
+	secpart@ time@ KeTime_SecPart + !
+
+	RTC_PORT RTC_PORT_UPTME | HALfox32In 1000 % time@ KeTime_MsPart + !
+end
+
+fn (HALUptimeQueryF) DriverRTCUptimeQuery { time -- }
+	auto uptime
+	RTC_PORT RTC_PORT_UPTME | HALfox32In uptime!
+
+	uptime@ 1000 / time@ KeTime_SecPart + !
+	uptime@ 1000 % time@ KeTime_MsPart + !
+end
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	fnsection "INIT$text"
+
+	if (stage@ STAGE_PRETASKING ==)
+		pointerof DriverRTCQuery HALRTCQueryFunction!
+		pointerof DriverRTCUptimeQuery HALUptimeQueryFunction!
+	end
+
+	0 ok!
+end

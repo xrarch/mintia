@@ -1,0 +1,112 @@
+//
+// Implements Interrupt Priority Level (IPL) management.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/HALInterrupt.h"
+
+#include "<ll>/OSDLL/OSStatistics.h"
+
+externptr KeIPLCurrent
+
+fn KeIPLRaise { newipl -- oldipl }
+	KeIPLCurrent@ oldipl!
+
+	if (newipl@ oldipl@ ==)
+		return
+	end
+
+	if (newipl@ oldipl@ <)
+		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not greater or equal (old=%s new=%s)\n" KeCrash
+	end
+
+	// only call into the HAL if hardware interrupt level changed.
+	// no need to call in for software interrupt levels IPLLOW-IPLDPC.
+
+	// XXX I don't know if I really need to disable interrupts for these two
+	// cases.
+
+	auto rs
+
+	if (newipl@ IPLDPC >)
+		HALCPUInterruptDisable rs!
+		newipl@ KeIPLCurrent!
+		newipl@ HALPlatformIPLSet
+		rs@ HALCPUInterruptRestore
+	end elseif (oldipl@ IPLDPC >)
+		HALCPUInterruptDisable rs!
+		newipl@ KeIPLCurrent!
+		newipl@ HALPlatformIPLSet
+		rs@ HALCPUInterruptRestore
+	end else
+		newipl@ KeIPLCurrent!
+	end
+end
+
+fn KeIPLLower { newipl -- }
+	auto oldipl
+	KeIPLCurrent@ oldipl!
+
+	if (newipl@ oldipl@ ==)
+		return
+	end
+
+	if (newipl@ oldipl@ >)
+		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not less or equal (old=%s new=%s)\n" KeCrash
+	end
+
+	auto rs
+
+	if (newipl@ IPLDPC >=)
+		HALCPUInterruptDisable rs!
+		newipl@ KeIPLCurrent!
+		newipl@ HALPlatformIPLSet
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	if (oldipl@ IPLAPC >)
+		// the new IPL isn't >=IPLDPC, and the old IPL was >IPLAPC.
+		// this means that we've dropped below IPLDPC and may have some DPCs
+		// to process.
+
+		// only call into the HAL if hardware interrupt level changed.
+		// no need to call in for software interrupt levels IPLLOW-IPLDPC.
+
+		if (oldipl@ IPLDPC >)
+			HALCPUInterruptDisable rs!
+			IPLDPC KeIPLCurrent!
+			IPLDPC HALPlatformIPLSet
+			rs@ HALCPUInterruptRestore
+		end else
+			IPLDPC KeIPLCurrent!
+		end
+
+		HALCPUInterruptDisable rs!
+
+		while (KeDPCListHead@ KeThreadNext@ ||)
+			if (KeDPCListHead@)
+				KeDPCDispatchQueue
+			end
+
+			if (KeThreadNext@)
+				rs@ HALCPUInterruptRestore
+
+				KeThreadNextSwitch
+
+				HALCPUInterruptDisable rs!
+			end
+		end
+
+		rs@ HALCPUInterruptRestore
+	end
+
+	newipl@ KeIPLCurrent!
+end

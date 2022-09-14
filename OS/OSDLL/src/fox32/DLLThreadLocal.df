@@ -1,0 +1,144 @@
+//
+// Implements the interlocked OSFastMutex for the fox32 architecture, along
+// with several other synchronization and thread-local features.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/OSCalls.h"
+#include "<inc>/OSMap.h"
+#include "<inc>/OSFile.h"
+#include "<inc>/OSAbort.h"
+#include "<inc>/OSAccess.h"
+#include "<inc>/OSObject.h"
+#include "<inc>/OSStatus.h"
+#include "<inc>/OSModule.h"
+#include "<inc>/OSAlloc.h"
+#include "<inc>/OSWait.h"
+#include "<inc>/OSFastMutex.h"
+#include "<inc>/OSProcess.h"
+
+#include "../OSDLL.h"
+
+extern DLLDisableInterrupts { -- }
+extern DLLEnableInterrupts { -- }
+
+fn OSFastMutexAcquire { fastmutex -- }
+	DLLDisableInterrupts
+
+	1 fastmutex@ OSFastMutex_LockCount + +=
+
+	if (fastmutex@ OSFastMutex_LockCount + @ 0 ==)
+		OSThreadCurrentTID fastmutex@ OSFastMutex_OwningThread + !
+		1 fastmutex@ OSFastMutex_ThreadLockCount + !
+
+		DLLEnableInterrupts
+
+		return
+	end
+
+	if (fastmutex@ OSFastMutex_OwningThread + @ OSThreadCurrentTID ==)
+		1 fastmutex@ OSFastMutex_ThreadLockCount + +=
+
+		DLLEnableInterrupts
+
+		return
+	end
+
+	DLLEnableInterrupts
+
+	fastmutex@ DLLFastMutexWait
+
+	OSThreadCurrentTID fastmutex@ OSFastMutex_OwningThread + !
+	1 fastmutex@ OSFastMutex_ThreadLockCount + !
+end
+
+fn OSFastMutexRelease { fastmutex -- }
+	1 fastmutex@ OSFastMutex_ThreadLockCount + -=
+
+	if (fastmutex@ OSFastMutex_ThreadLockCount + @ ~~)
+		0 fastmutex@ OSFastMutex_OwningThread + !
+
+		DLLDisableInterrupts
+
+		1 fastmutex@ OSFastMutex_LockCount + -=
+
+		if (fastmutex@ OSFastMutex_LockCount + @ -1 ==)
+			DLLEnableInterrupts
+
+			return
+		end
+
+		DLLEnableInterrupts
+
+		fastmutex@ DLLFastMutexWake
+
+		return
+	end
+
+	DLLDisableInterrupts
+	1 fastmutex@ OSFastMutex_LockCount + -=
+	DLLEnableInterrupts
+end
+
+fn OSFastMutexTryAcquire { fastmutex -- acquired }
+	DLLDisableInterrupts
+
+	if (fastmutex@ OSFastMutex_LockCount + @ -1 ~=)
+		DLLEnableInterrupts
+
+		0 acquired!
+
+		return
+	end
+
+	OSThreadCurrentTID fastmutex@ OSFastMutex_OwningThread + !
+	1 fastmutex@ OSFastMutex_ThreadLockCount + !
+	0 fastmutex@ OSFastMutex_LockCount + !
+
+	DLLEnableInterrupts
+
+	1 acquired!
+end
+
+fn OSInterlockedIncrement { inc ptr -- oldcount }
+	DLLDisableInterrupts
+	ptr@@ oldcount!
+	inc@ ptr@ +=
+	DLLEnableInterrupts
+end
+
+fn OSInterlockedDecrement { dec ptr -- oldcount }
+	DLLDisableInterrupts
+	ptr@@ oldcount!
+	dec@ ptr@ -=
+	DLLEnableInterrupts
+end
+
+asm "
+
+DLLDisableInterrupts:
+	icl
+	ret
+
+DLLEnableInterrupts:
+	ise
+	ret
+
+; shove this stuff in here because why not
+
+; -- teb
+OSThreadCurrentTEB:
+.global OSThreadCurrentTEB
+	mov  a0, tp
+	ret
+
+; -- tid
+OSThreadCurrentTID:
+.global OSThreadCurrentTID
+	mov  a0, tp
+	add  tp, OSThreadEnvironmentBlock_ThreadID
+	mov  a0, [tp]
+	ret
+
+"

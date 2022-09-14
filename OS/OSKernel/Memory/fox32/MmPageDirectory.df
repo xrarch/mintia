@@ -1,0 +1,170 @@
+//
+// Implements page directory management for the fox32 architecture.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OSStatus.h"
+
+fn MmPageDirectoryDestroy { process -- }
+	auto pagemap
+	process@ KeProcess_PageDirectory + @ pagemap!
+
+	auto pfdbe
+	pagemap@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	// MmAnonymousPageDelete wants to be entered at IPLDPC...
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pfdbe@ MmEvictablePageDereference drop
+
+	ipl@ // ipl
+	pfdbe@ // pfdbe
+	MmAnonymousPageDelete
+
+	// ...but it leaves at the provided IPL
+
+	auto quotablock
+	process@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
+
+	PAGESIZE // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUnchargeVM
+
+	PAGESIZE // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUncharge
+end
+
+fn MmPageDirectoryAlloc { process -- pdir ok }
+	auto quotablock
+	process@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
+
+	PAGESIZE // charge
+	quotablock@ // quotablock
+	MmQuotaBlockChargeVM ok!
+
+	if (ok@)
+		return
+	end
+
+	PAGESIZE // charge
+	quotablock@ // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		PAGESIZE // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargeVM
+
+		return
+	end
+
+	auto pfdbe
+	process@ KeProcess_PageDirectory + // pte
+	ZEROMUST // priority
+	MmAnonymousPageAlloc ok! pdir! pfdbe!
+
+	if (ok@)
+		PAGESIZE // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargeVM
+
+		PAGESIZE // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		return
+	end
+
+	pfdbe@ // pfdbe
+	0 // process
+	MmEvictablePageModify
+
+	PAGESHIFT pdir <<=
+
+	pdir@ IDENTITYSPACE | 2048 + // dest
+	HALPlatformKernelPageDirectory@ IDENTITYSPACE | 2048 + // src
+	2048 // size
+	memcpy
+end
+
+fn MmPageDirectoryReference { pri process -- ok }
+	if (DEBUGCHECKS)
+		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
+			"MmPageDirectoryReference: thread could be killed\n" KeCrash
+		end
+	end
+
+	0 ok!
+
+	auto pfdbe
+
+	process@ MmWorkingSetLock drop
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pri@ CANBLOCK |
+	MmPageWait ok! drop
+
+	if (ok@)
+		ipl@ KeIPLLower
+		process@ MmWorkingSetUnlock
+		return
+	end
+
+	if (process@ KeProcess_PageDirectory + @ PTE_INSWAP &)
+		auto pt
+
+		pri@ // priority
+		process@ KeProcess_PageDirectory + // pte
+		process@ KeProcess_PageDirectory + @ PAGESHIFT >> // pno
+		MmAnonymousSwapIn ok! pt! pfdbe!
+
+		if (ok@)
+			process@ MmWorkingSetUnlock
+			return
+		end
+
+		pt@ PAGESHIFT << process@ KeProcess_PageDirectory + !
+	end else
+		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		
+		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
+	end
+
+	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+		pfdbe@ // pfdbe
+		0 // process
+		MmEvictablePageModify
+	end
+
+	process@ MmWorkingSetUnlock
+end
+
+fn MmPageDirectoryDereference { process -- }
+	process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+	MmEvictablePageDereference drop
+end

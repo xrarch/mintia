@@ -1,0 +1,235 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALCrash.h"
+
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALConsole.h"
+
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Process.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+// if this seems janked up, its because it is, because this all used to be in
+// the HAL, and the process of moving it into the kernel was rough.
+
+const ECAUSEINTERRUPT 1
+const ECAUSESYS       2
+const ECAUSENMI       5
+const ECAUSEBRK       6
+const ECAUSEINVALID   7
+const ECAUSEPRIVVIOL  8
+const ECAUSEUNALIGNED 9
+const ECAUSEPAGEFAULT 12
+const ECAUSEPAGEWRITE 13
+
+externptr HALfox32InterruptHandlers
+
+externptr KeThreadCurrentStackTop
+externptr KeThreadCurrentStackBottom
+externptr HALInterruptStackTop
+
+externptr OSCallCount
+externptr OSCallTable
+
+externptr KeIPLCurrent
+
+extern HALfox32TLBFlushAll { -- }
+
+asm "
+
+KeFox32ExceptionVector:
+.global KeFox32ExceptionVector
+
+LoadInitialContext:
+.global LoadInitialContext
+
+; a0 - tf
+KeFox32Syscall:
+.global KeFox32Syscall
+
+	ret
+
+.section INIT$text
+
+KeCPUInit:
+.global KeCPUInit
+	ret
+
+.section text
+
+KeIPLCurrentGet:
+.global KeIPLCurrentGet
+	mov  a0, [KeIPLCurrent]
+	ret
+
+"
+
+extern KeLimn2600Syscall { tf -- }
+
+const EXCNAMESMAX 3
+
+table ExceptionNames
+	"DIVIDEBYZERO"
+	"INVALIDINSTRUCTION"
+	"PAGEFAULT"
+endtable
+
+extern PsPrepareUsermode { trapframe -- }
+
+fn KeStackOverflow { rs -- }
+	auto current
+	KeThreadCurrent@ current!
+
+	if (current@)
+		current@ KeThread_Name +
+		current@ KeThread_Process + @ KeProcess_Name +
+		"process '%s' thread '%s' kernel stack overflow\n" KeCrash
+	end
+
+	rs@ "Kernel stack overflow %x\n" KeCrash
+end
+
+fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
+	0 recheck!
+
+	auto usp
+	trapframe@ OSContext_sp + @ usp!
+
+	if (DEBUGCHECKS)
+		if (trapframe@ OSContext_ers + @ LIMN2600_ERS_USER & ~~)
+			trapframe@ "KeCopySignalFrame: not usermode trapframe %x\n" KeCrash
+		end
+	end
+
+	OSContext_SIZEOF usp -=
+
+	auto ok
+	usp@ // dest
+	trapframe@ // src
+	OSContext_SIZEOF // sz
+	KeSafeCopyOut ok!
+
+	if (ok@)
+		// failed to copy out signal frame, this is fatal to the entire
+		// process.
+		// XXX should it be???
+
+		128 OSSIGNAL_KILL + thread@ KeThread_Process + @ KeProcess_KilledStatus + !
+
+		OSSIGNAL_KILL // signal
+		thread@ KeThread_Process + @ // process
+		KeProcessSignal drop
+
+		1 recheck!
+
+		return
+	end
+
+	usp@ trapframe@ OSContext_sp + !
+	dispatchfunc@ trapframe@ OSContext_epc + !
+	signum@ trapframe@ OSContext_a0 + !
+	usp@ trapframe@ OSContext_a1 + !
+
+	auto process
+	thread@ KeThread_Process + @ process!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	1 signum@ << ~ thread@ KeThread_Signals + &=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeThreadContinue { context thread -- }
+	auto tf
+	thread@ KeThread_TrapFrame + @ tf!
+
+	auto ers
+	tf@ OSContext_ers + @ ers!
+
+	if (DEBUGCHECKS)
+		if (ers@ FOX32_RS_USER & ~~)
+			tf@ "KeThreadContinue: not usermode trapframe %x\n" KeCrash
+		end
+	end
+
+	tf@ // dest
+	context@ // src
+	OSContext_SIZEOF // size
+	memcpy
+
+	// don't modify ers lest we allow our user programs to get kernelmode...
+	ers@ tf@ OSContext_ers + !
+end
+
+fn KeFox32Exception { badaddr ecause tf -- }
+	auto excname
+
+	if (ecause@ EXCNAMESMAX >=)
+		"UNKNOWN" excname!
+	end else
+		[ecause@]ExceptionNames@ excname!
+	end
+
+	excname@
+	badaddr@
+	tf@ OSContext_epc + @
+	tf@ OSContext_ers + @
+	KeIPLCurrent@
+	"Fault: IPL=%d ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s\n" KeCrash
+
+	if (tf@ OSContext_ers + @ FOX32_RS_USER &)
+		// we interrupted usermode code
+
+		tf@ PsPrepareUsermode
+	end
+
+	// while (1) end
+end
+
+fn HALCPUIsUserTrapFrame { tf -- user }
+	tf@ OSContext_ers + @ FOX32_RS_USER & user!
+end
+
+fn HALCPUTrapFrameAbort { abort tf -- }
+	abort@ tf@ OSContext_epc + !
+end
+
+fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
+	8 kstack -=
+
+	0 kstack@!
+	startfunc@ kstack@ 4 + !
+
+	kstack@ OSContext_SIZEOF - ctx!
+
+	ctx@ OSContext_SIZEOF 0 memset
+
+	context1@ ctx@ OSContext_a1 + !
+	context2@ ctx@ OSContext_a0 + !
+
+	// enable interrupts and paging in the thread's context
+	FOX32_RS_KTHREAD ctx@ OSContext_ers + !
+
+	startfunc@ ctx@ OSContext_epc + !
+
+	kstack@ ctx@ OSContext_sp + !
+
+	OSContext_SIZEOF 4 + ctx -=
+
+	pointerof LoadInitialContext ctx@ 4 + !
+
+	0 ctx@ OSContext_ers + !
+end

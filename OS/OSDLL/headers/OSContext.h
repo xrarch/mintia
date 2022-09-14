@@ -70,18 +70,11 @@ struct OSContext
 
 	4 r31
 
-	4 sp
-	4 ers
-	4 epc
-
 	4 badaddr
-
-// not dumped
-
-	4 IPL
+	1 eflagsB
+	4 epc
+	4 sp
 endstruct
-
-const OSCONTEXTCOUNT 37
 
 const FOX32_RS_INT  1
 const FOX32_RS_USER 128

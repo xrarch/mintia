@@ -19,19 +19,43 @@
 var KeIPLCurrent IPLHIGH
 public KeIPLCurrent
 
+table HALPlatformInterruptHandlers[256]
+public HALPlatformInterruptHandlers
+
+fn HALfox32InterruptInit { -- }
+	IPLHIGH HALPlatformIPLSet
+
+	auto i
+	0 i!
+
+	while (i@ 256 <)
+		pointerof HALfox32InterruptSpurious [i@]HALPlatformInterruptHandlers!
+
+		1 i +=
+	end
+end
+
 fn HALPlatformInterruptRegister { handler int ipl -- }
-	handler@ IDENTITYSPACE int@ 4 * + !
+	if ([int@]HALPlatformInterruptHandlers@ pointerof HALfox32InterruptSpurious ~=)
+		int@ "HALPlatformInterruptRegister: attempt to register IRQ #%d twice\n" HALCrash
+	end
+
+	handler@ [int@]HALPlatformInterruptHandlers!
 end
 
 fn HALPlatformInterruptUnregister { int -- }
 	auto spf
 	pointerof HALfox32InterruptSpurious spf!
 
-	spf@ IDENTITYSPACE int@ 4 * + !
+	if ([int@]HALPlatformInterruptHandlers@ spf@ ==)
+		int@ "HALPlatformInterruptUnregister: attempt to unregister IRQ #%d; wasn't registered\n" HALCrash
+	end
+
+	spf@ [int@]HALPlatformInterruptHandlers!
 end
 
 fn (HALInterruptHandler) HALfox32InterruptSpurious { trapframe int -- }
-	int@ "spurious interrupt: %d\n" HALCrash
+	int@ "spurious interrupt: 0x%x\n" HALCrash
 end
 
 var HALInterruptNested 0
@@ -42,21 +66,3 @@ externptr HALInterruptStackTop
 fn HALInterrupt { trapframe -- }
 
 end
-
-asm "
-
-HALPlatformIPLSet:
-.global HALPlatformIPLSet
-	cmp  a0, IPLDPC
-	ifgt jmp .disable
-
-	ise
-
-	ret
-
-.disable:
-	icl
-
-	ret
-
-"

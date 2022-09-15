@@ -25,6 +25,12 @@ const RTC_PORT_MIN   4
 const RTC_PORT_SEC   5
 const RTC_PORT_UPTME 6
 
+const KBD_PORT 0x80000500
+
+const MSE_PORT 0x80000400
+const MSE_PORT_BUTTONS 0
+const MSE_PORT_POS     1
+
 fn (HALRTCQueryF) DriverRTCQuery { time -- }
 	auto year
 	RTC_PORT RTC_PORT_YEAR | HALfox32In year!
@@ -75,13 +81,89 @@ fn (HALUptimeQueryF) DriverRTCUptimeQuery { time -- }
 	uptime@ 1000 % time@ KeTime_MsPart + !
 end
 
+buffer Fox32VsyncDPC KeDPC_SIZEOF
+
 fn (FDriverInit) DriverInit { stage -- ok }
 	fnsection "INIT$text"
 
 	if (stage@ STAGE_PRETASKING ==)
 		pointerof DriverRTCQuery HALRTCQueryFunction!
 		pointerof DriverRTCUptimeQuery HALUptimeQueryFunction!
+
+		pointerof Fox32VsyncDPCFunction // function
+		Fox32VsyncDPC // dpc
+		KeDPCInitialize
+
+		pointerof Fox32Vsync // handler
+		0xFF // int
+		IPLHIGH // ipl
+		HALInterruptRegister
 	end
 
 	0 ok!
+end
+
+fn Fox32RTCInterrupt { -- }
+	// quantum decrement, statistics, etc
+end
+
+fn (HALInterruptHandler) Fox32Vsync { trapframe int -- }
+	Fox32RTCInterrupt
+
+	auto dpc
+	Fox32VsyncDPC dpc!
+
+	if (dpc@ KeDPC_Enqueued + @ ~~)
+		// defer waking up any blocked readers til later,
+		// otherwise we will BSOD
+
+		0 // context1
+		0 // context2
+		DPCLOWIMPORTANCE // importance
+		dpc@ // dpc
+		KeDPCEnqueue
+	end
+end
+
+fn (DPCFunction) Fox32VsyncDPCFunction { context1 context2 -- }
+	Fox32MousePoll
+	Fox32KeyboardPoll
+end
+
+var Fox32MouseButtonLast 0
+var Fox32MousePosLast 0
+
+fn Fox32MousePoll { -- }
+	auto mousebutton
+	MSE_PORT MSE_PORT_BUTTONS | HALfox32In mousebutton!
+
+	auto mousepos
+	MSE_PORT MSE_PORT_POS | HALfox32In mousepos!
+
+	if (mousebutton@ Fox32MouseButtonLast@ ~=)
+		mousebutton@ "b%d " Printf
+
+		mousebutton@ Fox32MouseButtonLast!
+	end
+
+	if (mousepos@ Fox32MousePosLast@ ~=)
+		mousepos@ 16 >>
+		mousepos@ 0xFFFF &
+		"%d,%d " Printf
+		
+		mousepos@ Fox32MousePosLast!
+	end
+end
+
+fn Fox32KeyboardPoll { -- }
+	while (1)
+		auto scan
+		KBD_PORT HALfox32In scan!
+
+		if (scan@ ~~)
+			break
+		end
+
+		scan@ "k%d " Printf
+	end
 end

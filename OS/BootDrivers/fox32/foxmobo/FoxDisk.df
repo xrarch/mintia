@@ -1,0 +1,497 @@
+//
+// Implements the fox32 disk driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALfox32IO.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+const PORT_POLL_DISK    0x80001000
+const PORT_SET_BUFFER   0x80002000
+const PORT_READ_SECTOR  0x80003000
+const PORT_WRITE_SECTOR 0x80004000
+
+const DISKMAX    4
+const BLOCKSHIFT 9
+const BLOCKSIZE  (1 BLOCKSHIFT <<)
+
+const MAXDISKID 3
+
+struct Disk
+	4 Type
+	4 DKSID
+	4 BlockOffset
+	4 Blocks
+endstruct
+
+table FoxDiskDispatch
+	0                                    // open
+	0                                    // close
+	pointerof FoxDiskIOControl           // iocontrol
+	pointerof FoxDiskRead                // read
+	pointerof FoxDiskWrite               // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	pointerof FoxDiskReadBlock           // readblock
+	pointerof FoxDiskWriteBlock          // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverFoxDisk
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"dks"                                // name
+	OSFILETYPE_BLOCKDEVICE               // type
+	pointerof FoxDiskDispatch            // dispatch table
+	Disk_SIZEOF                          // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+const DKS_REALDISK  1
+const DKS_PARTITION 2
+
+table DKSRealDisks[(MAXDISKID 1 +)]
+
+fn private CreateDisk { name blocks type id offset -- dev }
+	fnsection "INIT$text"
+
+	auto sizeinbytes
+	blocks@ 512 * sizeinbytes!
+
+	auto ok
+	name@ // name
+	sizeinbytes@ // sizeinbytes
+	DriverFoxDisk // driver
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ "FoxDiskInit: failed to create device object (%i)\n" KeCrash
+	end
+
+	BLOCKSHIFT dev@ IODeviceSetBlockLog // 1<<9 = 512
+
+	auto disk
+	dev@ IODeviceGetExtension disk!
+
+	type@ disk@ Disk_Type + !
+	id@ disk@ Disk_DKSID + !
+	offset@ disk@ Disk_BlockOffset + !
+	blocks@ disk@ Disk_Blocks + !
+
+	if (type@ DKS_REALDISK ==)
+		disk@ [id@]DKSRealDisks!
+	end
+end
+
+fn (IODispatchIOControlFunction) FoxDiskIOControl { arg2 arg1 access fcb lastmode -- ret ok }
+	0 ok!
+end
+
+fn FoxDiskInit { -- }
+	fnsection "INIT$text"
+
+	auto ok
+
+	// detect and register disks
+
+	auto diskid
+	0 diskid!
+
+	auto namebuf
+	64 alloc namebuf!
+
+	namebuf@ // dest
+	"dks" // src
+	strcpy
+
+	auto dev
+
+	while (diskid@ MAXDISKID <=)
+		auto blocks
+
+		PORT_POLL_DISK diskid@ | HALfox32In blocks!
+
+		if (blocks@ ~~)
+			1 diskid +=
+			continue
+		end
+
+		blocks@ BLOCKSIZE 1 - + BLOCKSHIFT >> blocks!
+
+		if (blocks@ 8388608 >=)
+			namebuf@
+			"%s: disk is >=4GB; this is not supported! skipping.\n" "FoxDiskInit" HALLog
+
+			1 diskid +=
+			continue
+		end
+
+		// we have a disk at this ID
+
+		diskid@ // n
+		namebuf@ 3 + // buf
+		itoa
+
+		blocks@ namebuf@ diskid@ "ID %d: NAME=%s BLOCKSZ=512 BLOCKS=%d\n" "FoxDiskInit" HALLog
+
+		auto sizeinbytes
+		blocks@ 512 * sizeinbytes!
+
+		namebuf@ // name
+		blocks@ // blocks
+		DKS_REALDISK // type
+		diskid@ // id
+		0 // offset
+		CreateDisk dev!
+
+		auto partitiontable
+		dev@ IOPartitionTableRead ok! partitiontable!
+
+		if (ok@ 0 ==)
+			auto pcount
+			partitiontable@ IOPartitionTable_PartitionCount + @ pcount!
+
+			auto pte
+			partitiontable@ IOPartitionTable_SIZEOF + pte!
+
+			namebuf@ 4 + // dest
+			"s" // src
+			strcpy
+
+			while (pcount@)
+				pte@ IOPartitionEntry_ID + @ // n
+				namebuf@ 5 + // buf
+				itoa
+
+				pte@ IOPartitionEntry_SizeInBlocks + @ blocks!
+
+				namebuf@ // name
+				blocks@ // blocks
+				DKS_PARTITION // type
+				diskid@ // id
+				pte@ IOPartitionEntry_BlockOffset + @ // offset
+				CreateDisk dev!
+
+				IOPartitionEntry_SIZEOF pte +=
+				1 pcount -=
+			end
+
+			partitiontable@ MmFree
+		end
+
+		1 diskid +=
+	end
+
+	0 ok!
+end
+
+fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb -- ok }
+	auto devobj
+	fcb@ IOFileControlBlockGetDeviceObject devobj!
+
+	auto disk
+	devobj@ IODeviceGetExtension disk!
+
+	0 ok!
+
+	auto size
+	fcb@ IOFileControlBlockGetSize size!
+
+	if (offset@ size@ >=)
+		0 mdl@ MmMDLHeader_Length + !
+	
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	if (offset@ BLOCKSIZE 1 - &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	auto length
+	size@ offset@ -
+	mdl@ MmMDLHeader_Length + @
+	min length!
+
+	if (length@ BLOCKSIZE 1 - &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	if (length@ ~~)
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	BLOCKSHIFT offset >>=
+	BLOCKSHIFT length >>=
+
+	disk@ Disk_BlockOffset + @ offset +=
+
+	auto mdlpages
+	mdl@ MmMDLHeader_SIZEOF + mdlpages!
+
+	auto buf
+	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	while (length@)
+		auto pageframe
+		mdlpages@ buf@ PAGESHIFT >> 2 << + @
+		MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT <<
+		buf@ PAGEOFFSETMASK & + pageframe!
+
+		pageframe@ // value
+		PORT_SET_BUFFER // port
+		HALfox32Out
+
+		offset@ // value
+		PORT_READ_SECTOR disk@ Disk_DKSID + @ | // port
+		HALfox32Out
+
+		1 offset +=
+		1 length -=
+		BLOCKSIZE buf +=
+	end
+
+	ipl@ KeIPLLower
+
+	0 // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
+	auto disk
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
+
+	0 ok!
+
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
+
+	if (offset@ bytesize@ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	if (offset@ BLOCKSIZE 1 - &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	auto length
+	bytesize@ offset@ -
+	mdl@ MmMDLHeader_Length + @
+	min length!
+
+	if (length@ BLOCKSIZE 1 - &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	if (length@ ~~)
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	BLOCKSHIFT offset >>=
+	BLOCKSHIFT length >>=
+
+	disk@ Disk_BlockOffset + @ offset +=
+
+	auto mdlpages
+	mdl@ MmMDLHeader_SIZEOF + mdlpages!
+
+	auto buf
+	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	while (length@)
+		auto pageframe
+		mdlpages@ buf@ PAGESHIFT >> 2 << + @
+		MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT <<
+		buf@ PAGEOFFSETMASK & + pageframe!
+
+		pageframe@ // value
+		PORT_SET_BUFFER // port
+		HALfox32Out
+
+		offset@ // value
+		PORT_WRITE_SECTOR disk@ Disk_DKSID + @ | // port
+		HALfox32Out
+
+		1 offset +=
+		1 length -=
+		BLOCKSIZE buf +=
+	end
+
+	ipl@ KeIPLLower
+
+	0 // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+// routines for I/O by block offset, by device object. rarely called.
+// used in some boot situations where acquiring an FCB would be irritating.
+
+fn (IODispatchWriteBlockFunction) FoxDiskWriteBlock { blockno buffer devobject -- ok }
+	// write by block
+
+	auto disk
+	devobject@ IODeviceGetExtension disk!
+
+	if (blockno@ disk@ Disk_Blocks + @ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	auto pteaddr
+	buffer@ // buffer
+	HALPlatformKernelPageDirectory@ // pagemap
+	MmVirtualtoPTEAddress pteaddr!
+
+	auto phyaddr
+	pteaddr@
+	MmPTEInterpret ok! drop phyaddr!
+
+	if (ok@)
+		return
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	phyaddr@ // value
+	PORT_SET_BUFFER // port
+	HALfox32Out
+
+	blockno@ // value
+	PORT_WRITE_SECTOR disk@ Disk_DKSID + @ | // port
+	HALfox32Out
+
+	ipl@ KeIPLLower
+end
+
+fn (IODispatchReadBlockFunction) FoxDiskReadBlock { blockno buffer devobject -- ok }
+	// read by block
+
+	auto disk
+	devobject@ IODeviceGetExtension disk!
+
+	if (blockno@ disk@ Disk_Blocks + @ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	auto pteaddr
+	buffer@ // buffer
+	HALPlatformKernelPageDirectory@ // pagemap
+	MmVirtualtoPTEAddress pteaddr!
+
+	auto phyaddr
+	pteaddr@
+	MmPTEInterpret ok! drop phyaddr!
+
+	if (ok@)
+		return
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	phyaddr@ // value
+	PORT_SET_BUFFER // port
+	HALfox32Out
+
+	blockno@ // value
+	PORT_READ_SECTOR disk@ Disk_DKSID + @ | // port
+	HALfox32Out
+
+	ipl@ KeIPLLower
+end

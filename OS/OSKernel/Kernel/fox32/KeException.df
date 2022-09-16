@@ -348,6 +348,79 @@ KeFox32PageFaultVector:
 	add  sp, 4
 	reti
 
+KeFox32PageFaultWriteVector:
+	push r31
+	push tp
+	push at
+	push s17
+	push s16
+	push s15
+	push s14
+	push s13
+	push s12
+	push s11
+	push s10
+	push s9
+	push s8
+	push s7
+	push s6
+	push s5
+	push s4
+	push s3
+	push s2
+	push s1
+	push s0
+	push a3
+	push a2
+	push a1
+	push a0
+	push t6
+	push t5
+	push t4
+	push t3
+	push t2
+	push t1
+	push t0
+
+	mov  a1, 0x103
+	mov  a0, sp
+	call KeFox32Exception
+
+	pop  t0
+	pop  t1
+	pop  t2
+	pop  t3
+	pop  t4
+	pop  t5
+	pop  t6
+	pop  a0
+	pop  a1
+	pop  a2
+	pop  a3
+	pop  s0
+	pop  s1
+	pop  s2
+	pop  s3
+	pop  s4
+	pop  s5
+	pop  s6
+	pop  s7
+	pop  s8
+	pop  s9
+	pop  s10
+	pop  s11
+	pop  s12
+	pop  s13
+	pop  s14
+	pop  s15
+	pop  s16
+	pop  s17
+	pop  at
+	pop  tp
+	pop  r31
+	add  sp, 4
+	reti
+
 ; a0 - tf
 KeFox32Syscall:
 .global KeFox32Syscall
@@ -370,12 +443,13 @@ extern ThreadTrampoline { -- }
 
 extern KeLimn2600Syscall { tf -- }
 
-const EXCNAMESMAX 3
+const EXCNAMESMAX 4
 
 table ExceptionNames
-	"DIVIDEBYZERO"
-	"INVALIDINSTRUCTION"
-	"PAGEFAULT"
+	"DIVZERO"
+	"INVINST"
+	"PF"
+	"PFW"
 endtable
 
 extern PsPrepareUsermode { trapframe -- }
@@ -467,6 +541,163 @@ fn KeThreadContinue { context thread -- }
 	ers@ tf@ OSContext_eflagsB + sb
 end
 
+fn DebugGetSymbolByAddress { address dll -- symbase symname symbol ok }
+	if (address@ dll@ ComDLL_Base + @ <)
+		-1 ok!
+		return
+	end
+
+	if (address@ dll@ ComDLL_End + @ >=)
+		-1 ok!
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectiontable
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectiontable!
+
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ XLOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	auto lastsym
+	0 lastsym!
+
+	-1 ok!
+
+	while (i@ count@ <)
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
+			auto sectionheader
+			sectiontable@ symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * + sectionheader!
+
+			auto sbase
+			symbol@ XLOFFSymbol_Value + @ sectionheader@ XLOFFSectionHeader_VirtualAddress + @ + sbase!
+
+			if (address@ sbase@ >=)
+				symbol@ XLOFFSymbol_NameOffset + @ symname!
+
+				if (symname@ 0xFFFFFFFF ==)
+					0 symname!
+				end else
+					strtab@ symname +=
+				end
+
+				symbol@ lastsym!
+				sbase@ symbase!
+			end elseif (address@ sbase@ <)
+				if (lastsym@)
+					0 ok!
+				end
+
+				lastsym@ symbol!
+
+				return
+			end
+		end
+
+		XLOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+
+	if (lastsym@)
+		0 ok!
+	end
+
+	lastsym@ symbol!
+end
+
+fn DebugGetSymbol { name dll -- symbol ok }
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ XLOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	-1 ok!
+
+	while (i@ count@ <)
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
+			auto sname
+			symbol@ XLOFFSymbol_NameOffset + @ sname!
+
+			if (sname@ 0xFFFFFFFF ~=)
+				strtab@ sname +=
+
+				if (sname@ name@ strcmp)
+					0 ok!
+					return
+				end
+			end
+		end
+
+		XLOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+end
+
+#include "../../../OSLoader/OSLoaderGlobal.h"
+
+externptr HALLoaderInfo
+
+fn DebugGetSymbolAddress { name dll -- address ok }
+	auto symbol
+	name@ dll@ DebugGetSymbol ok! symbol!
+
+	if (ok@)
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+	symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * sectionheader +=
+
+	symbol@ XLOFFSymbol_Value + @ address!
+
+	sectionheader@ XLOFFSectionHeader_VirtualAddress + @ address +=
+end
+
+fn DebugGetSymDLL { address -- dll symbase symname symbol ok }
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ dll!
+
+	-1 ok!
+
+	while (dll@)
+		address@ // address
+		dll@ // dll
+		DebugGetSymbolByAddress ok! symbol! symname! symbase!
+
+		if (ok@ ~~)
+			return
+		end
+
+		dll@ ComDLL_Next + @ dll!
+	end
+end
+
+const EXCPAGEFAULT 2
+const EXCPAGEFAULTWRITE 3
+
 fn KeFox32Exception { ecause tf -- }
 	auto olddis
 	HALfox32InterruptsDisabled@ olddis!
@@ -475,58 +706,102 @@ fn KeFox32Exception { ecause tf -- }
 	auto excname
 
 	auto handled
-	0 handled!
+	1 handled!
 
-	if (ecause@ 0x100 <)
-		// interrupt
+	if (olddis@)
+		0 handled!
+	end
 
-		auto ipl
-		KeIPLCurrent@ ipl!
-		IPLHIGH KeIPLCurrent!
+	if (handled@)
+		0 handled!
 
-		tf@ // trapframe
-		ecause@ // int
-		[ecause@]HALPlatformInterruptHandlers@ HALInterruptHandler
+		if (ecause@ 0x100 <)
+			// interrupt
 
-		// this is an inlined version of what KeIPLLower also does
+			auto ipl
+			KeIPLCurrent@ ipl!
+			IPLHIGH KeIPLCurrent!
 
-		if (ipl@ IPLDPC <)
-			IPLDPC KeIPLCurrent!
+			tf@ // trapframe
+			ecause@ // int
+			[ecause@]HALPlatformInterruptHandlers@ HALInterruptHandler
 
-			while (KeDPCListHead@ KeThreadNext@ ||)
-				if (KeDPCListHead@)
-					KeDPCDispatchQueue
-				end
+			// this is an inlined version of what KeIPLLower also does
 
-				if (KeThreadNext@)
-					HALCPUInterruptEnable
+			if (ipl@ IPLDPC <)
+				IPLDPC KeIPLCurrent!
 
-					KeThreadNextSwitch
+				while (KeDPCListHead@ KeThreadNext@ ||)
+					if (KeDPCListHead@)
+						KeDPCDispatchQueue
+					end
 
-					HALCPUInterruptDisable drop
+					if (KeThreadNext@)
+						HALCPUInterruptEnable
+
+						KeThreadNextSwitch
+
+						HALCPUInterruptDisable drop
+					end
 				end
 			end
-		end
 
-		ipl@ KeIPLCurrent!
+			ipl@ KeIPLCurrent!
 
-		1 handled!
-	end else
-		// exception
-		if (ecause@ 0x100 - EXCNAMESMAX >=)
-			"UNKNOWN" excname!
+			1 handled!
 		end else
-			[ecause@ 0x100 -]ExceptionNames@ excname!
+			if (ecause@ 0x100 - EXCPAGEFAULT ==)
+				0 // writing
+				tf@ OSContext_badaddr + @ // badaddr
+				tf@ // trapframe
+				MmPageFault handled!
+			end elseif (ecause@ 0x100 - EXCPAGEFAULTWRITE ==)
+				1 // writing
+				tf@ OSContext_badaddr + @ // badaddr
+				tf@ // trapframe
+				MmPageFault handled!
+			end
 		end
 	end
 
 	if (handled@ ~~)
-		excname@
-		tf@ OSContext_badaddr + @
+		if (ecause@ 0x100 >=)
+			// exception
+			if (ecause@ 0x100 - EXCNAMESMAX >=)
+				"UNKNOWN" excname!
+			end else
+				[ecause@ 0x100 -]ExceptionNames@ excname!
+			end
+		end else
+			"?" excname!
+		end
+
+		auto ok
+		auto symname
+		auto dll
+
 		tf@ OSContext_epc + @
-		tf@ OSContext_eflagsB + gb
-		KeIPLCurrent@
-		"Fault: IPL=%d EFLAG=%02x EPC=%08x BADADDR=%08x ECAUSE=%s\n" KeCrash
+		DebugGetSymDLL ok! drop symname! drop dll!
+
+		if (ok@ ~~)
+			symname@
+			dll@ ComDLL_Name + @
+			excname@
+			tf@ OSContext_badaddr + @
+			tf@ OSContext_epc + @
+			tf@ OSContext_eflagsB + gb
+			KeIPLCurrent@
+			olddis@
+			"I%d,IP%d,EF%02x,PC%08x,VA%08x,%s,%s!%s\n" KeCrash
+		end else
+			excname@
+			tf@ OSContext_badaddr + @
+			tf@ OSContext_epc + @
+			tf@ OSContext_eflagsB + gb
+			KeIPLCurrent@
+			olddis@
+			"I%d,IP%d,EF%02x,PC%08x,VA%08x,%s\n" KeCrash
+		end
 	end
 
 	if (tf@ OSContext_eflagsB + gb FOX32_RS_USER &)
@@ -570,6 +845,9 @@ fn KeCPUInit { -- }
 	4 vec +=
 
 	pointerof KeFox32PageFaultVector vec@!
+	4 vec +=
+
+	pointerof KeFox32PageFaultWriteVector vec@!
 	4 vec +=
 
 	// enable interrupts

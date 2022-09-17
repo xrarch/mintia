@@ -7,4 +7,12 @@ extern HALUptimeQuery { time -- }
 externptr HALRTCQueryFunction
 externptr HALUptimeQueryFunction
 
+#ifdef FOX32
+
+const HALRTCINTERVAL 15
+
+#else
+
 const HALRTCINTERVAL 10
+
+#endif

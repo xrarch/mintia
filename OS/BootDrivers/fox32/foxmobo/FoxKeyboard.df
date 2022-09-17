@@ -1,0 +1,521 @@
+//
+// Implements the fox32 keyboard driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALMap.h"
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALfox32IO.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALConsole.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+const KBD_PORT 0x80000500
+
+const SCANCOUNT 84
+
+const KEYBD_SHIFT 1
+const KEYBD_CTRL  2
+const KEYBD_CAPS  4
+const KEYBD_ARROW 8
+
+const SCANCODEBUFFERSIZE 32 // must be power of two
+
+struct Keyboard
+	SCANCODEBUFFERSIZE ScanCodeBuffer
+
+	4 ReadIndex
+	4 WriteIndex
+	4 Remaining
+
+	4 States
+	4 PendingArrowKey
+
+	4 RequestListHead
+	4 RequestListTail
+endstruct
+
+struct KeyboardRequest
+	4 Next
+	4 Prev
+
+	4 Keyboard
+	4 MDL
+	4 Buffer
+	4 Length
+endstruct
+
+table DriverKeyboardDispatch
+	0                                    // open
+	0                                    // close
+	0                                    // iocontrol
+	pointerof DriverKeyboardRead         // read
+	0                                    // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	0                                    // readblock
+	0                                    // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reclaim fcb
+	pointerof DriverKeyboardCancel       // cancel request
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverKeyboard
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"keyboard"                           // name
+	OSFILETYPE_CHARDEVICE                // type
+	pointerof DriverKeyboardDispatch     // dispatch table
+	Keyboard_SIZEOF                      // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+var Fox32Keyboard 0
+
+fn Fox32KeyboardInit { -- }
+	auto dev
+	auto ok
+	"foxkbd0" // name
+	0 // sizeinbytes
+	DriverKeyboard // driver
+	ACCESS_OWNER_READ ACCESS_GROUP_READ | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ "Fox32KeyboardInit: failed to create foxkbd0 (%i)\n" KeCrash
+	end
+
+	auto keyboard
+	dev@ IODeviceGetExtension keyboard!
+
+	0 keyboard@ Keyboard_States + !
+	0 keyboard@ Keyboard_PendingArrowKey + !
+
+	0 keyboard@ Keyboard_RequestListHead + !
+	0 keyboard@ Keyboard_RequestListTail + !
+
+	0 keyboard@ Keyboard_ReadIndex + !
+	0 keyboard@ Keyboard_WriteIndex + !
+	SCANCODEBUFFERSIZE keyboard@ Keyboard_Remaining + !
+
+	if (CoVideoConsoleInputDevice@ ~~)
+		// no device specified as video console input buffer, make that us
+		keyboard@ CoVideoConsoleInputDevice!
+	end
+
+	keyboard@ Fox32Keyboard!
+end
+
+fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl fcb -- ok }
+	0 ok!
+
+	auto keyboard
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension keyboard!
+
+	if (mdl@ MmMDLHeader_Length + @ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	if (mdl@ MmMDLHeader_Pages + @ 1 >)
+		mdl@ MmMDLMap ok!
+
+		if (ok@)
+			return
+		end
+
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
+	end else
+		// only one page, copy thru identityspace as a time saver
+		mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & + buf!
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto rp
+	keyboard@ Keyboard_ReadIndex + @ rp!
+
+	auto bytecnt
+	keyboard@ Keyboard_WriteIndex + @ rp@ - bytecnt!
+
+	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+		mdl@ MmMDLHeader_Length + @ bytecnt!
+	end
+
+	if (bytecnt@)
+		auto endp
+		rp@ bytecnt@ + endp!
+
+		if (rp@ SCANCODEBUFFERSIZE 1 - ~ & endp@ SCANCODEBUFFERSIZE 1 - ~ & ==)
+			// doesn't cross the boundary, do a single copy
+
+			buf@ // dest
+			keyboard@ Keyboard_ScanCodeBuffer + rp@ SCANCODEBUFFERSIZE 1 - & + // src
+			bytecnt@ // sz
+			memcpy
+		end else
+			// crosses the boundary, do two copies
+
+			buf@ // dest
+			keyboard@ Keyboard_ScanCodeBuffer + rp@ SCANCODEBUFFERSIZE 1 - & + // src
+			SCANCODEBUFFERSIZE rp@ SCANCODEBUFFERSIZE 1 - & - // sz
+			memcpy
+
+			buf@ SCANCODEBUFFERSIZE rp@ SCANCODEBUFFERSIZE 1 - & - + // dest
+			keyboard@ Keyboard_ScanCodeBuffer + // src
+			endp@ SCANCODEBUFFERSIZE 1 - & // sz
+			memcpy
+		end
+
+		endp@ keyboard@ Keyboard_ReadIndex + !
+		bytecnt@ keyboard@ Keyboard_Remaining + +=
+	end
+
+	if (bytecnt@ mdl@ MmMDLHeader_Length + @ ~=)
+		if (timeout@)
+			// enqueue
+
+			STATUS_OTHER_CONDITION ok!
+
+			auto ior
+			mdl@ MmMDLHeader_DriverGoWild + ior!
+
+			keyboard@ ior@ KeyboardRequest_Keyboard + !
+			mdl@ ior@ KeyboardRequest_MDL + !
+			buf@ bytecnt@ + ior@ KeyboardRequest_Buffer + !
+			mdl@ MmMDLHeader_Length + @ bytecnt@ - ior@ KeyboardRequest_Length + !
+
+			0 ior@ KeyboardRequest_Next + !
+
+			auto t
+			keyboard@ Keyboard_RequestListTail + @ t!
+
+			t@ ior@ KeyboardRequest_Prev + !
+
+			if (t@ ~~)
+				ior@ keyboard@ Keyboard_RequestListHead + !
+				ior@ keyboard@ Keyboard_RequestListTail + !
+			end else
+				ior@ t@ KeyboardRequest_Next + !
+			end
+		end else
+			bytecnt@ mdl@ MmMDLHeader_Length + !
+		end
+	end
+
+	ipl@ KeIPLLower
+
+	if (ok@ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end elseif (ok@ STATUS_OTHER_CONDITION ==)
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
+end
+
+fn (IODispatchCancelFunction) DriverKeyboardCancel { mdl -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ KeIPLLower
+		return
+	end
+
+	auto keyboard
+	ior@ KeyboardRequest_Keyboard + @ keyboard!
+
+	auto ls
+	auto ns
+
+	ior@ KeyboardRequest_Prev + @ ls!
+	ior@ KeyboardRequest_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ KeyboardRequest_Next + !
+	end else
+		ns@ keyboard@ Keyboard_RequestListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ KeyboardRequest_Prev + !
+	end else
+		ls@ keyboard@ Keyboard_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+
+	STATUS_IO_CANCELLED // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn Fox32KeyboardPoll { -- }
+	if (Fox32Keyboard@ ~~)
+		return
+	end
+
+	auto scanbuf
+	Fox32Keyboard@ Keyboard_ScanCodeBuffer + scanbuf!
+
+	auto c
+	auto scan
+
+	while (1)
+		Fox32Keyboard@ KeyboardRead c! scan!
+
+		if (scan@ -1 ==)
+			break
+		end
+
+		if (scan@ -2 ~=)
+			auto req
+			Fox32Keyboard@ Keyboard_RequestListHead + @ req!
+
+			if (req@)
+				scan@ req@ KeyboardRequest_Buffer + @ sb
+				1 req@ KeyboardRequest_Buffer + +=
+				1 req@ KeyboardRequest_Length + -=
+
+				if (req@ KeyboardRequest_Length + @ ~~)
+					// complete the client MDL.
+
+					0 // status
+					0 // priboost
+					req@ KeyboardRequest_MDL + @ // mdl
+					MmMDLComplete
+
+					// unlink the client request.
+
+					req@ KeyboardRequest_Next + @ req!
+
+					req@ Fox32Keyboard@ Keyboard_RequestListHead + !
+
+					if (req@)
+						0 req@ KeyboardRequest_Prev + !
+					end else
+						0 Fox32Keyboard@ Keyboard_RequestListTail + !
+					end
+				end
+			end elseif (Fox32Keyboard@ Keyboard_Remaining + @)
+				// insert into the buffer
+
+				scan@
+				scanbuf@ Fox32Keyboard@ Keyboard_WriteIndex + @ SCANCODEBUFFERSIZE 1 - & + sb
+
+				1 Fox32Keyboard@ Keyboard_Remaining + -=
+				1 Fox32Keyboard@ Keyboard_WriteIndex + +=
+			end
+		end
+
+		if (CoVideoConsoleInputDevice@ Fox32Keyboard@ ==)
+			if (CoVideoConsole@)
+				if (c@ -1 ~=)
+					c@ // c
+					CoVideoConsole@ // duplex
+					CoDuplexInputCharacter drop
+				end
+			end
+		end
+	end
+end
+
+fn KeyboardRead { keyboard -- scan c }
+	if (keyboard@ Keyboard_States + @ KEYBD_ARROW &)
+		KEYBD_ARROW ~ keyboard@ Keyboard_States + &=
+		-2 scan!
+		'[' c!
+		return
+	end elseif (keyboard@ Keyboard_PendingArrowKey + @)
+		-2 scan!
+		keyboard@ Keyboard_PendingArrowKey + @ c!
+		0 keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end
+
+	KBD_PORT HALfox32In scan!
+
+	-1 c!
+
+	if (scan@ 0 ==)
+		-1 scan!
+		return
+	end
+
+	if (scan@ 0x1D ==)
+		KEYBD_CTRL keyboard@ Keyboard_States + |=
+		return
+	end elseif (scan@ 0x2A ==)
+		KEYBD_SHIFT keyboard@ Keyboard_States + |=
+		return
+	end elseif (scan@ 0x9D ==)
+		KEYBD_CTRL ~ keyboard@ Keyboard_States + &=
+		return
+	end elseif (scan@ 0xAA ==)
+		KEYBD_SHIFT ~ keyboard@ Keyboard_States + &=
+		return
+	end elseif (scan@ 0xBA ==)
+		if (keyboard@ Keyboard_States + @ KEYBD_CAPS &)
+			KEYBD_CAPS ~ keyboard@ Keyboard_States + &=
+		end else
+			KEYBD_CAPS keyboard@ Keyboard_States + |=
+		end
+		return
+	end
+
+	if (scan@ 0x1C ==)
+		'\r' c!
+		return
+	end elseif (scan@ 0x0E ==)
+		'\b' c!
+		return
+	end elseif (scan@ 0x67 ==) // up
+		0x1B c!
+		KEYBD_ARROW keyboard@ Keyboard_States + |=
+		'A' keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end elseif (scan@ 0x69 ==) // left
+		0x1B c!
+		KEYBD_ARROW keyboard@ Keyboard_States + |=
+		'D' keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end elseif (scan@ 0x6A ==) // right
+		0x1B c!
+		KEYBD_ARROW keyboard@ Keyboard_States + |=
+		'C' keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end elseif (scan@ 0x6C ==) // down
+		0x1B c!
+		KEYBD_ARROW keyboard@ Keyboard_States + |=
+		'B' keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end
+
+	if (scan@ SCANCOUNT >=)
+		return
+	end
+
+	if (keyboard@ Keyboard_States + @ KEYBD_SHIFT &)
+		[scan@]KeyboardLayoutShift@ c!
+	end elseif (keyboard@ Keyboard_States + @ KEYBD_CTRL &)
+		[scan@]KeyboardLayoutCtrl@ c!
+	end elseif (keyboard@ Keyboard_States + @ KEYBD_CAPS &)
+		[scan@]KeyboardLayoutCaps@ c!
+	end else
+		[scan@]KeyboardLayout@ c!
+	end
+end
+
+table KeyboardLayout
+	-1
+	-1
+	'1' '2' '3' '4' '5' '6' '7' '8' '9' '0'
+	'-' '=' -1  ' ' 'q' 'w' 'e' 'r' 't' 'y'
+	'u' 'i' 'o' 'p' '[' ']' 0xD -1  'a' 's'
+	'd' 'f' 'g' 'h' 'j' 'k' 'l' ';' '\'' '`'
+	-1 '\\' 'z' 'x' 'c' 'v' 'b' 'n' 'm' ','
+	'.' '/' -1  '*' -1  ' ' -1  -1  -1  -1    // <- F3
+	-1  -1  -1  -1  -1  -1  -1  -1  -1  '7'
+	'8' '9' '-' '4' '5' '6' '+' '1' '2' '3'
+	'0' '.'
+endtable
+
+table KeyboardLayoutCtrl
+	-1
+	-1
+	'1' 0   '3' '4' '5' '6' '7' '8' '9' '0'
+	'-' '=' -1  ' ' 17  23  5   18  20  25
+	21  9   15  16  27  29  0xD -1  1   19
+	4   6   7   8   10  11  12  ';' '\'' 30
+	-1  28  26  24  3   22  2   14  13  ','
+	'.' '/' -1  '*' -1  ' ' -1  -1  -1  -1    // <- F3
+	-1  -1  -1  -1  -1  -1  -1  -1  -1  '7'
+	'8' '9' '-' '4' '5' '6' '+' '1' '2' '3'
+	'0' '.'
+endtable
+
+table KeyboardLayoutShift
+	-1
+	-1
+	'!' '@' '#' '$' '%' '^' '&' '*' '(' ')'
+	'_' '+' -1  ' ' 'Q' 'W' 'E' 'R' 'T' 'Y'
+	'U' 'I' 'O' 'P' '{' '}' 0xD -1  'A' 'S'
+	'D' 'F' 'G' 'H' 'J' 'K' 'L' ':' '\"' '~'
+	-1  '|' 'Z' 'X' 'C' 'V' 'B' 'N' 'M' '<'
+	'.' '/' -1  '*' -1  ' ' -1  -1  -1  -1    // <- F3
+	-1  -1  -1  -1  -1  -1  -1  -1  -1  '7'
+	'8' '9' '-' '4' '5' '6' '+' '1' '2' '3'
+	'0' '.'
+endtable
+
+table KeyboardLayoutCaps
+	-1
+	-1
+	'1' '2' '3' '4' '5' '6' '7' '8' '9' '0'
+	'-' '=' -1  ' ' 'Q' 'W' 'E' 'R' 'T' 'Y'
+	'U' 'I' 'O' 'P' '[' ']' 0xD -1  'A' 'S'
+	'D' 'F' 'G' 'H' 'J' 'K' 'L' ';' '\'' '`'
+	-1 '\\' 'Z' 'X' 'C' 'V' 'B' 'N' 'M' ','
+	'.' '/' -1  '*' -1  ' ' -1  -1  -1  -1    // <- F3
+	-1  -1  -1  -1  -1  -1  -1  -1  -1  '7'
+	'8' '9' '-' '4' '5' '6' '+' '1' '2' '3'
+	'0' '.'
+endtable

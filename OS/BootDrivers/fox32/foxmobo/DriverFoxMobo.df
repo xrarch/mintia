@@ -25,8 +25,6 @@ const RTC_PORT_MIN   4
 const RTC_PORT_SEC   5
 const RTC_PORT_UPTME 6
 
-const KBD_PORT 0x80000500
-
 const MSE_PORT 0x80000400
 const MSE_PORT_BUTTONS 0
 const MSE_PORT_POS     1
@@ -82,6 +80,7 @@ fn (HALUptimeQueryF) DriverRTCUptimeQuery { time -- }
 end
 
 extern FoxDiskInit { -- }
+extern Fox32KeyboardInit { -- }
 
 buffer Fox32VsyncDPC KeDPC_SIZEOF
 
@@ -102,17 +101,78 @@ fn (FDriverInit) DriverInit { stage -- ok }
 		HALInterruptRegister
 	end else
 		FoxDiskInit
+		Fox32KeyboardInit
 	end
 
 	0 ok!
 end
 
-fn Fox32RTCInterrupt { -- }
-	// quantum decrement, statistics, etc
+externptr KeTimerExpirationEarliest
+externptr KeTimerExpirationDPC
+externptr KeFox32OldIPL
+
+fn Fox32RTCInterrupt { trapframe -- }
+	1 KeStatistics OSStatistics_ClockTicks + +=
+
+	17 KeStatistics OSStatistics_IPLTimes + KeFox32OldIPL@ 4 * + +=
+
+	auto uptime
+	KeTime_SIZEOF alloc uptime!
+
+	uptime@ DriverRTCUptimeQuery
+
+	auto expdpc
+	KeTimerExpirationDPC expdpc!
+
+	if (expdpc@ KeDPC_Enqueued + @ ~~)
+		if (KeTimerExpirationEarliest uptime@ KeTimeCompare TIMEEARLIER ==)
+			0 // context1
+			0 // context2
+			DPCLOWIMPORTANCE // importance
+			expdpc@ // dpc
+			KeDPCEnqueue
+		end
+	end
+
+	auto cth
+	KeThreadCurrent@ cth!
+
+	if (cth@)
+		if (trapframe@ OSContext_eflagsB + gb FOX32_RS_USER &)
+			17 cth@ KeThread_UserTimeMs + +=
+		end elseif (KeFox32OldIPL@ IPLDPC ==)
+			17 cth@ KeThread_DPCTimeMs + +=
+		end else
+			17 cth@ KeThread_SystemTimeMs + +=
+		end
+
+		auto qt
+		cth@ KeThread_Quantum + @ qt!
+
+		if (qt@ QUANTUMUNITSPERTICK <=)
+			0 qt!
+		end else
+			QUANTUMUNITSPERTICK qt -=
+		end
+
+		if (qt@ ~~)
+			KeThreadQuantumDPC expdpc!
+
+			if (expdpc@ KeDPC_Enqueued + @ ~~)
+				0 // context1
+				0 // context2
+				DPCLOWIMPORTANCE // importance
+				expdpc@ // dpc
+				KeDPCEnqueue
+			end
+		end
+
+		qt@ cth@ KeThread_Quantum + !
+	end
 end
 
 fn (HALInterruptHandler) Fox32Vsync { trapframe int -- }
-	Fox32RTCInterrupt
+	trapframe@ Fox32RTCInterrupt
 
 	auto dpc
 	Fox32VsyncDPC dpc!
@@ -128,6 +188,8 @@ fn (HALInterruptHandler) Fox32Vsync { trapframe int -- }
 		KeDPCEnqueue
 	end
 end
+
+extern Fox32KeyboardPoll { -- }
 
 fn (DPCFunction) Fox32VsyncDPCFunction { context1 context2 -- }
 	Fox32MousePoll
@@ -156,18 +218,5 @@ fn Fox32MousePoll { -- }
 		"%d,%d " Printf
 		
 		mousepos@ Fox32MousePosLast!
-	end
-end
-
-fn Fox32KeyboardPoll { -- }
-	while (1)
-		auto scan
-		KBD_PORT HALfox32In scan!
-
-		if (scan@ ~~)
-			break
-		end
-
-		scan@ "k%d " Printf
 	end
 end

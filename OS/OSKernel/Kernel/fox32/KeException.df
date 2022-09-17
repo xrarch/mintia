@@ -201,6 +201,80 @@ KeFox32DivideZeroVector:
 	add  sp, 4
 	reti
 
+KeFox32SyscallVector:
+	push 0 ;badaddr
+	push r31
+	push tp
+	push at
+	push s17
+	push s16
+	push s15
+	push s14
+	push s13
+	push s12
+	push s11
+	push s10
+	push s9
+	push s8
+	push s7
+	push s6
+	push s5
+	push s4
+	push s3
+	push s2
+	push s1
+	push s0
+	push a3
+	push a2
+	push a1
+	push a0
+	push t6
+	push t5
+	push t4
+	push t3
+	push t2
+	push t1
+	push t0
+
+	mov  a1, 0x30
+	mov  a0, sp
+	call KeFox32Exception
+
+	pop  t0
+	pop  t1
+	pop  t2
+	pop  t3
+	pop  t4
+	pop  t5
+	pop  t6
+	pop  a0
+	pop  a1
+	pop  a2
+	pop  a3
+	pop  s0
+	pop  s1
+	pop  s2
+	pop  s3
+	pop  s4
+	pop  s5
+	pop  s6
+	pop  s7
+	pop  s8
+	pop  s9
+	pop  s10
+	pop  s11
+	pop  s12
+	pop  s13
+	pop  s14
+	pop  s15
+	pop  s16
+	pop  s17
+	pop  at
+	pop  tp
+	pop  r31
+	add  sp, 4
+	reti
+
 KeFox32InvalidOpcodeVector:
 	push 0 ;badaddr
 	push r31
@@ -424,7 +498,25 @@ KeFox32PageFaultWriteVector:
 ; a0 - tf
 KeFox32Syscall:
 .global KeFox32Syscall
+	push s17
+	mov  s17, a0 ;trampolines expect trapframe in s17
 
+	mov  t1, a0
+	add  t1, OSContext_t0
+	mov  t1, [t1]
+	ifz  jmp .sysout
+
+	mov  t0, [OSCallCount]
+	cmp  t1, t0
+	ifgt jmp .sysout
+
+	mov  t0, OSCallTable
+	sla  t1, 2
+	add  t0, t1
+	call [t0]
+
+.sysout:
+	pop  s17
 	ret
 
 ThreadTrampoline:
@@ -441,7 +533,7 @@ KeIPLCurrentGet:
 
 extern ThreadTrampoline { -- }
 
-extern KeLimn2600Syscall { tf -- }
+extern KeFox32Syscall { tf -- }
 
 const EXCNAMESMAX 4
 
@@ -718,37 +810,45 @@ fn KeFox32Exception { ecause tf -- }
 		if (ecause@ 0x100 <)
 			// interrupt
 
-			auto ipl
-			KeIPLCurrent@ ipl!
-			IPLHIGH KeIPLCurrent!
+			1 handled!
 
-			tf@ // trapframe
-			ecause@ // int
-			[ecause@]HALPlatformInterruptHandlers@ HALInterruptHandler
+			if (ecause@ 0x30 ==)
+				HALCPUInterruptEnable
 
-			// this is an inlined version of what KeIPLLower also does
+				tf@ KeFox32Syscall
 
-			if (ipl@ IPLDPC <)
-				IPLDPC KeIPLCurrent!
+				HALCPUInterruptDisable drop
+			end else
+				auto ipl
+				KeIPLCurrent@ ipl!
+				IPLHIGH KeIPLCurrent!
 
-				while (KeDPCListHead@ KeThreadNext@ ||)
-					if (KeDPCListHead@)
-						KeDPCDispatchQueue
-					end
+				tf@ // trapframe
+				ecause@ // int
+				[ecause@]HALPlatformInterruptHandlers@ HALInterruptHandler
 
-					if (KeThreadNext@)
-						HALCPUInterruptEnable
+				// this is an inlined version of what KeIPLLower also does
 
-						KeThreadNextSwitch
+				if (ipl@ IPLDPC <)
+					IPLDPC KeIPLCurrent!
 
-						HALCPUInterruptDisable drop
+					while (KeDPCListHead@ KeThreadNext@ ||)
+						if (KeDPCListHead@)
+							KeDPCDispatchQueue
+						end
+
+						if (KeThreadNext@)
+							HALCPUInterruptEnable
+
+							KeThreadNextSwitch
+
+							HALCPUInterruptDisable drop
+						end
 					end
 				end
+
+				ipl@ KeIPLCurrent!
 			end
-
-			ipl@ KeIPLCurrent!
-
-			1 handled!
 		end else
 			if (ecause@ 0x100 - EXCPAGEFAULT ==)
 				0 // writing
@@ -833,6 +933,9 @@ fn KeCPUInit { -- }
 
 	pointerof KeFox32VsyncVector
 	0xFF 4 * IDENTITYSPACE + !
+
+	pointerof KeFox32SyscallVector
+	0x30 4 * IDENTITYSPACE + !
 
 	// set the exception vectors
 

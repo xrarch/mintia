@@ -709,9 +709,9 @@ OSMapView:
 	mov  t3, a2
 	mov  t4, a3
 	add  sp, 4
-	pop  t5
-	pop  t6
 	pop  a0
+	pop  t6
+	pop  t5
 	sub  sp, 16
 
 	mov  t0, 57
@@ -1020,8 +1020,8 @@ OSThreadCreate:
 	mov  t3, a2
 	mov  t4, a3
 	add  sp, 4
-	pop  t5
 	pop  t6
+	pop  t5
 	sub  sp, 12
 
 	mov  t0, 82

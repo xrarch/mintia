@@ -792,6 +792,7 @@ OSTOSWaitForMultipleObjects:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	add  sp, 4
 	ret
 
 OSTOSWaitForObject:
@@ -1036,6 +1037,7 @@ OSTOSFileRead:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	add  sp, 4
 	ret
 
 OSTOSFileWrite:
@@ -1456,6 +1458,7 @@ OSTOSMapView:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	add  sp, 12
 	ret
 
 OSTOSUnmapView:
@@ -1568,6 +1571,7 @@ OSTOSAllocate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	add  sp, 4
 	ret
 
 OSTOSMemoryQuery:
@@ -1980,6 +1984,7 @@ OSTOSThreadCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	add  sp, 8
 	ret
 
 OSTOSThreadTerminate:

@@ -76,8 +76,8 @@ struct OSContext
 	4 sp
 endstruct
 
-const FOX32_RS_INT  1
-const FOX32_RS_USER 128
+const FOX32_RS_INT  4
+const FOX32_RS_USER 8
 
 const FOX32_RS_KTHREAD FOX32_RS_INT
 const FOX32_RS_UTHREAD (FOX32_RS_INT FOX32_RS_USER |)

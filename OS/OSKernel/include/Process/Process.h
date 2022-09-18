@@ -97,6 +97,17 @@ struct PsOSDLLInfo
 	4 ExitFunction
 	4 SignalDispatchFunction
 
+#ifdef FOX32
+	4 InterlockedIncStart
+	4 InterlockedIncEnd
+
+	4 InterlockedDecStart
+	4 InterlockedDecEnd
+
+	4 TryAcquireStart
+	4 TryAcquireEnd
+#endif
+
 	4 HeadSize
 
 	4 TextOffset

@@ -793,10 +793,43 @@ public KeFox32OldIPL
 const EXCPAGEFAULT 2
 const EXCPAGEFAULTWRITE 3
 
+externptr KeInterlockedDecrementEnd
+externptr KeInterlockedIncrementEnd
+
 fn KeFox32Exception { ecause tf -- }
 	auto olddis
 	HALfox32InterruptsDisabled@ olddis!
 	1 HALfox32InterruptsDisabled!
+
+	if (tf@ OSContext_eflagsB + gb FOX32_RS_USER &)
+		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
+
+		// check for interlocked operation
+
+		if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedIncStart + @ >=)
+			if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedIncEnd + @ <)
+				PsOSDLLInformation PsOSDLLInfo_InterlockedIncStart + @ tf@ OSContext_epc + !
+			end
+		end elseif (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedDecStart + @ >=)
+			if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedDecEnd + @ <)
+				PsOSDLLInformation PsOSDLLInfo_InterlockedDecStart + @ tf@ OSContext_epc + !
+			end
+		end elseif (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_TryAcquireStart + @ >=)
+			if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_TryAcquireEnd + @ <)
+				PsOSDLLInformation PsOSDLLInfo_TryAcquireStart + @ tf@ OSContext_epc + !
+			end
+		end
+	end else
+		if (tf@ OSContext_epc + @ pointerof KeInterlockedIncrement >=)
+			if (tf@ OSContext_epc + @ KeInterlockedIncrementEnd <)
+				pointerof KeInterlockedIncrement tf@ OSContext_epc + !
+			end
+		end elseif (tf@ OSContext_epc + @ pointerof KeInterlockedDecrement >=)
+			if (tf@ OSContext_epc + @ KeInterlockedDecrementEnd <)
+				pointerof KeInterlockedDecrement tf@ OSContext_epc + !
+			end
+		end
+	end
 
 	auto excname
 
@@ -883,21 +916,22 @@ fn KeFox32Exception { ecause tf -- }
 
 		auto ok
 		auto symname
+		auto symbase
 		auto dll
 
 		tf@ OSContext_epc + @
-		DebugGetSymDLL ok! drop symname! drop dll!
+		DebugGetSymDLL ok! drop symname! symbase! dll!
 
 		if (ok@ ~~)
+			tf@ OSContext_epc + @ symbase@ -
 			symname@
 			dll@ ComDLL_Name + @
 			excname@
 			tf@ OSContext_badaddr + @
-			tf@ OSContext_epc + @
 			tf@ OSContext_eflagsB + gb
 			KeIPLCurrent@
 			olddis@
-			"I%d,IP%d,EF%02x,PC%08x,VA%08x,%s,%s!%s\n" KeCrash
+			"I%d,IP%d,EF%02x,VA%08x,%s,%s!%s+%x\n" KeCrash
 		end else
 			excname@
 			tf@ OSContext_badaddr + @

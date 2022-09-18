@@ -20,19 +20,13 @@
 
 #include "../OSDLL.h"
 
-extern DLLDisableInterrupts { -- }
-extern DLLEnableInterrupts { -- }
-
 fn OSFastMutexAcquire { fastmutex -- }
-	DLLDisableInterrupts
+	auto oldcount
+	1 fastmutex@ OSFastMutex_LockCount + OSInterlockedIncrement oldcount!
 
-	1 fastmutex@ OSFastMutex_LockCount + +=
-
-	if (fastmutex@ OSFastMutex_LockCount + @ 0 ==)
+	if (oldcount@ -1 ==)
 		OSThreadCurrentTID fastmutex@ OSFastMutex_OwningThread + !
 		1 fastmutex@ OSFastMutex_ThreadLockCount + !
-
-		DLLEnableInterrupts
 
 		return
 	end
@@ -40,12 +34,8 @@ fn OSFastMutexAcquire { fastmutex -- }
 	if (fastmutex@ OSFastMutex_OwningThread + @ OSThreadCurrentTID ==)
 		1 fastmutex@ OSFastMutex_ThreadLockCount + +=
 
-		DLLEnableInterrupts
-
 		return
 	end
-
-	DLLEnableInterrupts
 
 	fastmutex@ DLLFastMutexWait
 
@@ -59,70 +49,74 @@ fn OSFastMutexRelease { fastmutex -- }
 	if (fastmutex@ OSFastMutex_ThreadLockCount + @ ~~)
 		0 fastmutex@ OSFastMutex_OwningThread + !
 
-		DLLDisableInterrupts
+		auto oldcount
+		1 fastmutex@ OSFastMutex_LockCount + OSInterlockedDecrement oldcount!
 
-		1 fastmutex@ OSFastMutex_LockCount + -=
-
-		if (fastmutex@ OSFastMutex_LockCount + @ -1 ==)
-			DLLEnableInterrupts
-
+		if (oldcount@ 0 ==)
 			return
 		end
-
-		DLLEnableInterrupts
 
 		fastmutex@ DLLFastMutexWake
 
 		return
 	end
 
-	DLLDisableInterrupts
-	1 fastmutex@ OSFastMutex_LockCount + -=
-	DLLEnableInterrupts
+	1 fastmutex@ OSFastMutex_LockCount + OSInterlockedDecrement drop
 end
 
+extern DLLTryAcquireHelp { ptr -- acquired }
+
 fn OSFastMutexTryAcquire { fastmutex -- acquired }
-	DLLDisableInterrupts
+	fastmutex@ OSFastMutex_LockCount + DLLTryAcquireHelp acquired!
 
-	if (fastmutex@ OSFastMutex_LockCount + @ -1 ~=)
-		DLLEnableInterrupts
-
-		0 acquired!
-
+	if (acquired@ ~~)
 		return
 	end
 
 	OSThreadCurrentTID fastmutex@ OSFastMutex_OwningThread + !
 	1 fastmutex@ OSFastMutex_ThreadLockCount + !
 	0 fastmutex@ OSFastMutex_LockCount + !
-
-	DLLEnableInterrupts
-
-	1 acquired!
-end
-
-fn OSInterlockedIncrement { inc ptr -- oldcount }
-	DLLDisableInterrupts
-	ptr@@ oldcount!
-	inc@ ptr@ +=
-	DLLEnableInterrupts
-end
-
-fn OSInterlockedDecrement { dec ptr -- oldcount }
-	DLLDisableInterrupts
-	ptr@@ oldcount!
-	dec@ ptr@ -=
-	DLLEnableInterrupts
 end
 
 asm "
 
-DLLDisableInterrupts:
-	icl
+; inc ptr -- oldcount
+OSInterlockedIncrement:
+.global OSInterlockedIncrement
+	mov  t0, [a0]
+	add  [a0], a1
+DLLInterlockedIncrementEnd:
+.global DLLInterlockedIncrementEnd
+	nop
+	mov  a0, t0
 	ret
 
-DLLEnableInterrupts:
-	ise
+; dec ptr -- oldcount
+OSInterlockedDecrement:
+.global OSInterlockedDecrement
+	mov  t0, [a0]
+	sub  [a0], a1
+DLLInterlockedDecrementEnd:
+.global DLLInterlockedDecrementEnd
+	nop
+	mov  a0, t0
+	ret
+
+; ptr -- acquired
+DLLTryAcquireHelp:
+.global DLLTryAcquireHelp
+	mov  t0, [a0]
+	cmp  t0, -1
+	ifnz jmp DLLTryAcquireHelpEndBadOut
+	mov  [a0], 0
+DLLTryAcquireHelpEnd:
+.global DLLTryAcquireHelpEnd
+	nop
+	mov  a0, 1
+	ret
+
+DLLTryAcquireHelpEndBadOut:
+	mov  a0, 0
 	ret
 
 ; shove this stuff in here because why not

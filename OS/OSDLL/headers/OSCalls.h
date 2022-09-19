@@ -54,6 +54,9 @@ extern OSHandleDuplicate { handle access srcprocesshandle destprocesshandle -- n
 
 extern OSDirectoryCountQuery { directoryhandle -- count ok }
 extern OSDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
+extern OSDirectoryObjectCreate { permissions name -- dirhandle ok }
+extern OSDirectoryInsert { objecthandle directoryhandle -- ok }
+extern OSDirectoryRemove { objecthandle -- ok }
 
 extern OSSetSecurity { uid gid permissions handle -- ok }
 

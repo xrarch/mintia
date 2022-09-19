@@ -9,8 +9,6 @@
 
 DLLMain:
 .global DLLMain
-	push 0
-
 	call DLLMainHL
 	nop
 

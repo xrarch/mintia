@@ -44,7 +44,7 @@ PROJECTS := HAL/$(PLATFORM) \
 			SystemInit \
 			TestDLL
 
-KERNELMODULES := BootDrivers/AisixFS
+KERNELMODULES := BootDrivers/AisixFS KDebug
 
 COMMANDS := $(wildcard OS/Commands/*)
 
@@ -143,5 +143,9 @@ cleanup:
 	done
 
 	for dir in $(KERNELMODULES); do \
+		make -C OS/$$dir cleanup; \
+	done
+
+	for dir in $(BOOTCODE); do \
 		make -C OS/$$dir cleanup; \
 	done

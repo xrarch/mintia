@@ -1,0 +1,167 @@
+//
+// Implements KDebug stack tracing.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/rta3x/a3x.h"
+
+#include "../../OSLoader/OSLoaderGlobal.h"
+
+#include "<inc>/HALConsole.h"
+#include "<inc>/DebugTrace.h"
+#include "<inc>/DebugSymbols.h"
+
+externptr HALLoaderInfo
+
+var DebugLink 0
+
+asm "
+
+GetLink:
+	mov  long [DebugLink], sp, tmp=t0
+	ret
+
+"
+
+extern GetLink { -- }
+
+fn DebugDump { rows cols -- }
+	GetLink
+
+	auto link
+	DebugLink@ link!
+
+	pointerof DebugDump link@ rows@ cols@ DebugTrace
+end
+
+buffer TraceNameBuffer 128
+
+fn DebugTrace { pc link rows cols -- }
+	"\n" Printf
+
+	1 rows -=
+
+	auto infostr
+	"InstrPtr Name                                     " infostr!
+
+	auto infocols
+	cols@ infostr@ strlen / infocols!
+
+	auto i
+	infocols@ i!
+
+	while (i@)
+		infostr@ Printf
+		1 i -=
+	end
+
+	"\n" Printf
+
+	1 rows -=
+
+	auto links
+	0 links!
+
+	if (link@ 0 ==)
+		"zero link!\n" Printf
+		return
+	end
+
+	if (link@ 3 &)
+		" unaligned!\n" Printf
+		return
+	end
+
+	if (pc@ 3 &)
+		" unaligned pc!\n" Printf
+	end
+
+	auto skip
+	0 skip!
+
+	while (pc@ rows@ &&)
+		infocols@ i!
+
+		while (pc@ i@ &&)
+			if (links@ 128 >=)
+				" maxtrace!\n" Printf
+				return
+			end
+
+			auto symname
+			auto symbase
+			auto dll
+
+			auto ok
+			pc@ DebugGetSymDLL ok! drop symname! symbase! dll!
+
+			if (ok@)
+				TraceNameBuffer "UNKNOWN" strcpy
+			end else
+				if (symname@ ~~)
+					"NAMELESS" symname!
+				end
+
+				TraceNameBuffer	dll@ ComDLL_Name + @ strcpy
+				TraceNameBuffer TraceNameBuffer strlen + "!" strcpy
+				TraceNameBuffer TraceNameBuffer strlen + symname@ strcpy
+			end
+
+			TraceNameBuffer
+			pc@
+			"%08x %40s " Printf
+
+			if (symname@ "KeLimn2600ExceptionVector" strcmp)
+				auto nlink
+				link@@ nlink!
+
+				if (nlink@)
+					link@ 4 + @ pc!
+				end else
+					0 pc!
+				end
+
+				nlink@ link!
+
+				0 skip!
+			end else
+				auto offset
+				0 offset!
+
+				while (pc@ symbase@ >=)
+					if (pc@@ 0xFFFF & 0xF7B4 ==)
+						pc@@ 16 >> offset!
+						break
+					end
+
+					4 pc -=
+				end
+
+				if (skip@ ~~)
+					link@@ pc!
+				end
+
+				link@ offset@ + link!
+
+				0 skip!
+			end
+
+			if (pc@ 3 &)
+				" unaligned pc!\n" Printf
+			end
+
+			if (link@ 3 &)
+				" unaligned link!\n" Printf
+				return
+			end
+
+			1 i -=
+			1 links +=
+		end
+
+		"\n" Printf
+
+		1 rows -=
+	end
+end

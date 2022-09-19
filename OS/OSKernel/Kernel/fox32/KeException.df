@@ -51,10 +51,13 @@ extern HALfox32TLBFlushAll { -- }
 asm "
 
 KeFox32DismissVector:
+.global KeFox32DismissVector
 	reti
 
 KeFox32VsyncVector:
+.global KeFox32VsyncVector
 	push 0 ;badaddr
+	push fp
 	push r31
 	push tp
 	push at
@@ -88,8 +91,8 @@ KeFox32VsyncVector:
 	push t1
 	push t0
 
-	mov  a1, 0xFF
 	mov  a0, sp
+	mov  a1, 0xFF
 	call KeFox32Exception
 
 	pop  t0
@@ -124,11 +127,14 @@ KeFox32VsyncVector:
 	pop  at
 	pop  tp
 	pop  r31
+	pop  fp
 	add  sp, 4
 	reti
 
 KeFox32DivideZeroVector:
+.global KeFox32DivideZeroVector
 	push 0 ;badaddr
+	push fp
 	push r31
 	push tp
 	push at
@@ -162,8 +168,8 @@ KeFox32DivideZeroVector:
 	push t1
 	push t0
 
-	mov  a1, 0x100
 	mov  a0, sp
+	mov  a1, 0x100
 	call KeFox32Exception
 
 	pop  t0
@@ -198,11 +204,14 @@ KeFox32DivideZeroVector:
 	pop  at
 	pop  tp
 	pop  r31
+	pop  fp
 	add  sp, 4
 	reti
 
 KeFox32SyscallVector:
+.global KeFox32SyscallVector
 	push 0 ;badaddr
+	push fp
 	push r31
 	push tp
 	push at
@@ -236,8 +245,8 @@ KeFox32SyscallVector:
 	push t1
 	push t0
 
-	mov  a1, 0x30
 	mov  a0, sp
+	mov  a1, 0x30
 	call KeFox32Exception
 
 	pop  t0
@@ -272,11 +281,14 @@ KeFox32SyscallVector:
 	pop  at
 	pop  tp
 	pop  r31
+	pop  fp
 	add  sp, 4
 	reti
 
 KeFox32InvalidOpcodeVector:
+.global KeFox32InvalidOpcodeVector
 	push 0 ;badaddr
+	push fp
 	push r31
 	push tp
 	push at
@@ -310,8 +322,8 @@ KeFox32InvalidOpcodeVector:
 	push t1
 	push t0
 
-	mov  a1, 0x101
 	mov  a0, sp
+	mov  a1, 0x101
 	call KeFox32Exception
 
 	pop  t0
@@ -346,10 +358,13 @@ KeFox32InvalidOpcodeVector:
 	pop  at
 	pop  tp
 	pop  r31
+	pop  fp
 	add  sp, 4
 	reti
 
 KeFox32PageFaultVector:
+.global KeFox32PageFaultVector
+	push fp
 	push r31
 	push tp
 	push at
@@ -383,8 +398,8 @@ KeFox32PageFaultVector:
 	push t1
 	push t0
 
-	mov  a1, 0x102
 	mov  a0, sp
+	mov  a1, 0x102
 	call KeFox32Exception
 
 	pop  t0
@@ -419,10 +434,13 @@ KeFox32PageFaultVector:
 	pop  at
 	pop  tp
 	pop  r31
+	pop  fp
 	add  sp, 4
 	reti
 
 KeFox32PageFaultWriteVector:
+.global KeFox32PageFaultWriteVector
+	push fp
 	push r31
 	push tp
 	push at
@@ -456,8 +474,8 @@ KeFox32PageFaultWriteVector:
 	push t1
 	push t0
 
-	mov  a1, 0x103
 	mov  a0, sp
+	mov  a1, 0x103
 	call KeFox32Exception
 
 	pop  t0
@@ -492,12 +510,16 @@ KeFox32PageFaultWriteVector:
 	pop  at
 	pop  tp
 	pop  r31
+	pop  fp
 	add  sp, 4
 	reti
 
 ; a0 - tf
 KeFox32Syscall:
 .global KeFox32Syscall
+	push fp
+	mov  fp, sp
+
 	push s17
 	mov  s17, a0 ;trampolines expect trapframe in s17
 
@@ -517,9 +539,12 @@ KeFox32Syscall:
 
 .sysout:
 	pop  s17
+
+	pop  fp
 	ret
 
 ThreadTrampoline:
+.global ThreadTrampoline
 	mov  [HALfox32InterruptsDisabled], 0
 	ise
 	jmp  a2
@@ -633,160 +658,6 @@ fn KeThreadContinue { context thread -- }
 	ers@ tf@ OSContext_eflagsB + sb
 end
 
-fn DebugGetSymbolByAddress { address dll -- symbase symname symbol ok }
-	if (address@ dll@ ComDLL_Base + @ <)
-		-1 ok!
-		return
-	end
-
-	if (address@ dll@ ComDLL_End + @ >=)
-		-1 ok!
-		return
-	end
-
-	auto head
-	dll@ ComDLL_HeadVAddr + @ head!
-
-	auto sectiontable
-	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectiontable!
-
-	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
-
-	auto i
-	0 i!
-
-	auto count
-	head@ XLOFFHeader_SymbolCount + @ count!
-
-	auto strtab
-	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
-
-	auto lastsym
-	0 lastsym!
-
-	-1 ok!
-
-	while (i@ count@ <)
-		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
-			auto sectionheader
-			sectiontable@ symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * + sectionheader!
-
-			auto sbase
-			symbol@ XLOFFSymbol_Value + @ sectionheader@ XLOFFSectionHeader_VirtualAddress + @ + sbase!
-
-			if (address@ sbase@ >=)
-				symbol@ XLOFFSymbol_NameOffset + @ symname!
-
-				if (symname@ 0xFFFFFFFF ==)
-					0 symname!
-				end else
-					strtab@ symname +=
-				end
-
-				symbol@ lastsym!
-				sbase@ symbase!
-			end elseif (address@ sbase@ <)
-				if (lastsym@)
-					0 ok!
-				end
-
-				lastsym@ symbol!
-
-				return
-			end
-		end
-
-		XLOFFSymbol_SIZEOF symbol +=
-		1 i +=
-	end
-
-	if (lastsym@)
-		0 ok!
-	end
-
-	lastsym@ symbol!
-end
-
-fn DebugGetSymbol { name dll -- symbol ok }
-	auto head
-	dll@ ComDLL_HeadVAddr + @ head!
-
-	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
-
-	auto i
-	0 i!
-
-	auto count
-	head@ XLOFFHeader_SymbolCount + @ count!
-
-	auto strtab
-	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
-
-	-1 ok!
-
-	while (i@ count@ <)
-		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
-			auto sname
-			symbol@ XLOFFSymbol_NameOffset + @ sname!
-
-			if (sname@ 0xFFFFFFFF ~=)
-				strtab@ sname +=
-
-				if (sname@ name@ strcmp)
-					0 ok!
-					return
-				end
-			end
-		end
-
-		XLOFFSymbol_SIZEOF symbol +=
-		1 i +=
-	end
-end
-
-#include "../../../OSLoader/OSLoaderGlobal.h"
-
-externptr HALLoaderInfo
-
-fn DebugGetSymbolAddress { name dll -- address ok }
-	auto symbol
-	name@ dll@ DebugGetSymbol ok! symbol!
-
-	if (ok@)
-		return
-	end
-
-	auto head
-	dll@ ComDLL_HeadVAddr + @ head!
-
-	auto sectionheader
-	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
-
-	symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * sectionheader +=
-
-	symbol@ XLOFFSymbol_Value + @ address!
-
-	sectionheader@ XLOFFSectionHeader_VirtualAddress + @ address +=
-end
-
-fn DebugGetSymDLL { address -- dll symbase symname symbol ok }
-	HALLoaderInfo@ LdrInfo_DLLListHead + @ dll!
-
-	-1 ok!
-
-	while (dll@)
-		address@ // address
-		dll@ // dll
-		DebugGetSymbolByAddress ok! symbol! symname! symbase!
-
-		if (ok@ ~~)
-			return
-		end
-
-		dll@ ComDLL_Next + @ dll!
-	end
-end
-
 var KeFox32OldIPL 0
 public KeFox32OldIPL
 
@@ -800,6 +671,29 @@ fn KeFox32Exception { ecause tf -- }
 	auto olddis
 	HALfox32InterruptsDisabled@ olddis!
 	1 HALfox32InterruptsDisabled!
+
+	auto ipl
+	KeIPLCurrent@ ipl!
+	ipl@ KeFox32OldIPL!
+
+	auto handled
+	1 handled!
+
+	if (DEBUGCHECKS)
+		if (tf@ OSContext_eflagsB + gb FOX32_RS_INT &)
+			if (olddis@)
+				olddis@ tf@ OSContext_eflagsB + gb "ef=%x interrupts enabled but id=%d\n" KeCrash
+			end elseif (ipl@ IPLDPC >)
+				ipl@ tf@ OSContext_eflagsB + gb "ef=%x interrupts enabled but ipl=%d\n" KeCrash
+			end
+		end else
+			if (olddis@ ~~)
+				if (ipl@ IPLDPC <=)
+					ipl@ olddis@ tf@ OSContext_eflagsB + gb "ef=%x interrupts disabled but id=%d ipl=%d\n" KeCrash
+				end
+			end
+		end
+	end
 
 	if (tf@ OSContext_eflagsB + gb FOX32_RS_USER &)
 		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
@@ -833,13 +727,6 @@ fn KeFox32Exception { ecause tf -- }
 
 	auto excname
 
-	auto handled
-	1 handled!
-
-	if (olddis@)
-		0 handled!
-	end
-
 	if (handled@)
 		0 handled!
 
@@ -855,11 +742,9 @@ fn KeFox32Exception { ecause tf -- }
 
 				HALCPUInterruptDisable drop
 			end else
-				auto ipl
-				KeIPLCurrent@ ipl!
-				IPLHIGH KeIPLCurrent!
+				1 KeStatistics OSStatistics_Interrupts + +=
 
-				ipl@ KeFox32OldIPL!
+				IPLHIGH KeIPLCurrent!
 
 				tf@ // trapframe
 				ecause@ // int
@@ -914,33 +799,13 @@ fn KeFox32Exception { ecause tf -- }
 			"?" excname!
 		end
 
-		auto ok
-		auto symname
-		auto symbase
-		auto dll
-
+		excname@
+		tf@ OSContext_badaddr + @
 		tf@ OSContext_epc + @
-		DebugGetSymDLL ok! drop symname! symbase! dll!
-
-		if (ok@ ~~)
-			tf@ OSContext_epc + @ symbase@ -
-			symname@
-			dll@ ComDLL_Name + @
-			excname@
-			tf@ OSContext_badaddr + @
-			tf@ OSContext_eflagsB + gb
-			KeIPLCurrent@
-			olddis@
-			"I%d,IP%d,EF%02x,VA%08x,%s,%s!%s+%x\n" KeCrash
-		end else
-			excname@
-			tf@ OSContext_badaddr + @
-			tf@ OSContext_epc + @
-			tf@ OSContext_eflagsB + gb
-			KeIPLCurrent@
-			olddis@
-			"I%d,IP%d,EF%02x,PC%08x,VA%08x,%s\n" KeCrash
-		end
+		tf@ OSContext_eflagsB + gb
+		KeIPLCurrent@
+		olddis@
+		"I%d,IP%d,EF%02x,PC%08x,VA%08x,%s\n" KeCrash
 	end
 
 	if (tf@ OSContext_eflagsB + gb FOX32_RS_USER &)
@@ -1018,6 +883,8 @@ fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 	startfunc@ ctx@ OSContext_a2 + !
 	context1@ ctx@ OSContext_a1 + !
 	context2@ ctx@ OSContext_a0 + !
+
+	0 ctx@ OSContext_fp + !
 
 	// enable interrupts and paging in the thread's context
 	FOX32_RS_KTHREAD ctx@ OSContext_eflagsB + sb

@@ -7,5 +7,4 @@ KERNELMODULES += BootDrivers/LIMNstation/AnalogClockTest \
 		BootDrivers/LIMNstation/KinnowFB \
 		BootDrivers/LIMNstation/Mouse \
 		BootDrivers/LIMNstation/RTC \
-		BootDrivers/LIMNstation/Serial \
-		KDebug
+		BootDrivers/LIMNstation/Serial

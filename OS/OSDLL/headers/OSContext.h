@@ -69,6 +69,7 @@ struct OSContext
 	4 tp
 
 	4 r31
+	4 fp
 
 	4 badaddr
 	1 eflagsB

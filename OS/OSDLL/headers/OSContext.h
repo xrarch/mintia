@@ -77,7 +77,7 @@ struct OSContext
 	4 sp
 endstruct
 
-const OSCONTEXTCOUNT 36
+const OSCONTEXTCOUNT 37
 
 const FOX32_RS_INT  4
 const FOX32_RS_USER 8

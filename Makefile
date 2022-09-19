@@ -83,6 +83,11 @@ endif
 all: $(PROJECT) $(shell rm -f DELTA)
 	$(FSTOOL) udf / DELTA
 
+update:
+	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
+	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
+	$(FSTOOL) ud / TextManifest
+
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null
 	dd if=$(DISKLABEL) of=$(DISTIMAGE) bs=512 count=1 seek=0 conv=notrunc

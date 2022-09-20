@@ -52,6 +52,79 @@ asm "
 
 KeFox32DismissVector:
 .global KeFox32DismissVector
+	push 0 ;badaddr
+	push fp
+	push r31
+	push tp
+	push at
+	push s17
+	push s16
+	push s15
+	push s14
+	push s13
+	push s12
+	push s11
+	push s10
+	push s9
+	push s8
+	push s7
+	push s6
+	push s5
+	push s4
+	push s3
+	push s2
+	push s1
+	push s0
+	push a3
+	push a2
+	push a1
+	push a0
+	push t6
+	push t5
+	push t4
+	push t3
+	push t2
+	push t1
+	push t0
+
+	mov  a0, sp
+	mov  a1, 0xFFFF
+	call KeFox32Exception
+
+	pop  t0
+	pop  t1
+	pop  t2
+	pop  t3
+	pop  t4
+	pop  t5
+	pop  t6
+	pop  a0
+	pop  a1
+	pop  a2
+	pop  a3
+	pop  s0
+	pop  s1
+	pop  s2
+	pop  s3
+	pop  s4
+	pop  s5
+	pop  s6
+	pop  s7
+	pop  s8
+	pop  s9
+	pop  s10
+	pop  s11
+	pop  s12
+	pop  s13
+	pop  s14
+	pop  s15
+	pop  s16
+	pop  s17
+	pop  at
+	pop  tp
+	pop  r31
+	pop  fp
+	add  sp, 4
 	reti
 
 KeFox32VsyncVector:
@@ -667,6 +740,160 @@ const EXCPAGEFAULTWRITE 3
 externptr KeInterlockedDecrementEnd
 externptr KeInterlockedIncrementEnd
 
+#include "../../../OSLoader/OSLoaderGlobal.h"
+
+externptr HALLoaderInfo
+
+fn DebugGetSymbolByAddress { address dll -- symbase symname symbol ok }
+	if (address@ dll@ ComDLL_Base + @ <)
+		-1 ok!
+		return
+	end
+
+	if (address@ dll@ ComDLL_End + @ >=)
+		-1 ok!
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectiontable
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectiontable!
+
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ XLOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	auto lastsym
+	0 lastsym!
+
+	-1 ok!
+
+	while (i@ count@ <)
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
+			auto sectionheader
+			sectiontable@ symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * + sectionheader!
+
+			auto sbase
+			symbol@ XLOFFSymbol_Value + @ sectionheader@ XLOFFSectionHeader_VirtualAddress + @ + sbase!
+
+			if (address@ sbase@ >=)
+				symbol@ XLOFFSymbol_NameOffset + @ symname!
+
+				if (symname@ 0xFFFFFFFF ==)
+					0 symname!
+				end else
+					strtab@ symname +=
+				end
+
+				symbol@ lastsym!
+				sbase@ symbase!
+			end elseif (address@ sbase@ <)
+				if (lastsym@)
+					0 ok!
+				end
+
+				lastsym@ symbol!
+
+				return
+			end
+		end
+
+		XLOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+
+	if (lastsym@)
+		0 ok!
+	end
+
+	lastsym@ symbol!
+end
+
+fn DebugGetSymbol { name dll -- symbol ok }
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	head@ XLOFFHeader_SymbolTableOffset + @ head@ + symbol!
+
+	auto i
+	0 i!
+
+	auto count
+	head@ XLOFFHeader_SymbolCount + @ count!
+
+	auto strtab
+	head@ XLOFFHeader_StringTableOffset + @ head@ + strtab!
+
+	-1 ok!
+
+	while (i@ count@ <)
+		if (symbol@ XLOFFSymbol_TypeB + gb XLOFF_SYMTYPE_GLOBAL ==)
+			auto sname
+			symbol@ XLOFFSymbol_NameOffset + @ sname!
+
+			if (sname@ 0xFFFFFFFF ~=)
+				strtab@ sname +=
+
+				if (sname@ name@ strcmp)
+					0 ok!
+					return
+				end
+			end
+		end
+
+		XLOFFSymbol_SIZEOF symbol +=
+		1 i +=
+	end
+end
+
+fn DebugGetSymbolAddress { name dll -- address ok }
+	auto symbol
+	name@ dll@ DebugGetSymbol ok! symbol!
+
+	if (ok@)
+		return
+	end
+
+	auto head
+	dll@ ComDLL_HeadVAddr + @ head!
+
+	auto sectionheader
+	head@ XLOFFHeader_SectionTableOffset + @ head@ + sectionheader!
+
+	symbol@ XLOFFSymbol_SectionIndexI + gi XLOFFSectionHeader_SIZEOF * sectionheader +=
+
+	symbol@ XLOFFSymbol_Value + @ address!
+
+	sectionheader@ XLOFFSectionHeader_VirtualAddress + @ address +=
+end
+
+fn DebugGetSymDLL { address -- dll symbase symname symbol ok }
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ dll!
+
+	-1 ok!
+
+	while (dll@)
+		address@ // address
+		dll@ // dll
+		DebugGetSymbolByAddress ok! symbol! symname! symbase!
+
+		if (ok@ ~~)
+			return
+		end
+
+		dll@ ComDLL_Next + @ dll!
+	end
+end
+
 fn KeFox32Exception { ecause tf -- }
 	auto olddis
 	HALfox32InterruptsDisabled@ olddis!
@@ -696,6 +923,12 @@ fn KeFox32Exception { ecause tf -- }
 	end
 
 	if (tf@ OSContext_eflagsB + gb FOX32_RS_USER &)
+		if (DEBUGCHECKS)
+			if (KeThreadCurrent@ KeThread_TrapFrame + @)
+				"already has trapframe\n" KeCrash
+			end
+		end
+
 		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
 
 		// check for interlocked operation
@@ -736,6 +969,12 @@ fn KeFox32Exception { ecause tf -- }
 			1 handled!
 
 			if (ecause@ 0x30 ==)
+				if (DEBUGCHECKS)
+					if (ipl@ IPLDPC >=)
+						"syscall at >= IPLDPC\n" KeCrash
+					end
+				end
+
 				HALCPUInterruptEnable
 
 				tf@ KeFox32Syscall
@@ -812,6 +1051,10 @@ fn KeFox32Exception { ecause tf -- }
 		// we interrupted usermode code
 
 		tf@ PsPrepareUsermode
+
+		if (DEBUGCHECKS)
+			0 KeThreadCurrent@ KeThread_TrapFrame + !
+		end
 	end
 
 	olddis@ HALfox32InterruptsDisabled!
@@ -871,11 +1114,6 @@ fn HALCPUTrapFrameAbort { abort tf -- }
 end
 
 fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
-	8 kstack -=
-
-	0 kstack@!
-	startfunc@ kstack@ 4 + !
-
 	kstack@ OSContext_SIZEOF - ctx!
 
 	ctx@ OSContext_SIZEOF 0 memset
@@ -886,10 +1124,5 @@ fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 
 	0 ctx@ OSContext_fp + !
 
-	// enable interrupts and paging in the thread's context
-	FOX32_RS_KTHREAD ctx@ OSContext_eflagsB + sb
-
 	pointerof ThreadTrampoline ctx@ OSContext_epc + !
-
-	kstack@ ctx@ OSContext_sp + !
 end

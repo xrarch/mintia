@@ -23,10 +23,118 @@
 
 #include "<inc>/IO.h"
 
-#include "<inc>/Console.h"
+#include "<inc>/IPC.h"
 
 #include "<ll>/OSDLL/OS.h"
 
-fn IPCPortCreateObject { permissions name -- portobject ok }
+fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
+	fnsection "PAGE$text"
 
+	auto ok
+
+	// dereference the server port, if this was a client.
+	// if this was a server, deallocate the client table.
+
+	auto clienttable
+
+	if (object@ IPCPort_ServerPort + @)
+		// TODO send a disconnection message (if prior connection was
+		// successful).
+
+
+
+		// remove client ID from server's table
+
+		object@ IPCPort_ServerPort + @ IPCPort_ClientTableHeader + @ clienttable!
+
+		object@ IPCPort_ClientID + @ // handle
+		clienttable@ // handletable
+		0 // locked
+		ExHandleDelete ok! drop drop
+
+		if (DEBUGCHECKS)
+			if (ok@)
+				"IPCPortObjectDelete: failed to delete handle (%i)\n" KeCrash
+			end
+		end
+
+		object@ IPCPort_ServerPort + @ ObObjectDereferenceByPointer drop
+	end else
+		object@ IPCPort_ClientTableHeader + @ clienttable!
+
+		0 // func
+		clienttable@ // handletable
+		ExHandleTableDelete
+
+		clienttable@ MmFree
+
+		object@ IPCPort_OwningProcess + @ ObObjectDereferenceByPointer drop
+	end
+
+	// TODO deallocate all pending messages
+
+
+end
+
+fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject ok }
+	fnsection "PAGE$text"
+
+	name@ // name
+	0 // flags
+	permissions@ // permissions
+	0 // npquotabias
+	0 // pquotabias
+	IPCPort_SIZEOF // bodysize
+	IPCPortObjectType@ // type
+	ObObjectCreate ok! portobject!
+
+	if (ok@)
+		return
+	end
+
+	0 portobject@ IPCPort_MessageListHead + !
+	0 portobject@ IPCPort_MessageListTail + !
+
+	owningprocess@ portobject@ IPCPort_OwningProcess + !
+
+	auto clienttable
+
+	if (serverport@)
+		serverport@ portobject@ IPCPort_ServerPort + !
+		0 portobject@ IPCPort_ClientTableHeader + !
+
+		serverport@ IPCPort_ClientTableHeader + @ clienttable!
+
+		auto clientid
+		portobject@ // entryvalue
+		clienttable@ // handletable
+		0 // locked
+		ExHandleCreate ok! drop clientid!
+
+		if (ok@)
+			portobject@ ObObjectDeallocate
+
+			return
+		end
+
+		clientid@ portobject@ IPCPort_ClientID + !
+
+		serverport@ ObObjectReferenceByPointer drop
+	end else
+		0 portobject@ IPCPort_ServerPort + !
+
+		owningprocess@ // chargedprocess
+		0 // entrysizelog
+		ExHandleTableCreate ok! clienttable!
+
+		if (ok@)
+			portobject@ ObObjectDeallocate
+
+			return
+		end
+
+		owningprocess@ ObObjectReferenceByPointer drop
+
+		clienttable@ portobject@ IPCPort_ClientTableHeader + !
+	end
 end

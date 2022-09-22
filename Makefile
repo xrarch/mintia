@@ -81,7 +81,7 @@ ifndef PROJECT
 endif
 
 all: $(PROJECT) $(shell rm -f DELTA)
-	$(FSTOOL) udf / DELTA
+	$(FSTOOL) wdf / DELTA
 
 update:
 	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)

@@ -6,7 +6,8 @@ COMPONENTS := Console \
 			Memory \
 			Object \
 			Process \
-			Security
+			Security \
+			IPC
 
 LINKOPT = -nostubs
 

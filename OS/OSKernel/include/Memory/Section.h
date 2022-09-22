@@ -18,8 +18,8 @@ endstruct
 extern MmSectionPPTLock { sectionobject -- ok }
 extern MmSectionPPTUnlock { sectionobject -- }
 
-extern MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
-extern MmSectionObjectCreate { pageprotection anonsize permissions name -- sectionhandle ok }
+extern MmSectionCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
+extern MmSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
 
 extern MmFilePrepareForMap { prot endofview offset fileobject -- ok }
 extern MmFileUnprepareForMap { fileobject -- }

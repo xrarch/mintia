@@ -26,9 +26,6 @@
 
 const MMSECTIONMULTILEVELTHRESHOLD 0x200000
 
-var MmAnonymousPageCount 0
-public MmAnonymousPageCount
-
 fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	fnsection "PAGE$text"
 
@@ -120,22 +117,6 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	object@ MmSection_Mutex + @ MmFree
 end
 
-fn MmAnonymousPageDelete { ipl pfdbe -- }
-	pfdbe@ MmEvictablePageReference drop
-	pfdbe@ MmEvictablePageDelete
-
-	1 MmAnonymousPageCount -=
-
-	ipl@ KeIPLLower
-
-	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
-		// free in swap
-		pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ IOSwapPageFreePTE
-	end
-
-	pfdbe@ MmEvictablePageDereference drop
-end
-
 fn MmSectionDeletePPT { ppt count -- }
 	while (count@)
 		auto ipl
@@ -190,7 +171,7 @@ fn MmSectionPPTUnlock { sectionobject -- }
 	KeMutexRelease drop
 end
 
-fn MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
+fn MmSectionCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
 	fnsection "PAGE$text"
 
 	if (anonsize@ ~~)
@@ -276,7 +257,7 @@ fn MmSectionObjectCreateObject { pageprotection anonsize permissions name -- sec
 	quotablock@ MmQuotaBlockReference
 end
 
-fn MmSectionObjectCreate { pageprotection anonsize permissions name -- sectionhandle ok }
+fn MmSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
 	fnsection "PAGE$text"
 
 	auto access
@@ -286,7 +267,7 @@ fn MmSectionObjectCreate { pageprotection anonsize permissions name -- sectionha
 	anonsize@ // anonsize
 	permissions@ // permissions
 	name@ // name
-	MmSectionObjectCreateObject ok! sectionobject!
+	MmSectionCreateObject ok! sectionobject!
 
 	if (ok@)
 		return
@@ -302,143 +283,6 @@ fn MmSectionObjectCreate { pageprotection anonsize permissions name -- sectionha
 
 		return
 	end
-end
-
-fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
-	auto pte
-	pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ pte!
-
-	auto ppte
-	pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ ppte!
-
-	auto ef
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb ef!
-
-	pte@ ppte@!
-
-	auto ptpfdbe
-
-	if (ef@ MMEVICTFLAG_PRIVATE &)
-		if (pfdbe@ MmPageFrameEntryAnonymous_Process + @ PsSystemProcess@ ~=)
-			// dereference the page table.
-
-			ppte@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
-
-			if (pte@ SWAPPTE_DEMANDZERO ==)
-				// let it be known that this IF statement was the fix to a bug
-				// that took me 2 weeks to resolve.
-
-				1 // deref
-				ppte@ // pteaddr
-				pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + @ // vaddr
-				pfdbe@ MmPageFrameEntryAnonymous_Process + @ // process
-				MmPTEDelete drop
-			end else
-				ptpfdbe@ MmEvictablePageDereference drop
-			end
-		end
-	end elseif (ef@ MMEVICTFLAG_PAGETABLE &)
-		ppte@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
-		ptpfdbe@ MmEvictablePageDereference drop
-	end
-
-	1 MmAnonymousPageCount -=
-end
-
-fn MmAnonymousPageGet { pte pri -- pfdbe pfn ok }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"MmAnonymousPageGet: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	// caller must set COW flag in pfdbe if applicable.
-
-	// caller must also set MMEVICTFLAG_MODIFIED and set SwapPageNumber to
-	// MMSWAPPAGE_NONE if this isn't a demand-zero page.
-
-	MMEVICTFLAG_WORKINGSET // flags
-	MMEVICTTYPE_ANON // evictabletype
-	pri@ // priority
-	MmEvictablePageGet ok! pfn! pfdbe!
-
-	if (ok@)
-		return
-	end
-
-	SWAPPTE_DEMANDZERO pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
-
-	pte@ pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
-
-	auto rs
-	HALCPUInterruptDisable rs!
-	1 MmAnonymousPageCount +=
-	rs@ HALCPUInterruptRestore
-end
-
-fn MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	pri@ CANBLOCK |
-	MmPageWait ok! drop
-
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
-
-	pte@ pri@ MmAnonymousPageGet ok! pfn! pfdbe!
-
-	ipl@ KeIPLLower
-end
-
-fn MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"MmAnonymousSwapIn: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	pte@ // pte
-	pri@ FREEFIRST | // pri
-	MmAnonymousPageGet ok! pfn! pfdbe!
-
-	IPLLOW KeIPLLower
-
-	if (ok@)
-		return
-	end
-
-	auto kflags
-	IOKFLAG_PAGEIN kflags!
-
-	if (pri@ TRYFOREVER &)
-		IOKFLAG_SWAPIN kflags |=
-	end
-
-	kflags@ // kflags
-	pfn@ PAGESHIFT << IDENTITYSPACE | // pageframe
-	pte@@ // pte
-	IOSwapPageReadPTE ok!
-
-	if (ok@)
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		pfdbe@ MmEvictablePageDereference drop
-
-		ipl@ // ipl
-		pfdbe@ // pfdbe
-		MmAnonymousPageDelete
-
-		return
-	end
-
-	pte@@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
-
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 end
 
 fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }

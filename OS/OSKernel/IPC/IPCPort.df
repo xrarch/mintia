@@ -27,42 +27,60 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+struct IPCPortWaiter // for one-copy, zero-allocation transfer to waiters
+	4 Next
+	4 Prev
+
+	MmMDLHeader_SIZEOF MDL
+endstruct
+
+fn (ObTypeOpenFunction) IPCPortObjectOpen { access object process -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	if (process@ object@ IPCPort_OwningProcess + @ ~=)
+		STATUS_PERMISSION_DENIED ok!
+	end
+end
+
 fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 	fnsection "PAGE$text"
 
 	auto ok
 
-	// dereference the server port, if this was a client.
-	// if this was a server, deallocate the client table.
-
 	auto clienttable
 
-	if (object@ IPCPort_ServerPort + @)
-		// TODO send a disconnection message (if prior connection was
-		// successful).
+	IPCGlobalLock drop
 
+	if (object@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+		// it's a client, check if there's a server port still.
 
+		if (object@ IPCPort_ServerPort + @)
+			if (object@ IPCPort_Flags + @ IPCPORTFLAG_FAILED_CONNECTION & ~~)
+				// TODO send a disconnection message
 
-		// remove client ID from server's table
+			end
 
-		object@ IPCPort_ServerPort + @ IPCPort_ClientTableHeader + @ clienttable!
+			// remove client ID from server's table
 
-		object@ IPCPort_ClientID + @ // handle
-		clienttable@ // handletable
-		0 // locked
-		ExHandleDelete ok! drop drop
+			object@ IPCPort_ServerPort + @ IPCPort_ClientTableHeader + @ clienttable!
 
-		if (DEBUGCHECKS)
-			if (ok@)
-				"IPCPortObjectDelete: failed to delete handle (%i)\n" KeCrash
+			object@ IPCPort_ClientID + @ // handle
+			clienttable@ // handletable
+			0 // locked
+			ExHandleDelete ok! drop drop
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"IPCPortObjectDelete: failed to delete handle (%i)\n" KeCrash
+				end
 			end
 		end
-
-		object@ IPCPort_ServerPort + @ ObObjectDereferenceByPointer drop
 	end else
 		object@ IPCPort_ClientTableHeader + @ clienttable!
 
-		0 // func
+		pointerof IPCPortHandleDestroyFunction // func
 		clienttable@ // handletable
 		ExHandleTableDelete
 
@@ -71,9 +89,18 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 		object@ IPCPort_OwningProcess + @ ObObjectDereferenceByPointer drop
 	end
 
+	IPCGlobalUnlock
+
 	// TODO deallocate all pending messages
 
 
+end
+
+fn (ExHandleEnumFunction) IPCPortHandleDestroyFunction { entryptr handle handletable -- ok }
+	fnsection "PAGE$text"
+
+	// TODO send disconnection messages to clients and clean up any pending
+	// connections.
 end
 
 fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject ok }
@@ -94,6 +121,13 @@ fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject
 
 	0 portobject@ IPCPort_MessageListHead + !
 	0 portobject@ IPCPort_MessageListTail + !
+
+	0 portobject@ IPCPort_ReceiverListHead + !
+	0 portobject@ IPCPort_ReceiverListTail + !
+
+	0 portobject@ IPCPort_Flags + !
+
+	0 portobject@ IPCPort_ServerContextForClient + !
 
 	owningprocess@ portobject@ IPCPort_OwningProcess + !
 
@@ -119,7 +153,7 @@ fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject
 
 		clientid@ portobject@ IPCPort_ClientID + !
 
-		serverport@ ObObjectReferenceByPointer drop
+		IPCPORTFLAG_CLIENT portobject@ IPCPort_Flags + |=
 	end else
 		0 portobject@ IPCPort_ServerPort + !
 

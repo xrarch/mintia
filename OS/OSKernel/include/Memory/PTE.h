@@ -5,6 +5,7 @@ extern MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 extern MmPTEDereference { pfdbe process -- }
 extern MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
 extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }
+extern MmVirtualAddressIsValid { vaddr pagemap -- isvalid }
 
 extern MmPTEInterpret { pteaddr -- phyaddr flags ok }
 extern MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflags ok }

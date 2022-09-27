@@ -53,10 +53,13 @@ struct CoDuplex
 
 	KeMutex_SIZEOF Mutex // only used if paged buffers, otherwise IPL sync
 
+	KeEvent_SIZEOF StoppedEvent
+
 	4 Paged
 	4 QuotaBlock
 
 	4 Flags
+	4 InternalFlags
 
 	4 Headless
 
@@ -124,6 +127,7 @@ table CoDuplexDispatch
 endtable
 
 const DUPLEXFLAG_PENDING_LF 0x80000000
+const DUPLEXFLAG_STOPPED    0x40000000
 
 fn CoDuplexBufferInitialize { size pri quotablock header -- ok }
 	fnsection "PAGE$text"
@@ -273,6 +277,8 @@ fn CoDuplexObjectCreate { context txfunc flags pri quotablock permanent name per
 
 	txfunc@ duplex@ CoDuplex_TXFunc + !
 
+	0 duplex@ CoDuplex_InternalFlags + !
+
 	flags@ duplex@ CoDuplex_Flags + !
 	pri@ duplex@ CoDuplex_Paged + !
 	0 duplex@ CoDuplex_Headless + !
@@ -333,6 +339,12 @@ fn CoDuplexObjectCreate { context txfunc flags pri quotablock permanent name per
 		duplex@ CoDuplex_Mutex + // mutex
 		KeMutexInitialize
 	end
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"CoDuplexStoppedEvent" // name
+	duplex@ CoDuplex_StoppedEvent + // event
+	KeEventInitialize
 
 	auto serverfcb
 	CoDuplexDispatch // dispatchtable
@@ -612,8 +624,8 @@ fn CoDuplexCookedCopyClient { dest src maxdest maxsrc duplex -- bufread bytecnt 
 		end
 
 		if (src@ gb '\n' ==)
-			if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
-				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
+			if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
+				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
 
 				'\n' dest@ sb
 				1 bytecnt +=
@@ -627,7 +639,7 @@ fn CoDuplexCookedCopyClient { dest src maxdest maxsrc duplex -- bufread bytecnt 
 
 					'\r' dest@ sb
 
-					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_InternalFlags + |=
 
 					1 bytecnt +=
 
@@ -641,7 +653,7 @@ fn CoDuplexCookedCopyClient { dest src maxdest maxsrc duplex -- bufread bytecnt 
 				2 bytecnt +=
 			end
 		end else
-			DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
+			DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
 
 			src@ gb dest@ sb
 
@@ -676,6 +688,8 @@ fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
 		if (timeout@)
 			STATUS_OTHER_CONDITION ok!
 		end else
+			0 mdl@ MmMDLHeader_Length + !
+
 			STATUS_RING_EMPTY ok!
 		end
 	end else
@@ -870,6 +884,8 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 		if (timeout@)
 			STATUS_OTHER_CONDITION ok!
 		end else
+			0 mdl@ MmMDLHeader_Length + !
+
 			STATUS_RING_EMPTY ok!
 		end
 	end else
@@ -1048,6 +1064,8 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 					STATUS_OTHER_CONDITION ok!
 				end
 			end else
+				bytecnt@ mdl@ MmMDLHeader_Length + !
+
 				STATUS_RING_EMPTY ok!
 			end
 		end else
@@ -1075,6 +1093,12 @@ end
 fn CoDuplexTXCharacter { c txfunc duplex -- done }
 	auto ok
 
+	0 done!
+
+	if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
+		return
+	end
+
 	if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 		c@ // c
 		duplex@ // duplex
@@ -1084,13 +1108,13 @@ fn CoDuplexTXCharacter { c txfunc duplex -- done }
 			DONE_NORMAL done!
 		end
 	end elseif (c@ '\n' ==)
-		if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+		if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
 			'\n' // c
 			duplex@ // duplex
 			txfunc@ CoDuplexTXFunction ok!
 
 			if (ok@ ~~)
-				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
+				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
 				DONE_NORMAL done!
 			end
 		end else
@@ -1104,7 +1128,7 @@ fn CoDuplexTXCharacter { c txfunc duplex -- done }
 				txfunc@ CoDuplexTXFunction ok!
 
 				if (ok@)
-					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_InternalFlags + |=
 				end else
 					DONE_NORMAL done!
 				end
@@ -1173,12 +1197,12 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 
 			DONE_NORMAL done!
 		end elseif (c@ '\n' ==)
-			if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+			if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
 				'\n'
 				header@ CoDuplexBuffer_UserBuffer + @
 				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
 
-				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
+				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
 
 				DONE_NORMAL done!
 			end elseif (header@ CoDuplexBuffer_UserBufferLength + @
@@ -1199,7 +1223,7 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 				header@ CoDuplexBuffer_UserBuffer + @
 				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
 
-				DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+				DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_InternalFlags + |=
 			end
 		end else
 			c@
@@ -1267,11 +1291,11 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 
 				DONE_NORMAL done!
 			end elseif (c@ '\n' ==)
-				if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+				if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
 					'\n'
 					bufp@ index@ bufmask@ & + sb
 
-					DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
+					DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
 
 					DONE_NORMAL done!
 				end elseif (rp@ 1 >)
@@ -1302,9 +1326,13 @@ end
 
 fn CoDuplexReadTransmitCharacter { duplex -- c ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
-	// MDL is pinned.
 
 	0 ok!
+
+	if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
+		-1 ok!
+		return
+	end
 
 	// read as much as possible from the buffer. if this completes, cool.
 	// if it does not complete, then we need to look for pending client
@@ -1351,12 +1379,13 @@ fn CoDuplexReadTransmitCharacter { duplex -- c ok }
 			header@ CoDuplexBuffer_UserBufferIndex + @ + gb c!
 
 			if (c@ '\n' ==)
-				if (duplex@ CoDuplex_Flags + @ DUPLEXFLAG_PENDING_LF &)
+				if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
 					'\n' c!
 					1 header@ CoDuplexBuffer_UserBufferIndex + +=
+					DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
 				end else
 					'\r' c!
-					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_Flags + |=
+					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_InternalFlags + |=
 				end
 			end else
 				1 header@ CoDuplexBuffer_UserBufferIndex + +=
@@ -1405,13 +1434,31 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 	0 ok!
 
-	if (c@ 3 ==) // ^C
-		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW & ~~)
+	if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW & ~~)
+		if (c@ 3 ==) // ^C
 			OSSIGNAL_INT // signal
 			duplex@ CoDuplex_ConsoleHeader + // console
 			CoConsoleSignal
 
 			3 duplex@ CoDuplexEcho
+
+			return
+		end elseif (c@ 19 ==) // ^S
+			if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED & ~~)
+				DUPLEXFLAG_STOPPED duplex@ CoDuplex_InternalFlags + |=
+
+				duplex@ CoDuplex_StoppedEvent + KeEventReset drop
+			end
+
+			return
+		end elseif (c@ 17 ==) // ^Q
+			if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
+				DUPLEXFLAG_STOPPED ~ duplex@ CoDuplex_InternalFlags + &=
+
+				0 // priboost
+				duplex@ CoDuplex_StoppedEvent + // event
+				KeEventSignal
+			end
 
 			return
 		end
@@ -1728,16 +1775,22 @@ fn CoDuplexServerWriteCooked { buf mdl duplex -- ok }
 	auto len
 	mdl@ MmMDLHeader_Length + @ len!
 
+	auto done
+	0 done!
+
 	while (len@)
 		buf@ gb // c
 		duplex@ // duplex
 		CoDuplexInputCharacter ok!
 
 		if (ok@)
+			done@ mdl@ MmMDLHeader_Length + !
+
 			return
 		end
 
-		1 len +=
+		1 done +=
+		1 len -=
 		1 buf +=
 	end
 end
@@ -2235,11 +2288,41 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 	end
 
 	if (fcb@ IOFileControlBlock_FSContext + @)
-		buf@ // buf
-		timeout@ // timeout
-		mdl@ // mdl
-		duplex@ // duplex
-		CoDuplexServerRead ok!
+		while (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
+			if (timeout@ ~~)
+				0 mdl@ MmMDLHeader_Length + !
+
+				STATUS_RING_EMPTY ok!
+
+				break
+			end else
+				ipl@ duplex@ CoDuplexUnlock
+
+				mdl@ MmMDLHeader_Mode + @ // waitmode
+				1 // alertable
+				timeout@ // timeout
+				duplex@ CoDuplex_StoppedEvent + // object
+				KeThreadWaitForObject ok!
+
+				if (ok@)
+					return
+				end
+
+				duplex@ CoDuplexLock ok! ipl!
+
+				if (ok@)
+					return
+				end
+			end
+		end
+
+		if (ok@ ~~)
+			buf@ // buf
+			timeout@ // timeout
+			mdl@ // mdl
+			duplex@ // duplex
+			CoDuplexServerRead ok!
+		end
 	end else
 		buf@ // buf
 		timeout@ // timeout
@@ -2455,8 +2538,6 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 			end
 		end
 	end
-
-	DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_Flags + &=
 
 	ipl@ KeIPLLower
 

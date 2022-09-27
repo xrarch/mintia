@@ -21,5 +21,6 @@
 #include "<ll>/OSDLL/OSUserInfo.h"
 #include "<ll>/OSDLL/OSStatistics.h"
 #include "<ll>/OSDLL/OSStream.h"
+#include "<ll>/OSDLL/OSPort.h"
 
 #include "<ll>/OSDLL/OSContext.h"

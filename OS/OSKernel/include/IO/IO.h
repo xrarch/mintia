@@ -118,7 +118,7 @@ extern IOFileControlBlockFlush { fcb -- ok }
 extern IOFileControlBlockDeleteLastReference { fcb -- }
 extern IOFileControlBlockRescue { fcb -- }
 
-extern IOFileControlBlockTruncate { newsize growing keeplocked zero fcb -- oldsize ok }
+extern IOFileControlBlockTruncate { newsize growing keeplocked zero flags fcb -- oldsize ok }
 
 extern IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 

@@ -80,8 +80,9 @@ ifndef PROJECT
 	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(COMMANDS)
 endif
 
-all: $(PROJECT) $(shell rm -f DELTA)
+all: $(PROJECT)
 	$(FSTOOL) wdf / DELTA
+	rm -f DELTA
 
 update:
 	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)

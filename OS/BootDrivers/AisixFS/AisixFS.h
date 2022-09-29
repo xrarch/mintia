@@ -116,7 +116,7 @@ extern AFSBlockBitmapUnlock { mount -- }
 
 extern AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 extern AFSBlockMap { blkoff fcb kflags -- blkno ok }
-extern AFSBlockTruncate { newblocks oldblocks zero fcb -- ok }
+extern AFSBlockTruncate { newblocks oldblocks zero flags fcb -- ok }
 
 extern AFSOpen { access fileobject -- ok }
 extern AFSClose { access fileobject -- ok }
@@ -134,7 +134,7 @@ extern AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 extern AFSVerifyName { name -- ok }
 
 extern AFSUnlink { name dirfcb -- ok }
-extern AFSTruncate { newsize zero fcb -- ok }
+extern AFSTruncate { newsize zero flags fcb -- ok }
 extern AFSRename { srcname srcfcb destname destfcb -- ok }
 
 extern AFSINodeUpdate { fcb -- }

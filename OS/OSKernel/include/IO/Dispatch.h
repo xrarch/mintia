@@ -12,7 +12,7 @@ fnptr IODispatchSetSecurityFunction { uid gid permissions object -- ok }
 fnptr IODispatchRenameFunction { srcname srcfcb destname destfcb -- ok }
 fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
-fnptr IODispatchTruncateFunction { newsize zero fcb -- ok }
+fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }

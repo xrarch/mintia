@@ -57,6 +57,6 @@ extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok
 
 extern IOCacheInitialize { fcb -- cacheblock ok }
 
-extern IOCacheZeroData { size offset fcb -- ok }
+extern IOCacheZeroData { size offset flags fcb -- ok }
 
 externptr IOCachePagesUsed

@@ -143,12 +143,12 @@ AisixFSBoot:
 	mov  s2, long [s1 + INode_startblock]
 
 ;iterate the FAT chain until we see a 0xFFFFFFFF (-1) and load OSLoader.a3x
-;starting at 0x40400.
+;starting at 0x20400.
 
 	subi s3, zero, 1
 	subi s6, zero, 1
 
-	la   s4, 0x40400
+	la   s4, 0x20400
 
 .loadloop:
 
@@ -189,7 +189,7 @@ AisixFSBoot:
 
 ;check for the a3x program signature
 
-	la   t0, 0x40400
+	la   t0, 0x20400
 
 	la   t1, 0x45544E41
 	mov  t2, long [t0]

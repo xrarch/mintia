@@ -10,7 +10,7 @@ a3xBootDescriptor.bin: a3xBootDescriptor.s
 
 AisixFSBoot.bin: AisixFSBoot.s
 	$(ASM) AisixFSBoot.s AisixFSBoot.bin
-	$(LNK) move AisixFSBoot.bin text=0x40000,bss=text+text_size
+	$(LNK) move AisixFSBoot.bin text=0x20000,bss=text+text_size
 	$(LNK) binary -nobss AisixFSBoot.bin
 
 cleanup:

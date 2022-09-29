@@ -6,9 +6,6 @@ struct MmMDLHeader
 	4 Process
 	4 Mode
 
-	4 PinCount
-	4 MapCount
-
 	4 MappedAddress
 
 	4 Status
@@ -30,6 +27,10 @@ fnptr MmMDLCompleteRoutine { mdl -- }
 const MMMDL_MODIFIED   4
 const MMMDL_DELETE     8
 const MMMDL_COMPLETE   16
+const MMMDL_PINNED     32
+const MMMDL_MAPPED     64
+const MMMDL_DONTUNPIN  128
+const MMMDL_DONTUNMAP  256
 
 const MMMDL_FLAGS_NOT_TO_INHERIT MMMDL_DELETE
 

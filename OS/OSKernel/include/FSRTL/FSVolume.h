@@ -1,6 +1,6 @@
 extern FSVolumeNameGet { mount -- name }
 extern FSVolumeInitialize { blocksize mount -- cacheblock ok }
-extern FSVolumeUninitialize { mount -- }
+extern FSVolumeUninitialize { mount -- ok }
 extern FSVolumeFlush { mount -- ok }
 
 extern FSVolumeFileCreate { size mount -- ok }

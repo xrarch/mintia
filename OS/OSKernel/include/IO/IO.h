@@ -104,7 +104,7 @@ extern IOFileControlBlockGetSizeof { -- sizeof }
 extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 extern IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
-extern IOFileControlBlockDelete { writeout fcb -- }
+extern IOFileControlBlockDelete { writeout fcb -- ok }
 extern IOFileControlBlockReference { fcb -- oldcount }
 extern IOFileControlBlockDereference { fcb -- oldcount }
 extern IOFileControlBlockLock { fcb -- ok }

@@ -116,7 +116,7 @@ fn IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
 
 				0 // writeout
 				fcb@ // fcb
-				IOFileControlBlockReclaim
+				IOFileControlBlockReclaim drop
 
 				break
 			end
@@ -188,7 +188,7 @@ fn IOFileControlBlockFlush { fcb -- ok }
 	end
 end
 
-fn IOFileControlBlockReclaim { writeout fcb -- }
+fn IOFileControlBlockReclaim { writeout fcb -- ok }
 	fnsection "PAGE$text"
 
 	auto cacheblock
@@ -199,21 +199,19 @@ fn IOFileControlBlockReclaim { writeout fcb -- }
 			"IOFileControlBlockReclaim: didn't expect a cacheblock\n" KeCrash
 		end
 
-		auto ok
-
 		writeout@ // writeout
 		cacheblock@ // cacheblock
 		IOCacheInfoBlockDestroy ok!
 
 		if (ok@)
-			ok@ "IOFileControlBlockReclaim: failed to destroy cacheblock (%i)\n" KeCrash
+			return
 		end
 	end
 
 	fcb@ IOFileControlBlock_RwLock + ExRwLockUninitialize
 end
 
-fn IOFileControlBlockDelete { writeout fcb -- }
+fn IOFileControlBlockDelete { writeout fcb -- ok }
 	// caller should be 100% sure this FCB won't be used again.
 	// it also should have removed it from the reusable list by now.
 
@@ -223,16 +221,20 @@ fn IOFileControlBlockDelete { writeout fcb -- }
 		end
 	end
 
+	writeout@ // writeout
+	fcb@ // fcb
+	IOFileControlBlockReclaim ok!
+
+	if (ok@)
+		return
+	end
+
 	if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
 		auto rs
 		HALCPUInterruptDisable rs!
 		1 IOFileControlBlockCount -=
 		rs@ HALCPUInterruptRestore
 	end
-
-	writeout@ // writeout
-	fcb@ // fcb
-	IOFileControlBlockReclaim
 
 	fcb@ MmFree
 end
@@ -365,7 +367,7 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 
 			0 // writeout
 			fcb@ // fcb
-			IOFileControlBlockDelete
+			IOFileControlBlockDelete drop
 
 			return
 		end elseif (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
@@ -389,7 +391,7 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 
 					0 // writeout
 					fcb@ // fcb
-					IOFileControlBlockDelete
+					IOFileControlBlockDelete drop
 
 					return
 				end

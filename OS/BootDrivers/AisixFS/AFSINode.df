@@ -452,12 +452,20 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 
 				1 // writeout
 				fcb@ // fcb
-				IOFileControlBlockDelete
+				IOFileControlBlockDelete ok!
+
+				if (ok@)
+					break
+				end
 
 				fcbdata@ MmFree
 			end else
 				fcb@ IOFileControlBlockGetCacheInfoBlock // cacheblock
-				IOCacheInfoBlockFlush drop
+				IOCacheInfoBlockFlush ok!
+
+				if (ok@)
+					break
+				end
 			end
 
 			nextfcb@ fcb!
@@ -466,6 +474,10 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 		i@ // bucket
 		mount@ // mount
 		AFSFCBCacheUnlockBucket
+
+		if (ok@)
+			break
+		end
 
 		1 i +=
 	end
@@ -591,12 +603,25 @@ fn (IODispatchReclaimFCBFunction) AFSFCBReclaim { fcb -- reclaimed }
 
 	IPLLOW KeIPLLower
 
-	1 reclaimed!
-
 	// we must flush any dirty cache data while holding the cache bucket
 	// mutex.
 
-	fcb@ IOFileControlBlockFlush drop
+	auto ok
+	fcb@ IOFileControlBlockFlush ok!
+
+	if (ok@)
+		0 reclaimed!
+
+		IPLDPC KeIPLRaise drop
+
+		bucket@ // bucket
+		mount@ // mount
+		AFSFCBCacheUnlockBucket
+
+		return
+	end
+
+	1 reclaimed!
 
 	fcb@ // fcb
 	buckethead@ // buckethead
@@ -604,11 +629,11 @@ fn (IODispatchReclaimFCBFunction) AFSFCBReclaim { fcb -- reclaimed }
 
 	fcbdata@ MmFree
 
+	IPLDPC KeIPLRaise drop
+
 	bucket@ // bucket
 	mount@ // mount
 	AFSFCBCacheUnlockBucket
-
-	IPLDPC KeIPLRaise drop
 end
 
 fn AFSFCBDelete { fcb -- }
@@ -750,7 +775,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		if (ok@)
 			-1 // writeout
 			fcb@ // fcb
-			IOFileControlBlockDelete
+			IOFileControlBlockDelete drop
 
 			bucket@ // bucket
 			mount@ // mount

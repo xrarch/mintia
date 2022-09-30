@@ -109,14 +109,14 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	FSVolumeBlockRead ok! pfdbe! pageframe!
 
 	if (ok@)
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 		return
 	end
 
 	if (pageframe@ AFSSuperblock_Magic + @ AFSSUPERBLOCKMAGIC ~=)
 		pfdbe@ MmEvictablePageDereference drop
 
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 
 		STATUS_BAD_FILESYSTEM ok!
 
@@ -126,7 +126,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	if (pageframe@ AFSSuperblock_Version + @ AFSSUPERBLOCKVERSION ~=)
 		pfdbe@ MmEvictablePageDereference drop
 
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 
 		STATUS_BAD_FILESYSTEM ok!
 
@@ -140,7 +140,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	if (ok@)
 		pfdbe@ MmEvictablePageDereference drop
 
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 
 		return
 	end
@@ -154,7 +154,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	if (ok@)
 		pfdbe@ MmEvictablePageDereference drop
 
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 
 		return
 	end
@@ -208,7 +208,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	if (ok@)
 		afsdata@ MmFree
 
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 
 		return
 	end
@@ -224,7 +224,7 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 
 		afsdata@ MmFree
 
-		mount@ FSVolumeUninitialize
+		mount@ FSVolumeUninitialize drop
 
 		return
 	end
@@ -251,7 +251,17 @@ fn (IOFilesystemUnmountFunction) DriverAFSUnmount { mount -- ok }
 	AFSFCBCacheFlush ok!
 
 	if (ok@)
-		ok@ "DriverAFSUnmount: cache destroy failed\n" KeCrash
+		mount@ IOMountGetRootFCB IOFileControlBlockReference drop
+
+		return
+	end
+
+	mount@ FSVolumeUninitialize ok!
+
+	if (ok@)
+		mount@ IOMountGetRootFCB IOFileControlBlockReference drop
+
+		return
 	end
 
 	mount@ AFSBlockBitmapUninitialize
@@ -259,8 +269,6 @@ fn (IOFilesystemUnmountFunction) DriverAFSUnmount { mount -- ok }
 	afsdata@ MmFree
 
 	0 mount@ IOMountSetContext
-
-	mount@ FSVolumeUninitialize
 
 	mount@ FSVolumeFlush drop
 end
@@ -304,9 +312,25 @@ fn (IOFilesystemUpdateFlagsFunction) DriverAFSUpdateFlags { newflags oldflags mo
 
 			0 // destroy
 			mount@ // mount
-			AFSFCBCacheFlush drop
+			AFSFCBCacheFlush ok!
 
-			mount@ FSVolumeFlush drop
+			if (ok@)
+				HALCPUInterruptDisable rs!
+				mount@ IOMountGetFlags OSMOUNT_READONLY ~ & mount@ IOMountSetFlags
+				rs@ HALCPUInterruptRestore
+
+				return
+			end
+
+			mount@ FSVolumeFlush ok!
+
+			if (ok@)
+				HALCPUInterruptDisable rs!
+				mount@ IOMountGetFlags OSMOUNT_READONLY ~ & mount@ IOMountSetFlags
+				rs@ HALCPUInterruptRestore
+
+				return
+			end
 		end
 	end
 end

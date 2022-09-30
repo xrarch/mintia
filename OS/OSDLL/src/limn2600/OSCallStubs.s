@@ -51,10 +51,12 @@ OSGetBootFlags:
 OSContinue:
 .global OSContinue
 	mov  t1, a0
+	mov  t2, a1
 
 	li   t0, 5
 	sys  0
 
+	mov  a0, t1
 
 	ret
 

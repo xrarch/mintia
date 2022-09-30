@@ -144,7 +144,7 @@ extern KeInterlockedDecrement { dec ptr -- oldcount }
 
 extern KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 
-extern KeThreadContinue { context thread -- }
+extern KeThreadContinue { signum context thread -- ok }
 
 extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name asid parentprocess process -- }

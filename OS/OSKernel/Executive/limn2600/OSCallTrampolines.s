@@ -267,9 +267,11 @@ OSTOSContinue:
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSContinue
 
+	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

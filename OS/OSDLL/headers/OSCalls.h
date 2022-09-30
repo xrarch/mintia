@@ -10,7 +10,7 @@ extern OSGetSystemConsoleName { namebuf -- ok }
 
 extern OSGetBootFlags { -- bootflags ok }
 
-extern OSContinue { context -- }
+extern OSContinue { signum context -- ok }
 
 extern OSQueryTime { -- sec ms }
 extern OSQueryUptime { -- sec ms }

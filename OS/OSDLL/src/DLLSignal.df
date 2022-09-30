@@ -185,11 +185,11 @@ fn OSSignalSetAction { action signum -- oldaction }
 
 	if (action@ OSSIGNALACTION_IGNORE ==)
 		signum@ // signal
-		OSCURRENTTHREAD // processhandle
+		OSCURRENTTHREAD // threadhandle
 		OSThreadMaskSignal drop
 	end else
 		signum@ // signal
-		OSCURRENTTHREAD // processhandle
+		OSCURRENTTHREAD // threadhandle
 		OSThreadUnmaskSignal drop
 	end
 
@@ -226,13 +226,23 @@ fn DLLSignalDispatchHL { context signum -- }
 	auto action
 	OSThreadCurrentTEB OSThreadEnvironmentBlock_SignalActions + signum@ 2 << + @ action!
 
-	if (action@ OSSIGNALACTION_DEFAULT ==)
-		[signum@]DLLSignalDefaultActions@ action!
+	auto defaultaction
+	[signum@]DLLSignalDefaultActions@ defaultaction!
 
-		if (action@ 1 ==)
+	if (defaultaction@ 2 ==)
+		// this is an error signal.
+		// unmask the signal before doing anything else.
+
+		signum@ // signal
+		OSCURRENTTHREAD // threadhandle
+		OSThreadUnmaskSignal drop
+	end
+
+	if (action@ OSSIGNALACTION_DEFAULT ==)
+		if (defaultaction@ 1 ==)
 			// terminate
 			signum@ 128 + OSExit
-		end elseif (action@ 2 ==)
+		end elseif (defaultaction@ 2 ==)
 			// print debug information/coredump and terminate
 
 			if (DLLAlreadyDied@)
@@ -258,7 +268,7 @@ fn DLLSignalDispatchHL { context signum -- }
 			end
 
 			signum@ 128 + OSExit
-		end elseif (action@ 3 ==)
+		end elseif (defaultaction@ 3 ==)
 			// stop
 		end
 	end elseif (action@ OSSIGNALACTION_IGNORE ~=)
@@ -269,7 +279,12 @@ fn DLLSignalDispatchHL { context signum -- }
 		end
 	end
 
-	context@ OSContinue
+	if (OSThreadCurrentTEB OSThreadEnvironmentBlock_SignalActions + signum@ 2 << + @ OSSIGNALACTION_IGNORE ==)
+		// don't unmask it
+		-1 signum!
+	end
+
+	signum@ context@ OSContinue drop
 
 	// if OSContinue returned, something bad happened.
 	"DLLSignalDispatch: couldn't OSContinue\n" OSError

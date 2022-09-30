@@ -220,10 +220,10 @@ fn CoDuplexBufferUninitialize { pri quotablock header -- }
 	buf@ MmFree
 end
 
-fn CoDuplexLock { duplex -- ipl ok }
+fn CoDuplexLock { duplex alertable -- ipl ok }
 	if (duplex@ CoDuplex_Paged + @ PAGED &)
 		KERNELMODE // waitmode
-		1 // alertable
+		alertable@ // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
 		duplex@ CoDuplex_Mutex + // object
 		KeThreadWaitForObject ok!
@@ -1149,7 +1149,9 @@ end
 
 fn CoDuplexWriteCharacter { c duplex -- ok }
 	auto ipl
-	duplex@ CoDuplexLock ok! ipl!
+	duplex@ // duplex
+	1 // alertable
+	CoDuplexLock ok! ipl!
 
 	if (ok@)
 		return
@@ -2294,7 +2296,9 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 	end
 
 	auto ipl
-	duplex@ CoDuplexLock ok! ipl!
+	duplex@ // duplex
+	1 // alertable
+	CoDuplexLock ok! ipl!
 
 	if (ok@)
 		return
@@ -2321,7 +2325,9 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 					return
 				end
 
-				duplex@ CoDuplexLock ok! ipl!
+				duplex@ // duplex
+				1 // alertable
+				CoDuplexLock ok! ipl!
 
 				if (ok@)
 					return
@@ -2411,7 +2417,9 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 	end
 
 	auto ipl
-	duplex@ CoDuplexLock ok! ipl!
+	duplex@ // duplex
+	1 // alertable
+	CoDuplexLock ok! ipl!
 
 	if (ok@)
 		return
@@ -2465,20 +2473,22 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 end
 
 fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
 	auto ior
 	mdl@ MmMDLHeader_DriverGoWild + ior!
 
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
-		// already completed, nothing to do
-		ipl@ KeIPLLower
-		return
-	end
-
 	auto duplex
 	ior@ CoDuplexRequest_Duplex + @ duplex!
+
+	auto ipl
+	duplex@ // duplex
+	0 // alertable
+	CoDuplexLock drop ipl!
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ duplex@ CoDuplexUnlock
+		return
+	end
 
 	auto flags
 	ior@ CoDuplexRequest_Flags + @ flags!
@@ -2552,7 +2562,7 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 		end
 	end
 
-	ipl@ KeIPLLower
+	ipl@ duplex@ CoDuplexUnlock
 
 	STATUS_IO_CANCELLED // status
 	0 // priboost
@@ -2578,7 +2588,9 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 	if (fcb@ IOFileControlBlock_FSContext + @)
 		// server fcb! mark duplex headless and satisfy any pending requests.
 
-		duplex@ CoDuplexLock drop ipl!
+		duplex@ // duplex
+		0 // alertable
+		CoDuplexLock drop ipl!
 
 		1 duplex@ CoDuplex_Headless + !
 
@@ -2629,7 +2641,9 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
 			// last client is being closed, satisfy any server requests.
 
-			duplex@ CoDuplexLock drop ipl!
+			duplex@ // duplex
+			0 // alertable
+			CoDuplexLock drop ipl!
 
 			duplex@ CoDuplex_ServerWriteListHead + @ req!
 

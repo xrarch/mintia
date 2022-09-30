@@ -81,11 +81,6 @@ fn PsPrepareUsermode { trapframe -- }
 		"PsPrepareUsermode: ipl >= IPLDPC\n" KeCrash
 	end
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	HALCPUInterruptEnable
-
 	while (1)
 		USERMODE // mode
 		1 // alertable
@@ -96,7 +91,7 @@ fn PsPrepareUsermode { trapframe -- }
 			// don't return to userland.
 			// our journey ends here
 
-			ipl@ KeIPLLower
+			HALCPUInterruptEnable
 
 			PsThreadExit
 
@@ -106,7 +101,11 @@ fn PsPrepareUsermode { trapframe -- }
 		end elseif (KeThreadCurrent@ KeThread_Suspended + @)
 			// suspend!
 
+			HALCPUInterruptEnable
+
 			THREADSTATUS_SUSPENDED KeThreadYield
+
+			HALCPUInterruptDisable drop
 
 			// continue and recheck signals because things probably
 			// changed since we napped.
@@ -115,10 +114,10 @@ fn PsPrepareUsermode { trapframe -- }
 			auto nextsig
 			KeThreadCurrent@ KeThreadNextSignal nextsig!
 
-			ipl@ KeIPLLower
-
 			if (trapframe@)
 				auto recheck
+
+				HALCPUInterruptEnable
 
 				nextsig@ // signum
 				PsOSDLLInformation PsOSDLLInfo_SignalDispatchFunction + @ // dispatchfunc
@@ -126,19 +125,16 @@ fn PsPrepareUsermode { trapframe -- }
 				trapframe@ // trapframe
 				KeCopySignalFrame recheck!
 
+				HALCPUInterruptDisable drop
+
 				if (recheck@)
-					IPLDPC KeIPLRaise ipl!
 					continue
 				end
 			end
 
 			break
 		end else
-			ipl@ KeIPLLower
-
 			break
 		end
 	end
-
-	HALCPUInterruptDisable drop
 end

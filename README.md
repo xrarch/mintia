@@ -18,13 +18,13 @@ in the future.
 
 As with all LIMNstation projects, the [sdk](http://github.com/limnarch/sdk) should be in a directory `../sdk` relative to this repository.
 
-Running `make` in this repository should then place an MINTIA distribution image at `build/mintia-dist.img`. Windows users should use WSL as Cygwin seems to have problems with the SDK.
+Running `make` in this repository should then place an MINTIA distribution image at `build/mintia-LIMNstation-fre.img`. Windows users should use WSL as Cygwin seems to have problems with the SDK.
 
 ## Testing
 
 With the LIMNstation emulator (`./limnemu/`) and MINTIA repository (`./mintia/`) in your current directory, run this command:
 
-`./limnemu/graphical.sh -dks ./mintia/build/mintia-dist.img`
+`./limnemu/graphical.sh -dks ./mintia/build/mintia-LIMNstation-fre.img`
 
 If it doesn't boot automatically, type this command at the firmware prompt:
 

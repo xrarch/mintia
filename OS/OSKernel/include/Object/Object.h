@@ -10,7 +10,7 @@
 //
 // Ob[HeapType]Header
 // Object Name (w/ null terminator and padding)
-// ObCommonHeader
+// ObCommonHeader (contains pointer to opposite header)
 //  <-- object pointer
 // Object Body
 

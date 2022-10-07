@@ -24,11 +24,11 @@ endif
 
 ifdef MKBINARY
 	$(LNK) binary -nobss $(FULLOUTPUTFILE)
+	echo "$(OUTPUTFILE) $(FULLOUTPUTFILE)" >> $(REPO)/DELTA
 else
 	$(LNK) istrip $(FULLOUTPUTFILE)
-endif
-
 	echo "$(OUTPUTFILE) $(FULLOUTPUTFILE) 493" >> $(REPO)/DELTA
+endif
 
 %.$(ARCHITECTURE).$(CHKFRE).o: %.df $(INCLUDEFILES)
 	$(DFC) $< $@ incdir=$(INCDIR)

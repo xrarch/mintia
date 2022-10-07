@@ -1,8 +1,8 @@
 ;this file defines block 4 of a MINTIA partition as specified by our boot
 ;descriptor to be the start of the boot program.
 ;
-;it is very dumb and only understands how to load /OSLoader.bin from an
-;AisixFS volume. assumes OSLoader.bin is inode number 2.
+;it is very dumb and only understands how to load /OSLoader.a3x from an
+;AisixFS volume. assumes OSLoader.a3x is inode number 2.
 ;=========== BOOT PROGRAM ============
 
 .section text

@@ -94,8 +94,8 @@ $(DISTIMAGE):
 	dd if=$(DISKLABEL) of=$(DISTIMAGE) bs=512 count=1 seek=0 conv=notrunc
 	$(FSTOOL) f
 	rm -f OS/OSLoader/$(PLATFORM)/bootcode/.new
-	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
+	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) ud / TextManifest
 
 $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE) $(BOOTCODE)

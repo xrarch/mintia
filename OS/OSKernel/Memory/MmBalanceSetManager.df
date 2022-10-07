@@ -37,6 +37,7 @@ const MMSTACKSCANPERIOD 5
 const MMSTACKAGE        10
 
 var MmSwapOutStacksPlease 0
+public MmSwapOutStacksPlease
 
 externptr MmOkToUnwire
 
@@ -182,6 +183,7 @@ fn MmBalanceSetManager { -- }
 end
 
 var MmProcessSwapOutListHead 0
+public MmProcessSwapOutListHead
 
 fn MmSwapWorker { context1 context2 -- }
 	PRIORITY_HIGHREALTIME 1 - // priority
@@ -223,14 +225,20 @@ fn MmSwapWorker { context1 context2 -- }
 				ipl@ KeIPLLower
 
 				continue
-			end elseif (KeThreadSwapInListHead@)
-				MmSwapInStacks
+			end elseif (MmProcessSwapOutListHead@)
+				MmSwapOutProcesses
 
 				ipl@ KeIPLLower
 
 				continue
-			end elseif (MmProcessSwapOutListHead@)
-				MmSwapOutProcesses
+			end elseif (KeProcessSwapInListHead@)
+				MmSwapInProcesses
+
+				ipl@ KeIPLLower
+
+				continue
+			end elseif (KeThreadSwapInListHead@)
+				MmSwapInStacks
 
 				ipl@ KeIPLLower
 
@@ -280,18 +288,16 @@ fn MmSwapOutStacks { -- }
 					end
 
 					if (process@ KeProcess_ResidentStackCount + @ ~~)
-						0 process@ PsProcess_SwappedOut + !
-
-						auto h
-						MmProcessSwapOutListHead@ h!
-
-						h@ process@ PsProcess_SwapOutNext + !
-						0 process@ PsProcess_SwapOutPrev + !
-
-						if (h@)
-							process@ h@ PsProcess_SwapOutPrev + !
+						if (DEBUGCHECKS)
+							if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+								process@ KeProcess_MemoryState + @
+								"MmSwapOutStacks: unexpected process state %d\n" Printf
+							end
 						end
 
+						PROCESSSTATE_TRANSITION process@ KeProcess_MemoryState + !
+
+						MmProcessSwapOutListHead@ process@ KeProcess_SwapListNext + !
 						process@ MmProcessSwapOutListHead!
 					end
 				end
@@ -313,36 +319,15 @@ fn MmSwapInStacks { -- }
 			break
 		end
 
-		thread@ KeThread_SwapInNext + @ KeThreadSwapInListHead!
+		thread@ KeThread_QueueNext + @ KeThreadSwapInListHead!
+		0 thread@ KeThread_QueueNext + !
 
 		auto process
 		thread@ KeThread_Process + @ process!
 
-		1 process@ KeProcess_ResidentStackCount + +=
-
-		if (process@ KeProcess_ResidentStackCount + @ 1 ==)
-			if (process@ PsProcess_SwappedOut + @ ~~)
-				// process had no resident stacks but wasn't swapped out which
-				// means it is on the swap-out queue. we need to remove it or
-				// terrible things will happen.
-
-				auto ls
-				process@ PsProcess_SwapOutPrev + @ ls!
-
-				auto ns
-				process@ PsProcess_SwapOutNext + @ ns!
-
-				if (ls@)
-					ns@ ls@ PsProcess_SwapOutNext + !
-				end else
-					ns@ MmProcessSwapOutListHead!
-				end
-
-				if (ns@)
-					ls@ ns@ PsProcess_SwapOutPrev + !
-				end
-			end else
-				process@ MmProcessSwapIn
+		if (DEBUGCHECKS)
+			if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+				process@ "MmSwapInStacks: process %x wasn't resident\n" KeCrash
 			end
 		end
 
@@ -352,6 +337,30 @@ fn MmSwapInStacks { -- }
 		QUEUEBACK thread@ KeThreadReady
 
 		IPLDPC KeIPLRaise drop
+	end
+end
+
+fn MmSwapInProcesses { -- }
+	// called at IPLDPC
+
+	while (1)
+		auto process
+		KeProcessSwapInListHead@ process!
+
+		if (process@ ~~)
+			break
+		end
+
+		process@ KeProcess_SwapListNext + @ KeProcessSwapInListHead!
+		0 process@ KeProcess_SwapListNext + !
+
+		IPLLOW KeIPLLower
+
+		process@ MmProcessSwapIn
+
+		IPLDPC KeIPLRaise drop
+
+		process@ MmSwapReadyDeferred
 	end
 end
 
@@ -366,18 +375,40 @@ fn MmSwapOutProcesses { -- }
 			break
 		end
 
-		process@ PsProcess_SwapOutNext + @ MmProcessSwapOutListHead!
+		process@ KeProcess_SwapListNext + @ MmProcessSwapOutListHead!
+		0 process@ KeProcess_SwapListNext + !
 
-		if (MmProcessSwapOutListHead@)
-			0 MmProcessSwapOutListHead@ PsProcess_SwapOutPrev + !
+		if (process@ KeProcess_DeferredThreadListHead + @)
+			// threads were added to the deferred list while the process
+			// was pending swapout. don't swap it out.
+
+			process@ MmSwapReadyDeferred
+		end else
+			PROCESSSTATE_OUTSWAPPED process@ KeProcess_MemoryState + !
+
+			IPLLOW KeIPLLower
+
+			process@ MmProcessSwapOut
+
+			IPLDPC KeIPLRaise drop
+		end
+	end
+end
+
+fn MmSwapReadyDeferred { process -- }
+	PROCESSSTATE_RESIDENT process@ KeProcess_MemoryState + !
+
+	while (1)
+		auto thread
+		process@ KeProcess_DeferredThreadListHead + @ thread!
+
+		if (thread@ ~~)
+			break
 		end
 
-		1 process@ PsProcess_SwappedOut + !
+		thread@ KeThread_QueueNext + @ process@ KeProcess_DeferredThreadListHead + !
+		0 thread@ KeThread_QueueNext + !
 
-		IPLLOW KeIPLLower
-
-		process@ MmProcessSwapOut
-
-		IPLDPC KeIPLRaise drop
+		QUEUEBACK thread@ KeThreadReady
 	end
 end

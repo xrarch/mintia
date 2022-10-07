@@ -90,7 +90,6 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_QueuePrev + !
 
 	1 thread@ KeThread_KernelStackResident + !
-	0 thread@ KeThread_SwapInNext + !
 
 	0 thread@ KeThread_Enqueued + !
 
@@ -622,18 +621,47 @@ fn KeThreadReady { front thread -- }
 	readytime@ HALUptimeQuery
 	readytime@ KeTime_SecPart + @ thread@ KeThread_WaitOrReadyTimeSec + !
 
+	auto process
+	thread@ KeThread_Process + @ process!
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (thread@ KeThread_KernelStackResident + @ ~~)
-		KeThreadSwapInListHead@ thread@ KeThread_SwapInNext + !
-		thread@ KeThreadSwapInListHead!
+	if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+		// place on process's list of threads pending swapin
+
+		process@ KeProcess_DeferredThreadListHead + @ thread@ KeThread_QueueNext + !
+		thread@ process@ KeProcess_DeferredThreadListHead + !
+
+		if (process@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ==)
+			// enqueue process to be swapped in
+
+			PROCESSSTATE_TRANSITION process@ KeProcess_MemoryState + !
+
+			KeProcessSwapInListHead@ process@ KeProcess_SwapListNext + !
+			process@ KeProcessSwapInListHead!
+		end
+
+		ipl@ KeIPLLower
 
 		0 // priboost
 		MmSwapEvent // event
 		KeEventSignal
 
+		return
+	end elseif (thread@ KeThread_KernelStackResident + @ ~~)
+		// place on global list of threads pending swapin
+
+		KeThreadSwapInListHead@ thread@ KeThread_QueueNext + !
+		thread@ KeThreadSwapInListHead!
+
+		1 process@ KeProcess_ResidentStackCount + +=
+
 		ipl@ KeIPLLower
+
+		0 // priboost
+		MmSwapEvent // event
+		KeEventSignal
 
 		return
 	end

@@ -3,8 +3,9 @@
 
 const KEPROCESSNAMELEN 16
 
-const PROCESSSTATUS_READY 1
-const PROCESSSTATUS_SUSPENDED 2
+const PROCESSSTATE_RESIDENT   1
+const PROCESSSTATE_TRANSITION 2
+const PROCESSSTATE_OUTSWAPPED 3
 
 const PRIORITY_IDLE           0
 const PRIORITY_LOWUSER        1
@@ -24,8 +25,6 @@ struct KeProcess
 	4 ThreadCount
 	4 ThreadListHead
 
-	4 ProcessStatus
-
 	4 BasePriority
 
 	4 SignalThread
@@ -42,7 +41,10 @@ struct KeProcess
 	4 PageDirectory
 	4 ASID
 
+	4 SwapListNext
+	4 DeferredThreadListHead
 	4 ResidentStackCount
+	4 MemoryState
 endstruct
 
 const THREADYIELD_PREEMPTED  1
@@ -83,7 +85,6 @@ struct KeThread
 	4 QueuePrev
 
 	4 KernelStackResident
-	4 SwapInNext
 
 	4 Status
 
@@ -153,6 +154,7 @@ extern KeProcessSignal { signal process -- ok }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess
+externptr KeProcessSwapInListHead
 
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- }
 extern KeThreadUninitialize { thread -- }

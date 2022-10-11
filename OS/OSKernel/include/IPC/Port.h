@@ -17,7 +17,7 @@ struct IPCPort
 endstruct
 
 const IPCPORTFLAG_CLIENT            1
-const IPCPORTFLAG_FAILED_CONNECTION 2
+const IPCPORTFLAG_NO_DISCONNECT_MSG 2
 
 extern IPCInitPhase1 { -- }
 

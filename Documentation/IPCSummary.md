@@ -1,5 +1,7 @@
 # Port Objects Design Summary
 
+!!! DRAFT: to be filled in with details as implementation proceeds
+
 MINTIA requires an IPC mechanism; the selected solution to this is a form of "port object". The requirements for port objects are as follows:
 
 1. Message passing, with variable length messages.

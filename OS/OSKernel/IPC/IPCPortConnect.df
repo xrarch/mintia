@@ -1,0 +1,85 @@
+//
+// Implements port connection.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/IPC.h"
+
+fn IPCPortConnectObject { rxmax rxmsg txmsg timeout portobject -- porthandle ok }
+	// called with server port referenced, always returns with server port
+	// dereferenced.
+
+	auto clientport
+	portobject@ // serverport
+	KeProcessCurrent // owningprocess
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	IPCPortCreateObject ok! clientport!
+
+	if (ok@)
+		portobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+end
+
+fn IPCPortConnect { rxmax rxmsg txmsg timeout path -- porthandle ok }
+	auto serverport
+	0 // flags
+	path@ // path
+	0 // initialobject
+	KeProcessCurrent // process
+	ObObjectReferenceByPath ok! serverport!
+
+	if (ok@)
+		return
+	end
+
+	if (serverport@ ObObjectNonpagedHeader ObNonpagedHeader_TypeObject + @ IPCPortObjectType@ ~=)
+		serverport@ ObObjectDereferenceByPointer drop
+
+		STATUS_INVALID_OBJECT_TYPE ok!
+
+		return
+	end
+
+	if (serverport@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+		// this is a client port. these shouldn't be allowed in the object
+		// namespace at all but check and return failure anyway.
+
+		serverport@ ObObjectDereferenceByPointer drop
+
+		STATUS_INVALID_OBJECT_TYPE ok!
+
+		return
+	end
+
+	rxmax@ // rxmax
+	rxmsg@ // rxmsg
+	txmsg@ // txmsg
+	timeout@ // timeout
+	serverport@ // portobject
+	IPCPortConnectObject ok! porthandle!
+end

@@ -83,6 +83,8 @@ struct PsThread
 	4 StackBottom
 	4 StackTop
 
+	4 IPCBlock
+
 	KeEvent_SIZEOF TerminationEvent
 
 	4 FileCreationPermissions

@@ -2,8 +2,8 @@ struct IPCPort
 	4 MessageListHead
 	4 MessageListTail
 
-	4 ReceiverListHead
-	4 ReceiverListTail
+	4 WaiterListHead
+	4 WaiterListTail
 
 	4 OwningProcess
 	4 ClientTableHeader
@@ -13,11 +13,30 @@ struct IPCPort
 
 	4 ServerContextForClient
 
+	4 NextConversationID
+
 	4 Flags
 endstruct
 
+struct IPCThreadBlock
+	4 WaiterNext
+	4 WaiterPrev
+	4 WaitingConversationID
+
+	4 RXMessage
+
+	KeEvent_SIZEOF Event
+endstruct
+
+struct IPCKernelMessage
+	4 Next
+	4 Prev
+	OSMessageHeader_SIZEOF Header
+//	0 Body
+endstruct
+
 const IPCPORTFLAG_CLIENT            1
-const IPCPORTFLAG_NO_DISCONNECT_MSG 2
+const IPCPORTFLAG_FAILED_CONNECTION 2
 
 extern IPCInitPhase1 { -- }
 

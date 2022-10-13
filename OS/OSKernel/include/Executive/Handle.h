@@ -5,7 +5,9 @@ const EXTENDBYENTRIES 16
 struct ExHandleTableHeader
 	ExRwLock_SIZEOF RwLock
 	4 EntrySizeLog
-	4 ChargedProcess
+	4 QuotaBlock
+
+	4 Context
 
 	4 Entries
 	4 FreeEntries
@@ -16,7 +18,7 @@ struct ExHandleTableHeader
 endstruct
 
 extern ExHandleTableDelete { func handletable -- }
-extern ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
+extern ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 
 extern ExHandleTableLockUnalertable { handletable -- }
 extern ExHandleTableLockSharedUnalertable { handletable -- }

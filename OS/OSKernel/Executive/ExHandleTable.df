@@ -22,23 +22,22 @@
 
 #include "<inc>/HALDebug.h"
 
-fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
+fn ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 	fnsection "PAGE$text"
 
 	auto entrysize
 	4 entrysizelog@ << entrysize!
 
-	// chargedprocess instead of keeping track of the quotablock itself is
-	// fine, because the handle table will never outlive its charged process.
-
-	if (chargedprocess@)
+	if (quotablock@)
 		ExHandleTableHeader_SIZEOF MmChargeBytesGet // charge
-		chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+		quotablock@ // quotablock
 		MmQuotaBlockCharge ok!
 
 		if (ok@)
 			return
 		end
+
+		quotablock@ MmQuotaBlockReference
 	end
 
 	ExHandleTableHeader_SIZEOF // bytes
@@ -49,10 +48,12 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 	if (ok@)
 		// allocation failed
 
-		if (chargedprocess@)
+		if (quotablock@)
 			ExHandleTableHeader_SIZEOF MmChargeBytesGet // charge
-			chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+			quotablock@ // quotablock
 			MmQuotaBlockUncharge
+
+			quotablock@ MmQuotaBlockDereference
 		end
 
 		return
@@ -64,10 +65,12 @@ fn ExHandleTableCreate { chargedprocess entrysizelog -- handletable ok }
 
 	entrysizelog@ handletable@ ExHandleTableHeader_EntrySizeLog + !
 
-	chargedprocess@ handletable@ ExHandleTableHeader_ChargedProcess + !
+	quotablock@ handletable@ ExHandleTableHeader_QuotaBlock + !
 
 	0 handletable@ ExHandleTableHeader_Entries + !
 	0 handletable@ ExHandleTableHeader_FreeEntries + !
+
+	context@ handletable@ ExHandleTableHeader_Context + !
 
 	-1 handletable@ ExHandleTableHeader_FreeListHead + !
 
@@ -116,31 +119,39 @@ fn ExHandleTableDelete { func handletable -- }
 
 	// deallocate handle table structures
 
-	auto chargedprocess
-	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
+	auto quotablock
+	handletable@ ExHandleTableHeader_QuotaBlock + @ quotablock!
 
-	if (chargedprocess@)
-		handletable@ MmBlockChargeGet // charge
-		chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
-		MmQuotaBlockUncharge
-	end
+	auto charge
 
 	auto tab
 	handletable@ ExHandleTableHeader_Table + @ tab!
 
 	if (tab@)
-		if (chargedprocess@)
-			tab@ MmBlockChargeGet // charge
-			chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
-			MmQuotaBlockUnchargePaged
-		end
+		tab@ MmBlockChargeGet charge!
 
 		tab@ MmFree
+
+		if (quotablock@)
+			charge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUnchargePaged
+		end
 	end
+
+	handletable@ MmBlockChargeGet charge!
 
 	handletable@ ExHandleTableHeader_RwLock + ExRwLockUninitialize
 
 	handletable@ MmFree
+
+	if (quotablock@)
+		charge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		quotablock@ MmQuotaBlockDereference
+	end
 end
 
 fn ExHandleTableLockUnalertable { handletable -- }
@@ -274,8 +285,8 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		return
 	end
 
-	auto chargedprocess
-	handletable@ ExHandleTableHeader_ChargedProcess + @ chargedprocess!
+	auto quotablock
+	handletable@ ExHandleTableHeader_QuotaBlock + @ quotablock!
 
 	auto entries
 	handletable@ ExHandleTableHeader_Entries + @ entries!
@@ -294,9 +305,9 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 		EXTENDBYENTRIES logsize@ << tabsize!
 
-		if (chargedprocess@)
+		if (quotablock@)
 			tabsize@ MmChargeBytesGet // charge
-			chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+			quotablock@ // quotablock
 			MmQuotaBlockChargePaged ok!
 
 			if (ok@)
@@ -318,9 +329,9 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		if (ok@)
 			// allocation failed
 
-			if (chargedprocess@)
+			if (quotablock@)
 				tabsize@ MmChargeBytesGet // charge
-				chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+				quotablock@ // quotablock
 				MmQuotaBlockUnchargePaged
 			end
 
@@ -352,10 +363,10 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			end
 		end
 
-		if (chargedprocess@)
+		if (quotablock@)
 			if (nquota@)
 				nquota@ // charge
-				chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+				quotablock@ // quotablock
 				MmQuotaBlockChargePaged ok!
 
 				if (ok@)
@@ -379,12 +390,12 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		if (ok@)
 			// allocation failed
 
-			if (chargedprocess@)
+			if (quotablock@)
 				// undo the shenanigans we just did with the quota charge
 
 				if (nquota@)
 					nquota@ // charge
-					chargedprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+					quotablock@ // quotablock
 					MmQuotaBlockUnchargePaged
 				end
 			end

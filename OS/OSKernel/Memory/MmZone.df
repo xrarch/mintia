@@ -17,14 +17,14 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmZoneInitialize { blocksize blockcount zone zoneheader -- ok }
+struct MmZoneFreeBlock
+	4 NextFree
+endstruct
+
+fn MmZoneInitialize { bytes chunk blocksize zoneheader -- }
 	if (DEBUGCHECKS)
 		if (blocksize@ 3 &)
 			blocksize@ "MmZoneInitialize: unaligned block size (%d bytes)\n" KeCrash
-		end
-
-		if (blockcount@ 1 <)
-			blockcount@ "MmZoneInitialize: zone too few blocks (%d)\n" KeCrash
 		end
 
 		if (blocksize@ MmZoneFreeBlock_SIZEOF <)
@@ -32,19 +32,65 @@ fn MmZoneInitialize { blocksize blockcount zone zoneheader -- ok }
 		end
 	end
 
-	zone@ zoneheader@ MmZoneHeader_Zone + !
-
+	blocksize@ zoneheader@ MmZoneHeader_BlockSize + !
+	0 zoneheader@ MmZoneHeader_ChunkListHead + !
 	0 zoneheader@ MmZoneHeader_FreeListHead + !
 
-	// initialize the zone blocks
+	bytes@ // bytes
+	chunk@ // chunk
+	zoneheader@ // zoneheader
+	MmZoneExtend
+end
 
-	while (blockcount@)
-		zoneheader@ MmZoneHeader_FreeListHead + @ zone@ MmZoneFreeBlock_NextFree + !
-		zone@ zoneheader@ MmZoneHeader_FreeListHead + !
+fn MmZoneExtend { bytes chunk zoneheader -- }
+	if (DEBUGCHECKS)
+		if (bytes@ 3 &)
+			bytes@ "MmZoneExtend: chunk unaligned size (%d bytes)\n" KeCrash
+		end
 
-		1 blockcount -=
-		blocksize@ zone +=
+		if (bytes@ MMZONEOVERHEAD MmZoneFreeBlock_SIZEOF + <)
+			bytes@ "MmZoneExtend: chunk too small (%d bytes)\n" KeCrash
+		end
 	end
+
+	auto blocksize
+	chunk@ MmZoneHeader_BlockSize + @ blocksize!
+
+	// add the chunk to the chunk list
+
+	zoneheader@ MmZoneHeader_ChunkListHead + @ chunk@ MmZoneChunkHeader_Next + !
+	chunk@ zoneheader@ MmZoneHeader_ChunkListHead + !
+
+	auto chunkend
+	chunk@ bytes@ + chunkend!
+
+	MmZoneChunkHeader_SIZEOF chunk +=
+
+	// initialize the chunk blocks
+
+	while (chunk@ chunkend@ <)
+		zoneheader@ MmZoneHeader_FreeListHead + @ chunk@ MmZoneFreeBlock_NextFree + !
+		chunk@ zoneheader@ MmZoneHeader_FreeListHead + !
+
+		blocksize@ chunk +=
+	end
+end
+
+fn MmZoneEmpty { zoneheader -- }
+	auto chunk
+	zoneheader@ MmZoneHeader_ChunkListHead + @ chunk!
+
+	while (chunk@)
+		auto nchunk
+		chunk@ MmZoneChunkHeader_Next + @ nchunk!
+
+		chunk@ MmFree
+
+		nchunk@ chunk!
+	end
+
+	0 zoneheader@ MmZoneHeader_ChunkListHead + !
+	0 zoneheader@ MmZoneHeader_FreeListHead + !
 end
 
 fn MmZoneAllocate { zoneheader -- ptr ok }

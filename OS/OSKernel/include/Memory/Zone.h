@@ -1,13 +1,20 @@
 struct MmZoneHeader
-	4 Zone
+	4 ChunkListHead
 	4 FreeListHead
+
+	4 BlockSize
 endstruct
 
-struct MmZoneFreeBlock
-	4 NextFree
+struct MmZoneChunkHeader
+	4 Next
 endstruct
 
-extern MmZoneInitialize { blocksize blockcount zone zoneheader -- ok }
+const MMZONEOVERHEAD (MmZoneChunkHeader_SIZEOF)
+
+extern MmZoneInitialize { bytes chunk blocksize zoneheader -- }
+
+extern MmZoneExtend { bytes chunk zoneheader -- }
+extern MmZoneEmpty { zoneheader -- }
 
 extern MmZoneAllocate { zoneheader -- ptr ok }
 extern MmZoneFree { ptr zoneheader -- }

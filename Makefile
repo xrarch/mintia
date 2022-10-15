@@ -65,6 +65,7 @@ else
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE)-small.img
 	export DISTIMGSZ  := 20480 # 10MB
 	export DISKLABEL  := $(REPO)/build/small.disklabel
+	TEXTSUFFIX := .small
 endif
 
 export FSTOOL := $(FST) $(DISTIMAGE) offset=4
@@ -88,6 +89,7 @@ update:
 	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) ud / TextManifest
+	$(FSTOOL) ud / TextManifestSuffixed $(TEXTSUFFIX)
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null
@@ -97,6 +99,7 @@ $(DISTIMAGE):
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) ud / TextManifest
+	$(FSTOOL) ud / TextManifestSuffixed $(TEXTSUFFIX)
 
 $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE) $(BOOTCODE)
 	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)

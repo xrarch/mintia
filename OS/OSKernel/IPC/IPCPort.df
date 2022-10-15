@@ -94,13 +94,32 @@ fn (ExHandleEnumFunction) IPCPortHandleDestroyFunction { entryptr handle handlet
 	// connections.
 end
 
-fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject ok }
+fn IPCPortCreateObject { maxlen serverport owningprocess permissions name -- portobject ok }
 	fnsection "PAGE$text"
+
+	if (maxlen@ 3 &)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	auto msgzonesize
+
+	if (serverport@)
+		serverport@ IPCPort_MaximumMessageLength + @ maxlen!
+
+		IPCKernelMessage_SIZEOF maxlen@ +
+		IPCINITIALMESSAGES_CLIENT *
+		MMZONEOVERHEAD + msgzonesize!
+	end else
+		IPCKernelMessage_SIZEOF maxlen@ +
+		IPCINITIALMESSAGES_SERVER *
+		MMZONEOVERHEAD + msgzonesize!
+	end
 
 	name@ // name
 	0 // flags
 	permissions@ // permissions
-	0 // npquotabias
+	msgzonesize@ MmChargeBytesGet // npquotabias
 	0 // pquotabias
 	IPCPort_SIZEOF // bodysize
 	IPCPortObjectType@ // type
@@ -124,6 +143,24 @@ fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject
 
 	owningprocess@ portobject@ IPCPort_OwningProcess + !
 
+	auto chunk
+	msgzonesize@ // bytes
+	'PoZn' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! chunk!
+
+	if (ok@)
+		portobject@ ObObjectDeallocate
+
+		return
+	end
+
+	msgzonesize@ // bytes
+	chunk@ // chunk
+	IPCKernelMessage_SIZEOF maxlen@ + // blocksize
+	portobject@ IPCPort_Zone + // zoneheader
+	MmZoneInitialize
+
 	auto clienttable
 
 	if (serverport@)
@@ -141,6 +178,8 @@ fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject
 		ExHandleCreate ok! drop clientid!
 
 		if (ok@)
+			chunk@ MmFree
+
 			portobject@ ObObjectDeallocate
 
 			return
@@ -160,6 +199,8 @@ fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject
 		ExHandleTableCreate ok! clienttable!
 
 		if (ok@)
+			chunk@ MmFree
+
 			portobject@ ObObjectDeallocate
 
 			return
@@ -169,4 +210,6 @@ fn IPCPortCreateObject { serverport owningprocess permissions name -- portobject
 
 		clienttable@ portobject@ IPCPort_ClientTableHeader + !
 	end
+
+	maxlen@ portobject@ IPCPort_MaximumMessageLength + !
 end

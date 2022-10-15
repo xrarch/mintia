@@ -5,6 +5,8 @@ struct IPCPort
 	4 WaiterListHead
 	4 WaiterListTail
 
+	4 MaximumMessageLength
+
 	4 OwningProcess
 	4 ClientTableHeader
 	4 ServerPort
@@ -16,6 +18,8 @@ struct IPCPort
 	4 NextConversationID
 
 	4 Flags
+
+	MmZoneHeader_SIZEOF Zone
 endstruct
 
 struct IPCThreadBlock
@@ -29,11 +33,21 @@ struct IPCThreadBlock
 endstruct
 
 struct IPCKernelMessage
+// kernel metadata part
+
 	4 Next
 	4 Prev
+
+	4 OriginatingPort
+
+// user-visible part
+
 	OSMessageHeader_SIZEOF Header
 //	0 Body
 endstruct
+
+const IPCINITIALMESSAGES_CLIENT 4
+const IPCINITIALMESSAGES_SERVER 16
 
 const IPCPORTFLAG_CLIENT            1
 const IPCPORTFLAG_FAILED_CONNECTION 2
@@ -43,7 +57,7 @@ extern IPCInitPhase1 { -- }
 extern IPCPortObjectDelete { object -- }
 extern IPCPortObjectOpen { access object process -- ok }
 
-extern IPCPortCreateObject { serverport owningprocess permissions name -- portobject ok }
+extern IPCPortCreateObject { maxlen serverport owningprocess permissions name -- portobject ok }
 
 externptr IPCPortObjectType
 

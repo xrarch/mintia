@@ -9,8 +9,7 @@ but also kernel stacks, page tables, and even its own kernel code and heap.
 It aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
 a pretty strong system at the time. It also tries to be portable to other
-32-bit architectures, with vague plans for a period-accurate MIPS or i386 port
-in the future.
+32-bit architectures, with plans for an m68k and SPARC port some day.
 
 ![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)
 

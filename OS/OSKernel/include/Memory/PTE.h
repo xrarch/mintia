@@ -10,7 +10,7 @@ extern MmVirtualAddressIsValid { vaddr pagemap -- isvalid }
 extern MmPTEInterpret { pteaddr -- phyaddr flags ok }
 extern MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflags ok }
 extern MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
-extern MmPTEValid { pteaddr -- valid }
+extern MmPTESet { pte vaddr pteaddr asid -- }
 extern MmPTEIsZero { pte -- iszero }
 
 struct MmPTECountTableHeader

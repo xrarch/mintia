@@ -5,7 +5,7 @@ struct IPCPort
 	4 WaiterListHead
 	4 WaiterListTail
 
-	4 MaximumMessageLength
+	4 MaximumMessageBody
 
 	4 OwningProcess
 	4 ClientTableHeader
@@ -19,7 +19,8 @@ struct IPCPort
 
 	4 Flags
 
-	MmZoneHeader_SIZEOF Zone
+	4 ZoneExtensionCharge
+	MmZoneHeader_SIZEOF ZoneHeader
 endstruct
 
 struct IPCThreadBlock
@@ -35,8 +36,11 @@ endstruct
 struct IPCKernelMessage
 // kernel metadata part
 
-	4 Next
-	4 Prev
+	4 PortNext
+	4 PortPrev
+
+	4 QueueNext
+	4 QueuePrev
 
 	4 OriginatingPort
 
@@ -48,6 +52,8 @@ endstruct
 
 const IPCINITIALMESSAGES_CLIENT 4
 const IPCINITIALMESSAGES_SERVER 16
+
+const IPCMESSAGEEXTENSION 8
 
 const IPCPORTFLAG_CLIENT            1
 const IPCPORTFLAG_FAILED_CONNECTION 2

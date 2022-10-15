@@ -1,0 +1,196 @@
+//
+// Implements IPC message management.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/IPC.h"
+
+fn IPCMessageAllocate { umsg bodylen mode conid portobject -- msg ok }
+	if (DEBUGCHECKS)
+		if (bodylen@ portobject@ IPCPort_MaximumMessageBody + @ >)
+			// this should have been checked by the caller
+			"IPCMessageAllocate: length of message body too great\n" KeCrash
+		end
+	end
+
+	// allocating from a zone is so fast we should just disable interrupts.
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	portobject@ IPCPort_ZoneHeader + // zoneheader
+	MmZoneAllocate ok! msg!
+
+	rs@ HALCPUInterruptRestore
+
+	if (ok@)
+		if (DEBUGCHECKS)
+			if (ok@ STATUS_NO_MEMORY ~=)
+				ok@ "IPCMessageAllocate: odd status (%i)\n" KeCrash
+			end
+		end
+
+		// try to extend the port message zone.
+
+		portobject@ // portobject
+		IPCMessageZoneExtend ok! msg!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 msg@ IPCKernelMessage_PortNext + !
+	0 msg@ IPCKernelMessage_PortPrev + !
+
+	0 msg@ IPCKernelMessage_QueueNext + !
+	0 msg@ IPCKernelMessage_QueuePrev + !
+
+	portobject@ msg@ IPCKernelMessage_OriginatingPort + !
+
+	if (mode@ USERMODE ==)
+		msg@ IPCKernelMessage_Header + // dest
+		umsg@ // src
+		bodylen@ // sz
+		KeSafeCopyIn ok!
+
+		if (ok@)
+			HALCPUInterruptDisable rs!
+
+			msg@ // ptr
+			portobject@ IPCPort_ZoneHeader + // zoneheader
+			MmZoneFree
+
+			rs@ HALCPUInterruptRestore
+
+			return
+		end
+	end else
+		msg@ IPCKernelMessage_Header + // dest
+		umsg@ // src
+		bodylen@ // sz
+		memcpy
+	end
+
+	// fill in the kernel-controlled parts of the message header.
+
+	0 msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
+
+	bodylen@ msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + si
+	portobject@ IPCPort_ClientID + @ msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
+	portobject@ IPCPort_ServerContextForClient + @ msg@ IPCKernelMessage_Header + OSMessageHeader_Context + !
+
+	if (conid@ OSPORT_CONID_NEW ==)
+		HALCPUInterruptDisable rs!
+
+		portobject@ IPCPort_NextConversationID + @ conid!
+
+		conid@ msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + !
+
+		if (conid@ -1 ==)
+			// overflow correctly
+			OSPORT_CONID_FIRSTDYNAMIC portobject@ IPCPort_NextConversationID + !
+		end else
+			conid@ 1 + portobject@ IPCPort_NextConversationID + !
+		end
+
+		rs@ HALCPUInterruptRestore
+	end else
+		conid@ msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + !
+	end
+end
+
+fn IPCMessageFree { msg -- }
+	// freeing to a zone is so fast we should just disable interrupts.
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	msg@ // ptr
+	msg@ IPCKernelMessage_OriginatingPort + @ IPCPort_ZoneHeader + // zoneheader
+	MmZoneFree
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IPCMessageZoneExtend { portobject -- msg ok }
+	auto msgzonesize
+	IPCKernelMessage_SIZEOF portobject@ IPCPort_MaximumMessageBody + @ +
+	IPCMESSAGEEXTENSION *
+	MMZONEOVERHEAD + msgzonesize!
+
+	auto quotablock
+	portobject@ ObObjectNonpagedHeader ObNonpagedHeader_QuotaBlock + @ quotablock!
+
+	auto charge
+	msgzonesize@ MmChargeBytesGet charge!
+
+	// charge the quotablock for the extra extension
+
+	charge@ // charge
+	quotablock@ // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		return
+	end
+
+	// allocate the chunk
+
+	auto chunk
+	msgzonesize@ // bytes
+	'PoZx' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! chunk!
+
+	if (ok@)
+		charge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		return
+	end
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	msgzonesize@ // bytes
+	chunk@ // chunk
+	portobject@ IPCPort_ZoneHeader + // zoneheader
+	MmZoneExtend
+
+	charge@ portobject@ IPCPort_ZoneExtensionCharge + +=
+
+	portobject@ IPCPort_ZoneHeader + // zoneheader
+	MmZoneAllocate ok! msg!
+
+	ipl@ KeIPLLower
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			"IPCMessageZoneExtend: failed to allocate even though just extended\n" KeCrash
+		end
+	end
+end

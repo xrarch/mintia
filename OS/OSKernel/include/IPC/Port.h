@@ -65,6 +65,9 @@ extern IPCPortObjectOpen { access object process -- ok }
 
 extern IPCPortCreateObject { maxlen serverport owningprocess permissions name -- portobject ok }
 
+extern IPCMessageAllocate { umsg mode conid portobject -- msg ok }
+extern IPCMessageFree { msg -- }
+
 externptr IPCPortObjectType
 
 extern IPCGlobalLock { -- ok }

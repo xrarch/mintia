@@ -27,14 +27,7 @@
 
 #include "<inc>/IPC.h"
 
-fn IPCMessageAllocate { umsg bodylen mode conid portobject -- msg ok }
-	if (DEBUGCHECKS)
-		if (bodylen@ portobject@ IPCPort_MaximumMessageBody + @ >)
-			// this should have been checked by the caller
-			"IPCMessageAllocate: length of message body too great\n" KeCrash
-		end
-	end
-
+fn IPCMessageAllocate { umsg mode conid portobject -- msg ok }
 	// allocating from a zone is so fast we should just disable interrupts.
 
 	auto rs
@@ -70,10 +63,12 @@ fn IPCMessageAllocate { umsg bodylen mode conid portobject -- msg ok }
 
 	portobject@ msg@ IPCKernelMessage_OriginatingPort + !
 
+	// pull in the message header
+
 	if (mode@ USERMODE ==)
 		msg@ IPCKernelMessage_Header + // dest
 		umsg@ // src
-		bodylen@ // sz
+		OSMessageHeader_SIZEOF // sz
 		KeSafeCopyIn ok!
 
 		if (ok@)
@@ -90,15 +85,56 @@ fn IPCMessageAllocate { umsg bodylen mode conid portobject -- msg ok }
 	end else
 		msg@ IPCKernelMessage_Header + // dest
 		umsg@ // src
-		bodylen@ // sz
+		OSMessageHeader_SIZEOF // sz
 		memcpy
+	end
+
+	// pull in the message body
+
+	if (msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi
+		portobject@ IPCPort_MaximumMessageBody + @ >)
+		STATUS_MESSAGE_TOO_LONG ok!
+
+		HALCPUInterruptDisable rs!
+
+		msg@ // ptr
+		portobject@ IPCPort_ZoneHeader + // zoneheader
+		MmZoneFree
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	if (msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi)
+		if (mode@ USERMODE ==)
+			msg@ IPCKernelMessage_Header + OSMessageHeader_SIZEOF + // dest
+			umsg@ OSMessageHeader_SIZEOF + // src
+			msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi // sz
+			KeSafeCopyIn ok!
+
+			if (ok@)
+				HALCPUInterruptDisable rs!
+
+				msg@ // ptr
+				portobject@ IPCPort_ZoneHeader + // zoneheader
+				MmZoneFree
+
+				rs@ HALCPUInterruptRestore
+
+				return
+			end
+		end else
+			msg@ IPCKernelMessage_Header + OSMessageHeader_SIZEOF + // dest
+			umsg@ OSMessageHeader_SIZEOF + // src
+			msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi // sz
+			memcpy
+		end
 	end
 
 	// fill in the kernel-controlled parts of the message header.
 
 	0 msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
-
-	bodylen@ msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + si
 	portobject@ IPCPort_ClientID + @ msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
 	portobject@ IPCPort_ServerContextForClient + @ msg@ IPCKernelMessage_Header + OSMessageHeader_Context + !
 

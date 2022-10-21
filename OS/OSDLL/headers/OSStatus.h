@@ -72,5 +72,6 @@ const STATUS_NOT_ENQUEUED            -70
 const STATUS_STRIPPED_EXECUTABLE     -71
 const STATUS_OTHER_CONDITION         -72
 const STATUS_IO_CANCELLED            -73
+const STATUS_MESSAGE_TOO_LONG        -74
 
 extern OSStatusGetName { status -- name }

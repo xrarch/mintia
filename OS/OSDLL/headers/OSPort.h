@@ -16,4 +16,4 @@ const OSPORT_CONID_NONE         0
 const OSPORT_CONID_ANY          0
 const OSPORT_CONID_ALL          0
 const OSPORT_CONID_NEW          0
-const OSPORT_CONID_CONNECTIONS  1
+const OSPORT_CONID_CONNECTION   1

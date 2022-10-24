@@ -1,7 +1,5 @@
-extern ObRootDirectoryLockUnalertable { -- }
-extern ObRootDirectoryLock { -- ok }
-extern ObRootDirectoryLockShared { -- ok }
-extern ObRootDirectoryLockSharedUnalertable { -- }
+extern ObRootDirectoryLock { alertable -- ok }
+extern ObRootDirectoryLockShared { alertable -- ok }
 extern ObRootDirectoryUnlock { -- }
 
 extern ObDirectoryObjectDelete { object -- }

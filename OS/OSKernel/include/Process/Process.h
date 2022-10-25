@@ -99,9 +99,6 @@ struct PsOSDLLInfo
 	4 InterlockedIncStart
 	4 InterlockedIncEnd
 
-	4 InterlockedDecStart
-	4 InterlockedDecEnd
-
 	4 TryAcquireStart
 	4 TryAcquireEnd
 #endif

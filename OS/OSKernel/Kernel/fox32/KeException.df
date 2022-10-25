@@ -751,7 +751,6 @@ public KeFox32OldIPL
 const EXCPAGEFAULT 2
 const EXCPAGEFAULTWRITE 3
 
-externptr KeInterlockedDecrementEnd
 externptr KeInterlockedIncrementEnd
 
 fn KeFox32Exception { ecause tf -- }
@@ -776,6 +775,9 @@ fn KeFox32Exception { ecause tf -- }
 		end
 	end
 
+	auto osdll
+	PsOSDLLInformation osdll!
+
 	if (tf@ OSContext_eflagsB + gb FOX32_RS_USER &)
 		if (DEBUGCHECKS)
 			if (KeThreadCurrent@ KeThread_TrapFrame + @)
@@ -787,28 +789,23 @@ fn KeFox32Exception { ecause tf -- }
 
 		// check for interlocked operation and restart if one was interrupted.
 
-		if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedIncStart + @ >=)
-			if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedIncEnd + @ <)
-				PsOSDLLInformation PsOSDLLInfo_InterlockedIncStart + @ tf@ OSContext_epc + !
+		if (tf@ OSContext_epc + @ osdll@ PsOSDLLInfo_InterlockedIncStart + @ >)
+			if (tf@ OSContext_epc + @ osdll@ PsOSDLLInfo_InterlockedIncEnd + @ <)
+				osdll@ PsOSDLLInfo_InterlockedIncStart + @ tf@ OSContext_epc + !
 			end
-		end elseif (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedDecStart + @ >=)
-			if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_InterlockedDecEnd + @ <)
-				PsOSDLLInformation PsOSDLLInfo_InterlockedDecStart + @ tf@ OSContext_epc + !
-			end
-		end elseif (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_TryAcquireStart + @ >=)
-			if (tf@ OSContext_epc + @ PsOSDLLInformation PsOSDLLInfo_TryAcquireEnd + @ <)
-				PsOSDLLInformation PsOSDLLInfo_TryAcquireStart + @ tf@ OSContext_epc + !
+		end elseif (tf@ OSContext_epc + @ osdll@ PsOSDLLInfo_TryAcquireStart + @ >)
+			if (tf@ OSContext_epc + @ osdll@ PsOSDLLInfo_TryAcquireEnd + @ <)
+				osdll@ PsOSDLLInfo_TryAcquireStart + @ tf@ OSContext_epc + !
 			end
 		end
-	end else
-		if (tf@ OSContext_epc + @ pointerof KeInterlockedIncrement >=)
-			if (tf@ OSContext_epc + @ KeInterlockedIncrementEnd <)
-				pointerof KeInterlockedIncrement tf@ OSContext_epc + !
-			end
-		end elseif (tf@ OSContext_epc + @ pointerof KeInterlockedDecrement >=)
-			if (tf@ OSContext_epc + @ KeInterlockedDecrementEnd <)
-				pointerof KeInterlockedDecrement tf@ OSContext_epc + !
-			end
+	end elseif (tf@ OSContext_epc + @ pointerof KeInterlockedIncrement >)
+		// check for interlocked kernel operation and restart if one was
+		// interrupted. this is needed for kernel mode because we often do an
+		// interlocked increment on paged kernel data that must not be guarded
+		// by means other than mutex.
+
+		if (tf@ OSContext_epc + @ KeInterlockedIncrementEnd <)
+			pointerof KeInterlockedIncrement tf@ OSContext_epc + !
 		end
 	end
 

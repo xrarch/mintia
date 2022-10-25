@@ -141,7 +141,6 @@ extern KeSafeProbeWrite { dest -- ok }
 extern KeSafeGetByte { src -- byte ok }
 
 extern KeInterlockedIncrement { inc ptr -- oldcount }
-extern KeInterlockedDecrement { dec ptr -- oldcount }
 
 extern KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 

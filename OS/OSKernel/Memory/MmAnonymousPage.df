@@ -37,6 +37,12 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 	auto ef
 	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb ef!
 
+	// remember the location of this page in swap by writing that to the PTE,
+	// which may be in a section object's prototype page table in the case of
+	// a shared anonymous page, or in the process's page table in the case of
+	// a private anonymous page. this may be zero if the page is a never-
+	// -written demand-zero page since we just discard those.
+
 	pte@ ppte@!
 
 	auto ptpfdbe
@@ -48,8 +54,14 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 			ppte@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
 
 			if (pte@ SWAPPTE_DEMANDZERO ==)
-				// let it be known that this IF statement was the fix to a bug
-				// that took me 2 weeks to resolve.
+				// this was a demand-zero page, so it's just going to be
+				// discarded now. officially delete the PTE, which may be able
+				// to free up the page table as well.
+				//
+				// let it be known that this was the fix to a bug that took me
+				// 2 weeks to resolve. previously, this would unconditionally
+				// dereference the page table, which broke things later as the
+				// PTE would end up never being properly deleted.
 
 				1 // deref
 				ppte@ // pteaddr
@@ -57,10 +69,17 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 				pfdbe@ MmPageFrameEntryAnonymous_Process + @ // process
 				MmPTEDelete drop
 			end else
+				// dereference the page table since the PTE contains some
+				// information about the location of this page in swap. this
+				// may allow the page table to be swapped out as well.
+
 				ptpfdbe@ MmEvictablePageDereference drop
 			end
 		end
 	end elseif (ef@ MMEVICTFLAG_PAGETABLE &)
+		// this is a page table page, dereference the page directory that
+		// points to it so we might be able to swap that out.
+
 		ppte@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
 		ptpfdbe@ MmEvictablePageDereference drop
 	end
@@ -75,7 +94,7 @@ fn MmAnonymousPageGet { pte pri -- pfdbe pfn ok }
 		end
 	end
 
-	// caller must set COW flag in pfdbe if applicable.
+	// caller must set PRIVATE flag in pfdbe if applicable.
 
 	// caller must also set MMEVICTFLAG_MODIFIED and set SwapPageNumber to
 	// MMSWAPPAGE_NONE if this isn't a demand-zero page.

@@ -4,8 +4,10 @@ struct OSVideoQuery
 	4 Width
 	4 Height
 	4 Format
-	32 Reserved
+	4 VRAMSize
+	28 Reserved
 endstruct
 
-const FBFORMAT_NA       0
-const FBFORMAT_1AB5G5R5 1
+const OSFBFORMAT_NA     0
+const OSFBFORMAT_I8     1
+const OSFBFORMAT_RGBA32 2

@@ -1,0 +1,263 @@
+//
+// Implements the fox32 framebuffer driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/OSDLL/OSVideoControl.h"
+
+#include "<inc>/HALMap.h"
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALfox32IO.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALConsole.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+const FRAMEBUFFER 0x02000000
+const FRAMEBUFFER_WIDTH  640
+const FRAMEBUFFER_HEIGHT 480
+
+struct FoxFB
+	4 BaseAddress
+	4 Width
+	4 Height
+	4 VRAMSize
+endstruct
+
+table DriverFoxFBDispatch
+	0                                    // open
+	0                                    // close
+	pointerof FoxFBIOControl             // iocontrol
+	pointerof FoxFBRead                  // read
+	pointerof FoxFBWrite                 // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	0                                    // readblock
+	0                                    // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	pointerof FoxFBGetPageAddress        // getpageaddr
+	0                                    // delete device object
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverFoxFB
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"foxfb"                              // name
+	OSFILETYPE_CHARDEVICE                // type
+	pointerof DriverFoxFBDispatch        // dispatch table
+	FoxFB_SIZEOF                         // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+fn Fox32FramebufferInit { -- }
+	fnsection "INIT$text"
+
+	auto vramsize
+	FRAMEBUFFER_WIDTH FRAMEBUFFER_HEIGHT * 4 * vramsize!
+
+	auto dev
+	auto ok
+
+	"foxfb0" // name
+	vramsize@ // sizeinbytes
+	DriverFoxFB // driver
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ "FoxFBEnumerate: failed to create foxfb0 (%i)\n" KeCrash
+	end
+
+	auto foxfb
+	dev@ IODeviceGetExtension foxfb!
+
+	FRAMEBUFFER foxfb@ FoxFB_BaseAddress + !
+	FRAMEBUFFER_WIDTH foxfb@ FoxFB_Width + !
+	FRAMEBUFFER_HEIGHT foxfb@ FoxFB_Height + !
+	vramsize@ foxfb@ FoxFB_VRAMSize + !
+end
+
+fn (IODispatchIOControlFunction) FoxFBIOControl { arg2 arg1 access fcb lastmode -- ret ok }
+	0 ok!
+
+	auto foxfb
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension foxfb!
+
+	if (arg1@ OSVIDEOIOCONTROL_QUERY ==)
+		auto query
+
+		if (lastmode@ USERMODE ==)
+			OSVideoQuery_SIZEOF alloc query!
+
+			query@ // ptr
+			OSVideoQuery_SIZEOF // size
+			0 // word
+			memset
+		end else
+			arg2@ query!
+		end
+
+		foxfb@ FoxFB_Width + @ query@ OSVideoQuery_Width + !
+		foxfb@ FoxFB_Height + @ query@ OSVideoQuery_Height + !
+		OSFBFORMAT_RGBA32 query@ OSVideoQuery_Format + !
+		foxfb@ FoxFB_VRAMSize + @ query@ OSVideoQuery_VRAMSize + !
+
+		if (lastmode@ USERMODE ==)
+			arg2@ // dest
+			query@ // src
+			OSVideoQuery_SIZEOF // size
+			KeSafeCopyOut ok!
+		end
+	end else
+		STATUS_NOT_SUPPORTED ok!
+	end
+end
+
+fn (IODispatchGetPageAddressFunction) FoxFBGetPageAddress { offset fcb -- phyaddr ok }
+	auto foxfb
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension foxfb!
+
+	if (offset@ foxfb@ FoxFB_VRAMSize + @ >=)
+		"FoxFBGetPageAddress: beyond end of VRAM\n" KeCrash
+	end
+
+	0 ok!
+	foxfb@ FoxFB_BaseAddress + @ offset@ + phyaddr!
+end
+
+fn (IODispatchReadFunction) FoxFBRead { timeout flags kflags offset mdl fcb -- ok }
+	auto foxfb
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension foxfb!
+
+	auto vramsize
+	foxfb@ FoxFB_VRAMSize + @ vramsize!
+
+	if (offset@ vramsize@ >=)
+		0 ok!
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	auto lastmode
+	mdl@ MmMDLHeader_Mode + @ lastmode!
+
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto length
+	mdl@ MmMDLHeader_Length + @ length!
+
+	vramsize@ offset@ -
+	length@
+	min length!
+
+	length@ mdl@ MmMDLHeader_Length + !
+
+	if (lastmode@ USERMODE ==)
+		buffer@ // dest
+		foxfb@ FoxFB_BaseAddress + @ IDENTITYSPACE | offset@ + // src
+		length@ // size
+		KeSafeCopyOut ok!
+
+		if (ok@)
+			return
+		end
+	end else
+		buffer@ // dest
+		foxfb@ FoxFB_BaseAddress + @ IDENTITYSPACE | offset@ + // src
+		length@ // size
+		memcpy
+	end
+
+	0 // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn (IODispatchWriteFunction) FoxFBWrite { flags kflags offset mdl fcb -- ok }
+	auto foxfb
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension foxfb!
+
+	auto vramsize
+	foxfb@ FoxFB_VRAMSize + @ vramsize!
+
+	if (offset@ vramsize@ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	auto lastmode
+	mdl@ MmMDLHeader_Mode + @ lastmode!
+
+	auto buffer
+	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+
+	auto length
+	mdl@ MmMDLHeader_Length + @ length!
+
+	vramsize@ offset@ -
+	length@
+	min length!
+
+	length@ mdl@ MmMDLHeader_Length + !
+
+	if (lastmode@ USERMODE ==)
+		foxfb@ FoxFB_BaseAddress + @ IDENTITYSPACE | offset@ + // dest
+		buffer@ // src
+		length@ // size
+		KeSafeCopyIn ok!
+
+		if (ok@)
+			return
+		end
+	end else
+		foxfb@ FoxFB_BaseAddress + @ IDENTITYSPACE | offset@ + // dest
+		buffer@ // src
+		length@ // size
+		memcpy
+	end
+
+	0 // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end

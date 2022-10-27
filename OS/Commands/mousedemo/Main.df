@@ -10,10 +10,43 @@ var YRes 0
 
 var FBAddress 0
 
+var BytesPerRow 0
+
 const BOXROWS 8
 const BOXCOLS 8
 
+fn InvertBox32 { x y -- }
+	auto base
+	y@ XRes@ * x@ + 4 * FBAddress@ + base!
+
+	auto mod
+	XRes@ BOXCOLS - 4 * mod!
+
+	auto count
+	BOXROWS count!
+
+	while (count@)
+		auto xcount
+		BOXCOLS xcount!
+
+		while (xcount@)
+			base@@ ~ base@!
+
+			4 base +=
+			1 xcount -=
+		end
+
+		mod@ base +=
+		1 count -=
+	end
+end
+
 fn InvertBox { x y -- }
+	if (BytesPerRow@ 4 ==)
+		x@ y@ InvertBox32
+		return
+	end
+
 	auto i
 	0 i!
 
@@ -84,7 +117,15 @@ fn Main { ... -- ret }
 	OSFileOpen ret! mousehandle!
 
 	if (ret@)
-		ret@ OSStatusGetName "mousedemo: couldn't open :mouse2: %s\n" OSError
+		0 // flags
+		ACCESS_READ // access
+		":foxmouse0" // path
+		0 // ftype
+		OSFileOpen ret! mousehandle!
+
+		if (ret@)
+			ret@ OSStatusGetName "mousedemo: couldn't open mouse device: %s\n" OSError
+		end
 	end
 
 	auto fbhandle
@@ -95,7 +136,15 @@ fn Main { ... -- ret }
 	OSFileOpen ret! fbhandle!
 
 	if (ret@)
-		ret@ OSStatusGetName "mousedemo: couldn't open :kinnowfb0: %s\n" OSError
+		0 // flags
+		ACCESS_READ ACCESS_WRITE | // access
+		":foxfb0" // path
+		0 // ftype
+		OSFileOpen ret! fbhandle!
+
+		if (ret@)
+			ret@ OSStatusGetName "mousedemo: couldn't open framebuffer device: %s\n" OSError
+		end
 	end
 
 	auto mousepacket
@@ -116,7 +165,15 @@ fn Main { ... -- ret }
 	videoquery@ OSVideoQuery_Height + @ YRes!
 	videoquery@ OSVideoQuery_Width + @ XRes!
 
-	videoquery@ OSVideoQuery_Width + @ videoquery@ OSVideoQuery_Height + @ * // length
+	if (videoquery@ OSVideoQuery_Format + @ OSFBFORMAT_I8 ==)
+		1 BytesPerRow!
+	end elseif (videoquery@ OSVideoQuery_Format + @ OSFBFORMAT_RGBA32 ==)
+		4 BytesPerRow!
+	end else
+		1 BytesPerRow!
+	end
+
+	videoquery@ OSVideoQuery_VRAMSize + @ // length
 	HEAPSTART // startva
 	0 // sectionoffset
 	fbhandle@ // sectionhandle
@@ -156,7 +213,11 @@ fn Main { ... -- ret }
 			ret@ OSStatusGetName "mousedemo: couldn't read mouse packet: %s\n" OSError
 		end
 
-		if (mousepacket@ OSMousePacket_EventType + @ OSMOUSEEVENT_MOVED ==)
+		auto eventtype
+		mousepacket@ OSMousePacket_EventType + @ eventtype!
+
+		if (eventtype@ OSMOUSEEVENT_MOVED ==
+			eventtype@ OSMOUSEEVENT_MOVEDABS == ||)
 			if (rcur@)
 				mouseX@ mouseY@ InvertBox
 			end
@@ -167,16 +228,21 @@ fn Main { ... -- ret }
 			auto dy
 			mousepacket@ OSMousePacket_Info + @ 0xFFFF & dy!
 
-			if (dx@ 0x8000 &)
-				0xFFFF0000 dx |=
-			end
+			if (eventtype@ OSMOUSEEVENT_MOVED ==)
+				if (dx@ 0x8000 &)
+					0xFFFF0000 dx |=
+				end
 
-			if (dy@ 0x8000 &)
-				0xFFFF0000 dy |=
-			end
+				if (dy@ 0x8000 &)
+					0xFFFF0000 dy |=
+				end
 
-			dy@ mouseY +=
-			dx@ mouseX +=
+				dy@ mouseY +=
+				dx@ mouseX +=
+			end elseif (eventtype@ OSMOUSEEVENT_MOVEDABS ==)
+				dx@ mouseX!
+				dy@ mouseY!
+			end
 
 			if (mouseX@ z<)
 				0 mouseX!
@@ -191,9 +257,9 @@ fn Main { ... -- ret }
 			end
 
 			mouseX@ mouseY@ InvertBox
-		end elseif (mousepacket@ OSMousePacket_EventType + @ OSMOUSEEVENT_PRESSED ==)
+		end elseif (eventtype@ OSMOUSEEVENT_PRESSED ==)
 			0 rcur!
-		end elseif (mousepacket@ OSMousePacket_EventType + @ OSMOUSEEVENT_RELEASED ==)
+		end elseif (eventtype@ OSMOUSEEVENT_RELEASED ==)
 			1 rcur!
 		end
 	end

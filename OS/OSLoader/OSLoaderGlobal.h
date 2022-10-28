@@ -40,10 +40,10 @@ struct LdrInfo
 
 	4 TotalRAM
 
-	// LIMNstation-specific -- to be IFDEF'd
-
+#ifdef LIMNSTATION
 	4 CitronBase
 	4 LSICBase
+#endif
 endstruct
 
 struct LdrBootResource

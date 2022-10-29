@@ -104,6 +104,9 @@ externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize
 externptr MmPeakWorkingSetSize
 
+externptr MmSoftPageFaultCount
+externptr MmHardPageFaultCount
+
 externptr MmTheoreticalCommitLimit
 externptr MmCommitLimit
 externptr MmCommitUsage

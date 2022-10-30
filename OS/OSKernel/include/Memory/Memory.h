@@ -104,8 +104,9 @@ externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize
 externptr MmPeakWorkingSetSize
 
-externptr MmSoftPageFaultCount
-externptr MmHardPageFaultCount
+externptr MmSoftPageFaultCount // transition/demandzero faults
+externptr MmHardPageFaultCount // pageins due to page fault
+externptr MmPageInCount        // pageins in general
 
 externptr MmTheoreticalCommitLimit
 externptr MmCommitLimit
@@ -117,10 +118,10 @@ externptr MmNonpageableCommitUsage
 // free page count thresholds at which various types/priorities of page
 // allocation will block or fail.
 
-const MMNORMALTHRESH        15 // normal allocations
-const MMPOOLTHRESH          12  // pool/heap allocations
-const MMMUSTSUCCEEDL2THRESH 4  // mustsucceed level 2
-const MMMUSTSUCCEEDTHRESH   0  // mustsucceed
+const MMNORMALTHRESH        8 // normal allocations
+const MMPOOLTHRESH          5 // nonblocking pool allocations
+const MMMUSTSUCCEEDL2THRESH 3 // mustsucceed level 2
+const MMMUSTSUCCEEDTHRESH   1 // mustsucceed
 
 // free page count threshold that counts as "dire", meaning the working set
 // trimmer will ignore working set lower limits and go woo wild.

@@ -144,6 +144,9 @@ fn IPCPortCreateObject { maxlen serverport owningprocess permissions name -- por
 	0 portobject@ IPCPort_MessageListHead + !
 	0 portobject@ IPCPort_MessageListTail + !
 
+	0 portobject@ IPCPort_SentListHead + !
+	0 portobject@ IPCPort_SentListTail + !
+
 	0 portobject@ IPCPort_WaiterListHead + !
 	0 portobject@ IPCPort_WaiterListTail + !
 
@@ -229,6 +232,44 @@ fn IPCPortCreateObject { maxlen serverport owningprocess permissions name -- por
 	maxlen@ portobject@ IPCPort_MaximumMessageBody + !
 end
 
+fn IPCPortWakeWaiter { rxmsg waiter portobject -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IPCPortWakeWaiter: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// store message pointer
+
+	rxmsg@ waiter@ IPCThreadBlock_RXMessage + !
+
+	// dequeue waiter
+
+	auto ls
+	auto ns
+
+	waiter@ IPCThreadBlock_WaiterPrev + @ ls!
+	waiter@ IPCThreadBlock_WaiterNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IPCThreadBlock_WaiterNext + !
+	end else
+		ns@ portobject@ IPCPort_WaiterListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ IPCThreadBlock_WaiterPrev + !
+	end else
+		ls@ portobject@ IPCPort_WaiterListTail + !
+	end
+
+	// signal event
+
+	IPCBOOST // priboost
+	waiter@ IPCThreadBlock_Event + // event
+	KeEventSignal
+end
+
 fn IPCPortEnqueueMessage { msg portobject -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
@@ -251,4 +292,73 @@ fn IPCPortEnqueueMessage { msg portobject -- }
 	// the check and the operation of this function. IPL sync is used instead
 	// of a mutex because it is anticipated that DPCs will need to enqueue IPC
 	// messages; additionally IPL sync comes with a shorter codepath.
+
+	// wake up waiter
+
+	auto conid
+	msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + @ conid!
+
+	auto msgtype
+	msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb msgtype!
+
+	auto waiter
+	portobject@ IPCPort_WaiterListHead + @ waiter!
+
+	while (waiter@)
+		auto wake
+		0 wake!
+
+		if (msgtype@ OSPORT_MESSAGE_REPLY ==)
+			if (waiter@ IPCThreadBlock_WaitingConversationID + @ conid@ ==)
+				1 wake!
+			end
+		end else
+			if (waiter@ IPCThreadBlock_WaitingConversationID + @ OSPORT_CONID_ANY ==)
+				1 wake!
+			end
+		end
+
+		if (wake@)
+			msg@ // rxmsg
+			waiter@ // waiter
+			portobject@ // portobject
+			IPCPortWakeWaiter
+
+			return
+		end
+
+		waiter@ IPCThreadBlock_WaiterNext + @ waiter!
+	end
+
+	// no waiters right now, add message to message queue
+
+	auto t
+	portobject@ IPCPort_MessageListTail + @ t!
+
+	t@ msg@ IPCKernelMessage_QueuePrev + !
+
+	if (t@ ~~)
+		msg@ portobject@ IPCPort_MessageListHead + !
+	end else
+		msg@ t@ IPCKernelMessage_QueueNext + !
+	end
+
+	msg@ portobject@ IPCPort_MessageListTail + !
+
+	// add message to port rundown queue
+
+	auto msgport
+	msg@ IPCKernelMessage_OriginatingPort + @ msgport!
+
+	msgport@ IPCPort_SentListTail + @ t!
+
+	t@ msg@ IPCKernelMessage_PortPrev + !
+
+	if (t@ ~~)
+		msg@ msgport@ IPCPort_SentListHead + !
+	end else
+		msg@ t@ IPCKernelMessage_PortNext + !
+	end
+
+	msg@ msgport@ IPCPort_SentListTail + !
 end

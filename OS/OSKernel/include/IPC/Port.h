@@ -2,6 +2,9 @@ struct IPCPort
 	4 MessageListHead
 	4 MessageListTail
 
+	4 SentListHead
+	4 SentListTail
+
 	4 WaiterListHead
 	4 WaiterListTail
 
@@ -49,6 +52,8 @@ struct IPCKernelMessage
 	OSMessageHeader_SIZEOF Header
 //	0 Body
 endstruct
+
+const IPCBOOST 1
 
 const IPCINITIALMESSAGES_CLIENT 4
 const IPCINITIALMESSAGES_SERVER 16

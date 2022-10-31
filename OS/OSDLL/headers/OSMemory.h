@@ -41,8 +41,8 @@ struct OSMemoryInformation
 	4 CommitLimit
 	4 CommitUsage
 
-	4 NonpageableCommitLimit
-	4 NonpageableCommitUsage
+	4 PhysicalCommitLimit
+	4 PhysicalCommitUsage
 
 	4 ModifiedFilePageCount
 
@@ -50,22 +50,26 @@ struct OSMemoryInformation
 endstruct
 
 struct OSQuotaInformation
-	4 HeapUsed
-	4 HeapMaximum
+	4 PoolUsed
+	4 PoolMaximum
+
+	4 PagedPoolUsed
+	4 PagedPoolMaximum
 
 	4 VirtualMemoryUsed
 	4 VirtualMemoryMaximum
 
-	4 PagedHeapUsed
-	4 PagedHeapMaximum
+	4 WorkingSetUsed
+	4 WorkingSetMaximum
 
 	48 Reserved
 endstruct
 
 struct OSQuota
-	4 Heap
+	4 Pool
+	4 PagedPool
 	4 VirtualMemory
-	4 PagedHeap
+	4 WorkingSet
 
 	48 Reserved
 endstruct

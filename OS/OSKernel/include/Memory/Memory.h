@@ -50,7 +50,7 @@ extern MmUsageDump { -- }
 
 extern MmInitPhase0 { -- }
 extern MmInitPhase1 { -- }
-extern MmInitNonpageableCommit { -- }
+extern MmInitPhysicalCommit { -- }
 
 extern MmQuery { query -- ok }
 
@@ -108,12 +108,12 @@ externptr MmSoftPageFaultCount // transition/demandzero faults
 externptr MmHardPageFaultCount // pageins due to page fault
 externptr MmPageInCount        // pageins in general
 
-externptr MmTheoreticalCommitLimit
-externptr MmCommitLimit
-externptr MmCommitUsage
+externptr MmTheoreticalCommitLimit // virtual memory available if all swapfiles extend to maximum
+externptr MmCommitLimit            // virtual memory available right now
+externptr MmCommitUsage            // virtual memory promised
 
-externptr MmNonpageableCommitLimit
-externptr MmNonpageableCommitUsage
+externptr MmPhysicalCommitLimit // physical memory available, sans a minimum margin for paging activity
+externptr MmPhysicalCommitUsage // physical memory promised to nonpaged pool and working set minimums
 
 // free page count thresholds at which various types/priorities of page
 // allocation will block or fail.
@@ -142,10 +142,10 @@ const MMSYSTEMWORKINGSETDEFAULTMAXIMUM 100
 
 const MMPROCESSPINGUARANTEE 8
 
-// default nonpageable commit heuristics
+// default physical commit heuristics
 
-const MMSYSTEMPROMISE (100 1024 *)
-const MMNONPAGECOMMITMINIMUM (256 1024 *)
+const MMSYSTEMPROMISE         32
+const MMPHYSICALCOMMITMINIMUM 64
 
 // page allocation priorities
 

@@ -108,11 +108,11 @@ public MmCommitLimit
 var MmCommitUsage 0
 public MmCommitUsage
 
-var MmNonpageableCommitLimit 0
-public MmNonpageableCommitLimit
+var MmPhysicalCommitLimit 0
+public MmPhysicalCommitLimit
 
-var MmNonpageableCommitUsage 0
-public MmNonpageableCommitUsage
+var MmPhysicalCommitUsage 0
+public MmPhysicalCommitUsage
 
 buffer MmEventPageAvailable KeEvent_SIZEOF
 public MmEventPageAvailable
@@ -167,6 +167,7 @@ fn MmInitPhase0 { -- }
 	KeProcessCurrent idleproc!
 
 	auto ok
+	MMQUOTAINFINITE // wsmax
 	MMQUOTAINFINITE // pghpmax
 	MMQUOTAINFINITE // vmmax
 	MMQUOTAINFINITE // heapmax
@@ -215,7 +216,7 @@ fn MmInitPhase0 { -- }
 
 	MmPoolInit
 
-	-1 MmNonpageableCommitLimit!
+	-1 MmPhysicalCommitLimit!
 
 	MmReclaimMemory
 
@@ -254,9 +255,9 @@ fn MmInitPhase1 { -- }
 	auto phdr
 	PsSystemProcess@ PsProcess_MmHeader + @ phdr!
 
-	MMSYSTEMWORKINGSETDEFAULTMINIMUM phdr@ MmProcessHeader_WorkingSetMinimum + !
-	MMSYSTEMWORKINGSETDEFAULTMAXIMUM phdr@ MmProcessHeader_WorkingSetMaximum + !
-	-1 phdr@ MmProcessHeader_WorkingSetQuota + !
+	// MMSYSTEMWORKINGSETDEFAULTMINIMUM phdr@ MmProcessHeader_WorkingSetMinimum + !
+	// MMSYSTEMWORKINGSETDEFAULTMAXIMUM phdr@ MmProcessHeader_WorkingSetMaximum + !
+	// -1 phdr@ MmProcessHeader_WorkingSetQuota + !
 
 	auto typeinit
 	ObTypeInitializer_SIZEOF alloc typeinit!
@@ -612,28 +613,19 @@ fn MmResourceJettison { -- }
 	0 HALResourceListHead!
 end
 
-fn MmInitNonpageableCommit { -- }
-	fnsection "INIT$text"
+fn MmInitPhysicalCommit { -- }
+//	fnsection "INIT$text"
 
 	auto limit
-
-	if (MmSystemSize@ MMTINYSYSTEM <=)
-		MmPageFreeCount@ PAGESHIFT << limit!
-	end elseif (MmSystemSize@ MMSMALLSYSTEM <=)
-		MmPageFreeCount@ 1 >> PAGESHIFT << limit!
-	end elseif (MmSystemSize@ MMMEDIUMSYSTEM <=)
-		MmPageFreeCount@ 2 >> PAGESHIFT << limit!
-	end else
-		MmPageFreeCount@ 3 >> PAGESHIFT << limit!
-	end
+	MmPageTotal@ limit!
 
 	// subtract the memory promised for FCB cache
 
-	if (IOFileControlBlockCacheSize@ limit@ <)
-		IOFileControlBlockCacheSize@ limit -=
+	if (IOFileControlBlockCacheSize@ PAGESHIFT >> limit@ <)
+		IOFileControlBlockCacheSize@ PAGESHIFT >> limit -=
 	end
 
-	// subtract an arbitrary 128KB for system usage
+	// subtract an arbitrary 32 pages for system usage
 
 	if (MMSYSTEMPROMISE limit@ <)
 		MMSYSTEMPROMISE limit -=
@@ -641,17 +633,17 @@ fn MmInitNonpageableCommit { -- }
 
 	// guarantee a minimum
 
-	if (limit@ MMNONPAGECOMMITMINIMUM <)
-		MMNONPAGECOMMITMINIMUM limit!
+	if (limit@ MMPHYSICALCOMMITMINIMUM <)
+		MMPHYSICALCOMMITMINIMUM limit!
 	end
 
 	// limit to total number of pages
 
-	if (limit@ MmPageTotal@ PAGESHIFT << >)
-		MmPageTotal@ PAGESHIFT << limit!
+	if (limit@ MmPageTotal@ >)
+		MmPageTotal@ limit!
 	end
 
-	limit@ MmNonpageableCommitLimit!
+	limit@ MmPhysicalCommitLimit!
 end
 
 fn MmUnwireKernel { -- }
@@ -760,6 +752,8 @@ fn MmUnwireKernel { -- }
 
 		nunwr@ unwr!
 	end
+
+	MmInitPhysicalCommit
 end
 
 fn MmQuery { query -- ok }
@@ -824,8 +818,8 @@ fn MmQuery { query -- ok }
 	MmCommitLimit@ query@ OSMemoryInformation_CommitLimit + !
 	MmCommitUsage@ query@ OSMemoryInformation_CommitUsage + !
 
-	MmNonpageableCommitLimit@ query@ OSMemoryInformation_NonpageableCommitLimit + !
-	MmNonpageableCommitUsage@ query@ OSMemoryInformation_NonpageableCommitUsage + !
+	MmPhysicalCommitLimit@ query@ OSMemoryInformation_PhysicalCommitLimit + !
+	MmPhysicalCommitUsage@ query@ OSMemoryInformation_PhysicalCommitUsage + !
 
 	MmModifiedFilePageCount@ query@ OSMemoryInformation_ModifiedFilePageCount + !
 end

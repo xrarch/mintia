@@ -47,6 +47,7 @@ struct IPCKernelMessage
 
 	4 OriginatingPort
 	4 RundownPointer
+	4 Object
 
 // user-visible part
 

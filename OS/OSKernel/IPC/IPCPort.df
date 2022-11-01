@@ -331,16 +331,6 @@ fn IPCPortReceiveMessage { umsg mode conid timeout portobject -- ok }
 		end
 	end
 
-	if (portobject@ ObObjectNonpagedHeader ObNonpagedHeader_PointerCount + @ ~~)
-		// port is being deleted
-
-		IPLLOW KeIPLLower
-
-		STATUS_PORT_DISCONNECTED ok!
-
-		return
-	end
-
 	// entered at IPLDPC, leaves at IPLLOW
 
 	auto msg
@@ -442,18 +432,6 @@ fn IPCPortReceiveMessage { umsg mode conid timeout portobject -- ok }
 			return
 		end
 
-		if (portobject@ ObObjectNonpagedHeader ObNonpagedHeader_PointerCount + @ ~~)
-			// port is being deleted but hadn't gotten to this message yet.
-
-			0 msg@ IPCKernelMessage_RundownPointer + !
-
-			IPLLOW KeIPLLower
-
-			STATUS_PORT_DISCONNECTED ok!
-
-			return
-		end
-
 		// the message was received successfully.
 		// ignore any status code we got from waiting on the event.
 
@@ -462,21 +440,37 @@ fn IPCPortReceiveMessage { umsg mode conid timeout portobject -- ok }
 
 	// process the message at IPLDPC
 
-	// remove from rundown list
+	auto msgport
+	msg@ IPCKernelMessage_OriginatingPort + @ msgport!
+
+	if (msgport@ ObObjectNonpagedHeader ObNonpagedHeader_PointerCount + @ ~~)
+		// port is being deleted but hadn't gotten to this message yet.
+
+		0 msg@ IPCKernelMessage_RundownPointer + !
+
+		IPLLOW KeIPLLower
+
+		STATUS_PORT_DISCONNECTED ok!
+
+		return
+	end
+
+	// remove this message from rundown list since its in our custody now
 
 	msg@ IPCMessageDequeueRundown
 
 	// reference port object to stop it from dropping out from under us now
 
-	portobject@ ObObjectReferenceByPointer drop
+	msgport@ ObObjectReferenceByPointer drop
 
 	// reference any passed object
 
 	auto object
-	msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + @ object! // actually an object pointer
+	msg@ IPCKernelMessage_Object + @ object!
 
 	if (object@)
 		object@ ObObjectReferenceByPointer drop
+		0 object@ IPCKernelMessage_Object + !
 	end
 
 	IPLLOW KeIPLLower
@@ -484,7 +478,18 @@ fn IPCPortReceiveMessage { umsg mode conid timeout portobject -- ok }
 	if (object@)
 		// open object in our handle table and save the handle in the message
 
-		// TODO
+		1 // nocheck
+		msg@ IPCKernelMessage_Header + OSMessageHeader_Access + @ // access
+		object@ // object
+		KeProcessCurrent // process
+		ObObjectOpenProcess ok! object!
+
+		object@ msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + !
+
+		if (ok@)
+			// failed to open the object
+			object@ ObObjectDereferenceByPointer drop
+		end
 	end
 
 	if (ok@ ~~)
@@ -503,7 +508,16 @@ fn IPCPortReceiveMessage { umsg mode conid timeout portobject -- ok }
 		end
 	end
 
-	// free to message zone
+	if (object@ ~~)
+		// free to message zone. don't free if there's a passed object because
+		// the synchronous IPC call will free the message instead.
+
+		msg@ IPCMessageFree
+	end
+
+	// dereference message port
+
+	msgport@ ObObjectDereferenceByPointer drop
 end
 
 fn IPCPortWaiterEnqueue { waiter portobject -- }

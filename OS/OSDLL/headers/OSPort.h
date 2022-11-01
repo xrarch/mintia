@@ -5,6 +5,7 @@ struct OSMessageHeader
 	4 ConversationID
 	4 ClientID
 	4 Context
+	4 Handle
 endstruct
 
 const OSPORT_MESSAGE_CONNECTION 1

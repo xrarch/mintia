@@ -242,26 +242,13 @@ fn IPCPortWakeWaiter { rxmsg waiter portobject -- }
 	// store message pointer
 
 	rxmsg@ waiter@ IPCThreadBlock_RXMessage + !
+	waiter@ IPCThreadBlock_RXMessage + rxmsg@ IPCKernelMessage_RundownPointer + !
 
 	// dequeue waiter
 
-	auto ls
-	auto ns
-
-	waiter@ IPCThreadBlock_WaiterPrev + @ ls!
-	waiter@ IPCThreadBlock_WaiterNext + @ ns!
-
-	if (ls@)
-		ns@ ls@ IPCThreadBlock_WaiterNext + !
-	end else
-		ns@ portobject@ IPCPort_WaiterListHead + !
-	end
-
-	if (ns@)
-		ls@ ns@ IPCThreadBlock_WaiterPrev + !
-	end else
-		ls@ portobject@ IPCPort_WaiterListTail + !
-	end
+	waiter@ // waiter
+	portobject@ // portobject
+	IPCPortWaiterDequeue
 
 	// signal event
 
@@ -270,7 +257,7 @@ fn IPCPortWakeWaiter { rxmsg waiter portobject -- }
 	KeEventSignal
 end
 
-fn IPCPortEnqueueMessage { msg portobject -- }
+fn IPCPortSendMessage { msg portobject -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"IPCPortEnqueueMessage: ipl != IPLDPC\n" KeCrash
@@ -292,6 +279,8 @@ fn IPCPortEnqueueMessage { msg portobject -- }
 	// the check and the operation of this function. IPL sync is used instead
 	// of a mutex because it is anticipated that DPCs will need to enqueue IPC
 	// messages; additionally IPL sync comes with a shorter codepath.
+
+	msg@ IPCMessageEnqueueRundown
 
 	// wake up waiter
 
@@ -330,35 +319,224 @@ fn IPCPortEnqueueMessage { msg portobject -- }
 		waiter@ IPCThreadBlock_WaiterNext + @ waiter!
 	end
 
-	// no waiters right now, add message to message queue
+	msg@ // msg
+	portobject@ // portobject
+	IPCMessageEnqueue
+end
 
+fn IPCPortReceiveMessage { umsg mode conid timeout portobject -- ok }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IPCPortReceiveMessage: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	if (portobject@ ObObjectNonpagedHeader ObNonpagedHeader_PointerCount + @ ~~)
+		// port is being deleted
+
+		IPLLOW KeIPLLower
+
+		STATUS_PORT_DISCONNECTED ok!
+
+		return
+	end
+
+	// entered at IPLDPC, leaves at IPLLOW
+
+	auto msg
+	portobject@ IPCPort_MessageListHead + @ msg!
+
+	while (msg@)
+		auto found
+		0 found!
+
+		if (conid@ OSPORT_CONID_ANY ==)
+			if (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ~=)
+				1 found!
+			end
+		end elseif (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ==)
+			if (msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + @ conid@ ==)
+				1 found!
+			end
+		end
+
+		if (found@)
+			// dequeue message
+
+			msg@ // msg
+			portobject@ // portobject
+			IPCMessageDequeue
+
+			break
+		end
+
+		msg@ IPCKernelMessage_QueueNext + @ msg!
+	end
+
+	if (msg@ ~~)
+		// no matching message
+
+		if (timeout@ ~~)
+			// nonblocking
+
+			IPLLOW KeIPLLower
+
+			STATUS_NO_MESSAGE ok!
+
+			return
+		end
+
+		// build & enqueue a waiter block
+
+		auto waiter
+		KeThreadCurrent@ PsThread_IPCBlock + @ waiter!
+
+		if (DEBUGCHECKS)
+			if (waiter@ ~~)
+				"IPCPortReceiveMessage: no ipcblock\n" KeCrash
+			end
+		end
+
+		conid@ waiter@ IPCThreadBlock_WaitingConversationID + !
+		0 waiter@ IPCThreadBlock_RXMessage + !
+
+		0 waiter@ IPCThreadBlock_WaiterNext + !
+
+		waiter@ // waiter
+		portobject@ // portobject
+		IPCPortWaiterEnqueue
+
+		// NOTE: event should already be initialized and cleared
+
+		IPLLOW KeIPLLower
+
+		mode@ // waitmode
+		1 // alertable
+		timeout@ // timeout
+		waiter@ IPCThreadBlock_Event + // object
+		KeThreadWaitForObject ok!
+
+		IPLDPC KeIPLRaise drop
+
+		waiter@ IPCThreadBlock_RXMessage + @ msg!
+
+		if (msg@ ~~)
+			// we were awoken before the message could be received.
+			// our waiter block is still enqueued so remove it.
+
+			waiter@ // waiter
+			portobject@ // portobject
+			IPCPortWaiterDequeue
+
+			IPLLOW KeIPLLower
+
+			return
+		end elseif (msg@ -1 ==)
+			// the other port disconnected. our waiter block is not enqueued,
+			// do not remove it.
+
+			IPLLOW KeIPLLower
+
+			STATUS_PORT_DISCONNECTED ok!
+
+			return
+		end
+
+		if (portobject@ ObObjectNonpagedHeader ObNonpagedHeader_PointerCount + @ ~~)
+			// port is being deleted but hadn't gotten to this message yet.
+
+			0 msg@ IPCKernelMessage_RundownPointer + !
+
+			IPLLOW KeIPLLower
+
+			STATUS_PORT_DISCONNECTED ok!
+
+			return
+		end
+
+		// the message was received successfully.
+		// ignore any status code we got from waiting on the event.
+
+		0 ok!
+	end
+
+	// process the message at IPLDPC
+
+	// remove from rundown list
+
+	msg@ IPCMessageDequeueRundown
+
+	// reference port object to stop it from dropping out from under us now
+
+	portobject@ ObObjectReferenceByPointer drop
+
+	// reference any passed object
+
+	auto object
+	msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + @ object! // actually an object pointer
+
+	if (object@)
+		object@ ObObjectReferenceByPointer drop
+	end
+
+	IPLLOW KeIPLLower
+
+	if (object@)
+		// open object in our handle table and save the handle in the message
+
+		// TODO
+	end
+
+	if (ok@ ~~)
+		// opening the object worked, copy contents
+
+		if (mode@ USERMODE ==)
+			umsg@ // dest
+			msg@ IPCKernelMessage_Header + // src
+			msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi OSMessageHeader_SIZEOF + // sz
+			KeSafeCopyOut ok!
+		end else
+			umsg@ // dest
+			msg@ IPCKernelMessage_Header + // src
+			msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi OSMessageHeader_SIZEOF + // sz
+			memcpy
+		end
+	end
+
+	// free to message zone
+end
+
+fn IPCPortWaiterEnqueue { waiter portobject -- }
 	auto t
-	portobject@ IPCPort_MessageListTail + @ t!
+	portobject@ IPCPort_WaiterListTail + @ t!
 
-	t@ msg@ IPCKernelMessage_QueuePrev + !
-
-	if (t@ ~~)
-		msg@ portobject@ IPCPort_MessageListHead + !
-	end else
-		msg@ t@ IPCKernelMessage_QueueNext + !
-	end
-
-	msg@ portobject@ IPCPort_MessageListTail + !
-
-	// add message to port rundown queue
-
-	auto msgport
-	msg@ IPCKernelMessage_OriginatingPort + @ msgport!
-
-	msgport@ IPCPort_SentListTail + @ t!
-
-	t@ msg@ IPCKernelMessage_PortPrev + !
+	t@ waiter@ IPCThreadBlock_WaiterPrev + !
 
 	if (t@ ~~)
-		msg@ msgport@ IPCPort_SentListHead + !
+		waiter@ portobject@ IPCPort_WaiterListHead + !
 	end else
-		msg@ t@ IPCKernelMessage_PortNext + !
+		waiter@ t@ IPCThreadBlock_WaiterNext + !
 	end
 
-	msg@ msgport@ IPCPort_SentListTail + !
+	waiter@ portobject@ IPCPort_WaiterListTail + !
+end
+
+fn IPCPortWaiterDequeue { waiter portobject -- }
+	auto ls
+	auto ns
+
+	waiter@ IPCThreadBlock_WaiterPrev + @ ls!
+	waiter@ IPCThreadBlock_WaiterNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IPCThreadBlock_WaiterNext + !
+	end else
+		ns@ portobject@ IPCPort_WaiterListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ IPCThreadBlock_WaiterPrev + !
+	end else
+		ls@ portobject@ IPCPort_WaiterListTail + !
+	end
 end

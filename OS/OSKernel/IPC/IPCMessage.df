@@ -62,6 +62,7 @@ fn IPCMessageAllocate { umsg mode conid portobject -- msg ok }
 	0 msg@ IPCKernelMessage_QueuePrev + !
 
 	portobject@ msg@ IPCKernelMessage_OriginatingPort + !
+	0 msg@ IPCKernelMessage_RundownPointer + !
 
 	// pull in the message header
 
@@ -137,6 +138,7 @@ fn IPCMessageAllocate { umsg mode conid portobject -- msg ok }
 	0 msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
 	portobject@ IPCPort_ClientID + @ msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
 	portobject@ IPCPort_ServerContextForClient + @ msg@ IPCKernelMessage_Header + OSMessageHeader_Context + !
+	0 msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + !
 
 	if (conid@ OSPORT_CONID_NEW ==)
 		HALCPUInterruptDisable rs!
@@ -232,5 +234,89 @@ fn IPCMessageZoneExtend { portobject -- msg ok }
 		if (ok@)
 			"IPCMessageZoneExtend: failed to allocate even though just extended\n" KeCrash
 		end
+	end
+end
+
+fn IPCMessageEnqueueRundown { msg -- }
+	// add message to port rundown list
+
+	auto msgport
+	msg@ IPCKernelMessage_OriginatingPort + @ msgport!
+
+	auto t
+	msgport@ IPCPort_SentListTail + @ t!
+
+	t@ msg@ IPCKernelMessage_PortPrev + !
+
+	if (t@ ~~)
+		msg@ msgport@ IPCPort_SentListHead + !
+	end else
+		msg@ t@ IPCKernelMessage_PortNext + !
+	end
+
+	msg@ msgport@ IPCPort_SentListTail + !
+end
+
+fn IPCMessageEnqueue { msg portobject -- }
+	// add message to message queue
+
+	auto t
+	portobject@ IPCPort_MessageListTail + @ t!
+
+	t@ msg@ IPCKernelMessage_QueuePrev + !
+
+	if (t@ ~~)
+		msg@ portobject@ IPCPort_MessageListHead + !
+	end else
+		msg@ t@ IPCKernelMessage_QueueNext + !
+	end
+
+	msg@ portobject@ IPCPort_MessageListTail + !
+end
+
+fn IPCMessageDequeueRundown { msg -- }
+	// remove message from port rundown list
+
+	auto msgport
+	msg@ IPCKernelMessage_OriginatingPort + @ msgport!
+
+	auto ls
+	auto ns
+
+	msg@ IPCKernelMessage_PortPrev + @ ls!
+	msg@ IPCKernelMessage_PortNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IPCKernelMessage_PortNext + !
+	end else
+		ns@ msgport@ IPCPort_SentListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ IPCKernelMessage_PortPrev + !
+	end else
+		ls@ msgport@ IPCPort_SentListTail + !
+	end
+end
+
+fn IPCMessageDequeue { msg portobject -- }
+	// remove message from queue
+
+	auto ls
+	auto ns
+
+	msg@ IPCKernelMessage_QueuePrev + @ ls!
+	msg@ IPCKernelMessage_QueueNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IPCKernelMessage_QueueNext + !
+	end else
+		ns@ portobject@ IPCPort_MessageListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ IPCKernelMessage_QueuePrev + !
+	end else
+		ls@ portobject@ IPCPort_MessageListTail + !
 	end
 end

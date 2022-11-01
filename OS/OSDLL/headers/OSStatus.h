@@ -74,5 +74,7 @@ const STATUS_OTHER_CONDITION          -72
 const STATUS_IO_CANCELLED             -73
 const STATUS_MESSAGE_TOO_LONG         -74
 const STATUS_WS_QUOTA_EXCEEDED        -75
+const STATUS_NO_MESSAGE               -76
+const STATUS_PORT_DISCONNECTED        -77
 
 extern OSStatusGetName { status -- name }

@@ -46,6 +46,7 @@ struct IPCKernelMessage
 	4 QueuePrev
 
 	4 OriginatingPort
+	4 RundownPointer
 
 // user-visible part
 
@@ -72,6 +73,12 @@ extern IPCPortCreateObject { maxlen serverport owningprocess permissions name --
 
 extern IPCMessageAllocate { umsg mode conid portobject -- msg ok }
 extern IPCMessageFree { msg -- }
+
+extern IPCMessageEnqueueRundown { msg -- }
+extern IPCMessageEnqueue { msg portobject -- }
+
+extern IPCMessageDequeueRundown { msg -- }
+extern IPCMessageDequeue { msg portobject -- }
 
 externptr IPCPortObjectType
 

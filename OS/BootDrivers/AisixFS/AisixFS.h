@@ -65,6 +65,8 @@ struct AFSFCBData
 	4 LastFATLinkValue
 endstruct
 
+const AFSFILECONTEXT_UPDATEONCLOSE 1
+
 struct AFSDirEnt
 	4 INum
 	60 name
@@ -87,7 +89,7 @@ const AFSSUPERBLOCKVERSION 0x6
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
-extern AFSPoke { poketype fcb -- }
+extern AFSPoke { poketype object -- }
 extern AFSSetSecurity { uid gid permissions object -- ok }
 
 extern AFSINodeUpdateModificationTime { fcb -- }

@@ -173,9 +173,28 @@ fn AFSINodeAllocate { mount -- inum inode pfdbe ok }
 	mount@ AFSINodeAllocationUnlock
 end
 
-fn (IODispatchPokeFunction) AFSPoke { poketype fcb -- }
+fn (IODispatchPokeFunction) AFSPoke { poketype object -- }
+	// this function gives us a chance to update timestamps when an operation
+	// occurs that might bypass us entirely i.e. a fully cached read or write.
+
+	auto fcb
+	object@ IOFileGetFileControlBlock fcb!
+
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	auto ok
+
 	if (poketype@ IOPOKE_WRITE ==)
-		fcb@ AFSINodeUpdateModificationTime
+		time@ HALRTCQuery
+
+		0 time@ KeTime_MsPart + !
+
+		if (fcb@ IOFileControlBlockGetModifyTime KeTime_SecPart + @ time@ KeTime_SecPart + @ ~=)
+			time@ fcb@ IOFileControlBlockSetModifyTime
+
+			object@ IOFileGetContext AFSFILECONTEXT_UPDATEONCLOSE | object@ IOFileSetContext
+		end
 	end
 end
 
@@ -215,6 +234,8 @@ end
 fn AFSINodeUpdateModificationTime { fcb -- }
 	auto time
 	KeTime_SIZEOF alloc time!
+
+	auto ok
 
 	time@ HALRTCQuery
 

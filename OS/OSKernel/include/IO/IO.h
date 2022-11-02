@@ -35,6 +35,7 @@ struct IOFile
 	4 FileControlBlock
 	4 Offset
 	4 Flags
+	4 Context
 	4 OpenedPath
 endstruct
 
@@ -124,6 +125,9 @@ extern IOFileControlBlockTruncate { newsize growing keeplocked zero flags fcb --
 extern IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 
 extern IOFileGetFileControlBlock { fileobject -- fcb }
+
+extern IOFileGetContext { fileobject -- context }
+extern IOFileSetContext { context fileobject -- }
 
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }

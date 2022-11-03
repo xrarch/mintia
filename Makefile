@@ -44,7 +44,9 @@ PROJECTS := HAL/$(PLATFORM) \
 			SystemInit \
 			TestDLL
 
-KERNELMODULES := BootDrivers/AisixFS KDebug
+KERNELMODULES := BootDrivers/AisixFS \
+				BootDrivers/AnalogClockTest \
+				KDebug
 
 COMMANDS := $(wildcard OS/Commands/*)
 

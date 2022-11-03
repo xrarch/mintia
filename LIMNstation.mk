@@ -1,7 +1,6 @@
 ARCHITECTURE := limn2600
 
-KERNELMODULES += BootDrivers/LIMNstation/AnalogClockTest \
-		BootDrivers/LIMNstation/DKS \
+KERNELMODULES += BootDrivers/LIMNstation/DKS \
 		BootDrivers/LIMNstation/EBus \
 		BootDrivers/LIMNstation/Keyboard \
 		BootDrivers/LIMNstation/KinnowFB \

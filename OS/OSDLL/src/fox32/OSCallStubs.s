@@ -56,7 +56,6 @@ OSContinue:
 	mov  t0, 5
 	int  0x30
 
-	mov  a0, t1
 
 	ret
 
@@ -354,9 +353,10 @@ OSWaitForMultipleObjects:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	add  sp, 4
-	pop  t5
-	sub  sp, 8
+	mov  r31, sp
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 30
 	int  0x30
@@ -515,9 +515,10 @@ OSFileRead:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	add  sp, 4
-	pop  t5
-	sub  sp, 8
+	mov  r31, sp
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 42
 	int  0x30
@@ -746,11 +747,14 @@ OSMapView:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	add  sp, 4
-	pop  a0
-	pop  t6
-	pop  t5
-	sub  sp, 16
+	mov  r31, sp
+	add  r31, 4
+	mov  a0, [r31]
+	add  r31, 4
+	mov  t6, [r31]
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 60
 	int  0x30
@@ -806,9 +810,10 @@ OSAllocate:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	add  sp, 4
-	pop  t5
-	sub  sp, 8
+	mov  r31, sp
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 64
 	int  0x30
@@ -1057,10 +1062,12 @@ OSThreadCreate:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
-	add  sp, 4
-	pop  t6
-	pop  t5
-	sub  sp, 12
+	mov  r31, sp
+	add  r31, 4
+	mov  t6, [r31]
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 85
 	int  0x30

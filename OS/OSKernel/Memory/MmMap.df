@@ -534,7 +534,6 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 	end
 
 	auto vad
-
 	vaddr@ // vaddr
 	length@ // length
 	1 // mustbestart
@@ -587,13 +586,22 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 		end
 	end
 
+	auto flags
+	PTE_V flags!
+
+#ifndef DIRTY_BIT_CAUSES_FAULT
+	if (pageprotection@ PAGEACCESS_WRITE &)
+		PTE_W flags |=
+	end
+#endif
+
 	pageprotection@ vad@ MmVAD_PageProtection + !
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 	processobject@ MmWorkingSetLock drop
 
 	if (processobject@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ~=)
-		PTE_V // flags
+		flags@ // flags
 		startva@ // startva
 		endva@ // endva
 		processobject@ // process
@@ -671,19 +679,37 @@ fn MmFlushViewProcess { length vaddr processobject -- ok }
 		return
 	end
 
+	auto flags
+	PTE_V flags!
+
+#ifndef DIRTY_BIT_CAUSES_FAULT
+	auto vad
+	vaddr@ // vaddr
+	length@ // length
+	1 // mustbestart
+	processobject@
+	MmVADFind ok! vad!
+
+	if (ok@)
+		processobject@ MmVADListUnlock
+
+		return
+	end
+
+	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+		PTE_W flags |=
+	end
+#endif
+
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 	processobject@ MmWorkingSetLock drop
 
 	if (processobject@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ~=)
-#ifdef DIRTY_BIT_CAUSES_FAULT
-		PTE_V // flags
+		flags@ // flags
 		vaddr@ // startva
 		vaddr@ length@ + // endva
 		processobject@ // process
 		MmWorkingSetRemap
-#else
-		BUG: this doesn't work on systems with hardware dirty bit
-#endif
 	end
 
 	processobject@ MmWorkingSetUnlock

@@ -271,7 +271,6 @@ OSTOSContinue:
 
 	jal  OSContinue
 
-	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

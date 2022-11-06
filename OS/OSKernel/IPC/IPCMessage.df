@@ -27,7 +27,7 @@
 
 #include "<inc>/IPC.h"
 
-fn IPCMessageAllocate { umsg mode conid portobject -- msg ok }
+fn IPCMessageAllocate { umsg mode conid portobject -- clientid msg ok }
 	// allocating from a zone is so fast we should just disable interrupts.
 
 	auto rs
@@ -64,6 +64,7 @@ fn IPCMessageAllocate { umsg mode conid portobject -- msg ok }
 	portobject@ msg@ IPCKernelMessage_OriginatingPort + !
 	0 msg@ IPCKernelMessage_RundownPointer + !
 	0 msg@ IPCKernelMessage_Object + !
+	0 msg@ IPCKernelMessage_EnqueuedTo + !
 
 	// pull in the message header
 
@@ -134,13 +135,18 @@ fn IPCMessageAllocate { umsg mode conid portobject -- msg ok }
 		end
 	end
 
+	msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + @ clientid!
+
 	// fill in the kernel-controlled parts of the message header.
 
-	0 msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
 	portobject@ IPCPort_ClientID + @ msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
 	portobject@ IPCPort_ServerContextForClient + @ msg@ IPCKernelMessage_Header + OSMessageHeader_Context + !
 	0 msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + !
 	0 msg@ IPCKernelMessage_Header + OSMessageHeader_Access + !
+
+	if (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ==)
+		msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + @ conid!
+	end
 
 	if (conid@ OSPORT_CONID_NEW ==)
 		HALCPUInterruptDisable rs!
@@ -165,18 +171,14 @@ end
 fn IPCMessageFree { msg -- }
 	// freeing to a zone is so fast we should just disable interrupts.
 
-	if (msg@ IPCKernelMessage_OriginatingPort + @)
-		auto rs
-		HALCPUInterruptDisable rs!
+	auto rs
+	HALCPUInterruptDisable rs!
 
-		msg@ // ptr
-		msg@ IPCKernelMessage_OriginatingPort + @ IPCPort_ZoneHeader + // zoneheader
-		MmZoneFree
+	msg@ // ptr
+	msg@ IPCKernelMessage_OriginatingPort + @ IPCPort_ZoneHeader + // zoneheader
+	MmZoneFree
 
-		rs@ HALCPUInterruptRestore
-	end else
-		msg@ MmFree
-	end
+	rs@ HALCPUInterruptRestore
 end
 
 fn IPCMessageZoneExtend { portobject -- msg ok }
@@ -274,6 +276,8 @@ fn IPCMessageEnqueue { msg portobject -- }
 	end
 
 	msg@ portobject@ IPCPort_MessageListTail + !
+
+	portobject@ msg@ IPCKernelMessage_EnqueuedTo + !
 end
 
 fn IPCMessageDequeueRundown { msg -- }
@@ -301,8 +305,11 @@ fn IPCMessageDequeueRundown { msg -- }
 	end
 end
 
-fn IPCMessageDequeue { msg portobject -- }
+fn IPCMessageDequeue { msg -- }
 	// remove message from queue
+
+	auto portobject
+	msg@ IPCKernelMessage_EnqueuedTo + @ portobject!
 
 	auto ls
 	auto ns
@@ -321,4 +328,6 @@ fn IPCMessageDequeue { msg portobject -- }
 	end else
 		ls@ portobject@ IPCPort_MessageListTail + !
 	end
+
+	0 msg@ IPCKernelMessage_EnqueuedTo + !
 end

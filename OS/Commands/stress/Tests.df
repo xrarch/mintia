@@ -369,3 +369,107 @@ fn (StressTestF) ConfigWriteTest { -- ok }
 	CFGTESTCOUNT
 	endtime@ starttime@ - "took %dms to load, write, and free a config file %d times\n" Printf
 end
+
+struct IPCTestMsgBody
+	4 Thing1
+	4 Thing2
+	4 Thing3
+endstruct
+
+fn (StressTestF) IPCTestServer { -- ok }
+	auto porthandle
+	0 // flags
+	IPCTestMsgBody_SIZEOF // maxlen
+	ACCESS_OWNER_ALL // permissions
+	"TestPort"
+	OSPortCreate ok! porthandle!
+
+	if (ok@)
+		ok@ ok@ OSStatusGetName "couldn't create port: %s %i\n" OSError
+	end
+
+	auto dirh
+	0 // flags
+	ACCESS_WRITE // access
+	"//:/" // path
+	OSOpen ok! dirh!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't open object directory: %s\n" OSError
+	end
+
+	porthandle@ // objecthandle
+	dirh@ // directoryhandle
+	OSDirectoryInsert ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't insert port: %s\n" OSError
+	end
+
+	auto rxmsg
+	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc rxmsg!
+
+	while (1)
+		rxmsg@ // rxmsg
+		0 // txmsg
+		OSWAIT_TIMEOUTINFINITE // timeout
+		porthandle@ // porthandle
+		OSPortSendAndWaitReceive ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "couldn't receive: %s\n" OSError
+		end
+
+		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_CONNECTION ==)
+			rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing3 + @
+			rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing2 + @
+			rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + @
+			rxmsg@ OSMessageHeader_ClientID + @ "connection received from %d: %x %x %x\n" Printf
+
+			0xAA55AA55 rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
+
+			0xDEADBEEF // context
+			rxmsg@ // txmsg
+			0 // reject
+			porthandle@ // porthandle
+			OSPortAccept ok!
+
+			ok@ OSStatusGetName "accept status: %s\n" Printf
+		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
+			rxmsg@ OSMessageHeader_Context + @
+			rxmsg@ OSMessageHeader_ClientID + @ "%d disconnected; ctx=%x\n" Printf
+		end else
+			rxmsg@ OSMessageHeader_TypeB + gb "dunno type %d\n" Printf
+		end
+	end
+
+	porthandle@ OSClose drop
+end
+
+fn (StressTestF) IPCTestClient { -- ok }
+	auto txmsg
+	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc txmsg!
+
+	IPCTestMsgBody_SIZEOF txmsg@ OSMessageHeader_LengthI + si
+	0 txmsg@ OSMessageHeader_Handle + !
+
+	3 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing3 + !
+	2 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing2 + !
+	1 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
+
+	auto rxmsg
+	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc rxmsg!
+
+	auto porthandle
+	rxmsg@ // rxmsg
+	txmsg@ // txmsg
+	OSWAIT_TIMEOUTINFINITE // timeout
+	"//:/TestPort" // path
+	OSPortConnect ok! porthandle!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't connect: %s\n" OSError
+	end
+
+	porthandle@ OSClose drop
+end

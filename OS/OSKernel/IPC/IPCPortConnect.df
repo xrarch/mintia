@@ -27,11 +27,16 @@
 
 #include "<inc>/IPC.h"
 
-fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- porthandle ok }
+fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
+	IPCThreadBlockCreate ok!
+
+	if (ok@)
+		return
+	end
+
 	// called with server port referenced, always returns with server port
 	// dereferenced.
 
-	auto clientport
 	0 // maxlen
 	portobject@ // serverport
 	KeProcessCurrent // owningprocess
@@ -50,7 +55,7 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- porthandle ok }
 	mode@ // mode
 	OSPORT_CONID_CONNECTION // conid
 	clientport@ // portobject
-	IPCMessageAllocate ok! ktxmsg!
+	IPCMessageAllocate ok! ktxmsg! drop
 
 	if (ok@)
 		clientport@ ObObjectDereferenceByPointer drop
@@ -59,12 +64,57 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- porthandle ok }
 		return
 	end
 
-	OSPORT_MESSAGE_CONNECTION ktxmsg@ OSMessageHeader_TypeB + sb
+	OSPORT_MESSAGE_CONNECTION ktxmsg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
 
-	
+	// dereference the server port so it can be closed by host properly.
+
+	portobject@ ObObjectDereferenceByPointer drop
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (clientport@ IPCPort_ServerPort + @ ~~)
+		ipl@ KeIPLLower
+
+		clientport@ ObObjectDereferenceByPointer drop
+
+		STATUS_CONNECTION_FAILED ok!
+
+		return
+	end
+
+	ktxmsg@ // msg
+	portobject@ // portobject
+	IPCPortSendMessage
+
+	rxmsg@ // umsg
+	mode@ // mode
+	0 // clientid
+	OSPORT_CONID_CONNECTION // conid
+	timeout@ // timeout
+	clientport@ // portobject
+	IPCPortReceiveMessage ok!
+
+	if (ok@)
+		clientport@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	if (clientport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
+		// failed to connect.
+
+		clientport@ ObObjectDereferenceByPointer drop
+
+		STATUS_CONNECTION_FAILED ok!
+
+		return
+	end
 end
 
 fn IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
+	fnsection "PAGE$text"
+
 	auto serverport
 	0 // flags
 	path@ // path
@@ -95,10 +145,159 @@ fn IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
 		return
 	end
 
+	auto portobject
 	mode@ // mode
 	rxmsg@ // rxmsg
 	txmsg@ // txmsg
 	timeout@ // timeout
 	serverport@ // portobject
-	IPCPortConnectObject ok! porthandle!
+	IPCPortConnectObject ok! portobject!
+
+	if (ok@)
+		return
+	end
+
+	1 // nocheck
+	ACCESS_OWNER_ALL ACCESS_NOINHERIT | // access
+	portobject@ // object
+	KeProcessCurrent // process
+	ObObjectOpenProcess ok! porthandle!
+
+	if (ok@)
+		portobject@ ObObjectDereferenceByPointer drop
+	end
+end
+
+fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
+	auto clientid
+	auto ktxmsg
+	txmsg@ // umsg
+	mode@ // mode
+	OSPORT_CONID_CONNECTION // conid
+	portobject@ // portobject
+	IPCMessageAllocate ok! ktxmsg! clientid!
+
+	if (ok@)
+		return
+	end
+
+	OSPORT_MESSAGE_REPLY ktxmsg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
+
+	auto clienttable
+	portobject@ IPCPort_ClientTableHeader + @ clienttable!
+
+	clienttable@ ExHandleTableLockShared ok!
+
+	if (ok@)
+		ktxmsg@ IPCMessageFree
+
+		return
+	end
+
+	auto entryptr
+	clientid@ // handle
+	clienttable@ // handletable
+	1 // locked
+	ExHandleLookup ok! entryptr!
+
+	if (ok@)
+		clienttable@ ExHandleTableUnlock
+
+		ktxmsg@ IPCMessageFree
+
+		if (ok@ STATUS_INVALID_HANDLE ==)
+			STATUS_NO_SUCH_CLIENT ok!
+		end
+
+		return
+	end
+
+	auto clientport
+	entryptr@@ clientport!
+
+	auto npheader
+	clientport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
+		// see function ObObjectDereferenceByPointer for an explanation on
+		// this check.
+
+		ipl@ KeIPLLower
+
+		clienttable@ ExHandleTableUnlock
+
+		ktxmsg@ IPCMessageFree
+
+		STATUS_NO_SUCH_CLIENT ok!
+
+		return
+	end
+
+	if (clientport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
+		// connection already accepted?
+
+		ipl@ KeIPLLower
+
+		clienttable@ ExHandleTableUnlock
+
+		ktxmsg@ IPCMessageFree
+
+		STATUS_INVALID_ARGUMENT ok!
+
+		return
+	end
+
+	ktxmsg@ // msg
+	clientport@ // portobject
+	IPCPortSendMessage
+
+	if (reject@ ~~)
+		IPCPORTFLAG_UNFINISHED_CONNECTION ~ clientport@ IPCPort_Flags + &=
+		context@ clientport@ IPCPort_ServerContextForClient + !
+	end
+
+	ipl@ KeIPLLower
+
+	clienttable@ ExHandleTableUnlock
+end
+
+fn IPCPortAccept { mode context txmsg reject porthandle -- ok }
+	fnsection "PAGE$text"
+
+	auto portobject
+	IPCPortObjectType@ // type
+	porthandle@ // handle
+	ObObjectReferenceByHandle ok! portobject! drop
+
+	if (ok@)
+		return
+	end
+
+	if (portobject@ IPCPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
+		portobject@ ObObjectDereferenceByPointer drop
+
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+		portobject@ ObObjectDereferenceByPointer drop
+
+		STATUS_INVALID_OBJECT_TYPE ok!
+
+		return
+	end
+
+	mode@ // mode
+	context@ // context
+	txmsg@ // txmsg
+	reject@ // reject
+	portobject@ // portobject
+	IPCPortAcceptObject ok!
+
+	portobject@ ObObjectDereferenceByPointer drop
 end

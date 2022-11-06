@@ -98,10 +98,14 @@
 .extern OSSetSystemConsole
 .extern OSConsoleSignal
 .extern OSAmIAdmin
+.extern OSPortCreate
+.extern OSPortConnect
+.extern OSPortAccept
+.extern OSPortSendAndWaitReceive
 
 OSCallCount:
 .global OSCallCount
-	.dl 96
+	.dl 100
 
 OSCallTable:
 .global OSCallTable
@@ -202,6 +206,10 @@ OSCallTable:
 	.dl OSTOSSetSystemConsole                            ;94
 	.dl OSTOSConsoleSignal                               ;95
 	.dl OSTOSAmIAdmin                                    ;96
+	.dl OSTOSPortCreate                                  ;97
+	.dl OSTOSPortConnect                                 ;98
+	.dl OSTOSPortAccept                                  ;99
+	.dl OSTOSPortSendAndWaitReceive                      ;100
 
 
 OSTOSConsolePutCharacter:
@@ -1685,6 +1693,76 @@ OSTOSAmIAdmin:
 	mov  long [sp], lr
 
 	jal  OSAmIAdmin
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSPortCreate:
+.global OSTOSPortCreate
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
+
+	jal  OSPortCreate
+
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSPortConnect:
+.global OSTOSPortConnect
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
+
+	jal  OSPortConnect
+
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSPortAccept:
+.global OSTOSPortAccept
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
+
+	jal  OSPortAccept
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSPortSendAndWaitReceive:
+.global OSTOSPortSendAndWaitReceive
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
+
+	jal  OSPortSendAndWaitReceive
 
 	mov  long [s17 + 4], a0 ;t1
 

@@ -76,5 +76,7 @@ const STATUS_MESSAGE_TOO_LONG         -74
 const STATUS_WS_QUOTA_EXCEEDED        -75
 const STATUS_NO_MESSAGE               -76
 const STATUS_PORT_DISCONNECTED        -77
+const STATUS_CONNECTION_FAILED        -78
+const STATUS_NO_SUCH_CLIENT           -79
 
 extern OSStatusGetName { status -- name }

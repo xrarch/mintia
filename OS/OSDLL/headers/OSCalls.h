@@ -144,3 +144,11 @@ extern OSConsoleSignal { signal filehandle -- ok }
 
 // Se
 extern OSAmIAdmin { -- ok }
+
+// IPC
+extern OSPortCreate { flags maxlen permissions name -- porthandle ok }
+
+extern OSPortConnect { rxmsg txmsg timeout path -- porthandle ok }
+extern OSPortAccept { context txmsg reject porthandle -- ok }
+
+extern OSPortSendAndWaitReceive { rxmsg txmsg timeout porthandle -- ok }

@@ -1,0 +1,203 @@
+//
+// Implements port connection.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/IPC.h"
+
+fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
+	IPCThreadBlockCreate ok!
+
+	if (ok@)
+		return
+	end
+
+	auto otherport
+
+	auto clientid
+
+	auto ipl
+
+	if (txmsg@)
+		txmsg@ // umsg
+		mode@ // mode
+		OSPORT_CONID_NEW // conid
+		portobject@ // portobject
+		IPCMessageAllocate ok! txmsg! clientid!
+
+		if (ok@)
+			return
+		end
+
+		if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+			// we are a client port sending to the server
+
+			IPLDPC KeIPLRaise ipl!
+
+			portobject@ IPCPort_ServerPort + @ otherport!
+
+			if (otherport@ ~~)
+				// disconnected
+
+				ipl@ KeIPLLower
+
+				txmsg@ IPCMessageFree
+
+				STATUS_PORT_DISCONNECTED ok!
+
+				return
+			end
+		end else
+			// we are a server port sending to a client
+
+			auto clienttable
+			portobject@ IPCPort_ClientTableHeader + @ clienttable!
+
+			clienttable@ ExHandleTableLockShared ok!
+
+			if (ok@)
+				txmsg@ IPCMessageFree
+
+				return
+			end
+
+			auto entryptr
+			clientid@ // handle
+			clienttable@ // handletable
+			1 // locked
+			ExHandleLookup ok! entryptr!
+
+			if (ok@)
+				clienttable@ ExHandleTableUnlock
+
+				txmsg@ IPCMessageFree
+
+				if (ok@ STATUS_INVALID_HANDLE ==)
+					STATUS_NO_SUCH_CLIENT ok!
+				end
+
+				return
+			end
+
+			entryptr@@ otherport!
+
+			auto npheader
+			otherport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
+
+			IPLDPC KeIPLRaise ipl!
+
+			if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
+				// see function ObObjectDereferenceByPointer for an explanation on
+				// this check.
+
+				ipl@ KeIPLLower
+
+				clienttable@ ExHandleTableUnlock
+
+				txmsg@ IPCMessageFree
+
+				STATUS_NO_SUCH_CLIENT ok!
+
+				return
+			end
+
+			if (otherport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
+				// connection not yet accepted
+
+				ipl@ KeIPLLower
+
+				clienttable@ ExHandleTableUnlock
+
+				txmsg@ IPCMessageFree
+
+				STATUS_INVALID_ARGUMENT ok!
+
+				return
+			end
+
+			clienttable@ ExHandleTableUnlock // WE ARE STILL AT IPLDPC THROUGHOUT UNLOCKING THIS
+		end
+
+		txmsg@ // msg
+		otherport@ // portobject
+		IPCPortSendMessage
+	end else
+		IPLDPC KeIPLRaise ipl!
+
+		if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+			portobject@ IPCPort_ServerPort + @ otherport!
+
+			if (otherport@ ~~)
+				ipl@ KeIPLLower
+
+				STATUS_PORT_DISCONNECTED ok!
+
+				return
+			end
+		end
+	end
+
+	if (rxmsg@)
+		// receive
+
+		rxmsg@ // umsg
+		mode@ // mode
+		0 // clientid
+		OSPORT_CONID_ANY // conid
+		timeout@ // timeout
+		portobject@ // portobject
+		IPCPortReceiveMessage ok!
+	end else
+		ipl@ KeIPLLower
+	end
+end
+
+fn IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
+	auto portobject
+	IPCPortObjectType@ // type
+	porthandle@ // handle
+	ObObjectReferenceByHandle ok! portobject! drop
+
+	if (ok@)
+		return
+	end
+
+	if (portobject@ IPCPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
+		portobject@ ObObjectDereferenceByPointer drop
+
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	mode@ // mode
+	rxmsg@ // rxmsg
+	txmsg@ // txmsg
+	timeout@ // timeout
+	portobject@ // portobject
+	IPCPortSendAndWaitReceiveObject ok!
+
+	portobject@ ObObjectDereferenceByPointer drop
+end

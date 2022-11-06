@@ -1186,3 +1186,61 @@ OSAmIAdmin:
 
 	ret
 
+OSPortCreate:
+.global OSPortCreate
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 97
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSPortConnect:
+.global OSPortConnect
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 98
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+
+OSPortAccept:
+.global OSPortAccept
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 99
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
+OSPortSendAndWaitReceive:
+.global OSPortSendAndWaitReceive
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+
+	li   t0, 100
+	sys  0
+
+	mov  a0, t1
+
+	ret
+

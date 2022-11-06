@@ -68,10 +68,10 @@ Asynchronously send a message to a port. If this is a client port, it will be pl
 
 Poll the port for a message. If none are available, an error status will be returned. If a nonzero conversation ID is supplied in `conid`, only messages with that conversation ID will be returned.
 
-    OSPortSendAndWaitReceive { rxmsg conid txmsg timeout porthandle -- ok }
+    OSPortSendAndWaitReceive { rxmsg txmsg timeout porthandle -- ok }
 
-Send a message to a port and wait for a message. If a nonzero conversation ID is supplied in `conid`, only messages with that conversation ID will be returned. Useful for server replies to client requests; enables a server to reply and wait for the next request in a single system call.
+Send a message to a port and wait for a message. Useful for server replies to client requests; enables a server to reply and wait for the next request in a single system call.
 
-    OSPortSendAndWaitReply { rxmsg txaccess txhandle txmsg timeout porthandle -- ok }
+    OSPortSendAndWaitReply { rxmsg txmsg timeout porthandle -- ok }
 
 Send a message to a port and wait for a reply to that message. This always starts a new conversation and will wait for replies only to that particular conversation ID. A `txhandle` may optionally be specified to pass to the recipient, and will be duplicated to the recipient's handle table with the specified `txaccess` at the time the recipient receives this message. `txaccess` must be a subset of the permissions the sender actually possesses on this handle, and the handle must be inheritable.

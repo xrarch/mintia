@@ -20,6 +20,8 @@ struct IPCPort
 
 	4 NextConversationID
 
+	4 DisconnectionMessage
+
 	4 Flags
 
 	4 ZoneExtensionCharge
@@ -30,6 +32,7 @@ struct IPCThreadBlock
 	4 WaiterNext
 	4 WaiterPrev
 	4 WaitingConversationID
+	4 WaitingClientID
 
 	4 RXMessage
 
@@ -48,6 +51,7 @@ struct IPCKernelMessage
 	4 OriginatingPort
 	4 RundownPointer
 	4 Object
+	4 EnqueuedTo
 
 // user-visible part
 
@@ -71,15 +75,26 @@ extern IPCPortObjectDelete { object -- }
 extern IPCPortObjectOpen { access object process -- ok }
 
 extern IPCPortCreateObject { maxlen serverport owningprocess permissions name -- portobject ok }
+extern IPCPortCreate { flags maxlen permissions name -- porthandle ok }
 
-extern IPCMessageAllocate { umsg mode conid portobject -- msg ok }
+extern IPCPortAccept { mode context txmsg reject porthandle -- ok }
+extern IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
+
+extern IPCMessageAllocate { umsg mode conid portobject -- clientid msg ok }
 extern IPCMessageFree { msg -- }
 
 extern IPCMessageEnqueueRundown { msg -- }
-extern IPCMessageEnqueue { msg portobject -- }
-
 extern IPCMessageDequeueRundown { msg -- }
-extern IPCMessageDequeue { msg portobject -- }
+
+extern IPCMessageEnqueue { msg portobject -- }
+extern IPCMessageDequeue { msg -- }
+
+extern IPCPortSendMessage { msg portobject -- }
+extern IPCPortReceiveMessage { umsg mode clientid conid timeout portobject -- ok }
+
+extern IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
+
+extern IPCThreadBlockCreate { -- ok }
 
 externptr IPCPortObjectType
 

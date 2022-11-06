@@ -68,6 +68,6 @@ Send a message to a port and wait for a message. Useful for server replies to cl
 
 Send a message to a port and wait for a reply to that message. This always starts a new conversation and will wait for replies only to that particular conversation ID. A `txhandle` may optionally be specified to pass to the recipient, and will be duplicated to the recipient's handle table with the specified `txaccess` at the time the recipient receives this message. `txaccess` must be a subset of the permissions the sender actually possesses on this handle, and the handle must be inheritable.
 
-    OSPortProcessByClientID { access clientid porthandle -- processhandle ok }
+    OSPortOpenProcessByClientID { access clientid porthandle -- processhandle ok }
 
 Open a process handle by its client ID with the given `access`.

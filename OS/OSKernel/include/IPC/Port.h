@@ -96,6 +96,8 @@ extern IPCPortReceiveMessage { umsg mode clientid conid timeout portobject -- ok
 extern IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
 extern IPCPortSendAndWaitReply { mode rxmsg txmsg timeout porthandle -- ok }
 
+extern IPCPortOpenProcessByClientID { access clientid porthandle -- processhandle ok }
+
 extern IPCThreadBlockCreate { -- ok }
 
 externptr IPCPortObjectType

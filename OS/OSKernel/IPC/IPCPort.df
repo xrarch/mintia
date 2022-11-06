@@ -372,6 +372,128 @@ fn IPCPortCreate { flags maxlen permissions name -- porthandle ok }
 	end
 end
 
+fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
+	auto clienttable
+	portobject@ IPCPort_ClientTableHeader + @ clienttable!
+
+	clienttable@ ExHandleTableLockShared ok!
+
+	if (ok@)
+		return
+	end
+
+	auto entryptr
+	clientid@ // handle
+	clienttable@ // handletable
+	1 // locked
+	ExHandleLookup ok! entryptr!
+
+	if (ok@)
+		clienttable@ ExHandleTableUnlock
+
+		if (ok@ STATUS_INVALID_HANDLE ==)
+			STATUS_NO_SUCH_CLIENT ok!
+		end
+
+		return
+	end
+
+	auto otherport
+	entryptr@@ otherport!
+
+	auto npheader
+	otherport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
+		// see function ObObjectDereferenceByPointer for an explanation on
+		// this check.
+
+		ipl@ KeIPLLower
+
+		clienttable@ ExHandleTableUnlock
+
+		STATUS_NO_SUCH_CLIENT ok!
+
+		return
+	end
+
+	otherport@ IPCPort_OwningProcess + @ processobject!
+
+	processobject@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
+
+	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
+		// see function ObObjectDereferenceByPointer for an explanation on
+		// this check.
+
+		ipl@ KeIPLLower
+
+		clienttable@ ExHandleTableUnlock
+
+		STATUS_PROCESS_IS_TERMINATED ok!
+
+		return
+	end
+
+	processobject@ ObObjectReferenceByPointer drop
+
+	ipl@ KeIPLLower
+
+	clienttable@ ExHandleTableUnlock
+end
+
+fn IPCPortOpenProcessByClientID { access clientid porthandle -- processhandle ok }
+	fnsection "PAGE$text"
+
+	auto portobject
+	IPCPortObjectType@ // type
+	porthandle@ // handle
+	ObObjectReferenceByHandle ok! portobject! drop
+
+	if (ok@)
+		return
+	end
+
+	if (portobject@ IPCPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
+		portobject@ ObObjectDereferenceByPointer drop
+
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+		portobject@ ObObjectDereferenceByPointer drop
+
+		STATUS_INVALID_OBJECT_TYPE ok!
+
+		return
+	end
+
+	auto processobject
+	clientid@ // clientid
+	portobject@ // portobject
+	IPCPortReferenceProcessByClientID ok! processobject!
+
+	portobject@ ObObjectDereferenceByPointer drop
+
+	if (ok@)
+		return
+	end
+
+	0 // nocheck
+	access@ // access
+	processobject@ // object
+	KeProcessCurrent // process
+	ObObjectOpenProcess ok! processhandle!
+
+	if (ok@)
+		processobject@ ObObjectDereferenceByPointer drop
+	end
+end
+
 fn IPCPortWakeWaiter { rxmsg waiter portobject -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)

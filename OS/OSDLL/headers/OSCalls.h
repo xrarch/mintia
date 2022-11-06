@@ -153,3 +153,5 @@ extern OSPortAccept { context txmsg reject porthandle -- ok }
 
 extern OSPortSendAndWaitReceive { rxmsg txmsg timeout porthandle -- ok }
 extern OSPortSendAndWaitReply { rxmsg txmsg timeout porthandle -- ok }
+
+extern OSPortOpenProcessByClientID { access clientid porthandle -- processhandle ok }

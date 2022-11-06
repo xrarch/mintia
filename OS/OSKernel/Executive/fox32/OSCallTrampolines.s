@@ -103,10 +103,11 @@
 .extern OSPortAccept
 .extern OSPortSendAndWaitReceive
 .extern OSPortSendAndWaitReply
+.extern OSPortOpenProcessByClientID
 
 OSCallCount:
 .global OSCallCount
-	.dl 101
+	.dl 102
 
 OSCallTable:
 .global OSCallTable
@@ -212,6 +213,7 @@ OSCallTable:
 	.dl OSTOSPortAccept                                  ;99
 	.dl OSTOSPortSendAndWaitReceive                      ;100
 	.dl OSTOSPortSendAndWaitReply                        ;101
+	.dl OSTOSPortOpenProcessByClientID                   ;102
 
 
 OSTOSConsolePutCharacter:
@@ -2412,6 +2414,34 @@ OSTOSPortSendAndWaitReply:
 	mov  t0, s17
 	add  t0, 4 ;t1
 	mov  [t0], a0
+
+	ret
+
+OSTOSPortOpenProcessByClientID:
+.global OSTOSPortOpenProcessByClientID
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	call OSPortOpenProcessByClientID
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  [t0], a1
 
 	ret
 

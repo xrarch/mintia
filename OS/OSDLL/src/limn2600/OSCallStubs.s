@@ -1258,3 +1258,17 @@ OSPortSendAndWaitReply:
 
 	ret
 
+OSPortOpenProcessByClientID:
+.global OSPortOpenProcessByClientID
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+
+	li   t0, 102
+	sys  0
+
+	mov  a1, t2
+	mov  a0, t1
+
+	ret
+

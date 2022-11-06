@@ -9,6 +9,8 @@ struct OSMessageHeader
 	4 Access
 endstruct
 
+const OSPORT_FLAG_NO_HANDLES    1 // forbid handle passing
+
 const OSPORT_CID_SYSTEM -1
 
 const OSPORT_MESSAGE_CONNECTION 1

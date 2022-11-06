@@ -23,6 +23,7 @@ struct IPCPort
 	4 DisconnectionMessage
 
 	4 Flags
+	4 UFlags
 
 	4 ZoneExtensionCharge
 	MmZoneHeader_SIZEOF ZoneHeader
@@ -74,7 +75,7 @@ extern IPCInitPhase1 { -- }
 extern IPCPortObjectDelete { object -- }
 extern IPCPortObjectOpen { access object process -- ok }
 
-extern IPCPortCreateObject { maxlen serverport owningprocess permissions name -- portobject ok }
+extern IPCPortCreateObject { flags maxlen serverport owningprocess permissions name -- portobject ok }
 extern IPCPortCreate { flags maxlen permissions name -- porthandle ok }
 
 extern IPCPortAccept { mode context txmsg reject porthandle -- ok }

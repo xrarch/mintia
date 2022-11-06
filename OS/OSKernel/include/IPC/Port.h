@@ -80,7 +80,7 @@ extern IPCPortCreate { flags maxlen permissions name -- porthandle ok }
 extern IPCPortAccept { mode context txmsg reject porthandle -- ok }
 extern IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
 
-extern IPCMessageAllocate { umsg mode conid portobject -- clientid msg ok }
+extern IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg ok }
 extern IPCMessageFree { msg -- }
 
 extern IPCMessageEnqueueRundown { msg -- }
@@ -93,6 +93,7 @@ extern IPCPortSendMessage { msg portobject -- }
 extern IPCPortReceiveMessage { umsg mode clientid conid timeout portobject -- ok }
 
 extern IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
+extern IPCPortSendAndWaitReply { mode rxmsg txmsg timeout porthandle -- ok }
 
 extern IPCThreadBlockCreate { -- ok }
 

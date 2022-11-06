@@ -60,17 +60,9 @@ Tries to pass a message and connect to the server port at the given object names
 
 Accept or reject a connection request on the given server port. The client to accept or reject is specified by the ID in the txmsg. An optional context value can be supplied which will be passed back to the server whenever it receives a message from this client.
 
-    OSPortSend { txmsg porthandle -- ok }
-
-Asynchronously send a message to a port. If this is a client port, it will be placed on the server's message queue. If it is a server port, it will be placed on the message queue of the client port specified by the client ID. If a conversation ID is specified in the message, it will be kept, otherwise one will be generated for it.
-
-    OSPortReceive { rxmsg conid porthandle -- ok }
-
-Poll the port for a message. If none are available, an error status will be returned. If a nonzero conversation ID is supplied in `conid`, only messages with that conversation ID will be returned.
-
     OSPortSendAndWaitReceive { rxmsg txmsg timeout porthandle -- ok }
 
-Send a message to a port and wait for a message. Useful for server replies to client requests; enables a server to reply and wait for the next request in a single system call.
+Send a message to a port and wait for a message. Useful for server replies to client requests; enables a server to reply and wait for the next request in a single system call. Both `rxmsg` and `txmsg` are optional. With a `txmsg` but no `rxmsg` this service can be used to asynchronously send a message to another port; with a `rxmsg` and a `timeout` of 0 this service can be used to nonblockingly poll for a message to be received.
 
     OSPortSendAndWaitReply { rxmsg txmsg timeout porthandle -- ok }
 

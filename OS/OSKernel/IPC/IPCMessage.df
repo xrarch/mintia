@@ -27,7 +27,7 @@
 
 #include "<inc>/IPC.h"
 
-fn IPCMessageAllocate { umsg mode conid portobject -- clientid msg ok }
+fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg ok }
 	// allocating from a zone is so fast we should just disable interrupts.
 
 	auto rs
@@ -137,12 +137,83 @@ fn IPCMessageAllocate { umsg mode conid portobject -- clientid msg ok }
 
 	msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + @ clientid!
 
+	if (msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + @ OSNONE ~=)
+		if (allowhandle@ ~~)
+			HALCPUInterruptDisable rs!
+
+			msg@ // ptr
+			portobject@ IPCPort_ZoneHeader + // zoneheader
+			MmZoneFree
+
+			rs@ HALCPUInterruptRestore
+
+			STATUS_INVALID_ARGUMENT ok!
+
+			return
+		end
+
+		auto passedobject
+		auto access
+
+		0 // type
+		msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + @ // handle
+		ObObjectReferenceByHandle ok! passedobject! access!
+
+		if (ok@)
+			HALCPUInterruptDisable rs!
+
+			msg@ // ptr
+			portobject@ IPCPort_ZoneHeader + // zoneheader
+			MmZoneFree
+
+			rs@ HALCPUInterruptRestore
+
+			return
+		end
+
+		if (access@ ACCESS_NOINHERIT &)
+			HALCPUInterruptDisable rs!
+
+			msg@ // ptr
+			portobject@ IPCPort_ZoneHeader + // zoneheader
+			MmZoneFree
+
+			rs@ HALCPUInterruptRestore
+
+			passedobject@ ObObjectDereferenceByPointer drop
+
+			STATUS_PERMISSION_DENIED ok!
+
+			return
+		end
+
+		ACCESS_ALL access &=
+
+		if (access@ msg@ IPCKernelMessage_Header + OSMessageHeader_Access + @ | access@ ~=)
+			// not a subset
+
+			HALCPUInterruptDisable rs!
+
+			msg@ // ptr
+			portobject@ IPCPort_ZoneHeader + // zoneheader
+			MmZoneFree
+
+			rs@ HALCPUInterruptRestore
+
+			passedobject@ ObObjectDereferenceByPointer drop
+
+			STATUS_PERMISSION_DENIED ok!
+
+			return
+		end
+
+		passedobject@ msg@ IPCKernelMessage_Object + !
+	end
+
 	// fill in the kernel-controlled parts of the message header.
 
 	portobject@ IPCPort_ClientID + @ msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
 	portobject@ IPCPort_ServerContextForClient + @ msg@ IPCKernelMessage_Header + OSMessageHeader_Context + !
-	0 msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + !
-	0 msg@ IPCKernelMessage_Header + OSMessageHeader_Access + !
 
 	if (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ==)
 		msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + @ conid!
@@ -170,6 +241,10 @@ end
 
 fn IPCMessageFree { msg -- }
 	// freeing to a zone is so fast we should just disable interrupts.
+
+	if (msg@ IPCKernelMessage_Object + @)
+		msg@ IPCKernelMessage_Object + @ ObObjectDereferenceByPointer drop
+	end
 
 	auto rs
 	HALCPUInterruptDisable rs!

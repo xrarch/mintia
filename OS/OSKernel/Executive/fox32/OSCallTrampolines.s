@@ -98,10 +98,15 @@
 .extern OSSetSystemConsole
 .extern OSConsoleSignal
 .extern OSAmIAdmin
+.extern OSPortCreate
+.extern OSPortConnect
+.extern OSPortAccept
+.extern OSPortSendAndWaitReceive
+.extern OSPortSendAndWaitReply
 
 OSCallCount:
 .global OSCallCount
-	.dl 96
+	.dl 101
 
 OSCallTable:
 .global OSCallTable
@@ -202,6 +207,11 @@ OSCallTable:
 	.dl OSTOSSetSystemConsole                            ;94
 	.dl OSTOSConsoleSignal                               ;95
 	.dl OSTOSAmIAdmin                                    ;96
+	.dl OSTOSPortCreate                                  ;97
+	.dl OSTOSPortConnect                                 ;98
+	.dl OSTOSPortAccept                                  ;99
+	.dl OSTOSPortSendAndWaitReceive                      ;100
+	.dl OSTOSPortSendAndWaitReply                        ;101
 
 
 OSTOSConsolePutCharacter:
@@ -2249,6 +2259,154 @@ OSTOSAmIAdmin:
 .global OSTOSAmIAdmin
 
 	call OSAmIAdmin
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	ret
+
+OSTOSPortCreate:
+.global OSTOSPortCreate
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	call OSPortCreate
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  [t0], a1
+
+	ret
+
+OSTOSPortConnect:
+.global OSTOSPortConnect
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	call OSPortConnect
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  [t0], a1
+
+	ret
+
+OSTOSPortAccept:
+.global OSTOSPortAccept
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	call OSPortAccept
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	ret
+
+OSTOSPortSendAndWaitReceive:
+.global OSTOSPortSendAndWaitReceive
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	call OSPortSendAndWaitReceive
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	ret
+
+OSTOSPortSendAndWaitReply:
+.global OSTOSPortSendAndWaitReply
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	call OSPortSendAndWaitReply
 
 
 	mov  t0, s17

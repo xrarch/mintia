@@ -102,10 +102,11 @@
 .extern OSPortConnect
 .extern OSPortAccept
 .extern OSPortSendAndWaitReceive
+.extern OSPortSendAndWaitReply
 
 OSCallCount:
 .global OSCallCount
-	.dl 100
+	.dl 101
 
 OSCallTable:
 .global OSCallTable
@@ -210,6 +211,7 @@ OSCallTable:
 	.dl OSTOSPortConnect                                 ;98
 	.dl OSTOSPortAccept                                  ;99
 	.dl OSTOSPortSendAndWaitReceive                      ;100
+	.dl OSTOSPortSendAndWaitReply                        ;101
 
 
 OSTOSConsolePutCharacter:
@@ -1763,6 +1765,23 @@ OSTOSPortSendAndWaitReceive:
 	mov  a3, long [s17 + 16] ;t4
 
 	jal  OSPortSendAndWaitReceive
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSPortSendAndWaitReply:
+.global OSTOSPortSendAndWaitReply
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+	mov  a2, long [s17 + 12] ;t3
+	mov  a3, long [s17 + 16] ;t4
+
+	jal  OSPortSendAndWaitReply
 
 	mov  long [s17 + 4], a0 ;t1
 

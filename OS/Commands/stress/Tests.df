@@ -409,22 +409,27 @@ fn (StressTestF) IPCTestServer { -- ok }
 	auto rxmsg
 	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc rxmsg!
 
+	auto replymsg
+	0 replymsg!
+
 	while (1)
 		rxmsg@ // rxmsg
-		0 // txmsg
+		replymsg@ // txmsg
 		OSWAIT_TIMEOUTINFINITE // timeout
 		porthandle@ // porthandle
 		OSPortSendAndWaitReceive ok!
 
 		if (ok@)
-			ok@ OSStatusGetName "couldn't receive: %s\n" OSError
+			ok@ OSStatusGetName "[server] couldn't receive: %s\n" OSError
 		end
+
+		0 replymsg!
 
 		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_CONNECTION ==)
 			rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing3 + @
 			rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing2 + @
 			rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + @
-			rxmsg@ OSMessageHeader_ClientID + @ "connection received from %d: %x %x %x\n" Printf
+			rxmsg@ OSMessageHeader_ClientID + @ "[server] connection received from %d: %x %x %x\n" Printf
 
 			0xAA55AA55 rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
 
@@ -434,12 +439,46 @@ fn (StressTestF) IPCTestServer { -- ok }
 			porthandle@ // porthandle
 			OSPortAccept ok!
 
-			ok@ OSStatusGetName "accept status: %s\n" Printf
+			ok@ OSStatusGetName "[server] accept status: %s\n" Printf
 		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
 			rxmsg@ OSMessageHeader_Context + @
-			rxmsg@ OSMessageHeader_ClientID + @ "%d disconnected; ctx=%x\n" Printf
+			rxmsg@ OSMessageHeader_ClientID + @ "[server] %d disconnected: ctx=%x\n" Printf
+		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
+			rxmsg@ OSMessageHeader_Handle + @
+			rxmsg@ OSMessageHeader_SubtypeB + gb
+			rxmsg@ OSMessageHeader_ClientID + @ "[server] request from %d: %d (handle %i)\n" Printf
+
+			auto realva
+			0x10000 // length
+			HEAPSTART // startva
+			0 // sectionoffset
+			rxmsg@ OSMessageHeader_Handle + @ // mappedhandle
+			OSCURRENTPROCESS // processhandle
+			ACCESS_READ ACCESS_WRITE | // pageprotection
+			0 // flags
+			OSMapView ok! realva!
+
+			if (ok@)
+				ok@ OSStatusGetName "[server] couldn't map section: %s\n" OSError
+			end
+
+			realva@@ "[server] realva@@ = %x\n" Printf
+			realva@ 0x10000 4 - + @ "[server] realva@ 0x10000 4 - + @ = %x\n" Printf
+
+			0x10000 // length
+			realva@ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+
+			rxmsg@ OSMessageHeader_Handle + @ OSClose drop
+
+			OSPORT_MESSAGE_REPLY rxmsg@ OSMessageHeader_TypeB + sb
+			realva@ rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
+			OSNONE rxmsg@ OSMessageHeader_Handle + !
+
+			rxmsg@ replymsg!
 		end else
-			rxmsg@ OSMessageHeader_TypeB + gb "dunno type %d\n" Printf
+			rxmsg@ OSMessageHeader_TypeB + gb "[server] dunno type %d\n" Printf
 		end
 	end
 
@@ -447,11 +486,39 @@ fn (StressTestF) IPCTestServer { -- ok }
 end
 
 fn (StressTestF) IPCTestClient { -- ok }
+	auto sectionhandle
+	ACCESS_READ ACCESS_WRITE | // pageprotection
+	0x10000 // anonsize
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ok! sectionhandle!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't create section: %s\n" OSError
+	end
+
+	auto realva
+	0x10000 // length
+	HEAPSTART // startva
+	0 // sectionoffset
+	sectionhandle@ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	ACCESS_READ ACCESS_WRITE | // pageprotection
+	0 // flags
+	OSMapView ok! realva!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't map section: %s\n" OSError
+	end
+
+	0xAABBCCDD realva@!
+	0x01020304 realva@ 0x10000 4 - + !
+
 	auto txmsg
 	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc txmsg!
 
 	IPCTestMsgBody_SIZEOF txmsg@ OSMessageHeader_LengthI + si
-	0 txmsg@ OSMessageHeader_Handle + !
+	OSNONE txmsg@ OSMessageHeader_Handle + !
 
 	3 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing3 + !
 	2 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing2 + !
@@ -468,8 +535,25 @@ fn (StressTestF) IPCTestClient { -- ok }
 	OSPortConnect ok! porthandle!
 
 	if (ok@)
-		ok@ OSStatusGetName "couldn't connect: %s\n" OSError
+		ok@ OSStatusGetName "[client] couldn't connect: %s\n" OSError
 	end
+
+	OSPORT_MESSAGE_REQUEST txmsg@ OSMessageHeader_TypeB + sb
+	32 txmsg@ OSMessageHeader_SubtypeB + sb
+	sectionhandle@ txmsg@ OSMessageHeader_Handle + !
+	ACCESS_READ ACCESS_WRITE | txmsg@ OSMessageHeader_Access + !
+
+	rxmsg@ // rxmsg
+	txmsg@ // txmsg
+	OSWAIT_TIMEOUTINFINITE // timeout
+	porthandle@ // porthandle
+	OSPortSendAndWaitReply ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "[client] couldn't request: %s\n" OSError
+	end
+
+	rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + @ "[client] server response: %x\n" Printf
 
 	porthandle@ OSClose drop
 end

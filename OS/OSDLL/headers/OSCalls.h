@@ -152,3 +152,4 @@ extern OSPortConnect { rxmsg txmsg timeout path -- porthandle ok }
 extern OSPortAccept { context txmsg reject porthandle -- ok }
 
 extern OSPortSendAndWaitReceive { rxmsg txmsg timeout porthandle -- ok }
+extern OSPortSendAndWaitReply { rxmsg txmsg timeout porthandle -- ok }

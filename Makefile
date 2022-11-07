@@ -42,7 +42,8 @@ PROJECTS := HAL/$(PLATFORM) \
 			OSKernel \
 			OSDLL \
 			SystemInit \
-			TestDLL
+			TestDLL \
+			AMS/Server
 
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \

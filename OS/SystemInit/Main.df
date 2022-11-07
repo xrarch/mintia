@@ -142,14 +142,18 @@ fn Main { ... -- ret }
 		"* WARNING: No swapfiles! The system may behave strangely.\n" Printf
 	end
 
+	config@ SiStartServices ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "Failed to start services: %s\n" Printf
+	end
+
 	while (1)
 		DeadSystemEvent@ OSEventReset drop drop
 
-		config@ SiStartLines
+		config@ SiStartLines ret!
 
 		if (LineCount@)
-			OSWorkingSetPurge drop
-
 			1 // alertable
 			OSWAIT_TIMEOUTINFINITE // timeout
 			DeadSystemEvent@ // objecthandle
@@ -316,8 +320,6 @@ fn SiSingleUserMode { -- ok }
 
 	thandle@ OSClose drop
 
-	OSWorkingSetPurge drop
-
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
 	phandle@ // objecthandle
@@ -333,16 +335,15 @@ endstruct
 
 var LineCount 0
 
-fn SiStartLines { config -- }
-	auto ok
-
+fn SiStartLines { config -- ok }
 	auto iterator
 	"DeviceManagers" // sectionname
 	config@ // config
 	OSConfigGetKeyIterator ok! iterator!
 
 	if (ok@)
-		ok@ OSStatusGetName "bad config: %s\n" OSError
+		ok@ OSStatusGetName "* Couldn't find DeviceManagers section: %s\n" Printf
+		return
 	end
 
 	while (iterator@)
@@ -354,7 +355,7 @@ fn SiStartLines { config -- }
 		OSConfigNextKey ok! iterator! manager! key!
 
 		if (ok@)
-			ok@ OSStatusGetName "bad config: %s\n" OSError
+			return
 		end
 
 		key@ OSConfigGetKeyName ttyname!
@@ -408,7 +409,7 @@ fn SiManageLineThread { context -- ret }
 		OSPROCESS_DETACHCONSOLE OSPROCESS_NOINHERITH | // creationflags
 		0 // creationparams
 		ACCESS_OWNER_ALL // permissions
-		context@ Line_Manager + OSLastComponent // name
+		0 // name
 		OSSpawn ret! phandle! thandle!
 
 		if (ret@)
@@ -421,8 +422,6 @@ fn SiManageLineThread { context -- ret }
 		end
 
 		thandle@ OSClose drop
-
-		OSWorkingSetPurge drop
 
 		1 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
@@ -448,5 +447,63 @@ fn SiManageLineThread { context -- ret }
 
 	if (oldcount@ 1 ==)
 		DeadSystemEvent@ OSEventSignal drop
+	end
+end
+
+fn SiStartServices { config -- ok }
+	auto iterator
+	"Services" // sectionname
+	config@ // config
+	OSConfigGetKeyIterator ok! iterator!
+
+	if (ok@)
+		ok@ OSStatusGetName "* Couldn't find Services section: %s\n" Printf
+		return
+	end
+
+	while (iterator@)
+		auto key
+		auto srvexe
+		auto servicename
+		iterator@ // iterator
+		config@ // config
+		OSConfigNextKey ok! iterator! srvexe! key!
+
+		if (ok@)
+			return
+		end
+
+		key@ OSConfigGetKeyName servicename!
+
+		auto phandle
+		auto thandle
+
+		srvexe@ // path
+		0 // creationflags
+		0 // creationparams
+		ACCESS_OWNER_ALL // permissions
+		0 // name
+		OSSpawn ok! phandle! thandle!
+
+		if (ok@ ~~)
+			phandle@ OSClose drop
+
+			1 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			thandle@ // objecthandle
+			OSWaitForObject drop
+
+			thandle@ OSThreadReadStatus drop ok!
+
+			thandle@ OSClose drop
+		end
+
+		if (ok@)
+			ok@ OSStatusGetName
+			srvexe@
+			"%s failed to start: %s\n" Printf
+
+			0 ok!
+		end
 	end
 end

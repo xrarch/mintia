@@ -25,7 +25,15 @@
 var MmQuotaBlockListHead 0
 
 fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
-	0 ok!
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	MmQuotaListMutex // object
+	KeThreadWaitForObject ok!
+
+	if (ok@)
+		return
+	end
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -37,7 +45,9 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 			quotablock@ MmQuotaBlockReference
 
 			ipl@ KeIPLLower
-			
+
+			0 MmQuotaListMutex KeMutexRelease drop
+
 			return
 		end
 
@@ -49,6 +59,7 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 	// not found, fork the forkquotablock to create one for this UID
 
 	if (forkquotablock@ ~~)
+		0 MmQuotaListMutex KeMutexRelease drop
 		-1 ok!
 		return
 	end
@@ -56,6 +67,8 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 	uid@ // uid
 	forkquotablock@ // quotablock
 	MmQuotaBlockFork ok! quotablock!
+
+	0 MmQuotaListMutex KeMutexRelease drop
 end
 
 fn MmQuotaBlockCreate { uid wsmax pghpmax vmmax heapmax -- quotablock ok }

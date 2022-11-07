@@ -845,6 +845,7 @@ OSProcessCreate:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
+	mov  t5, long [sp + 4]
 
 	li   t0, 68
 	sys  0

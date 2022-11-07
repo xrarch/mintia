@@ -1,4 +1,4 @@
-const OSPROCESS_FORKQUOTA     2
+const OSPROCESS_NEWSESSION    1
 const OSPROCESS_DETACHCONSOLE 4
 // userside
 const OSPROCESS_NOINHERITENV  8192
@@ -72,5 +72,8 @@ struct OSCreationParams
 	4 StdOut
 	4 StdErr
 
-	48 Reserved
+	// UID to charge the process's quota to
+	4 QuotaUID
+
+	44 Reserved
 endstruct

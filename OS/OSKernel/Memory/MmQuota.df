@@ -22,7 +22,45 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmQuotaBlockCreate { wsmax pghpmax vmmax heapmax -- quotablock ok }
+var MmQuotaBlockListHead 0
+
+fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	MmQuotaBlockListHead@ quotablock!
+
+	while (quotablock@)
+		if (quotablock@ MmQuotaBlock_UID + @ uid@ ==)
+			quotablock@ MmQuotaBlockReference
+
+			ipl@ KeIPLLower
+			
+			return
+		end
+
+		quotablock@ MmQuotaBlock_Next + @ quotablock!
+	end
+
+	ipl@ KeIPLLower
+
+	// not found, fork the forkquotablock to create one for this UID
+
+	if (forkquotablock@ ~~)
+		-1 ok!
+		return
+	end
+
+	uid@ // uid
+	forkquotablock@ // quotablock
+	MmQuotaBlockFork ok! quotablock!
+end
+
+fn MmQuotaBlockCreate { uid wsmax pghpmax vmmax heapmax -- quotablock ok }
+	fnsection "PAGE$text"
+
 	MmQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
 	CANBLOCK // flags
@@ -32,10 +70,12 @@ fn MmQuotaBlockCreate { wsmax pghpmax vmmax heapmax -- quotablock ok }
 		return
 	end
 
-	wsmax@ pghpmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
+	uid@ wsmax@ pghpmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockFork { quotablock -- newquotablock ok }
+fn MmQuotaBlockFork { uid quotablock -- newquotablock ok }
+	fnsection "PAGE$text"
+
 	MmQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
 	CANBLOCK // flags
@@ -45,6 +85,7 @@ fn MmQuotaBlockFork { quotablock -- newquotablock ok }
 		return
 	end
 
+	uid@ // uid
 	quotablock@ MmQuotaBlock_WorkingSetMax + @ // wsmax
 	quotablock@ MmQuotaBlock_PagedPoolMax + @ // pghpmax
 	quotablock@ MmQuotaBlock_VMMax + @ // vmmax
@@ -53,10 +94,11 @@ fn MmQuotaBlockFork { quotablock -- newquotablock ok }
 	MmQuotaBlockInitialize ok!
 end
 
-fn MmQuotaBlockInitialize { wsmax pghpmax vmmax heapmax quotablock -- ok }
+fn MmQuotaBlockInitialize { uid wsmax pghpmax vmmax heapmax quotablock -- ok }
 	0 ok!
 
 	1 quotablock@ MmQuotaBlock_References + !
+	uid@ quotablock@ MmQuotaBlock_UID + !
 
 	0 quotablock@ MmQuotaBlock_PoolUsed + !
 	heapmax@ quotablock@ MmQuotaBlock_PoolMax + !
@@ -69,6 +111,24 @@ fn MmQuotaBlockInitialize { wsmax pghpmax vmmax heapmax quotablock -- ok }
 
 	0 quotablock@ MmQuotaBlock_WorkingSetUsed + !
 	wsmax@ quotablock@ MmQuotaBlock_WorkingSetMax + !
+
+	0 quotablock@ MmQuotaBlock_Prev + !
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto h
+	MmQuotaBlockListHead@ h!
+
+	h@ quotablock@ MmQuotaBlock_Next + !
+
+	if (h@)
+		quotablock@ h@ MmQuotaBlock_Prev + !
+	end
+
+	quotablock@ MmQuotaBlockListHead!
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn MmQuotaBlockReference { quotablock -- }
@@ -105,6 +165,26 @@ fn MmQuotaBlockDereference { quotablock -- }
 
 	if (oldcount@ 1 ==)
 		// got dereferenced to 0, delete
+
+		HALCPUInterruptDisable rs!
+
+		auto ls
+		auto ns
+
+		quotablock@ MmQuotaBlock_Prev + @ ls!
+		quotablock@ MmQuotaBlock_Next + @ ns!
+
+		if (ls@)
+			ns@ ls@ MmQuotaBlock_Next + !
+		end else
+			ns@ MmQuotaBlockListHead!
+		end
+
+		if (ns@)
+			ls@ ns@ MmQuotaBlock_Prev + !
+		end
+
+		rs@ HALCPUInterruptRestore
 
 		quotablock@ MmFree
 	end

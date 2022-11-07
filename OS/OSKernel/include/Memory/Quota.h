@@ -1,5 +1,8 @@
 struct MmQuotaBlock
 	4 References
+	4 Next
+	4 Prev
+	4 UID
 
 	4 PoolUsed
 	4 PoolMax
@@ -16,9 +19,10 @@ endstruct
 
 const MMQUOTAINFINITE -1
 
-extern MmQuotaBlockCreate { wsmax pghpmax vmmax heapmax -- quotablock ok }
-extern MmQuotaBlockFork { quotablock -- newquotablock ok }
-extern MmQuotaBlockInitialize { wsmax pghpmax vmmax heapmax quotablock -- ok }
+extern MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
+extern MmQuotaBlockCreate { uid wsmax pghpmax vmmax heapmax -- quotablock ok }
+extern MmQuotaBlockFork { uid quotablock -- newquotablock ok }
+extern MmQuotaBlockInitialize { uid wsmax pghpmax vmmax heapmax quotablock -- ok }
 extern MmQuotaBlockReference { quotablock -- }
 extern MmQuotaBlockDereference { quotablock -- }
 

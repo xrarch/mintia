@@ -104,7 +104,7 @@ extern OSWorkingSetPurge { -- ok }
 extern OSSynchronizeIcache { -- }
 
 // Ps
-extern OSProcessCreate { sectionhandle creationflags permissions name -- processhandle ok }
+extern OSProcessCreate { quotauid sectionhandle creationflags permissions name -- processhandle ok }
 extern OSProcessSignal { signal processhandle -- ok }
 extern OSProcessOpenByPID { access pid -- processhandle ok }
 extern OSProcessQuery { processhandle query -- ok }

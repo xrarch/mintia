@@ -1711,6 +1711,10 @@ OSTOSProcessCreate:
 	add  t0, 16 ;t4
 	mov  a3, [t0]
 
+	mov  t0, s17
+	add  t0, 20 ;t5
+	push [t0]
+
 	call OSProcessCreate
 
 
@@ -1722,6 +1726,7 @@ OSTOSProcessCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	add  sp, 4
 	ret
 
 OSTOSProcessSignal:

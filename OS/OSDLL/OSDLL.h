@@ -122,4 +122,4 @@ struct DLLStreamWCB
 	4 Length
 endstruct
 
-#include "../../Common/Module.h"
+#include "../Common/Module.h"

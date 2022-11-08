@@ -21,5 +21,5 @@ INCDIR := $(HALINCDIR):./include/
 
 include $(REPO)/Project.mk
 
-Executive/$(ARCHITECTURE)/OSCallTrampolines.s: $(REPO)/OS/OSDLL/headers/OSCalls.h 
-	$(SYSCALLGEN) $(REPO)/OS/OSDLL/headers/OSCalls.h NO ./Executive/$(ARCHITECTURE)/OSCallTrampolines.s
+Executive/$(ARCHITECTURE)/OSCallTrampolines.s: $(REPO)/OS/Headers/OSDLL/OSCalls.h 
+	$(SYSCALLGEN) $(REPO)/OS/Headers/OSDLL/OSCalls.h NO ./Executive/$(ARCHITECTURE)/OSCallTrampolines.s

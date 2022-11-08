@@ -1,6 +1,14 @@
+//
+// Initialization for the MINTIA Authority Management Server.
+//
+
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/AmsAPI.h"
+
+var AmsApiPort 0
 
 fn Main { ... -- ret }
 	AmsInit ret!
@@ -9,6 +17,34 @@ fn Main { ... -- ret }
 end
 
 fn AmsInit { -- ok }
+	OSPORT_FLAG_NO_HANDLES // flags
+	AmsMessage_SIZEOF // maxlen
+	ACCESS_OWNER_ALL ACCESS_GROUP_EXEC | ACCESS_WORLD_EXEC | // permissions
+	"AmsApiPort" // name
+	OSPortCreate ok! AmsApiPort!
+
+	if (ok@)
+		return
+	end
+
+	auto dirh
+	0 // flags
+	ACCESS_EXEC ACCESS_WRITE | // access
+	"//:/" // path
+	OSOpen ok! dirh!
+
+	if (ok@)
+		return
+	end
+
+	AmsApiPort@ // objecthandle
+	dirh@ // directoryhandle
+	OSDirectoryInsert ok!
+
+	if (ok@)
+		return
+	end
+
 	auto thandle
 	0 // context
 	pointerof AmsApiThread // startfunc
@@ -26,5 +62,44 @@ fn AmsInit { -- ok }
 end
 
 fn AmsApiThread { context -- ret }
-	0 ret!
+	AmsApiLoop ret!
+end
+
+fn AmsApiLoop { -- ok }
+	auto rxmsg
+	AmsMessage_SIZEOF alloc rxmsg!
+
+	auto replymsg
+	0 replymsg!
+
+	while (1)
+		rxmsg@ // rxmsg
+		replymsg@ // txmsg
+		OSWAIT_TIMEOUTINFINITE // timeout
+		AmsApiPort@ // porthandle
+		OSPortSendAndWaitReceive ok!
+
+		0 replymsg!
+
+		if (ok@)
+			continue
+		end
+
+		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_CONNECTION ==)
+			0xDEADBEEF // context
+			rxmsg@ // txmsg
+			1 // reject
+			AmsApiPort@ // porthandle
+			OSPortAccept ok!
+
+			0 ok!
+		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
+			// process disconnect
+		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
+			// process request
+		end else
+			// unknown, ignore
+			continue
+		end
+	end
 end

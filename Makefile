@@ -34,6 +34,7 @@ export FST := $(SDK)/fstool.sh
 
 export KERNINCDIR   := $(REPO)/OS/OSKernel/include/
 export HALINCDIR    := $(REPO)/OS/HAL/include/:$(REPO)/OS/HAL/$(PLATFORM)/include/
+export LIBDIR       := $(REPO)/OS/Headers/
 
 BOOTCODE := OSLoader/$(PLATFORM)/bootcode \
 			OSLoader
@@ -112,13 +113,8 @@ $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE) $(BOOTCODE)
 $(BOOTCODE): $(DISTIMAGE)
 	make -C OS/$@
 
-$(PROJECTS): $(DISTIMAGE) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+$(PROJECTS): $(DISTIMAGE) OSDLL
 	make -C OS/$@
-
-$(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll: OSDLL
-	mkdir -p $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)
-	cp $(OSDLLBIN) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
-	$(SDK)/install.sh $(REPO)/OS/OSDLL
 
 SystemInit: OSDLL
 
@@ -131,7 +127,7 @@ OSKernel: HAL/$(PLATFORM)
 $(KERNELMODULES): $(DISTIMAGE) HAL/$(PLATFORM) OSKernel $(BUILDROOT)/$(DRIVERROOT)
 	make -C OS/$@
 
-$(COMMANDS): $(DISTIMAGE) $(BUILDROOT)/$(BINROOT) $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
+$(COMMANDS): $(DISTIMAGE) $(BUILDROOT)/$(BINROOT) OSDLL
 	make -C $@
 
 $(BUILDROOT)/$(DRIVERROOT):
@@ -142,8 +138,6 @@ $(BUILDROOT)/$(BINROOT):
 
 cleanup:
 	rm -f $(DISTIMAGE)
-
-	rm -f $(REPO)/OS/OSDLL/obj/$(ARCHITECTURE)/OSDLL.dll
 	rm -f $(DFLIBBIN)
 
 	for dir in $(COMMANDS); do \

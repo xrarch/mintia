@@ -31,7 +31,7 @@ else
 endif
 
 %.$(ARCHITECTURE).$(CHKFRE).o: %.df $(INCLUDEFILES)
-	$(DFC) $< $@ incdir=$(INCDIR)
+	$(DFC) $< $@ incdir=$(INCDIR) libdir=$(LIBDIR)
 
 %.$(ARCHITECTURE).$(CHKFRE).o: %.s
 	$(ASM) $< $@

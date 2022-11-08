@@ -8,6 +8,8 @@
 
 #include "<inc>/AmsAPI.h"
 
+#include "Ams.h"
+
 var AmsApiPort 0
 
 fn Main { ... -- ret }
@@ -73,6 +75,10 @@ fn AmsApiLoop { -- ok }
 	0 replymsg!
 
 	while (1)
+		// we do not need to deal with handles being passed sporadically
+		// because AMS specifies that we do not allow them when we create
+		// the port object.
+
 		rxmsg@ // rxmsg
 		replymsg@ // txmsg
 		OSWAIT_TIMEOUTINFINITE // timeout
@@ -86,15 +92,9 @@ fn AmsApiLoop { -- ok }
 		end
 
 		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_CONNECTION ==)
-			0xDEADBEEF // context
-			rxmsg@ // txmsg
-			1 // reject
-			AmsApiPort@ // porthandle
-			OSPortAccept ok!
-
-			0 ok!
+			rxmsg@ AmsHandleConnection
 		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
-			// process disconnect
+			rxmsg@ AmsHandleDisconnection
 		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
 			// process request
 		end else
@@ -102,4 +102,41 @@ fn AmsApiLoop { -- ok }
 			continue
 		end
 	end
+end
+
+fn AmsHandleConnection { msg -- }
+	auto ok
+
+	auto client
+	AmsClientCreate ok! client!
+
+	if (ok@)
+		// reject the connection
+
+		0 // context
+		msg@ // txmsg
+		1 // reject
+		AmsApiPort@ // porthandle
+		OSPortAccept drop
+
+		return
+	end
+
+	client@ // context
+	msg@ // txmsg
+	0 // reject
+	AmsApiPort@ // porthandle
+	OSPortAccept ok!
+
+	if (ok@)
+		// client disappeared while we were processing its connection request
+
+		client@ AmsClientDelete
+
+		return
+	end
+end
+
+fn AmsHandleDisconnection { msg -- }
+	msg@ OSMessageHeader_Context + @ AmsClientDelete
 end

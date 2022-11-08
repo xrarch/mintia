@@ -43,8 +43,8 @@ PROJECTS := HAL/$(PLATFORM) \
 			OSKernel \
 			OSDLL \
 			SystemInit \
-			TestDLL \
-			AMS/Server
+			AMS/Server \
+			AMS/Client
 
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \
@@ -60,6 +60,7 @@ export HALBIN   := $(BUILDROOT)/$(SYSROOT)/HAL$(PLATFORM).dll.$(ARCHITECTURE).$(
 export KERNBIN  := $(BUILDROOT)/$(SYSROOT)/OSKernel.exe.$(ARCHITECTURE).$(CHKFRE)
 export DFLIBBIN := $(BUILDROOT)/$(SYSROOT)/Dragonfruit.dll.$(ARCHITECTURE).$(CHKFRE)
 export OSDLLBIN := $(BUILDROOT)/$(SYSROOT)/OSDLL.dll.$(ARCHITECTURE).$(CHKFRE)
+export AMSBIN   := $(BUILDROOT)/$(SYSROOT)/ams.dll.$(ARCHITECTURE).$(CHKFRE)
 
 ifndef SMALLDIST
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE).img

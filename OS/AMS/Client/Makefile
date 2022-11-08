@@ -4,8 +4,6 @@ OUTPUTFILE := $(SYSROOT)/ams.dll
 
 DYLIBS := OSDLL.dll:$(OSDLLBIN)
 
-LIBS := L/dfrt/dfrt.f.o
-
 MOVEEXPR := mintiadll text=0x60000000,data=text+text_size+align,bss=data+data_size+align
 
 INCDIR := ../include/

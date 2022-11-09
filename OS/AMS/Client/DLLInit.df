@@ -26,6 +26,9 @@ end
 var AmsApiPort 0
 public AmsApiPort
 
+var AmsSectionBase 0
+public AmsSectionBase
+
 fn AmsInit { -- ok }
 	"AmsFastMutex" // name
 	AmsFastMutex // fastmutex
@@ -44,6 +47,75 @@ fn AmsInit { -- ok }
 	OSPortConnect ok! AmsApiPort!
 
 	if (ok@)
+		return
+	end
+
+	// create a section object
+
+	auto sectionhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	AMSSECTIONSIZE OSPAGEOFFSETMASK + OSPAGENUMBERMASK & // anonsize
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ok! sectionhandle!
+
+	if (ok@)
+		AmsApiPort@ OSClose drop
+
+		return
+	end
+
+	AMSSECTIONSIZE OSPAGEOFFSETMASK + OSPAGENUMBERMASK & // length
+	HEAPSTART // startva
+	0 // sectionoffset
+	sectionhandle@ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSMapView ok! AmsSectionBase!
+
+	if (ok@)
+		AmsApiPort@ OSClose drop
+
+		return
+	end
+
+	// send the section handle
+
+	OSPORT_MESSAGE_REQUEST txmsg@ OSMessageHeader_TypeB + sb
+	AMSAPI_COMPLETE_CONNECTION txmsg@ OSMessageHeader_SubtypeB + sb
+	sectionhandle@ txmsg@ OSMessageHeader_Handle + !
+	ACCESS_READ ACCESS_WRITE | txmsg@ OSMessageHeader_Access + !
+
+	txmsg@ // rxmsg
+	txmsg@ // txmsg
+	OSWAIT_TIMEOUTINFINITE // timeout
+	AmsApiPort@ // porthandle
+	OSPortSendAndWaitReply ok!
+
+	sectionhandle@ OSClose drop
+
+	if (ok@)
+		AMSSECTIONSIZE OSPAGEOFFSETMASK + OSPAGENUMBERMASK & // length
+		AmsSectionBase@ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+
+		AmsApiPort@ OSClose drop
+
+		return
+	end
+
+	txmsg@ AmsMessage_Status + @ ok!
+
+	if (ok@)
+		AMSSECTIONSIZE OSPAGEOFFSETMASK + OSPAGENUMBERMASK & // length
+		AmsSectionBase@ // vaddr
+		OSCURRENTPROCESS // processhandle
+		OSUnmapView drop
+
+		AmsApiPort@ OSClose drop
+
 		return
 	end
 end

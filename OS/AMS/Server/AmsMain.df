@@ -5,6 +5,7 @@
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
+#include "<ll>/AMS/Ams.h"
 
 #include "<inc>/AmsAPI.h"
 
@@ -19,13 +20,21 @@ fn Main { ... -- ret }
 end
 
 fn AmsInit { -- ok }
-	OSPORT_FLAG_NO_HANDLES // flags
+	AmsDbOpen ok!
+
+	if (ok@)
+		return
+	end
+
+	0 // flags
 	AmsMessage_SIZEOF // maxlen
 	ACCESS_OWNER_ALL ACCESS_GROUP_EXEC | ACCESS_WORLD_EXEC | // permissions
 	"AmsApiPort" // name
 	OSPortCreate ok! AmsApiPort!
 
 	if (ok@)
+		ok@ OSStatusGetName
+		"\namssrv: failed to create AmsApiPort: %s\n" OSGetStdErr FPrintf
 		return
 	end
 
@@ -36,6 +45,8 @@ fn AmsInit { -- ok }
 	OSOpen ok! dirh!
 
 	if (ok@)
+		ok@ OSStatusGetName
+		"\namssrv: failed to open //:/: %s\n" OSGetStdErr FPrintf
 		return
 	end
 
@@ -44,6 +55,8 @@ fn AmsInit { -- ok }
 	OSDirectoryInsert ok!
 
 	if (ok@)
+		ok@ OSStatusGetName
+		"\namssrv: failed to insert //:/AmsApiPort: %s\n" OSGetStdErr FPrintf
 		return
 	end
 
@@ -57,10 +70,93 @@ fn AmsInit { -- ok }
 	OSThreadCreate ok! thandle!
 
 	if (ok@)
+		ok@ OSStatusGetName
+		"\namssrv: failed to create API thread: %s\n" OSGetStdErr FPrintf
 		return
 	end
 
 	thandle@ OSClose drop
+end
+
+table AmsApiDispatchTable
+	pointerof AmsApiQueryByUID         // AMSAPI_QUERY_BY_UID
+	pointerof AmsApiQueryUIDByName     // AMSAPI_QUERY_UID_BY_NAME
+	pointerof AmsApiQueryGIDByName     // AMSAPI_QUERY_GID_BY_NAME
+	pointerof AmsApiQueryByGID         // AMSAPI_QUERY_BY_GID
+	pointerof AmsApiCompleteConnection // AMSAPI_COMPLETE_CONNECTION
+endtable
+
+const AMSAPICOUNT 5
+
+fn (AmsDispatchFunction) AmsApiQueryUIDByName { msg client -- ok }
+	auto name
+	AMSNAMEMAX alloc name!
+
+	name@ // dest
+	client@ AmsClient_SectionBase + @ AmsMessageQueryUIDByName_UserName + // src
+	AMSNAMEMAX 1 - // max
+	strncpy
+
+	auto uid
+	name@ AmsQueryUIDByName ok! uid!
+
+	if (ok@)
+		return
+	end
+
+	// store the uid where the username was
+	uid@ client@ AmsClient_SectionBase + @ AmsMessageQueryUIDByName_UserName + !
+end
+
+fn (AmsDispatchFunction) AmsApiQueryGIDByName { msg client -- ok }
+	auto name
+	AMSNAMEMAX alloc name!
+
+	name@ // dest
+	client@ AmsClient_SectionBase + @ AmsMessageQueryGIDByName_GroupName + // src
+	AMSNAMEMAX 1 - // max
+	strncpy
+
+	auto gid
+	name@ AmsQueryGIDByName ok! gid!
+
+	if (ok@)
+		return
+	end
+
+	// store the gid where the groupname was
+	gid@ client@ AmsClient_SectionBase + @ AmsMessageQueryGIDByName_GroupName + !
+end
+
+fn (AmsDispatchFunction) AmsApiQueryByUID { msg client -- ok }
+	0 ok!
+end
+
+fn (AmsDispatchFunction) AmsApiQueryByGID { msg client -- ok }
+	0 ok!
+end
+
+fn (AmsDispatchFunction) AmsApiCompleteConnection { msg client -- ok }
+	if (msg@ OSMessageHeader_Handle + @ OSNONE ==)
+		STATUS_INVALID_ARGUMENT ok!
+		return
+	end
+
+	auto realva
+	AMSSECTIONSIZE OSPAGEOFFSETMASK + OSPAGENUMBERMASK & // length
+	HEAPSTART // startva
+	0 // sectionoffset
+	msg@ OSMessageHeader_Handle + @ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSMapView ok! realva!
+
+	if (ok@)
+		return
+	end
+
+	realva@ client@ AmsClient_SectionBase + !
 end
 
 fn AmsApiThread { context -- ret }
@@ -75,10 +171,6 @@ fn AmsApiLoop { -- ok }
 	0 replymsg!
 
 	while (1)
-		// we do not need to deal with handles being passed sporadically
-		// because AMS specifies that we do not allow them when we create
-		// the port object.
-
 		rxmsg@ // rxmsg
 		replymsg@ // txmsg
 		OSWAIT_TIMEOUTINFINITE // timeout
@@ -96,7 +188,43 @@ fn AmsApiLoop { -- ok }
 		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
 			rxmsg@ AmsHandleDisconnection
 		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
-			// process request
+			auto rt
+			rxmsg@ OSMessageHeader_SubtypeB + gb rt!
+
+			if (rt@ AMSAPI_COMPLETE_CONNECTION ~=)
+				if (rxmsg@ OSMessageHeader_Context + @ AmsClient_SectionBase + @ ~~)
+					// connection not completed yet
+					STATUS_INVALID_ARGUMENT ok!
+				end elseif (rxmsg@ OSMessageHeader_Handle + @ OSNONE ~=)
+					// connection completed, but a handle was inexplicably sent
+					STATUS_INVALID_ARGUMENT ok!
+				end
+			end elseif (rxmsg@ OSMessageHeader_Context + @ AmsClient_SectionBase + @)
+				// this is a connection completion, but that already happened
+				STATUS_INVALID_ARGUMENT ok!
+			end
+
+			if (ok@ ~~)
+				if (rt@ AMSAPICOUNT >=)
+					// fail the request
+					STATUS_INVALID_ARGUMENT ok!
+				end else
+					// process request
+					rxmsg@ // msg
+					rxmsg@ OSMessageHeader_Context + @ // client
+					[rt@]AmsApiDispatchTable@ AmsDispatchFunction ok!
+				end
+			end
+
+			// make sure to close any handles we were passed
+			if (rxmsg@ OSMessageHeader_Handle + @ OSNONE ~=)
+				rxmsg@ OSMessageHeader_Handle + @ OSClose drop
+			end
+
+			ok@ rxmsg@ AmsMessage_Status + !
+			OSNONE rxmsg@ OSMessageHeader_Handle + !
+			OSPORT_MESSAGE_REPLY rxmsg@ OSMessageHeader_TypeB + sb
+			rxmsg@ replymsg!
 		end else
 			// unknown, ignore
 			continue

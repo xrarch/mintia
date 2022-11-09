@@ -41,9 +41,10 @@ BOOTCODE := OSLoader/$(PLATFORM)/bootcode \
 
 PROJECTS := HAL/$(PLATFORM) \
 			OSKernel \
-			OSDLL \
 			SystemInit \
-			AMS/Server \
+			AMS/Server
+
+LIBRARIES := OSDLL \
 			AMS/Client
 
 KERNELMODULES := BootDrivers/AisixFS \
@@ -83,7 +84,7 @@ DFC += $(BUILDCONFIG)
 ASM += target=$(ARCHITECTURE)
 
 ifndef PROJECT
-	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(COMMANDS)
+	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(LIBRARIES) $(COMMANDS)
 endif
 
 all: $(PROJECT)
@@ -106,7 +107,7 @@ $(DISTIMAGE):
 	$(FSTOOL) ud / TextManifest
 	$(FSTOOL) ud / TextManifestSuffixed $(TEXTSUFFIX)
 
-$(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE) $(BOOTCODE)
+$(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE)
 	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)
 	$(LNK) move $(DFLIBBIN) base=0x80300000
 	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(REPO)/DELTA
@@ -114,12 +115,13 @@ $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE) $(BOOTCODE)
 $(BOOTCODE): $(DISTIMAGE)
 	make -C OS/$@
 
-$(PROJECTS): $(DISTIMAGE) OSDLL
+$(PROJECTS): $(DISTIMAGE) $(LIBRARIES)
+	make -C OS/$@
+
+$(LIBRARIES): $(DISTIMAGE)
 	make -C OS/$@
 
 SystemInit: OSDLL
-
-TestDLL: OSDLL
 
 HAL/$(PLATFORM): $(DFLIBBIN)
 
@@ -128,7 +130,7 @@ OSKernel: HAL/$(PLATFORM)
 $(KERNELMODULES): $(DISTIMAGE) HAL/$(PLATFORM) OSKernel $(BUILDROOT)/$(DRIVERROOT)
 	make -C OS/$@
 
-$(COMMANDS): $(DISTIMAGE) $(BUILDROOT)/$(BINROOT) OSDLL
+$(COMMANDS): $(DISTIMAGE) $(BUILDROOT)/$(BINROOT) $(LIBRARIES)
 	make -C $@
 
 $(BUILDROOT)/$(DRIVERROOT):

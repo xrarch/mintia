@@ -44,8 +44,9 @@ PROJECTS := HAL/$(PLATFORM) \
 			SystemInit \
 			AMS/Server
 
-LIBRARIES := OSDLL \
-			AMS/Client
+ULIBRARIES := AMS/Client
+
+LIBRARIES := OSDLL $(ULIBRARIES)
 
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \
@@ -115,11 +116,13 @@ $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DISTIMAGE)
 $(BOOTCODE): $(DISTIMAGE)
 	make -C OS/$@
 
-$(PROJECTS): $(DISTIMAGE) $(LIBRARIES)
+$(PROJECTS): $(DISTIMAGE) OSDLL
 	make -C OS/$@
 
 $(LIBRARIES): $(DISTIMAGE)
 	make -C OS/$@
+
+$(ULIBRARIES): OSDLL
 
 SystemInit: OSDLL
 

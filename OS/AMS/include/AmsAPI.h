@@ -35,7 +35,7 @@ struct AmsMessageQueryGIDByName
 	AMSNAMEMAX GroupName
 endstruct
 
-struct AmsMessageNewSession
+struct AmsMessageLogon
 	4 UID
 	AMSPASSWORDMAX Password
 endstruct
@@ -44,7 +44,7 @@ const AMSSECTIONSIZE (AmsMessageQueryByUID_SIZEOF
 	AmsMessageQueryByGID_SIZEOF _max
 	AmsMessageQueryUIDByName_SIZEOF _max
 	AmsMessageQueryGIDByName_SIZEOF _max
-	AmsMessageNewSession_SIZEOF _max)
+	AmsMessageLogon_SIZEOF _max)
 
 const AMSAPI_QUERY_BY_UID        0
 const AMSAPI_QUERY_UID_BY_NAME   1

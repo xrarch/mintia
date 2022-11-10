@@ -33,11 +33,16 @@ buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
 
 const MMBALANCESETINTERVAL 1000
 
-const MMSTACKSCANPERIOD 5
-const MMSTACKAGE        10
+var MmStackAge 0
 
 var MmSwapOutStacksPlease 0
 public MmSwapOutStacksPlease
+
+var MmForcedOutProcessListHead 0
+public MmForcedOutProcessListHead
+
+var MmForcedOutProcessListTail 0
+public MmForcedOutProcessListTail
 
 externptr MmOkToUnwire
 
@@ -97,7 +102,7 @@ fn MmBalanceSetManager { -- }
 	MmEventLowMemory objecttable@ 4 + !
 
 	auto stackperiod
-	MMSTACKSCANPERIOD stackperiod!
+	0 stackperiod!
 
 	0 // context1
 	0 // context2
@@ -127,6 +132,7 @@ fn MmBalanceSetManager { -- }
 
 		auto needed
 		auto dire
+		auto rs
 
 		if (reason@ 0 ==)
 			// timer expired
@@ -138,12 +144,27 @@ fn MmBalanceSetManager { -- }
 				end
 			end
 
+			auto stackscanperiod
+
+			if (MmPhysicalCommitUsage@ MmPhysicalCommitLimit@ >)
+				1 stackscanperiod!
+				0 MmStackAge!
+
+				MmBalanceOutProcesses
+			end else
+				5 stackscanperiod!
+				10 MmStackAge!
+
+				0 MmBalanceInProcesses
+			end
+
+			if (MmForcedOutProcessListHead@)
+				10 MmBalanceInProcesses
+			end
+
 			MmManageWorkingSets drop
 
-			1 stackperiod -=
-
-			if (stackperiod@ ~~)
-				auto rs
+			if (stackperiod@ stackscanperiod@ >=)
 				HALCPUInterruptDisable rs!
 
 				if (MmSwapOutStacksPlease@ ~~)
@@ -157,7 +178,9 @@ fn MmBalanceSetManager { -- }
 					rs@ HALCPUInterruptRestore
 				end
 
-				MMSTACKSCANPERIOD stackperiod!
+				0 stackperiod!
+			end else
+				1 stackperiod +=
 			end
 
 			0 // context1
@@ -182,6 +205,213 @@ fn MmBalanceSetManager { -- }
 			KeThreadSleep drop
 		end
 	end
+end
+
+fn MmBalanceOutProcesses { -- }
+	PsProcessListLock drop
+
+	auto firstpass
+	1 firstpass!
+
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	auto timesec
+	time@ KeTime_SecPart + @ timesec!
+
+	time@ HALUptimeQuery
+
+	auto process
+	PsProcessListHead@ process!
+
+	auto count
+	PsActiveProcessCount@ count!
+
+	auto nprocess
+
+	auto checkloop
+	0 checkloop!
+
+	while (process@ count@ &&)
+		if (process@ checkloop@ ==)
+			break
+		end
+		
+		process@ PsProcess_GlobalListNext + @ nprocess!
+
+		auto balanceout
+		0 balanceout!
+
+		if (process@ PsSystemProcess@ ~=)
+			if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ==)
+				if (process@ PsProcess_RemovedFromBalanceSet + @ ~~)
+					if (firstpass@)
+						1 balanceout!
+					end else
+						auto ipl
+						IPLDPC KeIPLRaise ipl!
+
+						auto thread
+						process@ KeProcess_ThreadListHead + @ thread!
+
+						while (thread@)
+							if (thread@ KeThread_Status + @ THREADSTATUS_READY ==)
+								if (timesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - 10 >=)
+									1 balanceout!
+									break
+								end
+							end
+
+							thread@ KeThread_ProcessNext + @ thread!
+						end
+
+						ipl@ KeIPLLower
+					end
+				end
+			end
+		end
+
+		if (balanceout@)
+			auto rs
+			HALCPUInterruptDisable rs!
+
+			1 process@ PsProcess_RemovedFromBalanceSet + !
+
+			auto t
+			MmForcedOutProcessListTail@ t!
+
+			if (t@ ~~)
+				0 process@ PsProcess_ForcedOutListNext + !
+				0 process@ PsProcess_ForcedOutListPrev + !
+
+				process@ MmForcedOutProcessListHead!
+				process@ MmForcedOutProcessListTail!
+			end else
+				0 process@ PsProcess_ForcedOutListNext + !
+
+				t@ process@ PsProcess_ForcedOutListPrev + !
+				process@ t@ PsProcess_ForcedOutListNext + !
+				process@ MmForcedOutProcessListTail!
+			end
+
+			rs@ HALCPUInterruptRestore
+
+			if (process@ PsProcessListTail@ ~=)
+				if (checkloop@ ~~)
+					process@ checkloop!
+				end
+
+				process@ PsProcessRemove
+				process@ PsProcessInsert
+			end
+		end
+
+		1 count -=
+		0 firstpass!
+		nprocess@ process!
+	end
+
+	PsProcessListUnlock
+end
+
+fn MmBalanceInProcesses { swapoutmaxtime -- }
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	time@ HALUptimeQuery
+
+	auto timesec
+	time@ KeTime_SecPart + @ timesec!
+
+	auto balancein
+
+	auto checkloop
+	0 checkloop!
+
+	auto nprocess
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto process
+	MmForcedOutProcessListHead@ process!
+
+	while (process@)
+		process@ PsProcess_ForcedOutListNext + @ nprocess!
+
+		0 balancein!
+
+		if (process@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ==)
+			if (timesec@ process@ PsProcess_SwappedOutTimeSec + @ - swapoutmaxtime@ >=)
+				1 balancein!
+			end
+		end elseif (swapoutmaxtime@ ~~)
+			1 balancein!
+		end
+
+		if (balancein@)
+			process@ MmBalanceInProcess
+
+			break
+		end
+
+		nprocess@ process!
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn MmBalanceInProcess { process -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (process@ PsProcess_RemovedFromBalanceSet + @ ~~)
+		ipl@ KeIPLLower
+		return
+	end
+
+	0 process@ PsProcess_RemovedFromBalanceSet + !
+
+	// remove from list
+
+	auto ls
+	process@ PsProcess_ForcedOutListPrev + @ ls!
+
+	auto ns
+	process@ PsProcess_ForcedOutListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ PsProcess_ForcedOutListNext + !
+	end else
+		ns@ MmForcedOutProcessListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ PsProcess_ForcedOutListPrev + !
+	end else
+		ls@ MmForcedOutProcessListTail!
+	end
+
+	0 process@ PsProcess_ForcedOutListPrev + !
+	0 process@ PsProcess_ForcedOutListNext + !
+
+	// resume threads
+
+	auto thread
+	process@ KeProcess_ThreadListHead + @ thread!
+
+	while (thread@)
+		if (thread@ KeThread_Status + @ THREADSTATUS_BALSETREMOVED ==)
+			0 // waitstatus
+			1 // priboost
+			thread@ // thread
+			KeThreadWakeup drop
+		end
+
+		thread@ KeThread_ProcessNext + @ thread!
+	end
+
+	ipl@ KeIPLLower
 end
 
 var MmProcessSwapOutListHead 0
@@ -273,7 +503,7 @@ fn MmSwapOutStacks { -- }
 
 	while (thread@)
 		if (thread@ KeThread_KernelStackResident + @)
-			if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MMSTACKAGE >=)
+			if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MmStackAge@ >=)
 				if (thread@ KeThread_WaitMode + @ USERMODE ==)
 					// yeet it.
 					thread@ MmKernelStackSwapOut
@@ -413,4 +643,6 @@ fn MmSwapReadyDeferred { process -- }
 
 		QUEUEBACK thread@ KeThreadReady
 	end
+
+	process@ MmBalanceInProcess
 end

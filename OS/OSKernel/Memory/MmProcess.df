@@ -7,6 +7,7 @@
 #include "<inc>/HALLog.h"
 #include "<inc>/HALCPU.h"
 #include "<inc>/HALMap.h"
+#include "<inc>/HALRTC.h"
 
 #include "<inc>/Kernel.h"
 
@@ -35,6 +36,11 @@ fn MmProcessInitialize { sectionobject process -- ok }
 	process@ PsProcess_PagedArea + @ pagedarea!
 
 	0 pagedarea@ PsProcessPaged_MappedMMIOCount + !
+
+	0 process@ PsProcess_RemovedFromBalanceSet + !
+	0 process@ PsProcess_ForcedOutListNext + !
+	0 process@ PsProcess_ForcedOutListPrev + !
+	0 process@ PsProcess_SwappedOutTimeSec + !
 
 	0 process@ PsProcess_ModifiedPages + !
 
@@ -344,9 +350,19 @@ fn MmProcessUninitialize { process -- ok }
 end
 
 fn MmProcessSwapOut { process -- }
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	time@ HALUptimeQuery
+
+	time@ KeTime_SecPart + @ process@ PsProcess_SwappedOutTimeSec + !
+
 	// invalidate and free the process's working set structures.
 
 	process@ MmWorkingSetLock drop
+
+	auto workingsetmin
+	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMinimum + @ workingsetmin!
 
 	process@ MmWorkingSetPurge
 	process@ MmProcessHeaderDereference
@@ -356,10 +372,20 @@ fn MmProcessSwapOut { process -- }
 	// dereference the page directory so it can get swapped out.
 
 	process@ MmPageDirectoryDereference
+
+	auto rs
+	HALCPUInterruptDisable rs!
+	2 workingsetmin@ + MmPhysicalCommitUsage -=
+	rs@ HALCPUInterruptRestore
 end
 
 fn MmProcessSwapIn { process -- }
 	// make the page directory resident again if it was swapped out.
+
+	auto rs
+	HALCPUInterruptDisable rs!
+	2 MmPhysicalCommitUsage +=
+	rs@ HALCPUInterruptRestore
 
 	auto ok
 	TRYFOREVER // pri
@@ -377,6 +403,13 @@ fn MmProcessSwapIn { process -- }
 	if (ok@)
 		ok@ "MmProcessSwapIn: failed to reference process header (%i)\n" KeCrash
 	end
+
+	auto workingsetmin
+	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMinimum + @ workingsetmin!
+
+	HALCPUInterruptDisable rs!
+	workingsetmin@ MmPhysicalCommitUsage +=
+	rs@ HALCPUInterruptRestore
 end
 
 fn MmProcessChargePageTables { startva endva process -- ok }

@@ -83,10 +83,16 @@ fn PsPrepareUsermode { trapframe -- }
 		"PsPrepareUsermode: ipl >= IPLDPC\n" KeCrash
 	end
 
+	auto process
+	KeProcessCurrent process!
+
+	auto current
+	KeThreadCurrent@ current!
+
 	while (1)
 		USERMODE // mode
 		1 // alertable
-		KeThreadCurrent@ // thread
+		current@ // thread
 		KeThreadIsKilled whatnow!
 
 		if (whatnow@ STATUS_KILLED ==)
@@ -100,12 +106,30 @@ fn PsPrepareUsermode { trapframe -- }
 			// PsThreadExit should not return
 
 			"PsPrepareUsermode\n" KeCrash
-		end elseif (KeThreadCurrent@ KeThread_Suspended + @)
+		end elseif (current@ KeThread_Suspended + @
+					process@ PsProcess_RemovedFromBalanceSet + @ ||)
 			// suspend!
 
 			HALCPUInterruptEnable
 
-			THREADSTATUS_SUSPENDED KeThreadYield
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			if (process@ PsProcess_RemovedFromBalanceSet + @)
+				IPLLOW // waitipl
+				USERMODE // waitmode
+				1 // alertable
+				THREADSTATUS_BALSETREMOVED // explicitstatus
+				KeThreadWait drop
+			end elseif (current@ KeThread_Suspended + @)
+				IPLLOW // waitipl
+				USERMODE // waitmode
+				1 // alertable
+				THREADSTATUS_SUSPENDED // explicitstatus
+				KeThreadWait drop
+			end
+
+			ipl@ KeIPLLower
 
 			HALCPUInterruptDisable drop
 
@@ -114,7 +138,7 @@ fn PsPrepareUsermode { trapframe -- }
 			continue
 		end elseif (whatnow@ STATUS_SIGNALLED ==)
 			auto nextsig
-			KeThreadCurrent@ KeThreadNextSignal nextsig!
+			current@ KeThreadNextSignal nextsig!
 
 			if (trapframe@)
 				auto recheck
@@ -123,7 +147,7 @@ fn PsPrepareUsermode { trapframe -- }
 
 				nextsig@ // signum
 				PsOSDLLInformation PsOSDLLInfo_SignalDispatchFunction + @ // dispatchfunc
-				KeThreadCurrent@ // thread
+				current@ // thread
 				trapframe@ // trapframe
 				KeCopySignalFrame recheck!
 

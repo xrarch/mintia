@@ -11,6 +11,7 @@ extern ConfigReadTest { -- ok }
 extern ConfigWriteTest { -- ok }
 extern IPCTestServer { -- ok }
 extern IPCTestClient { -- ok }
+extern InfiniteLoopTest { -- ok }
 
 externptr ArgTable
 externptr ArgCount

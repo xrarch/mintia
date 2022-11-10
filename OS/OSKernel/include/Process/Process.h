@@ -27,6 +27,12 @@ struct PsProcess
 
 	KeMutex_SIZEOF VADListMutex
 
+	4 RemovedFromBalanceSet
+	4 ForcedOutListNext
+	4 ForcedOutListPrev
+
+	4 SwappedOutTimeSec
+
 	4 ModifiedPages
 
 	4 PinnedPageCount

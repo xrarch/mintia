@@ -57,6 +57,7 @@ const THREADSTATUS_RUNNING            4
 const THREADSTATUS_WAITINGALERTABLE   5
 const THREADSTATUS_WAITINGUNALERTABLE 6
 const THREADSTATUS_TERMINATED         7
+const THREADSTATUS_BALSETREMOVED      8
 
 const QUEUEFRONT 1
 const QUEUEBACK  0
@@ -177,7 +178,6 @@ extern KeThreadReady { front thread -- }
 extern KeThreadYield { yieldstatus -- }
 extern KeThreadPriorityBoost { boost thread -- }
 extern KeThreadNextSwitch { -- }
-extern KeThreadWakeup { waitstatus priboost thread -- woken }
 extern KeThreadSleep { ms waitmode alertable -- ok }
 extern KeThreadPrioritySet { priority thread -- }
 

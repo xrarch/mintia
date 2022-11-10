@@ -52,6 +52,7 @@ struct IPCKernelMessage
 	4 OriginatingPort
 	4 RundownPointer
 	4 Object
+	4 ObjectCapturedHeader
 	4 EnqueuedTo
 
 // user-visible part

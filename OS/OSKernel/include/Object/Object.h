@@ -131,6 +131,7 @@ extern ObObjectOpenProcess { nocheck access object process -- handle ok }
 extern ObObjectHandleCountIncrement { object -- oldcount }
 extern ObObjectHandleCountDecrement { object -- oldcount }
 
+extern ObObjectReferenceByPointerCapturedHeader { npheader -- oldcount }
 extern ObObjectReferenceByPointer { object -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
 

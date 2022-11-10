@@ -77,8 +77,6 @@ extern MmKernelStackFree { kstack -- }
 extern MmKernelStackSwapOut { thread -- }
 extern MmKernelStackSwapIn { thread -- }
 
-extern MmBalanceInProcess { process -- }
-
 extern MmModifiedPageWriter { context1 context2 -- }
 extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }

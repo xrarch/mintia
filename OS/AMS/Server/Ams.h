@@ -16,9 +16,9 @@ extern AmsDbUserGetByUID { uid -- userptr ok }
 extern AmsDbUserGetName { userptr -- username }
 extern AmsDbUserGetProperty { property userptr -- value ok }
 
-// groups
-
 extern AmsDbGroupGetByName { groupname -- groupptr ok }
 extern AmsDbGroupGetByGID { gid -- groupptr ok }
 extern AmsDbGroupGetName { groupptr -- groupname }
 extern AmsDbGroupGetProperty { property groupptr -- value ok }
+
+externptr AmsMemoryInformation

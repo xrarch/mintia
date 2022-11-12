@@ -18,7 +18,6 @@
 #include "<ll>/OSDLL/OSVersion.h"
 #include "<ll>/OSDLL/OSShutdown.h"
 #include "<ll>/OSDLL/OSConfiguration.h"
-#include "<ll>/OSDLL/OSUserInfo.h"
 #include "<ll>/OSDLL/OSStatistics.h"
 #include "<ll>/OSDLL/OSStream.h"
 #include "<ll>/OSDLL/OSPort.h"

@@ -308,7 +308,11 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 	// put it on the global process list
 
 	PsProcessListLockUnalertable
-	processobject@ PsProcessInsert
+
+	0 // trim
+	processobject@ // process
+	PsProcessInsert
+
 	PsProcessListUnlock
 
 	if (initial@ ~~)
@@ -652,49 +656,85 @@ fn PsProcessGetGID { process -- gid }
 	process@ PsProcess_PagedArea + @ PsProcessPaged_GID + @ gid!
 end
 
-fn PsProcessRemove { process -- }
+fn PsProcessRemove { trim process -- }
 	// assumes process list locked
 
-	1 PsActiveProcessCount -=
-
 	auto ls
-	process@ PsProcess_GlobalListPrev + @ ls!
-
 	auto ns
-	process@ PsProcess_GlobalListNext + @ ns!
+
+	if (trim@ ~~)
+		1 PsActiveProcessCount -=
+
+		process@ PsProcess_GlobalListPrev + @ ls!
+		process@ PsProcess_GlobalListNext + @ ns!
+
+		if (ls@)
+			ns@ ls@ PsProcess_GlobalListNext + !
+		end else
+			ns@ PsProcessListHead!
+		end
+
+		if (ns@)
+			ls@ ns@ PsProcess_GlobalListPrev + !
+		end else
+			ls@ PsProcessListTail!
+		end
+	end
+
+	process@ PsProcess_TrimListPrev + @ ls!
+	process@ PsProcess_TrimListNext + @ ns!
 
 	if (ls@)
-		ns@ ls@ PsProcess_GlobalListNext + !
+		ns@ ls@ PsProcess_TrimListNext + !
 	end else
-		ns@ PsProcessListHead!
+		ns@ PsProcessTrimListHead!
 	end
 
 	if (ns@)
-		ls@ ns@ PsProcess_GlobalListPrev + !
+		ls@ ns@ PsProcess_TrimListPrev + !
 	end else
-		ls@ PsProcessListTail!
+		ls@ PsProcessTrimListTail!
 	end
 end
 
-fn PsProcessInsert { process -- }
+fn PsProcessInsert { trim process -- }
 	// assumes process list locked
 
-	1 PsActiveProcessCount +=
-
 	auto t
-	PsProcessListTail@ t!
+
+	if (trim@ ~~)
+		1 PsActiveProcessCount +=
+
+		PsProcessListTail@ t!
+
+		if (t@ ~~)
+			0 process@ PsProcess_GlobalListNext + !
+			0 process@ PsProcess_GlobalListPrev + !
+
+			process@ PsProcessListHead!
+			process@ PsProcessListTail!
+		end else
+			0 process@ PsProcess_GlobalListNext + !
+
+			t@ process@ PsProcess_GlobalListPrev + !
+			process@ t@ PsProcess_GlobalListNext + !
+			process@ PsProcessListTail!
+		end
+	end
+
+	PsProcessTrimListTail@ t!
 
 	if (t@ ~~)
-		0 process@ PsProcess_GlobalListNext + !
-		0 process@ PsProcess_GlobalListPrev + !
+		0 process@ PsProcess_TrimListNext + !
+		0 process@ PsProcess_TrimListPrev + !
 
-		process@ PsProcessListHead!
-		process@ PsProcessListTail!
+		process@ PsProcessTrimListHead!
+		process@ PsProcessTrimListTail!
 	end else
-		0 process@ PsProcess_GlobalListNext + !
+		0 process@ PsProcess_TrimListNext + !
 
-		t@ process@ PsProcess_GlobalListPrev + !
-		process@ t@ PsProcess_GlobalListNext + !
-		process@ PsProcessListTail!
+		t@ process@ PsProcess_TrimListPrev + !
+		process@ t@ PsProcess_TrimListNext + !
+		process@ PsProcessTrimListTail!
 	end
 end

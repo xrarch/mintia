@@ -37,6 +37,64 @@ fn (ObTypeOpenFunction) IPCPortObjectOpen { access object process -- ok }
 	end
 end
 
+const HELPER_RUNDOWN_MINE    1
+const HELPER_SEND_DISCONNECT 2
+const HELPER_ORPHAN          3
+
+fn IPCPortObjectDeleteHelper { action object -- }
+	// nonpaged helper function
+
+	auto msg
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (action@ HELPER_RUNDOWN_MINE ==)
+		// rundown all of my messages still out there in a queue
+
+		while (1)
+			object@ IPCPort_SentListHead + @ msg!
+
+			if (msg@ ~~)
+				break
+			end
+
+			msg@ IPCMessageDequeueRundown
+
+			if (msg@ IPCKernelMessage_RundownPointer + @)
+				0 msg@ IPCKernelMessage_RundownPointer + @ !
+			end else
+				msg@ IPCMessageDequeue
+			end
+
+			msg@ IPCMessageFree
+		end
+	end elseif (action@ HELPER_SEND_DISCONNECT ==)
+		object@ IPCPort_DisconnectionMessage + @ // msg
+		object@ IPCPort_ServerPort + @ // portobject
+		IPCPortSendMessage
+	end elseif (action@ HELPER_ORPHAN ==)
+		// orphan all of the pending messages in my queue
+
+		while (1)
+			object@ IPCPort_MessageListHead + @ msg!
+
+			if (msg@ ~~)
+				break
+			end
+
+			msg@ IPCMessageDequeueRundown
+			msg@ IPCMessageDequeue
+
+			if (msg@ IPCKernelMessage_Object + @ ~~)
+				msg@ IPCMessageFree
+			end
+		end
+	end
+
+	ipl@ KeIPLLower
+end
+
 fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 	fnsection "PAGE$text"
 
@@ -46,32 +104,7 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 
 	IPCGlobalLock drop
 
-	auto msg
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	// rundown all of my messages still out there in a queue
-
-	while (1)
-		object@ IPCPort_SentListHead + @ msg!
-
-		if (msg@ ~~)
-			break
-		end
-
-		msg@ IPCMessageDequeueRundown
-
-		if (msg@ IPCKernelMessage_RundownPointer + @)
-			0 msg@ IPCKernelMessage_RundownPointer + @ !
-		end else
-			msg@ IPCMessageDequeue
-		end
-
-		msg@ IPCMessageFree
-	end
-
-	ipl@ KeIPLLower
+	HELPER_RUNDOWN_MINE object@ IPCPortObjectDeleteHelper
 
 	if (object@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
 		// it's a client, check if there's a server port still.
@@ -85,13 +118,7 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 				OSPORT_MESSAGE_DISCONNECT kdms@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
 				object@ IPCPort_ClientID + @ kdms@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
 
-				IPLDPC KeIPLRaise ipl!
-
-				object@ IPCPort_DisconnectionMessage + @ // msg
-				object@ IPCPort_ServerPort + @ // portobject
-				IPCPortSendMessage
-
-				ipl@ KeIPLLower
+				HELPER_SEND_DISCONNECT object@ IPCPortObjectDeleteHelper
 			end
 
 			// remove client ID from server's table
@@ -119,26 +146,7 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 		object@ IPCPort_OwningProcess + @ ObObjectDereferenceByPointer drop
 	end
 
-	IPLDPC KeIPLRaise ipl!
-
-	// orphan all of the pending messages in my queue
-
-	while (1)
-		object@ IPCPort_MessageListHead + @ msg!
-
-		if (msg@ ~~)
-			break
-		end
-
-		msg@ IPCMessageDequeueRundown
-		msg@ IPCMessageDequeue
-
-		if (msg@ IPCKernelMessage_Object + @ ~~)
-			msg@ IPCMessageFree
-		end
-	end
-
-	ipl@ KeIPLLower
+	HELPER_ORPHAN object@ IPCPortObjectDeleteHelper
 
 	IPCGlobalUnlock
 
@@ -156,8 +164,6 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 end
 
 fn (ExHandleEnumFunction) IPCPortHandleDestroyFunction { entryptr handle handletable -- ok }
-	fnsection "PAGE$text"
-
 	0 ok!
 
 	auto clientport

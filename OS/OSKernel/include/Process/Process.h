@@ -11,6 +11,9 @@ struct PsProcess
 	4 GlobalListNext
 	4 GlobalListPrev
 
+	4 TrimListNext
+	4 TrimListPrev
+
 	KeMutex_SIZEOF ThreadCreateDeleteMutex
 
 	KeEvent_SIZEOF TerminationEvent
@@ -126,6 +129,9 @@ externptr PsProcessTable
 externptr PsProcessListHead
 externptr PsProcessListTail
 
+externptr PsProcessTrimListHead
+externptr PsProcessTrimListTail
+
 externptr PsActiveProcessCount
 
 externptr PsSystemProcess
@@ -208,5 +214,5 @@ extern PsThreadUnmaskSignal { signal threadhandle -- ok }
 extern PsProcessGetUID { process -- uid }
 extern PsProcessGetGID { process -- gid }
 
-extern PsProcessRemove { process -- }
-extern PsProcessInsert { process -- }
+extern PsProcessRemove { trim process -- }
+extern PsProcessInsert { trim process -- }

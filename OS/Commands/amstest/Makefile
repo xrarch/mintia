@@ -1,4 +1,4 @@
-DYLIBS := ams.dll:$(AMSBIN)
+DYLIBS += ams.dll:$(AMSBIN)
 
 CMDNAME = amstest
 

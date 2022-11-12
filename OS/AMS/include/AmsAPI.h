@@ -1,31 +1,11 @@
+#include "<ll>/AMS/Ams.h"
+
 struct AmsMessage
 	OSMessageHeader_SIZEOF Header
 	4 Status
-	4 Datum
 endstruct
 
 const AMSBODYLENGTH (AmsMessage_SIZEOF OSMessageHeader_SIZEOF -)
-
-const AMSPASSWORDMAX 128
-const AMSNAMEMAX     128
-
-struct AmsMessageQueryByUID
-	4 GID
-
-	4 PoolQuota
-	4 PagedPoolQuota
-	4 VirtualMemoryQuota
-	4 WorkingSetQuota
-
-	AMSNAMEMAX UserName
-
-	OSFILEPATHMAX Home
-	OSFILEPATHMAX Shell
-endstruct
-
-struct AmsMessageQueryByGID
-	AMSNAMEMAX GroupName
-endstruct
 
 struct AmsMessageQueryUIDByName
 	AMSNAMEMAX UserName
@@ -40,8 +20,8 @@ struct AmsMessageLogon
 	AMSPASSWORDMAX Password
 endstruct
 
-const AMSSECTIONSIZE (AmsMessageQueryByUID_SIZEOF
-	AmsMessageQueryByGID_SIZEOF _max
+const AMSSECTIONSIZE (AmsUserInformation_SIZEOF
+	AmsGroupInformation_SIZEOF _max
 	AmsMessageQueryUIDByName_SIZEOF _max
 	AmsMessageQueryGIDByName_SIZEOF _max
 	AmsMessageLogon_SIZEOF _max)

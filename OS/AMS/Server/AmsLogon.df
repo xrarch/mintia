@@ -11,6 +11,23 @@
 
 #include "Ams.h"
 
+fn AmsCheckPassword { password upass -- ok }
+	auto hash
+	16 alloc hash!
+
+	password@ // string
+	upass@ gi // salt
+	hash@ // hash
+	OSSimpleCrypt
+
+	if (hash@ upass@ strcmp ~~)
+		STATUS_INCORRECT_PASSWORD ok!
+		return
+	end
+
+	0 ok!
+end
+
 fn AmsInternalLogon { flags password uid processhandle -- ok }
 	auto pinfo
 	OSObjectQuery_SIZEOF alloc pinfo!
@@ -54,16 +71,99 @@ fn AmsInternalLogon { flags password uid processhandle -- ok }
 		return
 	end
 
+	password@ // password
+	upass@ // upass
+	AmsCheckPassword ok!
+end
+
+fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
+	auto pinfo
+	OSObjectQuery_SIZEOF alloc pinfo!
+
+	processhandle@ // handle
+	pinfo@ // query
+	OSQuery ok!
+
+	if (ok@)
+		return
+	end
+
+	if (pinfo@ OSObjectQuery_UID + @ uid@ ~=)
+		if (pinfo@ OSObjectQuery_UID + @ UID_SYSTEM ~=)
+			STATUS_PERMISSION_DENIED ok!
+			return
+		end
+	end
+
+	auto userptr
+	uid@ AmsDbUserGetByUID ok! userptr!
+
+	if (ok@)
+		return
+	end
+
+	auto upass
+	"password" // property
+	userptr@ // userptr
+	AmsDbUserGetProperty ok! upass!
+
+	if (ok@)
+		return
+	end
+
+	oldpassword@ // password
+	upass@ // upass
+	AmsCheckPassword ok!
+
+	if (ok@)
+		return
+	end
+
 	auto hash
 	16 alloc hash!
 
-	password@ // string
-	upass@ gi // salt
+	auto ms
+	auto sec
+
+	OSQueryTime ms! sec!
+
+	sec@ ms@ ^ ms!
+
+	auto sb0
+	ms@ 63 & '.' + sb0!
+
+	auto sb1
+	ms@ 6 >> 63 & '.' + sb1!
+
+	if (sb0@ '9' >)
+		7 sb0 +=
+	end
+	if (sb0@ 'Z' >)
+		6 sb0 +=
+	end
+	if (sb1@ '9' >)
+		7 sb1 +=
+	end
+	if (sb1@ 'Z' >)
+		6 sb1 +=
+	end
+
+	auto salt
+	sb0@ sb1@ 8 << | salt!
+
+	newpassword@ // string
+	salt@ // salt
 	hash@ // hash
 	OSSimpleCrypt
 
-	if (hash@ upass@ strcmp ~~)
-		STATUS_INCORRECT_PASSWORD ok!
+	hash@ // value
+	"password" // property
+	userptr@ // userptr
+	AmsDbUserSetProperty ok!
+
+	if (ok@)
 		return
 	end
+
+	AmsDbUserWrite ok!
 end

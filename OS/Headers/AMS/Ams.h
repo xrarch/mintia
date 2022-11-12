@@ -7,6 +7,7 @@ extern AmsQueryGIDByName { name -- gid ok }
 extern AmsQueryByUID { info uid -- ok }
 extern AmsQueryByGID { info gid -- ok }
 extern AmsLogon { flags password uid -- ok }
+extern AmsChangePassword { oldpassword newpassword uid -- ok }
 
 const AMSPASSWORDMAX 128
 const AMSNAMEMAX     128

@@ -21,6 +21,12 @@ struct AmsMessageLogon
 	AMSPASSWORDMAX Password
 endstruct
 
+struct AmsMessageChangePassword
+	4 UID
+	AMSPASSWORDMAX OldPassword
+	AMSPASSWORDMAX NewPassword
+endstruct
+
 const AMSSECTIONSIZE (AmsUserInformation_SIZEOF
 	AmsGroupInformation_SIZEOF _max
 	AmsMessageQueryUIDByName_SIZEOF _max
@@ -33,3 +39,4 @@ const AMSAPI_QUERY_GID_BY_NAME   2
 const AMSAPI_QUERY_BY_GID        3
 const AMSAPI_COMPLETE_CONNECTION 4
 const AMSAPI_LOGON               5
+const AMSAPI_CHANGE_PASSWORD     6

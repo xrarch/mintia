@@ -177,23 +177,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	auto maxpage
 	newsize@ PAGENUMBERMASK & maxpage!
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	if (cacheblock@ IOCacheInfoBlock_MapCount + @)
-		// this file is currently mapped. truncation isn't allowed.
-
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
-	end
-
-	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
-
-	rs@ HALCPUInterruptRestore
-
 	0 ok!
 
 	auto pfdbe
@@ -201,6 +184,18 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	if (cacheblock@ IOCacheInfoBlock_MapCount + @)
+		// this file is currently mapped. truncation isn't allowed.
+
+		ipl@ KeIPLLower
+
+		STATUS_TRY_AGAIN_LATER ok!
+
+		return
+	end
+
+	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOCacheInfoBlock_Flags + |=
 
 	newsize@ // value
 	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
@@ -290,11 +285,9 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		end
 	end
 
-	ipl@ KeIPLLower
-
-	HALCPUInterruptDisable rs!
 	IOCACHEBLOCKFLAG_TRUNCATING ~ cacheblock@ IOCacheInfoBlock_Flags + &=
-	rs@ HALCPUInterruptRestore
+
+	ipl@ KeIPLLower
 end
 
 fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }

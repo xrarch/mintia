@@ -144,6 +144,7 @@ extern OSConsoleSignal { signal filehandle -- ok }
 
 // Se
 extern OSAmIAdmin { -- ok }
+extern OSCheckPermission { permission -- ok }
 
 // IPC
 extern OSPortCreate { flags maxlen permissions name -- porthandle ok }

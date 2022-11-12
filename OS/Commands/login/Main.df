@@ -7,49 +7,10 @@
 
 #include "<ll>/OSDLL/OSCrypt.h"
 
-var PasswordConfig 0
-
 var AmsInited 0
 
 buffer Quota OSQuota_SIZEOF
 buffer MemoryInformation OSMemoryInformation_SIZEOF
-
-fn GetPasswordForUser { username -- password ok }
-	auto iterator
-	PasswordConfig@ OSConfigGetSectionIterator ok! iterator!
-
-	while (iterator@)
-		auto userptr
-		iterator@ // iterator
-		PasswordConfig@ // config
-		OSConfigNextSection ok! iterator! userptr!
-
-		if (ok@)
-			return
-		end
-
-		if (userptr@ OSConfigGetSectionName username@ strcmp)
-			"password" // keyname
-			userptr@ // section
-			OSConfigGetKey ok! password!
-
-			if (ok@)
-				return
-			end
-
-			password@ OSConfigGetKeyValue password!
-
-			if (password@ ~~)
-				-1 ok!
-				return
-			end
-
-			return
-		end
-	end
-
-	STATUS_NO_SUCH_USER ok!
-end
 
 buffer UsernameBuffer 128
 buffer PasswordBuffer 128
@@ -111,42 +72,28 @@ fn Login { -- user loggedin }
 		if (ok@ STATUS_NO_SUCH_USER ==)
 			"Incorrect login\n" Printf
 		end else
-			"Badly formatted user record -- contact your system administrator\n" Printf
+			ok@ "Badly formatted user record (%i) -- contact your system administrator\n" Printf
 		end
 
 		return
 	end
 
-	auto password
-	UsernameBuffer // username
-	GetPasswordForUser ok! password!
+	0 // flags
+	PasswordBuffer // password
+	user@ // uid
+	AmsLogon ok!
 
 	if (ok@)
-		"Badly formatted login record -- contact your system administrator\n" Printf
+		if (ok@ STATUS_INCORRECT_PASSWORD ==)
+			"Incorrect login\n" Printf
+			return
+		end
+
+		ok@ "Badly formatted login record (%i) -- contact your system administrator\n" Printf
 		return
 	end
 
-	if (password@ "none" strcmp)
-		"Incorrect login\n" Printf
-		return
-	end elseif (password@ "any" strcmp)
-		1 loggedin!
-		return
-	end
-
-	auto hash
-	16 alloc hash!
-
-	PasswordBuffer // string
-	password@ gi // salt
-	hash@ // hash
-	OSSimpleCrypt
-
-	if (hash@ password@ strcmp)
-		1 loggedin!
-	end else
-		"Incorrect login\n" Printf
-	end
+	1 loggedin!
 end
 
 buffer FileBuf 128
@@ -202,15 +149,6 @@ end
 fn Main { ... -- ret }
 	0 ret!
 
-	"/mintia/login.cfg" // path
-	0 // create
-	0 // write
-	OSConfigFileLoad ret! PasswordConfig!
-
-	if (ret@)
-		ret@ OSStatusGetName "login: couldn't open login.cfg: %s\n" OSError
-	end
-
 	"\n" Printf
 
 	auto info
@@ -228,13 +166,6 @@ fn Main { ... -- ret }
 		Login loggedin! user!
 
 		if (loggedin@)
-			MemoryInformation OSMemoryQuery ret!
-
-			if (ret@)
-				ret@ OSStatusGetName "couldn't query system memory usage: %s\n" Printf
-				continue
-			end
-
 			info@ // info
 			user@ // uid
 			AmsQueryByUID ret!
@@ -264,7 +195,11 @@ fn Main { ... -- ret }
 		ret@ OSStatusGetName "couldn't read motd: %s\n" Printf
 	end
 
-	MemoryInformation OSMemoryInformationDump
+	MemoryInformation OSMemoryQuery ret!
+	
+	if (ret@ ~~)
+		MemoryInformation OSMemoryInformationDump
+	end
 
 	'\n' Putc
 
@@ -289,9 +224,6 @@ fn Main { ... -- ret }
 	shell@ // shell
 	SpawnShell ret!
 
-	AmsFree
-	PasswordConfig@ OSConfigFileFree
-
 	if (ret@)
 		ret@ OSStatusGetName shell@ "couldn't spawn %s: %s\n" Printf
 
@@ -310,6 +242,8 @@ fn Main { ... -- ret }
 
 		0 ret!
 	end
+
+	AmsFree
 
 	return
 end

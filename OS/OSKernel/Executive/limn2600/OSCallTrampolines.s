@@ -98,6 +98,7 @@
 .extern OSSetSystemConsole
 .extern OSConsoleSignal
 .extern OSAmIAdmin
+.extern OSCheckPermission
 .extern OSPortCreate
 .extern OSPortConnect
 .extern OSPortAccept
@@ -107,7 +108,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 102
+	.dl 103
 
 OSCallTable:
 .global OSCallTable
@@ -208,12 +209,13 @@ OSCallTable:
 	.dl OSTOSSetSystemConsole                            ;94
 	.dl OSTOSConsoleSignal                               ;95
 	.dl OSTOSAmIAdmin                                    ;96
-	.dl OSTOSPortCreate                                  ;97
-	.dl OSTOSPortConnect                                 ;98
-	.dl OSTOSPortAccept                                  ;99
-	.dl OSTOSPortSendAndWaitReceive                      ;100
-	.dl OSTOSPortSendAndWaitReply                        ;101
-	.dl OSTOSPortOpenProcessByClientID                   ;102
+	.dl OSTOSCheckPermission                             ;97
+	.dl OSTOSPortCreate                                  ;98
+	.dl OSTOSPortConnect                                 ;99
+	.dl OSTOSPortAccept                                  ;100
+	.dl OSTOSPortSendAndWaitReceive                      ;101
+	.dl OSTOSPortSendAndWaitReply                        ;102
+	.dl OSTOSPortOpenProcessByClientID                   ;103
 
 
 OSTOSConsolePutCharacter:
@@ -1700,6 +1702,20 @@ OSTOSAmIAdmin:
 	mov  long [sp], lr
 
 	jal  OSAmIAdmin
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSCheckPermission:
+.global OSTOSCheckPermission
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+
+	jal  OSCheckPermission
 
 	mov  long [s17 + 4], a0 ;t1
 

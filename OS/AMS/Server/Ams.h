@@ -1,10 +1,16 @@
 struct AmsClient
+	4 ClientID
 	4 SectionBase
+	4 Flags
 endstruct
 
-extern AmsClientCreate { -- client ok }
+const AMSCLIENTFLAG_IMPERSONATING 1
+
+extern AmsClientCreate { cid -- client ok }
 extern AmsClientDelete { client -- }
-extern AmsClientInitialize { client -- }
+extern AmsClientInitialize { cid client -- }
+
+extern AmsInternalLogon { flags password uid processhandle -- ok }
 
 fnptr AmsDispatchFunction { msg client -- ok }
 

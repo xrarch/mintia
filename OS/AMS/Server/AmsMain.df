@@ -92,9 +92,10 @@ table AmsApiDispatchTable
 	pointerof AmsApiQueryGIDByName     // AMSAPI_QUERY_GID_BY_NAME
 	pointerof AmsApiQueryByGID         // AMSAPI_QUERY_BY_GID
 	pointerof AmsApiCompleteConnection // AMSAPI_COMPLETE_CONNECTION
+	pointerof AmsApiLogon              // AMSAPI_LOGON
 endtable
 
-const AMSAPICOUNT 5
+const AMSAPICOUNT 6
 
 fn (AmsDispatchFunction) AmsApiQueryUIDByName { msg client -- ok }
 	auto name
@@ -169,6 +170,37 @@ fn (AmsDispatchFunction) AmsApiCompleteConnection { msg client -- ok }
 	end
 
 	realva@ client@ AmsClient_SectionBase + !
+end
+
+fn (AmsDispatchFunction) AmsApiLogon { msg client -- ok }
+	auto password
+	AMSPASSWORDMAX alloc password!
+
+	password@ // dest
+	client@ AmsClient_SectionBase + @ AmsMessageLogon_Password + // src
+	AMSPASSWORDMAX 1 - // max
+	strncpy
+
+	auto processhandle
+	0 // access
+	client@ AmsClient_ClientID + @ // clientid
+	AmsApiPort@ // porthandle
+	OSPortOpenProcessByClientID ok! processhandle!
+
+	if (ok@)
+		return
+	end
+
+	auto flags
+	client@ AmsClient_SectionBase + @ AmsMessageLogon_Flags + @ flags!
+
+	flags@ // flags
+	password@ // password
+	client@ AmsClient_SectionBase + @ AmsMessageLogon_UID + @ // uid
+	processhandle@ // processhandle
+	AmsInternalLogon ok!
+
+	processhandle@ OSClose drop
 end
 
 fn AmsApiThread { context -- ret }
@@ -249,6 +281,7 @@ fn AmsHandleConnection { msg -- }
 	auto ok
 
 	auto client
+	msg@ OSMessageHeader_ClientID + @ // cid
 	AmsClientCreate ok! client!
 
 	if (ok@)

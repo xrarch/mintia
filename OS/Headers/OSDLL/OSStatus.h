@@ -78,5 +78,6 @@ const STATUS_NO_MESSAGE               -76
 const STATUS_PORT_DISCONNECTED        -77
 const STATUS_CONNECTION_FAILED        -78
 const STATUS_NO_SUCH_CLIENT           -79
+const STATUS_INCORRECT_PASSWORD       -80
 
 extern OSStatusGetName { status -- name }

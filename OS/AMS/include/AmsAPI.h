@@ -17,6 +17,7 @@ endstruct
 
 struct AmsMessageLogon
 	4 UID
+	4 Flags
 	AMSPASSWORDMAX Password
 endstruct
 
@@ -31,3 +32,4 @@ const AMSAPI_QUERY_UID_BY_NAME   1
 const AMSAPI_QUERY_GID_BY_NAME   2
 const AMSAPI_QUERY_BY_GID        3
 const AMSAPI_COMPLETE_CONNECTION 4
+const AMSAPI_LOGON               5

@@ -86,6 +86,118 @@ fn AmsInit { -- ok }
 	thandle@ OSClose drop
 end
 
+fn AmsApiThread { context -- ret }
+	AmsApiLoop ret!
+end
+
+fn AmsApiLoop { -- ok }
+	auto rxmsg
+	AmsMessage_SIZEOF alloc rxmsg!
+
+	auto replymsg
+	0 replymsg!
+
+	while (1)
+		rxmsg@ // rxmsg
+		replymsg@ // txmsg
+		OSWAIT_TIMEOUTINFINITE // timeout
+		AmsApiPort@ // porthandle
+		OSPortSendAndWaitReceive ok!
+
+		0 replymsg!
+
+		if (ok@)
+			continue
+		end
+
+		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_CONNECTION ==)
+			rxmsg@ AmsHandleConnection
+		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
+			rxmsg@ AmsHandleDisconnection
+		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
+			auto rt
+			rxmsg@ OSMessageHeader_SubtypeB + gb rt!
+
+			if (rt@ AMSAPI_COMPLETE_CONNECTION ~=)
+				if (rxmsg@ OSMessageHeader_Context + @ AmsClient_SectionBase + @ ~~)
+					// connection not completed yet
+					STATUS_INVALID_ARGUMENT ok!
+				end elseif (rxmsg@ OSMessageHeader_Handle + @ OSNONE ~=)
+					// connection completed, but a handle was inexplicably sent
+					STATUS_INVALID_ARGUMENT ok!
+				end
+			end elseif (rxmsg@ OSMessageHeader_Context + @ AmsClient_SectionBase + @)
+				// this is a connection completion, but that already happened
+				STATUS_INVALID_ARGUMENT ok!
+			end
+
+			if (ok@ ~~)
+				if (rt@ AMSAPICOUNT >=)
+					// fail the request
+					STATUS_INVALID_ARGUMENT ok!
+				end else
+					// process request
+					rxmsg@ // msg
+					rxmsg@ OSMessageHeader_Context + @ // client
+					[rt@]AmsApiDispatchTable@ AmsDispatchFunction ok!
+				end
+			end
+
+			// make sure to close any handles we were passed
+			if (rxmsg@ OSMessageHeader_Handle + @ OSNONE ~=)
+				rxmsg@ OSMessageHeader_Handle + @ OSClose drop
+			end
+
+			ok@ rxmsg@ AmsMessage_Status + !
+			OSNONE rxmsg@ OSMessageHeader_Handle + !
+			AMSBODYLENGTH rxmsg@ OSMessageHeader_LengthI + si
+			OSPORT_MESSAGE_REPLY rxmsg@ OSMessageHeader_TypeB + sb
+			rxmsg@ replymsg!
+		end else
+			// unknown, ignore
+			continue
+		end
+	end
+end
+
+fn AmsHandleConnection { msg -- }
+	auto ok
+
+	auto client
+	msg@ OSMessageHeader_ClientID + @ // cid
+	AmsClientCreate ok! client!
+
+	if (ok@)
+		// reject the connection
+
+		0 // context
+		msg@ // txmsg
+		1 // reject
+		AmsApiPort@ // porthandle
+		OSPortAccept drop
+
+		return
+	end
+
+	client@ // context
+	msg@ // txmsg
+	0 // reject
+	AmsApiPort@ // porthandle
+	OSPortAccept ok!
+
+	if (ok@)
+		// client disappeared while we were processing its connection request
+
+		client@ AmsClientDelete
+
+		return
+	end
+end
+
+fn AmsHandleDisconnection { msg -- }
+	msg@ OSMessageHeader_Context + @ AmsClientDelete
+end
+
 table AmsApiDispatchTable
 	pointerof AmsApiQueryByUID         // AMSAPI_QUERY_BY_UID
 	pointerof AmsApiQueryUIDByName     // AMSAPI_QUERY_UID_BY_NAME
@@ -94,9 +206,15 @@ table AmsApiDispatchTable
 	pointerof AmsApiCompleteConnection // AMSAPI_COMPLETE_CONNECTION
 	pointerof AmsApiLogon              // AMSAPI_LOGON
 	pointerof AmsApiChangePassword     // AMSAPI_CHANGE_PASSWORD
+	pointerof AmsApiEnumerateUsers     // AMSAPI_ENUMERATE_USERS
+	pointerof AmsApiEnumerateGroups    // AMSAPI_ENUMERATE_GROUPS
+	pointerof AmsApiCreateUser         // AMSAPI_CREATE_USER
+	pointerof AmsApiCreateGroup        // AMSAPI_CREATE_GROUP
+	pointerof AmsApiEditUser           // AMSAPI_EDIT_USER
+	pointerof AmsApiEditGroup          // AMSAPI_EDIT_GROUP
 endtable
 
-const AMSAPICOUNT 7
+const AMSAPICOUNT 13
 
 fn (AmsDispatchFunction) AmsApiQueryUIDByName { msg client -- ok }
 	auto name
@@ -240,114 +358,26 @@ fn (AmsDispatchFunction) AmsApiChangePassword { msg client -- ok }
 	processhandle@ OSClose drop
 end
 
-fn AmsApiThread { context -- ret }
-	AmsApiLoop ret!
+fn (AmsDispatchFunction) AmsApiEnumerateUsers { msg client -- ok }
+	0 ok!
 end
 
-fn AmsApiLoop { -- ok }
-	auto rxmsg
-	AmsMessage_SIZEOF alloc rxmsg!
-
-	auto replymsg
-	0 replymsg!
-
-	while (1)
-		rxmsg@ // rxmsg
-		replymsg@ // txmsg
-		OSWAIT_TIMEOUTINFINITE // timeout
-		AmsApiPort@ // porthandle
-		OSPortSendAndWaitReceive ok!
-
-		0 replymsg!
-
-		if (ok@)
-			continue
-		end
-
-		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_CONNECTION ==)
-			rxmsg@ AmsHandleConnection
-		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_DISCONNECT ==)
-			rxmsg@ AmsHandleDisconnection
-		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
-			auto rt
-			rxmsg@ OSMessageHeader_SubtypeB + gb rt!
-
-			if (rt@ AMSAPI_COMPLETE_CONNECTION ~=)
-				if (rxmsg@ OSMessageHeader_Context + @ AmsClient_SectionBase + @ ~~)
-					// connection not completed yet
-					STATUS_INVALID_ARGUMENT ok!
-				end elseif (rxmsg@ OSMessageHeader_Handle + @ OSNONE ~=)
-					// connection completed, but a handle was inexplicably sent
-					STATUS_INVALID_ARGUMENT ok!
-				end
-			end elseif (rxmsg@ OSMessageHeader_Context + @ AmsClient_SectionBase + @)
-				// this is a connection completion, but that already happened
-				STATUS_INVALID_ARGUMENT ok!
-			end
-
-			if (ok@ ~~)
-				if (rt@ AMSAPICOUNT >=)
-					// fail the request
-					STATUS_INVALID_ARGUMENT ok!
-				end else
-					// process request
-					rxmsg@ // msg
-					rxmsg@ OSMessageHeader_Context + @ // client
-					[rt@]AmsApiDispatchTable@ AmsDispatchFunction ok!
-				end
-			end
-
-			// make sure to close any handles we were passed
-			if (rxmsg@ OSMessageHeader_Handle + @ OSNONE ~=)
-				rxmsg@ OSMessageHeader_Handle + @ OSClose drop
-			end
-
-			ok@ rxmsg@ AmsMessage_Status + !
-			OSNONE rxmsg@ OSMessageHeader_Handle + !
-			AMSBODYLENGTH rxmsg@ OSMessageHeader_LengthI + si
-			OSPORT_MESSAGE_REPLY rxmsg@ OSMessageHeader_TypeB + sb
-			rxmsg@ replymsg!
-		end else
-			// unknown, ignore
-			continue
-		end
-	end
+fn (AmsDispatchFunction) AmsApiEnumerateGroups { msg client -- ok }
+	0 ok!
 end
 
-fn AmsHandleConnection { msg -- }
-	auto ok
-
-	auto client
-	msg@ OSMessageHeader_ClientID + @ // cid
-	AmsClientCreate ok! client!
-
-	if (ok@)
-		// reject the connection
-
-		0 // context
-		msg@ // txmsg
-		1 // reject
-		AmsApiPort@ // porthandle
-		OSPortAccept drop
-
-		return
-	end
-
-	client@ // context
-	msg@ // txmsg
-	0 // reject
-	AmsApiPort@ // porthandle
-	OSPortAccept ok!
-
-	if (ok@)
-		// client disappeared while we were processing its connection request
-
-		client@ AmsClientDelete
-
-		return
-	end
+fn (AmsDispatchFunction) AmsApiCreateUser { msg client -- ok }
+	0 ok!
 end
 
-fn AmsHandleDisconnection { msg -- }
-	msg@ OSMessageHeader_Context + @ AmsClientDelete
+fn (AmsDispatchFunction) AmsApiCreateGroup { msg client -- ok }
+	0 ok!
+end
+
+fn (AmsDispatchFunction) AmsApiEditUser { msg client -- ok }
+	0 ok!
+end
+
+fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
+	0 ok!
 end

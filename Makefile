@@ -154,6 +154,10 @@ cleanup:
 		make -C OS/$$dir cleanup; \
 	done
 
+	for dir in $(LIBRARIES); do \
+		make -C OS/$$dir cleanup; \
+	done
+
 	for dir in $(KERNELMODULES); do \
 		make -C OS/$$dir cleanup; \
 	done

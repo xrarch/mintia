@@ -38,6 +38,17 @@ const ENUMIDBYTES  (AMSSECTIONSIZE AmsMessageEnumerate_SIZEOF -)
 const ENUMUSERMAX  (ENUMIDBYTES AmsUserEnumeration_SIZEOF /)
 const ENUMGROUPMAX (ENUMIDBYTES AmsGroupEnumeration_SIZEOF /)
 
+struct AmsMessageCreateUser
+	4 UID // only returned
+	AMSPASSWORDMAX Password
+	AmsUserInformation_SIZEOF Info
+endstruct
+
+struct AmsMessageCreateGroup
+	4 GID // only returned
+	AmsGroupInformation_SIZEOF Info
+endstruct
+
 struct AmsMessageEditUser
 	4 UID
 	4 Delete
@@ -47,16 +58,6 @@ endstruct
 struct AmsMessageEditGroup
 	4 GID
 	4 Delete
-	AmsGroupInformation_SIZEOF Info
-endstruct
-
-struct AmsMessageCreateUser
-	4 UID
-	AmsUserInformation_SIZEOF Info
-endstruct
-
-struct AmsMessageCreateGroup
-	4 GID
 	AmsGroupInformation_SIZEOF Info
 endstruct
 

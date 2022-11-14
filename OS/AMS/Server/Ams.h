@@ -13,6 +13,12 @@ extern AmsClientInitialize { cid client -- }
 extern AmsInternalLogon { flags password uid processhandle -- ok }
 extern AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 
+extern AmsInternalEmumerateUsers { context max buf -- nextcontext count ok }
+extern AmsInternalEmumerateGroups { context max buf -- nextcontext count ok }
+
+extern AmsQueryByUserPtr { info userptr -- ok }
+extern AmsQueryByGroupPtr { info groupptr -- ok }
+
 fnptr AmsDispatchFunction { msg client -- ok }
 
 extern AmsDbOpen { -- ok }
@@ -26,10 +32,14 @@ extern AmsDbUserGetByUID { uid -- userptr ok }
 extern AmsDbUserGetName { userptr -- username }
 extern AmsDbUserGetProperty { property userptr -- value ok }
 extern AmsDbUserSetProperty { value property userptr -- ok }
+extern AmsDbUserGetIterator { -- iterator ok }
+extern AmsDbUserNext { iterator -- userptr nextiterator ok }
 
 extern AmsDbGroupGetByName { groupname -- groupptr ok }
 extern AmsDbGroupGetByGID { gid -- groupptr ok }
 extern AmsDbGroupGetName { groupptr -- groupname }
 extern AmsDbGroupGetProperty { property groupptr -- value ok }
+extern AmsDbGroupGetIterator { -- iterator ok }
+extern AmsDbGroupNext { iterator -- groupptr nextiterator ok }
 
 externptr AmsMemoryInformation

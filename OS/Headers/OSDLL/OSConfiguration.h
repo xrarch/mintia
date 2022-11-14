@@ -19,3 +19,6 @@ extern OSConfigGetSectionIterator { config -- iterator ok }
 
 extern OSConfigNextKey { iterator config -- key valueptr nextiterator ok }
 extern OSConfigNextSection { iterator config -- section nextiterator ok }
+
+extern OSConfigFileGetSectionCount { config -- count }
+extern OSConfigSectionGetKeyCount { section -- count }

@@ -7,6 +7,7 @@
 
 #include "<ll>/OSDLL/OSCalls.h"
 #include "<ll>/OSDLL/OSMap.h"
+#include "<ll>/OSDLL/OSAlloc.h"
 #include "<ll>/OSDLL/OSAccess.h"
 #include "<ll>/OSDLL/OSFile.h"
 #include "<ll>/OSDLL/OSAbort.h"
@@ -15,6 +16,9 @@
 #include "<ll>/OSDLL/OSStatus.h"
 
 #include "OSDLL.h"
+
+var DLLHeapUsedInternally 0
+var DLLHeapUsedExternally 0
 
 buffer DLLHeapMutex OSFastMutex_SIZEOF
 
@@ -28,6 +32,11 @@ fn DLLHeapInit { -- }
 	"DLLHeapMutex" // name
 	DLLHeapMutex // fastmutex
 	OSFastMutexInitialize
+end
+
+fn OSHeapQuery { query -- }
+	DLLHeapUsedInternally@ query@ OSHeapInformation_UsedInternally + !
+	DLLHeapUsedExternally@ query@ OSHeapInformation_UsedExternally + !
 end
 
 fn OSHeapAllocate { bytes -- ptr ok }
@@ -51,6 +60,12 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		if (ok@)
 			return
 		end
+
+		bytes@ DLLDirectHeapBlock_SIZEOF + OSPAGEOFFSETMASK + OSPAGENUMBERMASK &
+		DLLHeapUsedInternally OSInterlockedIncrement drop
+
+		bytes@ DLLDirectHeapBlock_SIZEOF + OSPAGEOFFSETMASK + OSPAGENUMBERMASK &
+		DLLHeapUsedExternally OSInterlockedIncrement drop
 
 		DLLHEAPDIRECTMAGIC ptr@ DLLDirectHeapBlock_Magic + si
 		bytes@ DLLDirectHeapBlock_SIZEOF + OSPAGEOFFSETMASK + OSPAGENUMBERMASK & ptr@ DLLDirectHeapBlock_Size + !
@@ -95,6 +110,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		end
 
 		n@ [bucketindex@]DLLHeapBucketListHeads!
+
+		bytes@ DLLHeapUsedInternally +=
 
 		mutex@ OSFastMutexRelease
 
@@ -172,6 +189,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 			0 newblock@ DLLHeapBlock_PrevFree + !
 
 			newblock@ [newbucketindex@]DLLHeapBucketListHeads!
+
+			bytes@ DLLHeapUsedInternally +=
 
 			mutex@ OSFastMutexRelease
 
@@ -252,6 +271,8 @@ fn OSHeapAllocate { bytes -- ptr ok }
 		1 i +=
 	end
 
+	bytes@ DLLHeapUsedInternally +=
+
 	mutex@ OSFastMutexRelease
 
 	DLLAllocatedHeapBlock_SIZEOF ptr +=
@@ -267,6 +288,12 @@ fn OSHeapFree { ptr -- }
 		// directly unmap.
 
 		DLLDirectHeapBlock_SIZEOF ptr -=
+
+		0 ptr@ DLLDirectHeapBlock_Size + @ -
+		DLLHeapUsedInternally OSInterlockedIncrement drop
+
+		0 ptr@ DLLDirectHeapBlock_Size + @ -
+		DLLHeapUsedExternally OSInterlockedIncrement drop
 
 		ptr@ DLLDirectHeapBlock_Size + @ // length
 		ptr@ // vaddr
@@ -292,6 +319,8 @@ fn OSHeapFree { ptr -- }
 	ptr@ DLLHeapBlock_BucketIndex + gb bucketindex!
 
 	mutex@ OSFastMutexAcquire
+
+	bucketindex@ DLLHEAPBLOCKSIZESHIFT << DLLHeapUsedInternally -=
 
 	if (ptr@ OSPAGEOFFSETMASK &)
 		// we're not at the start of the page, check left
@@ -452,6 +481,8 @@ fn DLLHeapExtensionAllocate { -- pages ptr ok }
 			DLLHEAPEXTENSIONMAXIMUM DLLHeapExtensionSize!
 		end
 	end
+
+	pages@ OSPAGESHIFT << DLLHeapUsedExternally +=
 end
 
 fn DLLHeapExtensionFree { ptr -- }
@@ -522,6 +553,8 @@ fn DLLHeapExtensionFree { ptr -- }
 	extensionstart@ // vaddr
 	OSCURRENTPROCESS // processhandle
 	OSUnmapView drop
+
+	extensionstart@ DLLHeapBlock_LastBucketIndex + gb OSPAGESHIFT << DLLHeapUsedExternally -=
 end
 
 fn Malloc { size -- ptr }

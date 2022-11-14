@@ -9,8 +9,19 @@ extern AmsQueryByGID { info gid -- ok }
 extern AmsLogon { flags password uid -- ok }
 extern AmsChangePassword { oldpassword newpassword uid -- ok }
 
-const AMSPASSWORDMAX 128
-const AMSNAMEMAX     128
+extern AmsEmumerateUsers { -- enumeration ok }
+extern AmsEmumerateGroups { -- enumeration ok }
+
+extern AmsFreeEnumeration { enumeration -- }
+
+extern AmsRunForEachUserEnumeration { context func enumeration -- ok }
+extern AmsRunForEachGroupEnumeration { context func enumeration -- ok }
+
+extern AmsIndexUserEnumeration { index enumeration -- enum ok }
+extern AmsIndexGroupEnumeration { index enumeration -- enum ok }
+
+const AMSPASSWORDMAX 32
+const AMSNAMEMAX     32
 
 struct AmsUserInformation
 	4 GID
@@ -25,11 +36,23 @@ struct AmsUserInformation
 	OSFILEPATHMAX Home
 	OSFILEPATHMAX Shell
 
-	64 Reserved
+	32 Reserved
 endstruct
 
 struct AmsGroupInformation
 	AMSNAMEMAX GroupName
 
-	64 Reserved
+	32 Reserved
 endstruct
+
+struct AmsUserEnumeration
+	4 UID
+	AmsUserInformation_SIZEOF Info
+endstruct
+
+struct AmsGroupEnumeration
+	4 GID
+	AmsGroupInformation_SIZEOF Info
+endstruct
+
+fnptr AmsEnumerationFunction { context enum index -- ok }

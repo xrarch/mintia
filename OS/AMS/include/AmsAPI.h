@@ -27,14 +27,16 @@ struct AmsMessageChangePassword
 	AMSPASSWORDMAX NewPassword
 endstruct
 
-const ENUMIDBYTES (OSPAGESIZE 8 -)
-const ENUMIDMAX   (ENUMIDBYTES 4 /)
+const AMSSECTIONSIZE 8192
 
 struct AmsMessageEnumerate
 	4 ReturnedIDs
-	4 Context        // -1 to search from beginning. if -1 is returned here, the search is over, otherwise there's more
-	ENUMIDBYTES IDs
+	4 Context // -1 to search from beginning. if -1 is returned here, the search is over, otherwise there's more
 endstruct
+
+const ENUMIDBYTES  (AMSSECTIONSIZE AmsMessageEnumerate_SIZEOF -)
+const ENUMUSERMAX  (ENUMIDBYTES AmsUserEnumeration_SIZEOF /)
+const ENUMGROUPMAX (ENUMIDBYTES AmsGroupEnumeration_SIZEOF /)
 
 struct AmsMessageEditUser
 	4 UID
@@ -57,8 +59,6 @@ struct AmsMessageCreateGroup
 	4 GID
 	AmsGroupInformation_SIZEOF Info
 endstruct
-
-const AMSSECTIONSIZE OSPAGESIZE
 
 const AMSAPI_QUERY_BY_UID        0
 const AMSAPI_QUERY_UID_BY_NAME   1

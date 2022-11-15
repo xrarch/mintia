@@ -27,7 +27,7 @@ struct AmsMessageChangePassword
 	AMSPASSWORDMAX NewPassword
 endstruct
 
-const AMSSECTIONSIZE 8192
+const AMSSECTIONSIZE 4096
 
 struct AmsMessageEnumerate
 	4 ReturnedIDs

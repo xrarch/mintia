@@ -35,6 +35,17 @@ struct MmPageFrameEntryPageTable
 	4 PDENumber
 endstruct
 
+struct MmPageFrameEntryWaitable
+	4 EventBlock
+	4 Context1
+	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
+	4 Context2
+	4 Context3
+	4 Context4
+	4 Context5
+	4 Context6
+endstruct
+
 const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_PRIVATE    16
@@ -60,6 +71,15 @@ extern MmEvictablePageInsert { pfdbe -- }
 extern MmEvictablePageModify { pfdbe process -- }
 
 extern MmEvictSinglePage { -- pfdbe ok }
+
+struct MmEvictablePageEvent
+	KeEvent_SIZEOF Event
+	4 References
+endstruct
+
+extern MmEvictablePageWait { pri pfdbe -- ok }
+extern MmEvictablePageSatisfy { pfdbe -- }
+extern MmEvictablePageStartIO { pfdbe -- }
 
 externptr MmModifiedPageListHead
 externptr MmModifiedPageListTail

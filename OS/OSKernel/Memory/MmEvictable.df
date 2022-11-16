@@ -22,7 +22,7 @@
 
 #include "<inc>/IO.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
+#include "<ll>/OSDLL/OS.h"
 
 var MmEvictablePageListHead 0
 public MmEvictablePageListHead
@@ -372,4 +372,110 @@ fn MmEvictSinglePage { -- pfdbe ok }
 	end
 
 	0 ok!
+end
+
+fn MmEvictablePageWait { pri pfdbe -- ok }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmEvictablePageWait: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// wait for IO to complete on a cache page.
+
+	// entered at IPLDPC
+
+	0 ok!
+
+	auto eventblock
+	pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
+
+	if (eventblock@ ~~)
+		// allocate an event block.
+		// some odd but harmless interactions can happen here.
+
+		IPLLOW KeIPLLower
+
+		MmEvictablePageEvent_SIZEOF // bytes
+		'IOCE' // tag
+		pri@ // flags
+		MmAllocWithTag ok! eventblock!
+
+		IPLDPC KeIPLRaise drop
+
+		if (ok@)
+			return
+		end
+
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS & ~~)
+			// IO completed while doing that allocation, free our eventblock
+			// and go home.
+
+			eventblock@ MmFree
+			return
+		end
+
+		if (pfdbe@ MmPageFrameEntryWaitable_EventBlock + @)
+			// awkward, someone allocated one while we were trying to.
+			// free ours and use theirs.
+
+			eventblock@ MmFree
+			pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
+		end else
+			eventblock@ pfdbe@ MmPageFrameEntryWaitable_EventBlock + !
+
+			0 // signaled
+			OSEVENT_NOTIF // type
+			"MmEvictablePageWaitEvent" // name
+			eventblock@ MmEvictablePageEvent_Event + // event
+			KeEventInitialize
+
+			0 eventblock@ MmEvictablePageEvent_References + !
+		end
+	end
+
+	1 eventblock@ MmEvictablePageEvent_References + +=
+
+	IPLLOW KeIPLLower
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	eventblock@ MmEvictablePageEvent_Event + // object
+	KeThreadWaitForObject drop
+
+	IPLDPC KeIPLRaise drop
+
+	1 eventblock@ MmEvictablePageEvent_References + -=
+
+	if (eventblock@ MmEvictablePageEvent_References + @ ~~)
+		eventblock@ MmFree
+	end
+end
+
+fn MmEvictablePageSatisfy { pfdbe -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmEvictablePageSatisfy: ipl != IPLDPC \n" KeCrash
+		end
+	end
+
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS ~ &
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+	auto eventblock
+	pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
+
+	if (eventblock@)
+		0 // priboost
+		eventblock@ MmEvictablePageEvent_Event + // event
+		KeEventSignal
+	end
+end
+
+fn MmEvictablePageStartIO { pfdbe -- }
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
+	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+	0 pfdbe@ MmPageFrameEntryWaitable_EventBlock + !
 end

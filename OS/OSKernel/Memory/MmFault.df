@@ -28,9 +28,6 @@
 var MmPageFaultCount 0
 public MmPageFaultCount
 
-const REFAULT -2
-const ERROR   -1
-
 fn MmPageFault { writing badaddr trapframe -- handled }
 	if (KeIPLCurrentGet IPLDPC >=)
 		0 handled!
@@ -66,9 +63,9 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		KeThreadCurrent@ KeThreadIgnoreKill drop
 		process@ MmVADListLock drop
 
-		REFAULT signal!
+		STATUS_REFAULT signal!
 
-		while (signal@ REFAULT ==)
+		while (signal@ STATUS_REFAULT ==)
 			kernelmapping@ // kernelmapping
 			writing@ // writing
 			badaddr@ // vaddr
@@ -79,7 +76,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		KeThreadCurrent@ KeThreadAcceptKill drop
 	end
 
-	if (signal@ ERROR ==)
+	if (signal@ STATUS_FAULT_ERROR ==)
 		// system error happened
 		0 handled!
 	end elseif (signal@)
@@ -267,7 +264,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 						if (ptpfdbe@)
 							ptpfdbe@ process@ MmPTEDereference
 						end
-						REFAULT signal!
+						STATUS_REFAULT signal!
 						return
 					end
 
@@ -404,7 +401,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				end
 
 				if (writing@)
-					REFAULT signal!
+					STATUS_REFAULT signal!
 				end
 
 				return
@@ -467,7 +464,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				process@ MmWorkingSetUnlock
 
 				if (writing@)
-					REFAULT signal!
+					STATUS_REFAULT signal!
 				end
 
 				return
@@ -483,7 +480,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	if (kernelmapping@)
 		if (vaddr@ POOLSPACE < vaddr@ POOLSPACE POOLSIZE + >= ||)
-			ERROR signal!
+			STATUS_FAULT_ERROR signal!
 			return
 		end
 	end
@@ -498,7 +495,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	if (signal@ ~~)
 		if (writing@)
-			REFAULT signal!
+			STATUS_REFAULT signal!
 		end
 	end
 end
@@ -640,7 +637,12 @@ fn MmNormalFault { vaddr process -- signal }
 			MmPTEDelete drop
 		end
 
-		OSSIGNAL_KILL signal!
+		if (ok@ STATUS_REFAULT ==)
+			STATUS_REFAULT signal!
+		end else
+			OSSIGNAL_KILL signal!
+		end
+
 		return
 	end
 
@@ -837,7 +839,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	if (ok@)
 		// invalid
 		ipl@ KeIPLLower
-		REFAULT signal!
+		STATUS_REFAULT signal!
 		return
 	end
 
@@ -890,7 +892,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 		if (ok@)
 			// invalid
-			REFAULT signal!
+			STATUS_REFAULT signal!
 			break
 		end
 
@@ -912,7 +914,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 				end
 
 				if (process@ PsSystemProcess@ ==)
-					SWAPPTE_DEMANDZERO PTE_TLBHACK | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
+					SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
 				end
 
 				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |

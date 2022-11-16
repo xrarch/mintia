@@ -49,15 +49,6 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 		end
 	end
 
-	auto ok
-	object@ MmSectionPPTLock ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "MmSectionObjectDelete: failed to lock PPT (%i)\n" KeCrash
-		end
-	end
-
 	// walk the prototype page tables and free all pages, in swap or in
 	// RAM. then free the prototype page tables.
 
@@ -104,8 +95,6 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 		object@ MmSection_AnonPrototypePageTable + @ MmFree
 	end
 
-	object@ MmSectionPPTUnlock
-
 	anonsize@ // charge
 	quotablock@ // quota
 	MmQuotaBlockUnchargeVM
@@ -123,7 +112,7 @@ fn MmSectionDeletePPT { ppt count -- }
 		auto ppte
 		ppt@@ ppte!
 
-		if (ppte@ PTE_V &)
+		if (ppte@ PTE_V PTE_TRANSITION | &)
 			// free in RAM
 
 			ipl@ // ipl
@@ -373,6 +362,8 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 		sectionoffset@ PAGESHIFT >> 2 << ppt +=
 	end
 
+	sectionobject@ MmSectionPPTUnlock
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -383,7 +374,6 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 	if (ok@)
 		ipl@ KeIPLLower
-		sectionobject@ MmSectionPPTUnlock
 		return
 	end
 
@@ -410,41 +400,104 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 
 		if (ok@)
 			ipl@ KeIPLLower
-			sectionobject@ MmSectionPPTUnlock
 			return
 		end
 
 		1 MmSoftPageFaultCount +=
 
-		ipl@ KeIPLLower
-
 		PAGESHIFT phyaddr <<=
 
 		phyaddr@ PTE_V | ppt@!
-	end elseif (ppte@ PTE_INSWAP &)
-		// swapped out, bring back in
 
-		pri@ // pri
-		ppt@ // pte
-		ppte@ PAGESHIFT >> // pno
-		MmAnonymousSwapIn ok! phyaddr! pfdbe!
+		ipl@ KeIPLLower
+	end elseif (ppte@ PTE_TRANSITION &)
+		// being paged in, wait
+
+		ppte@ PAGENUMBERMASK & phyaddr!
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		pfdbe@ MmEvictablePageReference drop
+
+		pri@ CANBLOCK | // pri
+		pfdbe@ // pfdbe
+		MmEvictablePageWait ok!
 
 		if (ok@)
-			sectionobject@ MmSectionPPTUnlock
+			ipl@ KeIPLLower
+
+			pfdbe@ MmEvictablePageDereference drop
+
 			return
 		end
 
-		auto rs
-		HALCPUInterruptDisable rs!
-		1 MmHardPageFaultCount +=
-		rs@ HALCPUInterruptRestore
+		ppt@@ ppte!
+
+		if (ppte@ PTE_V & ~~)
+			pfdbe@ MmEvictablePageDereference drop
+
+			STATUS_REFAULT ok!
+		end
+
+		ipl@ KeIPLLower
+	end elseif (ppte@ PTE_INSWAP &)
+		// swapped out, bring back in
+
+		ppt@ // pte
+		pri@ FREEFIRST | // pri
+		MmAnonymousPageGet ok! phyaddr! pfdbe!
+
+		if (ok@)
+			ipl@ KeIPLLower
+			return
+		end
 
 		PAGESHIFT phyaddr <<=
 
+		pfdbe@ MmEvictablePageStartIO
+		phyaddr@ PTE_TRANSITION | ppt@!
+
+		IPLLOW KeIPLLower
+
+		auto kflags
+		IOKFLAG_PAGEIN kflags!
+
+		if (pri@ TRYFOREVER &)
+			IOKFLAG_SWAPIN kflags |=
+		end
+
+		kflags@ // kflags
+		phyaddr@ IDENTITYSPACE | // pageframe
+		ppte@ // pte
+		IOSwapPageReadPTE ok!
+
+		IPLDPC KeIPLRaise ipl!
+
+		pfdbe@ MmEvictablePageSatisfy
+
+		if (ok@)
+			ppte@ ppt@!
+
+			pfdbe@ MmEvictablePageDereference drop
+
+			ipl@ // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
+
+			return
+		end
+
+		1 MmHardPageFaultCount +=
+		1 MmPageInCount +=
+
+		ppte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
 		phyaddr@ PTE_V | ppt@!
+
+		ipl@ KeIPLLower
 	end elseif (DEBUGCHECKS)
 		"MmSectionPageGet: unreachable\n" KeCrash
 	end
-
-	sectionobject@ MmSectionPPTUnlock
 end

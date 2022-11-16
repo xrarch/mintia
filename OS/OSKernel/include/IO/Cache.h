@@ -43,8 +43,6 @@ extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 extern IOCacheInfoBlockReference { cacheblock -- oldcount }
 extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 
-extern IOCachePageWait { pri pfdbe -- ok }
-
 extern IOCachePageModified { pfdbe -- }
 
 extern IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }

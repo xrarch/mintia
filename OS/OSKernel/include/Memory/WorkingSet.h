@@ -1,8 +1,3 @@
-extern MmWorkingSetLock { processobject -- ok }
-extern MmWorkingSetLockTimeout { timeout processobject -- ok }
-extern MmWorkingSetTryLock { processobject -- ok }
-extern MmWorkingSetUnlock { processobject -- }
-
 extern MmWorkingSetListInitialize { process -- ok }
 extern MmWorkingSetListFree { process -- }
 

@@ -32,44 +32,6 @@ const MMWORKINGSETEXTENDENTRIES   8
 
 const MMWORKINGSETENTRY_VALID 1
 
-fn MmWorkingSetLock { processobject -- ok }
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	processobject@ PsProcess_WorkingSetMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmWorkingSetLockUnalertable { processobject -- ok }
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	processobject@ PsProcess_WorkingSetMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmWorkingSetLockTimeout { timeout processobject -- ok }
-	KERNELMODE // waitmode
-	0 // alertable
-	timeout@ // timeout
-	processobject@ PsProcess_WorkingSetMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmWorkingSetTryLock { processobject -- ok }
-	KERNELMODE // waitmode
-	0 // alertable
-	0 // timeout
-	processobject@ PsProcess_WorkingSetMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmWorkingSetUnlock { processobject -- }
-	0 // abandon
-	processobject@ PsProcess_WorkingSetMutex + // mutex
-	KeMutexRelease drop
-end
-
 fn MmWorkingSetListInitialize { process -- ok }
 	0 ok!
 
@@ -886,53 +848,47 @@ fn MmManageWorkingSets { -- success }
 			
 			process@ PsProcess_TrimListNext + @ nprocess!
 
-			auto ok
+			IPLDPC KeIPLRaise ipl!
 
-			10 // timeout
-			process@ // processobject
-			MmWorkingSetLockTimeout ok!
+			if (process@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ==)
+				ipl@ KeIPLLower
+			end elseif (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
+				auto trimmed
 
-			if (ok@ ~~)
-				if (process@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ==)
-					process@ MmWorkingSetUnlock
-				end elseif (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
-					auto trimmed
+				dire@ // dire
+				pagecount@ // pages
+				process@ // process
+				MmWorkingSetTrim trimmed!
 
-					dire@ // dire
-					pagecount@ // pages
+				ipl@ KeIPLLower
+
+				if (process@ PsProcessTrimListTail@ ~=)
+					if (checkloop@ ~~)
+						process@ checkloop!
+					end
+
+					// remove and re-insert the process so we don't trim
+					// it again for a while.
+
+					1 // trim
 					process@ // process
-					MmWorkingSetTrim trimmed!
-
-					process@ MmWorkingSetUnlock
-
-					if (process@ PsProcessTrimListTail@ ~=)
-						if (checkloop@ ~~)
-							process@ checkloop!
-						end
-
-						// remove and re-insert the process so we don't trim
-						// it again for a while.
-
-						1 // trim
-						process@ // process
-						PsProcessRemove
-						
-						1 // trim
-						process@ // process
-						PsProcessInsert
-					end
-
-					if (trimmed@ pagecount@ >=)
-						0 pagecount!
-						break
-					end
-
-					trimmed@ totaltrimmed +=
-
-					trimmed@ pagecount -=
-				end else
-					process@ MmWorkingSetUnlock
+					PsProcessRemove
+					
+					1 // trim
+					process@ // process
+					PsProcessInsert
 				end
+
+				if (trimmed@ pagecount@ >=)
+					0 pagecount!
+					break
+				end
+
+				trimmed@ totaltrimmed +=
+
+				trimmed@ pagecount -=
+			end else
+				ipl@ KeIPLLower
 			end
 
 			1 count -=

@@ -278,10 +278,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					pfdbe@ MmEvictablePageReference drop
 				end
 
-				ipl@ KeIPLLower
-
-				process@ MmWorkingSetLock drop // will NEVER fail
-
 				process@ // process
 				MmWorkingSetEntryReserve ok! wsleptr! wsli!
 
@@ -290,7 +286,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 						pfdbe@ MmEvictablePageDereference drop
 					end
 
-					process@ MmWorkingSetUnlock
+					ipl@ KeIPLLower
 
 					if (ptpfdbe@)
 						ptpfdbe@ process@ MmPTEDereference
@@ -305,10 +301,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					// swap it in. unlock and relock the working set to avoid
 					// deadlock.
 
-					process@ MmWorkingSetUnlock
-
-					IPLDPC KeIPLRaise ipl!
-
 					if (kernelmapping@)
 						CANBLOCK TRYFOREVER | MmPageWait ok! drop
 					end else
@@ -316,16 +308,12 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					end
 
 					if (ok@)
-						ipl@ KeIPLLower
-
-						process@ MmWorkingSetLock drop
-
 						wsli@ // wsli
 						wsleptr@ // wsleptr
 						process@ // process
 						MmWorkingSetEntryFree
 
-						process@ MmWorkingSetUnlock
+						ipl@ KeIPLLower
 
 						if (ptpfdbe@)
 							ptpfdbe@ process@ MmPTEDereference
@@ -341,7 +329,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					phyaddr@ PAGESHIFT >> // pno
 					MmAnonymousSwapIn ok! phyaddr! pfdbe!
 
-					process@ MmWorkingSetLock drop
+					IPLDPC KeIPLRaise ipl!
 
 					if (ok@)
 						wsli@ // wsli
@@ -349,7 +337,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 						process@ // process
 						MmWorkingSetEntryFree
 
-						process@ MmWorkingSetUnlock
+						ipl@ KeIPLLower
 
 						if (ptpfdbe@)
 							ptpfdbe@ process@ MmPTEDereference
@@ -360,9 +348,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 						return
 					end
 
-					HALCPUInterruptDisable rs!
 					1 MmHardPageFaultCount +=
-					rs@ HALCPUInterruptRestore
 
 					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
 					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
@@ -391,7 +377,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				process@ // process
 				MmWorkingSetEntryInsert
 
-				process@ MmWorkingSetUnlock
+				ipl@ KeIPLLower
 
 				if (ptpfdbe@)
 					ptpfdbe@ process@ MmPTEDereference
@@ -435,7 +421,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 				PAGESHIFT phyaddr <<=
 
-				process@ MmWorkingSetLock drop
+				IPLDPC KeIPLRaise ipl!
 
 				process@ // process
 				MmWorkingSetEntryReserve ok! wsleptr! wsli!
@@ -458,7 +444,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				process@ // process
 				MmWorkingSetEntryInsert
 
-				process@ MmWorkingSetUnlock
+				ipl@ KeIPLLower
 
 				if (writing@)
 					STATUS_REFAULT signal!
@@ -580,12 +566,13 @@ fn MmNormalFault { vaddr process -- signal }
 		MmVirtualtoPTEAddress pteaddr!
 	end
 
-	process@ MmWorkingSetLock drop // will NEVER fail
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	process@ // process
 	MmWorkingSetEntryReserve ok! wsleptr! wsli!
 
-	process@ MmWorkingSetUnlock
+	ipl@ KeIPLLower
 
 	if (ok@)
 		if (kernelmapping@ ~~)
@@ -616,7 +603,7 @@ fn MmNormalFault { vaddr process -- signal }
 		MmSatisfyAnonFault ok! phyaddr! pfdbe! flags!
 	end
 
-	process@ MmWorkingSetLock drop
+	IPLDPC KeIPLRaise ipl!
 
 	if (ok@)
 		wsli@ // wsli
@@ -624,7 +611,7 @@ fn MmNormalFault { vaddr process -- signal }
 		process@ // process
 		MmWorkingSetEntryFree
 
-		process@ MmWorkingSetUnlock
+		ipl@ KeIPLLower
 
 		if (kernelmapping@ ~~)
 			1 // deref
@@ -655,7 +642,7 @@ fn MmNormalFault { vaddr process -- signal }
 	process@ // process
 	MmWorkingSetEntryInsert
 
-	process@ MmWorkingSetUnlock
+	ipl@ KeIPLLower
 end
 
 fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
@@ -868,7 +855,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	end
 
 	while (1)
-		process@ MmWorkingSetLock drop
+		IPLDPC KeIPLRaise ipl!
 
 		// re-check the PTE with the working set mutex held, since it may have
 		// been trimmed since we decided it was valid. we know that it's the same
@@ -899,7 +886,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 			// COW, allocate a page frame and copy the old page frame into it.
 
 			if (cowaddr@ ~~)
-				process@ MmWorkingSetUnlock
+				ipl@ KeIPLLower
 
 				pteaddr@ // pte
 				FREEFIRST // pri
@@ -949,7 +936,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 			// mapped, so dereference it
 			pfdbe@ MmEvictablePageDereference drop
 
-			process@ MmWorkingSetUnlock
+			ipl@ KeIPLLower
 
 			return
 		end elseif (pageprot@ PAGEACCESS_WRITE & ~~)
@@ -976,15 +963,13 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		end
 	end
 
-	process@ MmWorkingSetUnlock
-
 	if (cowaddr@)
-		IPLDPC KeIPLRaise ipl!
-
 		cowpfdbe@ MmEvictablePageDereference drop
 
 		ipl@ // ipl
 		cowpfdbe@ // pfdbe
 		MmAnonymousPageDelete
+	end else
+		ipl@ KeIPLLower
 	end
 end

@@ -27,6 +27,9 @@
 const MMWORKINGSETTABLESIZE       (PAGESIZE MmProcessHeader_SIZEOF -)
 const MMWORKINGSETENTRIESPERTABLE (MMWORKINGSETTABLESIZE 4 /)
 
+const MMWORKINGSETINITIALENTRIES  16
+const MMWORKINGSETEXTENDENTRIES   8
+
 const MMWORKINGSETENTRY_VALID 1
 
 fn MmWorkingSetLock { processobject -- ok }
@@ -98,16 +101,16 @@ fn MmWorkingSetListInitialize { process -- ok }
 
 	auto entryptr
 	phdr@ MmProcessHeader_SIZEOF +
-	MMWORKINGSETENTRIESPERTABLE 4 * + entryptr!
+	MMWORKINGSETINITIALENTRIES 4 * + entryptr!
 
 	auto last
 	-1 last!
 
 	auto ihandle
-	MMWORKINGSETENTRIESPERTABLE ihandle!
+	MMWORKINGSETINITIALENTRIES ihandle!
 
 	auto count
-	MMWORKINGSETENTRIESPERTABLE count!
+	MMWORKINGSETINITIALENTRIES count!
 
 	// initialize the free list
 
@@ -122,7 +125,7 @@ fn MmWorkingSetListInitialize { process -- ok }
 	end
 
 	last@ phdr@ MmProcessHeader_WorkingSetFreeListHead + !
-	MMWORKINGSETENTRIESPERTABLE 1 - phdr@ MmProcessHeader_WorkingSetMaximumIndex + !
+	MMWORKINGSETINITIALENTRIES 1 - phdr@ MmProcessHeader_WorkingSetMaximumIndex + !
 end
 
 // unless explicitly stated otherwise, all working set manipulation functions
@@ -537,7 +540,60 @@ fn MmWorkingSetEntryReserve { process -- wsli wsleptr ok }
 end
 
 fn MmWorkingSetArrayExpand { process -- wsli wsleptr ok }
-	STATUS_NO_MEMORY ok!
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
+
+	auto maxi
+	phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ maxi!
+
+	auto size
+	maxi@ 1 + size!
+
+	auto count
+	MMWORKINGSETEXTENDENTRIES count!
+
+	if (size@ MMWORKINGSETENTRIESPERTABLE >=)
+		STATUS_NO_MEMORY ok!
+		return
+	end elseif (size@ count@ + MMWORKINGSETENTRIESPERTABLE >=)
+		MMWORKINGSETENTRIESPERTABLE size@ - count!
+	end
+
+	// extend the working set list.
+
+	auto entryptr
+	phdr@ MmProcessHeader_SIZEOF +
+	size@ 4 * +
+	count@ 4 * + entryptr!
+
+	auto last
+	-1 last!
+
+	auto ihandle
+	size@ count@ + ihandle!
+
+	// extend the free list
+
+	auto i
+	count@ 1 - i!
+
+	while (i@)
+		4 entryptr -=
+		1 ihandle -=
+
+		last@ PAGESHIFT << entryptr@!
+
+		ihandle@ last!
+		1 i -=
+	end
+
+	last@ phdr@ MmProcessHeader_WorkingSetFreeListHead + !
+	size@ count@ + 1 - phdr@ MmProcessHeader_WorkingSetMaximumIndex + !
+
+	entryptr@ 4 - wsleptr!
+	ihandle@ 1 - wsli!
+
+	0 ok!
 end
 
 fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }

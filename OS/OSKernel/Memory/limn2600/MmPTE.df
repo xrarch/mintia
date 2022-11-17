@@ -191,7 +191,7 @@ fn MmPTEDelete { deref pteaddr vaddr process -- ok }
 	end
 end
 
-fn MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
+fn MmPTEReference { pri vaddr process nowait -- pfdbe pteaddr ok }
 	// works like MmVirtualToPTEAddress but will swap in PTEs that are swapped
 	// out and will return a referenced page table pfdbe.
 
@@ -215,16 +215,18 @@ fn MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 	IDENTITYSPACE pagemap |=
 
 	0 ok!
+	0 waited!
 
 	vaddr@ 22 >> 2 << pagemap@ + pteaddr!
 
 	auto pt
+	auto waited
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
 	pri@ CANBLOCK | // pri
-	MmPageWait ok! drop
+	MmPageWait ok! waited!
 
 	if (ok@)
 		ipl@ KeIPLLower
@@ -245,6 +247,8 @@ fn MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 		ipl@ KeIPLLower
 	end elseif (pde@ PTE_INSWAP &)
 		// swap in the PTE
+
+		1 waited!
 
 		pri@ // pri
 		pteaddr@ // pte
@@ -280,6 +284,8 @@ fn MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 
 		pagemap@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
 		MmEvictablePageReference drop
+
+		1 waited!
 	end elseif (pde@ ~~)
 		// no such PTE.
 		ipl@ KeIPLLower
@@ -296,6 +302,10 @@ fn MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
 	end
 
 	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + IDENTITYSPACE | pteaddr!
+
+	if (nowait@ waited@ &&)
+		STATUS_REFAULT ok!
+	end
 end
 
 fn MmPTEDereference { pfdbe process -- }
@@ -488,11 +498,13 @@ fn MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
 
 	0 ok!
 
-	if (vaddr@ MMLOWESTSYSTEMADDRESS >=)
-		PTE_TLBHACK flags |=
+	if (asid@ -1 ~=)
+		if (vaddr@ MMLOWESTSYSTEMADDRESS >=)
+			PTE_TLBHACK flags |=
 
-		if (flags@ PTE_V &)
-			PTE_K flags |=
+			if (flags@ PTE_V &)
+				PTE_K flags |=
+			end
 		end
 	end
 
@@ -504,16 +516,18 @@ fn MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
 
 	phyaddr@ PAGESHIFT >> 5 << flags@ 31 & | pteaddr@!
 
-	if (asid@ 0 ==)
-		pteaddr@@ // pte
-		vaddr@ PAGESHIFT >> // vpn
-		0 // asid
-		HALLimn2500TLBFill
-	end else
-		pteaddr@@ // pte
-		vaddr@ PAGESHIFT >> // vpn
-		asid@ 255 & 1 + // asid
-		HALLimn2500TLBFill
+	if (asid@ -1 ~=)
+		if (asid@ 0 ==)
+			pteaddr@@ // pte
+			vaddr@ PAGESHIFT >> // vpn
+			0 // asid
+			HALLimn2500TLBFill
+		end else
+			pteaddr@@ // pte
+			vaddr@ PAGESHIFT >> // vpn
+			asid@ 255 & 1 + // asid
+			HALLimn2500TLBFill
+		end
 	end
 end
 

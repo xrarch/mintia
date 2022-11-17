@@ -194,6 +194,286 @@ fn MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 end
 
+fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
+	auto pfdbe
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto capturedpte
+	pteaddr@@ capturedpte!
+
+	if (capturedpte@ MmPTEIsZero ~~)
+		auto deref
+		1 deref!
+
+		if (capturedpte@ PTE_V &)
+			auto phyaddr
+			pteaddr@ MmPTEInterpret drop drop phyaddr!
+
+			phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+			if (process@)
+				0 // phyaddr
+				0 // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				process@ KeProcess_ASID + @ // asid
+				MmPTEUpdate drop drop drop
+			end else
+				0 pteaddr@!
+			end
+
+			ipl@ // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
+		end else
+			if (process@)
+				0 // phyaddr
+				0 // flags
+				vaddr@ // vaddr
+				pteaddr@ // pteaddr
+				process@ KeProcess_ASID + @ // asid
+				MmPTEUpdate drop drop drop
+			end else
+				0 pteaddr@!
+			end
+
+			if (capturedpte@ PTE_INSWAP &)
+				// free private page in swap
+
+				ipl@ KeIPLLower
+
+				0 deref!
+
+				capturedpte@ IOSwapPageFreePTE
+
+				ipl@ KeIPLLower
+			end elseif (capturedpte@ PTE_TRANSITION &)
+				// free private page
+
+				capturedpte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+				ipl@ // ipl
+				pfdbe@ // pfdbe
+				MmAnonymousPageDelete
+			end elseif (DEBUGCHECKS)
+				capturedpte@ "MmAnonymousPageDeleteByPTE: strange PTE %08x\n" KeCrash
+			end
+		end
+
+		if (deletepte@)
+			// there was a PTE containing some information, so delete it.
+
+			deref@ // deref
+			pteaddr@ // pteaddr
+			vaddr@ // vaddr
+			process@ // process
+			MmPTEDelete drop
+		end
+	end else
+		ipl@ KeIPLLower
+	end
+end
+
+fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr -- pfdbe phyaddr ok }
+	// assumes caller already did a MmPageWait and determined that the PTE is
+	// not valid if it wants to do its own processing in that case.
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmAnonymousPageReference: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	auto createdpage
+	0 createdpage!
+
+	auto asid
+
+	if (process@)
+		process@ KeProcess_ASID + @ asid!
+	end else
+		-1 asid!
+	end
+
+	auto capturedpte
+	pteaddr@@ capturedpte!
+
+	if (capturedpte@ PTE_V &)
+		// already present, return
+
+		pteaddr@ MmPTEInterpret ok! drop phyaddr!
+
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		pfdbe@ MmEvictablePageReference drop
+
+		if (process@)
+			1 MmSoftPageFaultCount +=
+		end
+	end elseif (capturedpte@ dzpte@ ==)
+		// demand-zero PTE.
+
+		pteaddr@ // pte
+		ZEROMUST pri@ | // pri
+		MmAnonymousPageGet ok! phyaddr! pfdbe!
+
+		if (ok@)
+			return
+		end
+
+		1 MmSoftPageFaultCount +=
+
+		PAGESHIFT phyaddr <<=
+
+		1 createdpage!
+
+		phyaddr@ // phyaddr
+		PTE_V // flags
+		vaddr@ // vaddr
+		pteaddr@ // pteaddr
+		asid@ // asid
+		MmPTEUpdate drop drop drop
+	end elseif (capturedpte@ PTE_TRANSITION &)
+		// page is in transition.
+		// if IO is in progress, wait for that to finish.
+
+		capturedpte@ PAGENUMBERMASK & phyaddr!
+		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+		pfdbe@ MmEvictablePageReference drop
+
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+			pri@ CANBLOCK | // pri
+			pfdbe@ // pfdbe
+			MmEvictablePageWait ok!
+
+			if (ok@ ~~)
+				auto chkphyaddr
+				pteaddr@ MmPTEInterpret ok! drop chkphyaddr!
+
+				if (ok@)
+					STATUS_REFAULT ok!
+				end elseif (chkphyaddr@ phyaddr@ ~=)
+					STATUS_REFAULT ok!
+				end
+			end
+
+			if (ok@)
+				pfdbe@ MmEvictablePageDereference drop
+
+				return
+			end
+		end else
+			phyaddr@ // phyaddr
+			PTE_V // flags
+			vaddr@ // vaddr
+			pteaddr@ // pteaddr
+			asid@ // asid
+			MmPTEUpdate drop drop drop
+		end
+
+		if (process@)
+			1 MmSoftPageFaultCount +=
+		end
+	end elseif (capturedpte@ PTE_INSWAP &)
+		// page was written to swap and then evicted. we are responsible
+		// for bringing it in now.
+
+		pteaddr@ // pte
+		pri@ FREEFIRST | // pri
+		MmAnonymousPageGet ok! phyaddr! pfdbe!
+
+		if (ok@)
+			return
+		end
+
+		PAGESHIFT phyaddr <<=
+
+		pfdbe@ MmEvictablePageStartIO
+		phyaddr@ PTE_TRANSITION | pteaddr@!
+
+		IPLLOW KeIPLLower
+
+		auto kflags
+		IOKFLAG_PAGEIN kflags!
+
+		if (pri@ TRYFOREVER &)
+			IOKFLAG_SWAPIN kflags |=
+		end
+
+		kflags@ // kflags
+		phyaddr@ IDENTITYSPACE | // pageframe
+		capturedpte@ // pte
+		IOSwapPageReadPTE ok!
+
+		IPLDPC KeIPLRaise drop
+
+		pfdbe@ MmEvictablePageSatisfy
+
+		if (ok@ ~~)
+			// check that the PTE didn't change to something else
+
+			if (pteaddr@@ phyaddr@ PTE_TRANSITION | ~=)
+				STATUS_REFAULT ok!
+			end
+		end elseif (pteaddr@@ phyaddr@ PTE_TRANSITION | ==)
+			// the PTE didn't change, but there was an error, so reset it
+
+			capturedpte@ pteaddr@!
+		end
+
+		if (ok@)
+			pfdbe@ MmEvictablePageDereference drop
+
+			IPLDPC // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
+
+			return
+		end
+
+		if (process@)
+			1 MmHardPageFaultCount +=
+		end
+
+		1 MmPageInCount +=
+
+		capturedpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+		phyaddr@ // phyaddr
+		PTE_V // flags
+		vaddr@ // vaddr
+		pteaddr@ // pteaddr
+		asid@ // asid
+		MmPTEUpdate drop drop drop
+
+		1 createdpage!
+	end elseif (DEBUGCHECKS)
+		capturedpte@ "MmAnonymousPageReference: odd PTE %x\n" Printf
+	end
+
+	if (createdpage@)
+		if (refpfdbe@)
+			// this is a private page or a page table
+
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb evictflag@ |
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+			if (evictflag@ MMEVICTFLAG_PRIVATE &)
+				process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+				vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+			end
+
+			refpfdbe@ MmEvictablePageReference drop
+		end
+	end
+end
+
 fn MmAnonymousPageDelete { ipl pfdbe -- }
 	pfdbe@ MmEvictablePageReference drop
 	pfdbe@ MmEvictablePageDelete

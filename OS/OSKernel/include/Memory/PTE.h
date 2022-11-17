@@ -1,7 +1,7 @@
 extern MmPTECreate { vaddr process -- pteaddr ok }
 extern MmPTEDelete { deref pteaddr vaddr process -- ok }
 
-extern MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
+extern MmPTEReference { pri vaddr process nowait -- pfdbe pteaddr ok }
 extern MmPTEDereference { pfdbe process -- }
 extern MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
 extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }

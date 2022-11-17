@@ -42,6 +42,8 @@ extern MmAnonymousSwapIn { pri pte pno -- pfdbe pfn ok }
 
 extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
 extern MmAnonymousPageGet { pte pri -- pfdbe pfn ok }
+extern MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
+extern MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr -- pfdbe phyaddr ok }
 extern MmAnonymousPageDelete { ipl pfdbe -- }
 extern MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 

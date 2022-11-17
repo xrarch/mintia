@@ -106,26 +106,11 @@ end
 
 fn MmSectionDeletePPT { ppt count -- }
 	while (count@)
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		auto ppte
-		ppt@@ ppte!
-
-		if (ppte@ PTE_V PTE_TRANSITION | &)
-			// free in RAM
-
-			ipl@ // ipl
-			ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
-			MmAnonymousPageDelete
-		end elseif (ppte@ PTE_INSWAP &)
-			ipl@ KeIPLLower
-
-			// free in swap
-			ppte@ IOSwapPageFreePTE
-		end else
-			ipl@ KeIPLLower
-		end
+		0 // deletepte
+		ppt@ // pteaddr
+		0 // vaddr
+		0 // process
+		MmAnonymousPageDeleteByPTE
 
 		4 ppt +=
 		1 count -=
@@ -377,127 +362,14 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 		return
 	end
 
-	auto ppte
-	ppt@@ ppte!
+	0 // dzpte
+	0 // evictflag
+	0 // refpfdbe
+	0 // process
+	pri@ // pri
+	0 // vaddr
+	ppt@ // pteaddr
+	MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 
-	if (ppte@ PTE_V &)
-		// already present, return
-
-		ppte@ PAGENUMBERMASK & phyaddr!
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-		pfdbe@ MmEvictablePageReference drop
-
-		1 MmSoftPageFaultCount +=
-
-		ipl@ KeIPLLower
-	end elseif (ppte@ ~~)
-		// non-existent, demand zero
-
-		ppt@ // pte
-		ZEROMUST pri@ | // pri
-		MmAnonymousPageGet ok! phyaddr! pfdbe!
-
-		if (ok@)
-			ipl@ KeIPLLower
-			return
-		end
-
-		1 MmSoftPageFaultCount +=
-
-		PAGESHIFT phyaddr <<=
-
-		phyaddr@ PTE_V | ppt@!
-
-		ipl@ KeIPLLower
-	end elseif (ppte@ PTE_TRANSITION &)
-		// being paged in, wait
-
-		ppte@ PAGENUMBERMASK & phyaddr!
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-		pfdbe@ MmEvictablePageReference drop
-
-		pri@ CANBLOCK | // pri
-		pfdbe@ // pfdbe
-		MmEvictablePageWait ok!
-
-		if (ok@)
-			ipl@ KeIPLLower
-
-			pfdbe@ MmEvictablePageDereference drop
-
-			return
-		end
-
-		ppt@@ ppte!
-
-		if (ppte@ PTE_V & ~~)
-			pfdbe@ MmEvictablePageDereference drop
-
-			STATUS_REFAULT ok!
-		end
-
-		ipl@ KeIPLLower
-	end elseif (ppte@ PTE_INSWAP &)
-		// swapped out, bring back in
-
-		ppt@ // pte
-		pri@ FREEFIRST | // pri
-		MmAnonymousPageGet ok! phyaddr! pfdbe!
-
-		if (ok@)
-			ipl@ KeIPLLower
-			return
-		end
-
-		PAGESHIFT phyaddr <<=
-
-		pfdbe@ MmEvictablePageStartIO
-		phyaddr@ PTE_TRANSITION | ppt@!
-
-		IPLLOW KeIPLLower
-
-		auto kflags
-		IOKFLAG_PAGEIN kflags!
-
-		if (pri@ TRYFOREVER &)
-			IOKFLAG_SWAPIN kflags |=
-		end
-
-		kflags@ // kflags
-		phyaddr@ IDENTITYSPACE | // pageframe
-		ppte@ // pte
-		IOSwapPageReadPTE ok!
-
-		IPLDPC KeIPLRaise ipl!
-
-		pfdbe@ MmEvictablePageSatisfy
-
-		if (ok@)
-			ppte@ ppt@!
-
-			pfdbe@ MmEvictablePageDereference drop
-
-			ipl@ // ipl
-			pfdbe@ // pfdbe
-			MmAnonymousPageDelete
-
-			return
-		end
-
-		1 MmHardPageFaultCount +=
-		1 MmPageInCount +=
-
-		ppte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
-
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-		phyaddr@ PTE_V | ppt@!
-
-		ipl@ KeIPLLower
-	end elseif (DEBUGCHECKS)
-		"MmSectionPageGet: unreachable\n" KeCrash
-	end
+	ipl@ KeIPLLower
 end

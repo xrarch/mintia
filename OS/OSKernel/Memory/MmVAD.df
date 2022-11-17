@@ -432,6 +432,7 @@ fn MmVADUnmap { vad processobject -- }
 					TRYFOREVER // pri
 					vaddr@ // vaddr
 					processobject@ // process
+					0 // nowait
 					MmPTEReference ok! pteaddr! ptpfdbe!
 
 					if (ok@)
@@ -450,62 +451,11 @@ fn MmVADUnmap { vad processobject -- }
 				MmVirtualtoPTEAddress pteaddr!
 			end
 
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
-
-			pteaddr@@ pte!
-
-			if (pte@ MmPTEIsZero ~~)
-				0 // phyaddr
-				0 // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				asid@ // asid
-				MmPTEUpdate drop drop drop
-
-				auto deref
-				1 deref!
-
-				if (chargevmquota@)
-					if (DEBUGCHECKS)
-						if (pte@ PTE_V &)
-							"MmVADUnmap: valid PTE found despite clearing working set\n" KeCrash
-						end
-					end
-
-					if (pte@ PTE_INSWAP &)
-						// free private page in swap
-
-						ipl@ KeIPLLower
-
-						0 deref!
-
-						pte@ IOSwapPageFreePTE
-					end elseif (pte@ PTE_TRANSITION &)
-						// free private page
-
-						ipl@ // ipl
-						pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
-						MmAnonymousPageDelete
-					end elseif (DEBUGCHECKS)
-						pte@ "MmVADUnmap: strange PTE %08x\n" KeCrash
-					end
-				end else
-					ipl@ KeIPLLower
-				end
-
-				if (kernelmapping@ ~~)
-					// there was a PTE containing some information, so delete it.
-
-					deref@ // deref
-					pteaddr@ // pteaddr
-					vaddr@ // vaddr
-					processobject@ // process
-					MmPTEDelete drop
-				end
-			end else
-				ipl@ KeIPLLower
-			end
+			1 // deletepte
+			pteaddr@ // pteaddr
+			vaddr@ // vaddr
+			processobject@ // process
+			MmAnonymousPageDeleteByPTE
 
 			PTESIZE pteaddr +=
 			PAGESIZE vaddr +=

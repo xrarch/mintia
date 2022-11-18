@@ -158,7 +158,7 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	priority@ MmPageWait ok! drop
+	0 priority@ MmPageWait ok! drop
 
 	if (ok@)
 		ipl@ KeIPLLower
@@ -170,17 +170,23 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 	ipl@ KeIPLLower
 end
 
-fn MmPageWait { priority -- waited ok }
+fn MmPageWait { process priority -- waited ok }
 	// wait until the appropriate available page threshold is reached.
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"MmPageWait: ipl != IPLDPC\n" KeCrash
 		end
+
+		if (process@)
+			if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
+				"MmPageWait: kill not ignored\n" KeCrash
+			end
+		end
 	end
 
-	auto process
-	KeThreadCurrent@ KeThread_Process + @ process!
+	auto wprocess
+	KeThreadCurrent@ KeThread_Process + @ wprocess!
 
 	0 waited!
 
@@ -208,10 +214,10 @@ fn MmPageWait { priority -- waited ok }
 			// normal rules:
 			MMNORMALTHRESH blockon! // don't dip into MUSTSUCCEED page pool
 
-			if (process@ PsSystemInitProcess@ ==)
+			if (wprocess@ PsSystemInitProcess@ ==)
 				-1 tries!
 				0 alertable!
-			end elseif (process@ PsSystemProcess@ ==)
+			end elseif (wprocess@ PsSystemProcess@ ==)
 				-1 tries!
 				0 alertable!
 
@@ -242,6 +248,10 @@ fn MmPageWait { priority -- waited ok }
 
 			IPLLOW KeIPLLower
 
+			if (process@)
+				process@ MmVADListUnlock
+			end
+
 			1 waited!
 
 			KERNELMODE // waitmode
@@ -249,6 +259,10 @@ fn MmPageWait { priority -- waited ok }
 			100 // timeout
 			MmEventPageAvailable // object
 			KeThreadWaitForObject ok!
+
+			if (process@)
+				process@ MmVADListLock drop
+			end
 
 			IPLDPC KeIPLRaise drop
 

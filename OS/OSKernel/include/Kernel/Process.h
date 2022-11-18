@@ -85,6 +85,8 @@ struct KeThread
 	4 QueueNext
 	4 QueuePrev
 
+	4 SwapListNext
+
 	4 KernelStackResident
 
 	4 Status

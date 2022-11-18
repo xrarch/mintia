@@ -59,7 +59,7 @@ extern MmResourceJettison { -- }
 extern MmPoolInit { -- }
 
 extern MmKflagToPriority { kflags -- pri }
-extern MmPageWait { priority -- waited ok }
+extern MmPageWait { process priority -- waited ok }
 extern MmPageGet { priority -- pfdbe pfn ok }
 extern MmPageAlloc { priority -- pfdbe pfn ok }
 extern MmPageFree { pfn -- }

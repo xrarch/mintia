@@ -162,7 +162,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 		0 // pri
 		vaddr@ // vaddr
 		process@ // process
-		0 // nowait
 		MmPTEReference ok! pteaddr! ptpfdbe!
 
 		if (ok@)
@@ -231,7 +230,9 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 			// hold PTE contents in flags temporarily
 			pteaddr@@ flags!
 
-			if (flags@ PTE_TRANSITION PTE_INSWAP | &)
+			if (flags@ MmPTEIsZero)
+				ipl@ KeIPLLower
+			end else
 				// private page. we need to do work here
 
 				flags@ PAGENUMBERMASK & phyaddr!
@@ -262,99 +263,55 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					return
 				end
 
-				if (flags@ PTE_TRANSITION &)
-					// reference it now so we can drop IPL
-
-					1 MmSoftPageFaultCount +=
-
-					phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-					if (DEBUGCHECKS)
-						if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
-							flags@ vaddr@ "MmSatisfyFault: %x: transition PTE (%x) wasn't private\n" KeCrash
-						end
-					end
-
-					pfdbe@ MmEvictablePageReference drop
-				end
-
 				process@ // process
 				MmWorkingSetEntryReserve ok! wsleptr! wsli!
 
 				if (ok@)
-					if (flags@ PTE_TRANSITION &)
-						pfdbe@ MmEvictablePageDereference drop
-					end
-
 					ipl@ KeIPLLower
-
 					if (ptpfdbe@)
 						ptpfdbe@ process@ MmPTEDereference
 					end
-
 					OSSIGNAL_KILL signal!
-
 					return
 				end
 
-				if (flags@ PTE_INSWAP &)
-					// swap it in. unlock and relock the working set to avoid
-					// deadlock.
+				process@ MmVADListUnlock // still at IPLDPC...
 
+				if (kernelmapping@)
+					PTE_KERNEL_DEMANDZERO // dzpte
+					MMEVICTFLAG_PRIVATE // evictflag
+					ptpfdbe@ // refpfdbe
+					process@ // process
+					TRYFOREVER // pri
+					vaddr@ // vaddr
+					pteaddr@ // pteaddr
+					MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+				end else
+					-1 // dzpte
+					MMEVICTFLAG_PRIVATE // evictflag
+					ptpfdbe@ // refpfdbe
+					process@ // process
 					0 // pri
-					pteaddr@ // pte
-					phyaddr@ PAGESHIFT >> // pno
-					MmAnonymousSwapIn ok! phyaddr! pfdbe!
-
-					IPLDPC KeIPLRaise ipl!
-
-					if (ok@)
-						wsli@ // wsli
-						wsleptr@ // wsleptr
-						process@ // process
-						MmWorkingSetEntryFree
-
-						ipl@ KeIPLLower
-
-						if (ptpfdbe@)
-							ptpfdbe@ process@ MmPTEDereference
-						end
-
-						OSSIGNAL_KILL signal!
-
-						return
-					end
-
-					1 MmHardPageFaultCount +=
-
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-					process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
-					vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-
-					PAGESHIFT phyaddr <<=
-
-					if (ptpfdbe@)
-						ptpfdbe@ MmEvictablePageReference drop
-					end
+					vaddr@ // vaddr
+					pteaddr@ // pteaddr
+					MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 				end
 
-				PTE_V flags!
-
-				phyaddr@ // phyaddr
-				flags@ // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate drop drop drop
-
-				vaddr@ PAGENUMBERMASK & // vaddr
-				wsleptr@ // wsleptr
-				process@ // process
-				MmWorkingSetEntryInsert
+				if (ok@)
+					wsli@ // wsli
+					wsleptr@ // wsleptr
+					process@ // process
+					MmWorkingSetEntryFree
+				end else
+					vaddr@ PAGENUMBERMASK & // vaddr
+					wsleptr@ // wsleptr
+					process@ // process
+					MmWorkingSetEntryInsert
+				end
 
 				ipl@ KeIPLLower
+
+				process@ MmVADListLock drop
 
 				if (ptpfdbe@)
 					ptpfdbe@ process@ MmPTEDereference
@@ -365,73 +322,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				end
 
 				return
-			end elseif (flags@ PTE_KERNEL_DEMANDZERO ==)
-				1 MmSoftPageFaultCount +=
-
-				ipl@ KeIPLLower
-
-				if (DEBUGCHECKS)
-					if (process@ PsSystemProcess@ ~=)
-						"MmSatisfyFault: demandzero PTE in userspace\n" KeCrash
-					end
-				end
-
-				// paged pool or whatnot. allocate and map a private page.
-
-				pteaddr@ // pte
-				FREEFIRST TRYFOREVER | // pri
-				MmAnonymousPageAlloc ok! phyaddr! pfdbe!
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						"MmSatisfyFault: failed to allocate private kernel page\n" KeCrash
-					end
-				end
-
-				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-				process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
-				vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-
-				PTE_KERNEL_DEMANDZERO pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
-
-				PAGESHIFT phyaddr <<=
-
-				IPLDPC KeIPLRaise ipl!
-
-				process@ // process
-				MmWorkingSetEntryReserve ok! wsleptr! wsli!
-
-				if (DEBUGCHECKS)
-					if (ok@)
-						"MmSatisfyFault: couldn't reserve WSLE for private kernel page\n" KeCrash
-					end
-				end
-
-				phyaddr@ // phyaddr
-				PTE_V // flags
-				vaddr@ // vaddr
-				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate drop drop drop
-
-				vaddr@ PAGENUMBERMASK & // vaddr
-				wsleptr@ // wsleptr
-				process@ // process
-				MmWorkingSetEntryInsert
-
-				ipl@ KeIPLLower
-
-				if (writing@)
-					STATUS_REFAULT signal!
-				end
-
-				return
-			end elseif (flags@ MmPTEIsZero)
-				ipl@ KeIPLLower
-			end elseif (DEBUGCHECKS)
-				flags@ "MmSatisfyFault: odd PTE %08x\n" KeCrash
 			end
 		end
 	end else
@@ -768,7 +658,7 @@ fn MmSatisfyAnonFault { process vaddr pteaddr section offset vad -- flags pfdbe 
 end
 
 fn MmWriteFault { pteaddr vaddr process -- signal }
-	// COW or dirty fault. lets find out which one
+	// COW, dirty fault, or segfault. lets find out which one
 
 	0 signal!
 

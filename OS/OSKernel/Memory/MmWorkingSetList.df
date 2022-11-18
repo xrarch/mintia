@@ -229,6 +229,14 @@ end
 fn MmWorkingSetRemap { flags startva endva process -- }
 	// update all of the mapped PTEs in the process to have the new flags.
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+		ipl@ KeIPLLower
+		return
+	end
+
 	auto wsli
 	0 wsli!
 
@@ -244,6 +252,7 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMaximumIndex + @ maxi!
 
 	if (maxi@ -1 ==)
+		ipl@ KeIPLLower
 		return
 	end
 
@@ -303,10 +312,20 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 		4 wsleptr +=
 		1 wsli +=
 	end
+
+	ipl@ KeIPLLower
 end
 
 fn MmWorkingSetTrimRange { startva endva process -- }
 	// trim any entries between startva and endva out of the working set.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+		ipl@ KeIPLLower
+		return
+	end
 
 	auto wsli
 	0 wsli!
@@ -323,11 +342,13 @@ fn MmWorkingSetTrimRange { startva endva process -- }
 	phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ maxi!
 
 	if (maxi@ -1 ==)
+		ipl@ KeIPLLower
 		return
 	end
 
 	while (wsli@ maxi@ <=)
 		if (phdr@ MmProcessHeader_WorkingSetSize + @ ~~)
+			ipl@ KeIPLLower
 			return
 		end
 
@@ -351,6 +372,8 @@ fn MmWorkingSetTrimRange { startva endva process -- }
 		4 wsleptr +=
 		1 wsli +=
 	end
+
+	ipl@ KeIPLLower
 end
 
 fn MmWorkingSetEntryInsert { vaddr wsleptr process -- }
@@ -850,7 +873,7 @@ fn MmManageWorkingSets { -- success }
 
 			IPLDPC KeIPLRaise ipl!
 
-			if (process@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ==)
+			if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
 				ipl@ KeIPLLower
 			end elseif (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
 				auto trimmed

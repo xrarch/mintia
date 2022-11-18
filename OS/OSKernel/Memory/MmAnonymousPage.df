@@ -395,6 +395,8 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			return
 		end
 
+		capturedpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+
 		PAGESHIFT phyaddr <<=
 
 		pfdbe@ MmEvictablePageStartIO
@@ -419,23 +421,30 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		pfdbe@ MmEvictablePageSatisfy
 
 		if (ok@ ~~)
-			// check that the PTE didn't change to something else
+			// check that the PTE didn't get deleted.
 
 			if (pteaddr@@ phyaddr@ PTE_TRANSITION | ~=)
+				// it got deleted. do NOT delete the pfdbe since it was
+				// deleted already.
+
 				STATUS_REFAULT ok!
 			end
 		end elseif (pteaddr@@ phyaddr@ PTE_TRANSITION | ==)
-			// the PTE didn't change, but there was an error, so reset it
+			// the PTE didn't get deleted, but there was an error, so reset.
+			// delete the pfdbe since that hasn't been done.
+
+			// prevent the swap page from being deleted.
+			SWAPPTE_DEMANDZERO pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+
+			IPLDPC // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
 
 			capturedpte@ pteaddr@!
 		end
 
 		if (ok@)
 			pfdbe@ MmEvictablePageDereference drop
-
-			IPLDPC // ipl
-			pfdbe@ // pfdbe
-			MmAnonymousPageDelete
 
 			return
 		end
@@ -445,8 +454,6 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		end
 
 		1 MmPageInCount +=
-
-		capturedpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb

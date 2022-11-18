@@ -2,21 +2,10 @@ extern MmSectionObjectDelete { object -- }
 
 struct MmSection
 	4 PageProtection // processes may only map with protections that are a subset of this
-
 	4 AnonSize
-	4 AnonPrototypePageTable
-
 	4 NoCommit
-
 	4 QuotaBlock
-
-	4 Mutex
-
-	KeMutex_SIZEOF PrototypePageTableMutex
 endstruct
-
-extern MmSectionPPTLock { sectionobject -- ok }
-extern MmSectionPPTUnlock { sectionobject -- }
 
 extern MmSectionCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
 extern MmSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }

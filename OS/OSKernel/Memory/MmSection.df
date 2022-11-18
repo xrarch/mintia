@@ -24,8 +24,6 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-const MMSECTIONMULTILEVELTHRESHOLD 0x200000
-
 fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	fnsection "PAGE$text"
 
@@ -52,59 +50,12 @@ fn (ObTypeDeleteFunction) MmSectionObjectDelete { object -- }
 	// walk the prototype page tables and free all pages, in swap or in
 	// RAM. then free the prototype page tables.
 
-	auto multilevel
-	anonsize@ MMSECTIONMULTILEVELTHRESHOLD >= multilevel!
+	auto count
+	anonsize@ PAGESHIFT >> count!
 
 	auto ppt
-	object@ MmSection_AnonPrototypePageTable + @ ppt!
+	object@ MmSection_SIZEOF + ppt!
 
-	auto ipl
-
-	if (ppt@)
-		auto ppte
-
-		auto count
-
-		auto rs
-
-		if (multilevel@)
-			PAGESIZE 2 >> count!
-
-			// iterate top level table
-			while (count@)
-				auto ppde
-				ppt@@ ppde!
-
-				if (ppde@)
-					ppde@ // ppt
-					PAGESIZE 2 >> // count
-					MmSectionDeletePPT
-
-					ppde@ MmFree
-				end
-
-				4 ppt +=
-				1 count -=
-			end
-		end else
-			ppt@ // ppt
-			anonsize@ PAGESHIFT >> // count
-			MmSectionDeletePPT
-		end
-
-		object@ MmSection_AnonPrototypePageTable + @ MmFree
-	end
-
-	anonsize@ // charge
-	quotablock@ // quota
-	MmQuotaBlockUnchargeVM
-
-	quotablock@ MmQuotaBlockDereference
-
-	object@ MmSection_Mutex + @ MmFree
-end
-
-fn MmSectionDeletePPT { ppt count -- }
 	while (count@)
 		0 // deletepte
 		ppt@ // pteaddr
@@ -115,32 +66,12 @@ fn MmSectionDeletePPT { ppt count -- }
 		4 ppt +=
 		1 count -=
 	end
-end
 
-fn MmSectionPPTLock { sectionobject -- ok }
-	fnsection "PAGE$text"
+	anonsize@ // charge
+	quotablock@ // quota
+	MmQuotaBlockUnchargeVM
 
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	sectionobject@ MmSection_Mutex + @ // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmSectionPPTTryLock { sectionobject -- ok }
-	KERNELMODE // waitmode
-	0 // alertable
-	0 // timeout
-	sectionobject@ MmSection_Mutex + @ // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmSectionPPTUnlock { sectionobject -- }
-	fnsection "PAGE$text"
-
-	0 // abandon
-	sectionobject@ MmSection_Mutex + @ // mutex
-	KeMutexRelease drop
+	quotablock@ MmQuotaBlockDereference
 end
 
 fn MmSectionCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
@@ -173,14 +104,15 @@ fn MmSectionCreateObject { pageprotection anonsize permissions name -- sectionob
 		end
 	end
 
-	// no quotabias -- PPT size is limited by VM quota already.
+	auto pptsize
+	anonsize@ PAGESHIFT >> 4 * pptsize!
 
 	name@ // name
 	0 // flags
 	permissions@ // permissions
-	KeMutex_SIZEOF // npquotabias
+	0 // npquotabias
 	0 // pquotabias
-	MmSection_SIZEOF // bodysize
+	MmSection_SIZEOF pptsize@ + // bodysize
 	MmSectionObjectType@ // type
 	ObObjectCreate ok! sectionobject!
 
@@ -190,28 +122,13 @@ fn MmSectionCreateObject { pageprotection anonsize permissions name -- sectionob
 
 	pageprotection@ sectionobject@ MmSection_PageProtection + !
 	anonsize@ sectionobject@ MmSection_AnonSize + !
-	0 sectionobject@ MmSection_AnonPrototypePageTable + !
 	0 sectionobject@ MmSection_NoCommit + !
 	0 sectionobject@ MmSection_QuotaBlock + !
 
-	auto mutex
-	KeMutex_SIZEOF // bytes
-	'SeMu' // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! mutex!
-
-	if (ok@)
-		sectionobject@ ObObjectDeallocate
-
-		return
-	end
-
-	"MmSectionPrototypePageTableMutex" // name
-	KERNELMODE // mode
-	mutex@ // mutex
-	KeMutexInitialize
-
-	mutex@ sectionobject@ MmSection_Mutex + !
+	sectionobject@ MmSection_SIZEOF + // ptr
+	pptsize@ // sz
+	0 // word
+	memset
 
 	anonsize@ // charge
 	quotablock@ // quotablock
@@ -219,8 +136,6 @@ fn MmSectionCreateObject { pageprotection anonsize permissions name -- sectionob
 
 	if (ok@)
 		sectionobject@ ObObjectDeallocate
-
-		mutex@ MmFree
 
 		return
 	end
@@ -261,93 +176,23 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 	// get specified page frame from section. will read it in if in swap, or
 	// demand zero if non-existent, or just return if resident.
 
-	if (DEBUGCHECKS)
-		if (sectionobject@ MmSection_AnonSize + @ ~~)
-			"MmSectionPageGet: anonsize==0\n" KeCrash
-		end
-	end
-
-	sectionobject@ MmSectionPPTLock ok!
-
-	if (ok@)
-		return
-	end
-
 	auto anonsize
 	sectionobject@ MmSection_AnonSize + @ anonsize!
 
 	if (DEBUGCHECKS)
+		if (anonsize@ ~~)
+			"MmSectionPageGet: anonsize==0\n" KeCrash
+		end
+
 		if (sectionoffset@ anonsize@ >=)
 			"MmSectionPageGet: offset>=anonsize\n" KeCrash
 		end
 	end
-	
-	auto multilevel
-	anonsize@ MMSECTIONMULTILEVELTHRESHOLD >= multilevel!
 
 	auto ppt
-	sectionobject@ MmSection_AnonPrototypePageTable + @ ppt!
+	sectionobject@ MmSection_SIZEOF + ppt!
 
-	if (ppt@ ~~)
-		// needs to be created
-
-		if (multilevel@)
-			// nonpaged pool respects ZEROMUST when doing page-aligned allocs
-			PAGESIZE // bytes
-			'mPPT' // tag
-			ZEROMUST CANBLOCK | pri@ | // flags
-			MmAllocWithTag ok! ppt!
-
-			if (ok@)
-				sectionobject@ MmSectionPPTUnlock
-				return
-			end
-		end else
-			// create linearly
-			anonsize@ PAGESHIFT >> 2 << // bytes
-			'lPPT' // tag
-			CANBLOCK pri@ | // flags
-			MmAllocWithTag ok! ppt!
-
-			if (ok@)
-				sectionobject@ MmSectionPPTUnlock
-				return
-			end
-
-			ppt@ // ptr
-			anonsize@ PAGESHIFT >> 2 << // size
-			0 // word
-			memset
-		end
-
-		ppt@ sectionobject@ MmSection_AnonPrototypePageTable + !
-	end
-
-	if (multilevel@)
-		auto pde
-		sectionoffset@ PDSHIFT >> 2 << ppt@ + pde!
-
-		if (pde@@ ~~)
-			// nonpaged pool respects ZEROMUST when doing page-aligned allocs
-			PAGESIZE // bytes
-			'sPPT' // tag
-			ZEROMUST CANBLOCK | pri@ | // flags
-			MmAllocWithTag ok! ppt!
-
-			if (ok@)
-				sectionobject@ MmSectionPPTUnlock
-				return
-			end
-
-			ppt@ pde@!
-		end
-
-		pde@@ sectionoffset@ PAGESHIFT >> 2 << PAGEOFFSETMASK & + ppt!
-	end else
-		sectionoffset@ PAGESHIFT >> 2 << ppt +=
-	end
-
-	sectionobject@ MmSectionPPTUnlock
+	sectionoffset@ PAGESHIFT >> 2 << ppt +=
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!

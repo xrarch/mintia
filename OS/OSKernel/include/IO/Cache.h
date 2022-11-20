@@ -45,8 +45,8 @@ extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 
 extern IOCachePageModified { pfdbe -- }
 
-extern IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
-extern IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
+extern IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe ok }
+extern IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok }
 
 extern IOCachePageWrite { transfer kflags pfdbe -- ok }
 

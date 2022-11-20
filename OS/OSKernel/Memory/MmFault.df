@@ -289,6 +289,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					TRYFOREVER // pri
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
+					0 // localpteaddr
 					MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 				end else
 					-1 // dzpte
@@ -298,6 +299,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					0 // pri
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
+					0 // localpteaddr
 					MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 				end
 
@@ -321,7 +323,11 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					ptpfdbe@ process@ MmPTEDereference
 				end
 
-				if (writing@)
+				if (ok@)
+					if (ok@ STATUS_REFAULT ~=)
+						OSSIGNAL_KILL signal!
+					end
+				end elseif (writing@)
 					STATUS_REFAULT signal!
 				end
 
@@ -388,11 +394,13 @@ fn MmNormalFault { vaddr process -- signal }
 	auto vad
 	auto ok
 	auto flags
-	auto phyaddr
-	auto pfdbe
 	auto pteaddr
 	auto wsli
 	auto wsleptr
+
+	auto phyaddr
+	auto asid
+	process@ KeProcess_ASID + @ asid!
 
 	auto kernelmapping
 	process@ PsSystemProcess@ == kernelmapping!
@@ -412,8 +420,14 @@ fn MmNormalFault { vaddr process -- signal }
 		return
 	end
 
-	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
-		if (object@ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+	vad@ MmVAD_Flags + @ flags!
+
+	auto capturedfcb
+
+	if (flags@ MMVADFLAG_FILE &)
+		object@ IOFile_FileControlBlock + @ capturedfcb!
+
+		if (capturedfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
 			vaddr@ // vaddr
 			process@ // process
 			object@ // fileobject
@@ -447,12 +461,23 @@ fn MmNormalFault { vaddr process -- signal }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	process@ // process
-	MmWorkingSetEntryReserve ok! wsleptr! wsli!
+	// ensure that referencing this page won't starve the system.
 
-	ipl@ KeIPLLower
+	auto waited
+
+	if (kernelmapping@)
+		process@ // process
+		TRYFOREVER CANBLOCK | // priority
+		MmPageWait ok! waited!
+	end else
+		process@ // process
+		CANBLOCK // priority
+		MmPageWait ok! waited!
+	end
 
 	if (ok@)
+		ipl@ KeIPLLower
+
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
@@ -465,32 +490,85 @@ fn MmNormalFault { vaddr process -- signal }
 		return
 	end
 
-	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
-		process@ // process
-		object@ // fileobject
-		offset@ // offset
-		vad@ // vad
-		MmSatisfyFileFault ok! phyaddr! pfdbe! flags!
-	end else
+	if (waited@)
+		ipl@ KeIPLLower
+
+		if (kernelmapping@ ~~)
+			1 // deref
+			pteaddr@ // pteaddr
+			vaddr@ // vaddr
+			process@ // process
+			MmPTEDelete drop
+		end
+
+		STATUS_REFAULT signal!
+		return
+	end
+
+	process@ // process
+	MmWorkingSetEntryReserve ok! wsleptr! wsli!
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		if (kernelmapping@ ~~)
+			1 // deref
+			pteaddr@ // pteaddr
+			vaddr@ // vaddr
+			process@ // process
+			MmPTEDelete drop
+		end
+
+		OSSIGNAL_KILL signal!
+		return
+	end
+
+	process@ MmVADListUnlock // still at IPLDPC...
+
+	if (object@ ~~)
 		process@ // process
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
+		MmSatisfyPrivatePageFault ok! phyaddr!
+	end elseif (flags@ MMVADFLAG_FILE &)
+		process@ // process
+		capturedfcb@ // fcb
+		offset@ // offset
+		pteaddr@ // pteaddr
+		MmSatisfyFileFault ok! phyaddr!
+	end else
+		vaddr@ // vaddr
+		process@ // process
 		object@ // section
 		offset@ // offset
-		vad@ // vad
-		MmSatisfyAnonFault ok! phyaddr! pfdbe! flags!
+		pteaddr@ // pteaddr
+		MmSatisfyAnonFault ok! phyaddr!
 	end
-
-	IPLDPC KeIPLRaise ipl!
 
 	if (ok@)
 		wsli@ // wsli
 		wsleptr@ // wsleptr
 		process@ // process
 		MmWorkingSetEntryFree
+	end else
+		phyaddr@ // phyaddr
+		PTE_V // flags
+		vaddr@ // vaddr
+		pteaddr@ // pteaddr
+		asid@ // asid
+		MmPTEUpdate drop drop drop
 
-		ipl@ KeIPLLower
+		vaddr@ PAGENUMBERMASK & // vaddr
+		wsleptr@ // wsleptr
+		process@ // process
+		MmWorkingSetEntryInsert
+	end
 
+	ipl@ KeIPLLower
+
+	process@ MmVADListLock drop
+
+	if (ok@)
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
@@ -507,20 +585,6 @@ fn MmNormalFault { vaddr process -- signal }
 
 		return
 	end
-
-	phyaddr@ // phyaddr
-	flags@ // flags
-	vaddr@ // vaddr
-	pteaddr@ // pteaddr
-	process@ KeProcess_ASID + @ // asid
-	MmPTEUpdate drop drop drop
-
-	vaddr@ PAGENUMBERMASK & // vaddr
-	wsleptr@ // wsleptr
-	process@ // process
-	MmWorkingSetEntryInsert
-
-	ipl@ KeIPLLower
 end
 
 fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
@@ -581,10 +645,7 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	MmPTEUpdate drop drop drop
 end
 
-fn MmSatisfyFileFault { process fileobject offset vad -- flags pfdbe phyaddr ok }
-	auto fcb
-	fileobject@ IOFile_FileControlBlock + @ fcb!
-
+fn MmSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
 	auto kflags
 	IOKFLAG_PAGEAC kflags!
 
@@ -592,22 +653,21 @@ fn MmSatisfyFileFault { process fileobject offset vad -- flags pfdbe phyaddr ok 
 		IOKFLAG_SWAPIN kflags |=
 	end
 
+	pteaddr@ // localpteaddr
 	0 // flags
 	kflags@ // kflags
 	offset@ PAGENUMBERMASK & // offset
 	fcb@ // fcb
-	IOCachePageRead ok! pfdbe! phyaddr!
+	IOCachePageRead ok! drop phyaddr!
 
 	if (ok@)
 		return
 	end
 
 	IDENTITYSPACEMASK phyaddr &=
-
-	PTE_V flags!
 end
 
-fn MmSatisfyAnonFault { process vaddr pteaddr section offset vad -- flags pfdbe phyaddr ok }
+fn MmSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 	auto pri
 	0 pri!
 
@@ -615,57 +675,41 @@ fn MmSatisfyAnonFault { process vaddr pteaddr section offset vad -- flags pfdbe 
 		TRYFOREVER pri!
 	end
 
-	if (section@)
-		pri@ // pri
-		offset@ // sectionoffset
-		section@ // sectionobject
-		MmSectionPageGet ok! pfdbe! phyaddr!
+	pteaddr@ // localpteaddr
+	pri@ // pri
+	offset@ // sectionoffset
+	section@ // sectionobject
+	MmSectionPageGet ok! drop phyaddr!
 
-		if (ok@)
-			return
-		end
-	end else
-		// private page
+	if (ok@)
+		return
+	end
+end
 
-		pteaddr@ // pte
-		ZEROMUST pri@ | // pri
-		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+fn MmSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
+	auto waited
+	process@ // process
+	CANBLOCK // priority
+	MmPageWait ok! waited!
 
-		if (ok@)
-			return
-		end
-
-		auto rs
-		HALCPUInterruptDisable rs!
-		1 MmSoftPageFaultCount +=
-		rs@ HALCPUInterruptRestore
-
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-		process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
-		vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-
-		if (process@ PsSystemProcess@ ==)
-			PTE_TLBHACK pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
-		end
-
-		PAGESHIFT phyaddr <<=
+	if (ok@)
+		return
 	end
 
-	PTE_V flags!
+	if (waited@)
+		STATUS_REFAULT ok!
+		return
+	end
 
-#ifdef DIRTY_BIT_CAUSES_FAULT
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-		if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
-			PTE_W flags |=
-		end
-	end
-#else
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
-		PTE_W flags |=
-	end
-#endif
+	SWAPPTE_DEMANDZERO // dzpte
+	MMEVICTFLAG_PRIVATE // evictflag
+	0 // refpfdbe
+	process@ // process
+	0 // pri
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	0 // localpteaddr
+	MmAnonymousPageReferenceByPTE ok! phyaddr! drop
 end
 
 fn MmWriteFault { pteaddr vaddr process -- signal }

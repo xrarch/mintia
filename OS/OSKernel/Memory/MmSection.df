@@ -172,9 +172,10 @@ fn MmSectionCreate { pageprotection anonsize permissions name -- sectionhandle o
 	end
 end
 
-fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
+fn MmSectionPageGet { localpteaddr pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 	// get specified page frame from section. will read it in if in swap, or
 	// demand zero if non-existent, or just return if resident.
+	// assumes the caller did an MmPageWait already.
 
 	auto anonsize
 	sectionobject@ MmSection_AnonSize + @ anonsize!
@@ -187,26 +188,16 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 		if (sectionoffset@ anonsize@ >=)
 			"MmSectionPageGet: offset>=anonsize\n" KeCrash
 		end
+
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmSectionPageGet: IPL != IPLDPC\n" KeCrash
+		end
 	end
 
 	auto ppt
 	sectionobject@ MmSection_SIZEOF + ppt!
 
 	sectionoffset@ PAGESHIFT >> 2 << ppt +=
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	// ensure that referencing this page won't starve the system.
-
-	0 // process
-	pri@ CANBLOCK | // priority
-	MmPageWait ok! drop
-
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
 
 	0 // dzpte
 	0 // evictflag
@@ -215,7 +206,6 @@ fn MmSectionPageGet { pri sectionoffset sectionobject -- phyaddr pfdbe ok }
 	pri@ // pri
 	0 // vaddr
 	ppt@ // pteaddr
+	localpteaddr@ // localpteaddr
 	MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
-
-	ipl@ KeIPLLower
 end

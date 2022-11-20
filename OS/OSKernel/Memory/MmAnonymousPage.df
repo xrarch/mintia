@@ -253,9 +253,26 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 
 				capturedpte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-				ipl@ // ipl
-				pfdbe@ // pfdbe
-				MmAnonymousPageDelete
+				if (process@)
+					// this page may actually be a shared page currently
+					// undergoing page-in, in which case we do not want to
+					// delete that page, or in fact delete the PTE, since the
+					// former isn't our responsibility and the latter will be
+					// done by the faulting thread when it realizes this PTE
+					// was unmapped while it was blocked.
+
+					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
+						ipl@ // ipl
+						pfdbe@ // pfdbe
+						MmAnonymousPageDelete
+					end else
+						0 deletepte!
+					end
+				end else
+					ipl@ // ipl
+					pfdbe@ // pfdbe
+					MmAnonymousPageDelete
+				end
 			end elseif (DEBUGCHECKS)
 				capturedpte@ "MmAnonymousPageDeleteByPTE: strange PTE %08x\n" KeCrash
 			end
@@ -275,7 +292,7 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 	end
 end
 
-fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr -- pfdbe phyaddr ok }
+fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr localpteaddr -- pfdbe phyaddr ok }
 	// assumes caller already did a MmPageWait and determined that the PTE is
 	// not valid if it wants to do its own processing in that case.
 
@@ -310,9 +327,7 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		pfdbe@ MmEvictablePageReference drop
 
-		if (process@)
-			1 MmSoftPageFaultCount +=
-		end
+		1 MmSoftPageFaultCount +=
 	end elseif (capturedpte@ dzpte@ ==)
 		// demand-zero PTE.
 
@@ -358,20 +373,9 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			pfdbe@ // pfdbe
 			MmEvictablePageWait ok!
 
-			if (ok@ ~~)
-				auto chkphyaddr
-				pteaddr@ MmPTEInterpret ok! drop chkphyaddr!
-
-				if (ok@)
-					STATUS_REFAULT ok!
-				end elseif (chkphyaddr@ phyaddr@ ~=)
-					STATUS_REFAULT ok!
-				end
-			end
+			pfdbe@ MmEvictablePageDereference drop
 
 			if (ok@)
-				pfdbe@ MmEvictablePageDereference drop
-
 				return
 			end
 
@@ -386,10 +390,6 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			pteaddr@ // pteaddr
 			asid@ // asid
 			MmPTEUpdate drop drop drop
-		end
-
-		if (process@)
-			1 MmSoftPageFaultCount +=
 		end
 	end elseif (capturedpte@ PTE_INSWAP &)
 		// page was written to swap and then evicted. we are responsible
@@ -419,6 +419,13 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		transitionpte@ pteaddr@!
 
+		auto capturedlocalpte
+
+		if (localpteaddr@)
+			localpteaddr@@ capturedlocalpte!
+			transitionpte@ localpteaddr@!
+		end
+
 		IPLLOW KeIPLLower
 
 		auto kflags
@@ -446,6 +453,12 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 				STATUS_REFAULT ok!
 			end
+
+			if (localpteaddr@)
+				if (localpteaddr@@ transitionpte@ ~=)
+					STATUS_REFAULT ok!
+				end
+			end
 		end elseif (pteaddr@@ transitionpte@ ==)
 			// the PTE didn't get deleted, but there was an error, so reset.
 			// delete the pfdbe since that hasn't been done.
@@ -455,6 +468,12 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 			// restore the old PTE.
 			capturedpte@ pteaddr@!
+
+			if (localpteaddr@)
+				if (localpteaddr@@ transitionpte@ ==)
+					capturedlocalpte@ pteaddr@!
+				end
+			end
 
 			IPLDPC // ipl
 			pfdbe@ // pfdbe
@@ -467,10 +486,7 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			return
 		end
 
-		if (process@)
-			1 MmHardPageFaultCount +=
-		end
-
+		1 MmHardPageFaultCount +=
 		1 MmPageInCount +=
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &

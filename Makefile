@@ -54,6 +54,8 @@ KERNELMODULES := BootDrivers/AisixFS \
 
 COMMANDS := $(wildcard OS/Commands/*)
 
+PLATFORMS := LIMNstation fox32
+
 include $(PLATFORM).mk
 
 export SYSCALLGEN := $(SDK)/gensyscalls.sh $(ARCHITECTURE)
@@ -141,6 +143,12 @@ $(BUILDROOT)/$(DRIVERROOT):
 
 $(BUILDROOT)/$(BINROOT):
 	mkdir -p $(BUILDROOT)/$(BINROOT)
+
+cleanupall:
+	for platform in $(PLATFORMS); do \
+		make cleanup PLATFORM=$$platform; \
+		make cleanup PLATFORM=$$platform DEBUGCHECKS=1; \
+	done
 
 cleanup:
 	rm -f $(DISTIMAGE)

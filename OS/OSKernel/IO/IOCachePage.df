@@ -32,7 +32,9 @@
 var IOCachePagesUsed 0
 public IOCachePagesUsed
 
-fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
+fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe ok }
+	// if localpteaddr is set, we must enter and leave at IPLDPC.
+
 	if (DEBUGCHECKS)
 		if (offset@ PAGEOFFSETMASK &)
 			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
@@ -59,16 +61,19 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 	kflags@ MmKflagToPriority pri |=
 
 	auto ipl
-	IPLDPC KeIPLRaise ipl!
 
-	0 // process
-	pri@ // priority
-	MmPageWait ok! drop
+	if (localpteaddr@ ~~)
+		IPLDPC KeIPLRaise ipl!
 
-	if (ok@)
-		ipl@ KeIPLLower
+		0 // process
+		pri@ // priority
+		MmPageWait ok! drop
 
-		return
+		if (ok@)
+			ipl@ KeIPLLower
+
+			return
+		end
 	end
 
 	auto lastnode
@@ -89,6 +94,8 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 
 		while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
 			MMEVICTFLAG_VALID MMEVICTFLAG_IOINPROGRESS | & MMEVICTFLAG_IOINPROGRESS ==)
+			// this page is in transition. wait for the I/O to complete.
+
 			// XXX there was a race condition here where when a page read
 			// failed and left the page invalid but satisfied, the wait here
 			// would be satisfied but then it wouldn't set the IOINPROGRESS
@@ -99,7 +106,10 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 
 			if (ok@)
 				pfdbe@ MmEvictablePageDereference drop
-				break
+			end elseif (localpteaddr@)
+				pfdbe@ MmEvictablePageDereference drop
+				STATUS_REFAULT ok!
+				return
 			end
 		end
 
@@ -111,7 +121,9 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 			end
 		end
 
-		ipl@ KeIPLLower
+		if (localpteaddr@ ~~)
+			ipl@ KeIPLLower
+		end
 
 		return
 	end
@@ -149,7 +161,9 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 	end
 
 	if (ok@)
-		ipl@ KeIPLLower
+		if (localpteaddr@ ~~)
+			ipl@ KeIPLLower
+		end
 
 		if (pri@ TRYFOREVER &)
 			// we needed this page for a swapout, system detonates.
@@ -171,7 +185,9 @@ fn IOCachePageGet { iointent kflags offset fcb -- pageframe pfdbe ok }
 	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
 	ExSplayTreeInsert
 
-	ipl@ KeIPLLower
+	if (localpteaddr@ ~~)
+		ipl@ KeIPLLower
+	end
 
 	// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 
@@ -457,7 +473,9 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 	ipl@ KeIPLLower
 end
 
-fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
+fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok }
+	// if localpteaddr is set, we must enter and leave at IPLDPC.
+
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
@@ -467,6 +485,7 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		end
 	end
 
+	localpteaddr@ // localpteaddr
 	1 // iointent
 	kflags@ // kflags
 	offset@ // offset
@@ -502,6 +521,24 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 		1 MmPageInCount +=
 
 		rs@ HALCPUInterruptRestore
+
+		auto capturedpte
+		auto transitionpte
+
+		if (localpteaddr@)
+			localpteaddr@@ capturedpte!
+
+			if (kflags@ IOKFLAG_SWAPIN &)
+				// this is a kernel mapping
+				pageframe@ IDENTITYSPACEMASK & PTE_TRANSITION | PTE_TLBHACK | transitionpte!
+			end else
+				pageframe@ IDENTITYSPACEMASK & PTE_TRANSITION | transitionpte!
+			end
+
+			transitionpte@ localpteaddr@!
+
+			IPLLOW KeIPLLower
+		end
 
 		// perform the read operation
 
@@ -550,42 +587,48 @@ fn IOCachePageRead { flags kflags offset fcb -- pageframe pfdbe ok }
 			KeThreadWaitForObject drop
 		end
 
-		if (ok@)
-			// read failed
-
-			IPLDPC KeIPLRaise ipl!
-			pfdbe@ MmEvictablePageSatisfy
-			ipl@ KeIPLLower
-
-			pfdbe@ MmEvictablePageDereference drop
-
-			return
+		if (ok@ ~~)
+			mdl@ MmMDLHeader_Status + @ ok!
 		end
 
-		mdl@ MmMDLHeader_Status + @ ok!
+		IPLDPC KeIPLRaise ipl!
+
+		pfdbe@ MmEvictablePageSatisfy
 
 		if (ok@)
 			// read failed
 
-			IPLDPC KeIPLRaise ipl!
-			pfdbe@ MmEvictablePageSatisfy
-			ipl@ KeIPLLower
+			if (localpteaddr@)
+				if (localpteaddr@@ transitionpte@ ==)
+					// restore old PTE
+					capturedpte@ localpteaddr@!
+				end
+			end else
+				ipl@ KeIPLLower
+			end
 
 			pfdbe@ MmEvictablePageDereference drop
 
 			return
+		end elseif (localpteaddr@)
+			if (localpteaddr@@ transitionpte@ ~=)
+				// PTE was deleted.
+				STATUS_REFAULT ok!
+			end
 		end
 
 		// read succeeded, page is now valid
 
-		IPLDPC KeIPLRaise ipl!
-
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-		pfdbe@ MmEvictablePageSatisfy
+		if (ok@)
+			pfdbe@ MmEvictablePageDereference drop
+		end
 
-		ipl@ KeIPLLower
+		if (localpteaddr@ ~~)
+			ipl@ KeIPLLower
+		end
 	end elseif (kflags@ IOKFLAG_PAGEAC &)
 		HALCPUInterruptDisable rs!
 		1 MmSoftPageFaultCount +=

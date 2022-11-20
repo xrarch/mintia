@@ -292,6 +292,10 @@ fn IOFileControlBlockUnlock { fcb -- }
 	fcb@ IOFileControlBlock_RwLock + ExRwLockRelease
 end
 
+fn IOFileControlBlockIsPinned { fcb -- pinned }
+	fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_LOCKEDMETADATA & pinned!
+end
+
 fn IOFileControlBlockDeleteLastReference { fcb -- }
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -403,6 +407,34 @@ fn IOFileControlBlockDereference { fcb -- oldcount }
 	end
 
 	ipl@ KeIPLLower
+end
+
+fn IOFileControlBlockPinMetadata { fcb -- ok }
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_LOCKEDMETADATA &)
+		// already pinned.
+
+		fcb@ IOFileControlBlockUnlock
+
+		return
+	end
+
+	fcb@ // fcb
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_PinMetadata + @ IODispatchPinMetadataFunction ok!
+
+	if (ok@ ~~)
+		auto rs
+		HALCPUInterruptDisable rs!
+		IOFCBFLAG_LOCKEDMETADATA fcb@ IOFileControlBlock_Flags + |=
+		rs@ HALCPUInterruptRestore
+	end
+
+	fcb@ IOFileControlBlockUnlock
 end
 
 fn IOFileControlBlockRemove { fcb -- }

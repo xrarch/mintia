@@ -49,9 +49,9 @@ endstruct
 const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_PRIVATE    16
-const MMEVICTFLAG_WORKINGSET 32 // indicates that a page should be considered
-                                // for working set accounting when inserted or
-                                // removed from an evictable list.
+const MMEVICTFLAG_WORKINGSET 32 // indicates that a page has been pinned by
+                                // the I/O system, usually as a result of
+                                // being part of the swapfile's metadata.
 const MMEVICTFLAG_VALID      64 // file cache
 const MMEVICTFLAG_PAGETABLE  64 // page table (reused bit from filecache
                                 // because that bit will NEVER be on in an

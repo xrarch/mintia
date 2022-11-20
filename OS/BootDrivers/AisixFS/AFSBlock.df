@@ -358,7 +358,7 @@ fn AFSBlockDeallocateChain { first blkno mount -- }
 	mount@ AFSBlockBitmapUnlock
 end
 
-fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
+fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok }
 	mount@ AFSBlockBitmapLockUnalertable
 
 	auto afsdata
@@ -407,6 +407,8 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 
 	// if we fail and need to undo the allocation chain we already did,
 	// does AFSBlockDeallocateChain need to write back a 0xFFFFFFFF or not?
+	// we decide that here.
+
 	if (lastblkno@ -1 ==)
 		0 first!
 	end else
@@ -483,6 +485,11 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 			blkno@ afsdata@ AFSData_FreeBlockHint + !
 		end
 
+		if (pintable@)
+			blkno@ pintable@!
+			4 pintable +=
+		end
+
 		if (fatpfdbe@)
 			blkno@ fatdata@ lastblkno@ 2 << AFSBLOCKOFFMASK & + !
 		end else
@@ -545,6 +552,62 @@ fn AFSBlockAllocateChain { blocks lastblkno zero mount -- startblkno ok }
 	end
 end
 
+fn AFSPinChain { lookuptable blkno mount -- }
+	// pin a FAT chain in memory.
+
+	auto fatblkno
+	0 fatblkno!
+
+	auto curfatblkno
+	-1 curfatblkno!
+
+	auto fatpfdbe
+	0 fatpfdbe!
+
+	auto ok
+
+	auto off
+
+	auto fatdata
+
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	while (blkno@ 0xFFFFFFFF ~=)
+		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+		blkno@ 2 << AFSBLOCKOFFMASK & off!
+
+		if (fatblkno@ curfatblkno@ ~=)
+			// must read in a new FAT block
+
+			if (fatpfdbe@)
+				fatpfdbe@ MmEvictablePageDereference drop
+			end
+
+			0 // flags
+			IOKFLAG_URGENT // kflags
+			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
+			mount@ // mount
+			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+
+			if (ok@)
+				ok@ "AFSPinChain: failed to read FAT block (%i)\n" KeCrash
+			end
+
+			fatblkno@ curfatblkno!
+		end
+
+		blkno@ lookuptable@!
+		4 lookuptable +=
+
+		fatdata@ off@ + @ blkno!
+	end
+
+	if (fatpfdbe@)
+		fatpfdbe@ MmEvictablePageDereference drop
+	end
+end
+
 fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	// convert a block offset within an FCB to an absolute disk block number.
 
@@ -578,6 +641,16 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	HALCPUInterruptDisable rs!
 
 	auto lastlookup
+	fcbdata@ AFSFCBData_PinnedFATLookupTable + @ lastlookup!
+
+	if (lastlookup@)
+		blkoff@ 4 * lastlookup@ + @ blkno!
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
 	fcbdata@ AFSFCBData_LastFATLinkBlkOff + @ lastlookup!
 
 	auto walkcount
@@ -619,7 +692,7 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn AFSBlockTruncate { newblocks oldblocks zero flags fcb -- ok }
+fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
 
@@ -705,6 +778,8 @@ fn AFSBlockTruncate { newblocks oldblocks zero flags fcb -- ok }
 		fcbdata@ AFSFCBData_FirstFATLink + @ fcbdata@ AFSFCBData_LastFATLinkValue + !
 	end else
 		auto startblock
+
+		pintable@ // pintable
 		newblocks@ oldblocks@ - // blocks
 		blkno@ // lastblock
 		zero@ // zero

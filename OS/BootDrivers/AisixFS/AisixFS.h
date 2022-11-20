@@ -60,6 +60,8 @@ struct AFSFCBData
 	4 GID
 	4 Permissions
 	4 IParent
+	4 PinnedFATLookupTable
+	4 PinnedFATLookupTableSize
 
 	4 LastFATLinkBlkOff
 	4 LastFATLinkValue
@@ -88,6 +90,9 @@ const AFSSUPERBLOCKVERSION 0x6
 
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
+
+extern AFSFCBMetadataUnpin { fcb -- ok }
+extern AFSFCBMetadataPin { fcb -- ok }
 
 extern AFSPoke { poketype object -- }
 extern AFSSetSecurity { uid gid permissions object -- ok }
@@ -118,7 +123,9 @@ extern AFSBlockBitmapUnlock { mount -- }
 
 extern AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 extern AFSBlockMap { blkoff fcb kflags -- blkno ok }
-extern AFSBlockTruncate { newblocks oldblocks zero flags fcb -- ok }
+extern AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
+
+extern AFSPinChain { lookuptable blkno mount -- }
 
 extern AFSOpen { access fileobject -- ok }
 extern AFSClose { access fileobject -- ok }

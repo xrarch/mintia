@@ -345,6 +345,9 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			return
 		end
 
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb evictflag@ |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
 		dzpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
 
 		1 MmSoftPageFaultCount +=
@@ -362,6 +365,14 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 	end elseif (capturedpte@ PTE_TRANSITION &)
 		// page is in transition.
 		// if IO is in progress, wait for that to finish.
+
+		if (DEBUGCHECKS)
+			if (capturedpte@ PTE_KERNELSTACK &)
+				if (process@)
+					"Faulted on a transition kernel stack\n" KeCrash
+				end
+			end
+		end
 
 		capturedpte@ PAGENUMBERMASK & phyaddr!
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
@@ -395,6 +406,14 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		// page was written to swap and then evicted. we are responsible
 		// for bringing it in now.
 
+		if (DEBUGCHECKS)
+			if (capturedpte@ PTE_KERNELSTACK &)
+				if (process@)
+					"Faulted on a swapped-out kernel stack\n" KeCrash
+				end
+			end
+		end
+
 		pteaddr@ // pte
 		pri@ FREEFIRST | // pri
 		MmAnonymousPageGet ok! phyaddr! pfdbe!
@@ -402,6 +421,9 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (ok@)
 			return
 		end
+
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb evictflag@ |
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		capturedpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
 
@@ -505,16 +527,9 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 	end
 
 	if (createdpage@)
-		if (evictflag@)
-			// this is a private page or a page table
-
-			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb evictflag@ |
-			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-			if (evictflag@ MMEVICTFLAG_PRIVATE &)
-				process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
-				vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-			end
+		if (evictflag@ MMEVICTFLAG_PRIVATE &)
+			process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+			vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
 		end
 
 		if (refpfdbe@)

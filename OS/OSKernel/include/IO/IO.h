@@ -66,6 +66,7 @@ const IOFCBFLAG_DELETELASTREFERENCE 1
 const IOFCBFLAG_SYSTEMFILE          2
 const IOFCBFLAG_REUSABLEINSERTED    4
 const IOFCBFLAG_MOUNTBUSY           8
+const IOFCBFLAG_LOCKEDMETADATA      16
 
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
@@ -90,6 +91,7 @@ extern IOFileControlBlockGetType { fcb -- filetype }
 extern IOFileControlBlockGetSize { fcb -- size }
 extern IOFileControlBlockSetSize { size fcb -- }
 extern IOFileControlBlockGetCacheInfoBlock { fcb -- cacheblock }
+extern IOFileControlBlockIsPinned { fcb -- pinned }
 
 extern IOFileControlBlockSetAccessTime { time fcb -- }
 extern IOFileControlBlockSetModifyTime { time fcb -- }
@@ -114,6 +116,8 @@ extern IOFileControlBlockLockShared { fcb -- ok }
 extern IOFileControlBlockTryLock { fcb -- ok }
 extern IOFileControlBlockTryLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
+
+extern IOFileControlBlockPinMetadata { fcb -- ok }
 
 extern IOFileControlBlockFlush { fcb -- ok }
 

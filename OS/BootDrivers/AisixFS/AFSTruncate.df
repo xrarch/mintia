@@ -37,6 +37,9 @@ fn (IODispatchTruncateFunction) AFSTruncate { newsize zero flags fcb -- ok }
 	auto oldsize
 	fcb@ IOFileControlBlockGetSize oldsize!
 
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
 	auto oldblocks
 	oldsize@ AFSBLOCKOFFMASK + AFSBLOCKSHIFT >> oldblocks!
 
@@ -67,10 +70,79 @@ fn (IODispatchTruncateFunction) AFSTruncate { newsize zero flags fcb -- ok }
 		end
 	end
 
+	auto oldlookuptable
+	0 oldlookuptable!
+
+	auto newlookuptable
+	0 newlookuptable!
+
+	auto pintable
+	0 pintable!
+
+	auto newtable
+	0 newtable!
+
+	if (fcb@ IOFileControlBlockIsPinned)
+		1 newtable!
+
+		fcbdata@ AFSFCBData_PinnedFATLookupTable + @ oldlookuptable!
+
+		if (newblocks@ oldblocks@ >)
+			if (newblocks@ fcbdata@ AFSFCBData_PinnedFATLookupTableSize + @ <=)
+				// lookup table is already big enough, don't worry about it.
+				// this can be caused by a failed attempt to allocate a new
+				// table while truncating to a smaller size.
+
+				0 newtable!
+
+				0 oldlookuptable!
+				fcbdata@ AFSFCBData_PinnedFATLookupTable + @ oldblocks@ 2 << + pintable!
+			end
+		end elseif (newblocks@ ~~)
+			0 newtable!
+		end
+	end
+
+	if (newtable@)
+		newblocks@ 2 << // bytes
+		'AfPt' // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! newlookuptable!
+
+		if (ok@ ~~)
+			if (oldlookuptable@)
+				if (newblocks@ oldblocks@ >)
+					newlookuptable@ // dest
+					oldlookuptable@ // src
+					oldblocks@ 2 << // sz
+					memcpy
+
+					newlookuptable@ oldblocks@ 2 << + pintable!
+				end else
+					newlookuptable@ // dest
+					oldlookuptable@ // src
+					newblocks@ 2 << // sz
+					memcpy
+				end
+			end
+		end else
+			if (newblocks@ oldblocks@ >)
+				// this is a failure when growing.
+				return
+			end else
+				// when shrinking, just ignore and keep using the old table.
+				0 oldlookuptable!
+				0 newlookuptable!
+				0 ok!
+			end
+		end
+	end
+
 	newsize@ // size
 	fcb@ // fcb
 	IOFileControlBlockSetSize
 
+	pintable@ // lookuptable
 	newblocks@ // newblocks
 	oldblocks@ // oldblocks
 	zero@ // zero
@@ -79,11 +151,24 @@ fn (IODispatchTruncateFunction) AFSTruncate { newsize zero flags fcb -- ok }
 	AFSBlockTruncate ok!
 
 	if (ok@)
+		if (newlookuptable@)
+			newlookuptable@ MmFree
+		end
+
 		// failed to truncate blocks, reset size
 		oldsize@ // size
 		fcb@ // fcb
 		IOFileControlBlockSetSize
 	end else
+		if (newlookuptable@)
+			newlookuptable@ fcbdata@ AFSFCBData_PinnedFATLookupTable + !
+			newblocks@ fcbdata@ AFSFCBData_PinnedFATLookupTableSize + !
+		end
+
+		if (oldlookuptable@)
+			oldlookuptable@ MmFree
+		end
+
 		fcb@ AFSINodeUpdate
 	end
 end

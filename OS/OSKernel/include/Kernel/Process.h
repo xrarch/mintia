@@ -121,7 +121,6 @@ struct KeThread
 	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock
 
 	KeTimer_SIZEOF Timer
-	KeEvent_SIZEOF SuspensionEvent
 
 	4 SafeAccessAbort
 	4 SafeAccessSP

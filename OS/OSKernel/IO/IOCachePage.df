@@ -32,7 +32,7 @@
 var IOCachePagesUsed 0
 public IOCachePagesUsed
 
-fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe ok }
+fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
 	// if localpteaddr is set, we must enter and leave at IPLDPC.
 
 	if (DEBUGCHECKS)
@@ -62,7 +62,7 @@ fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe o
 
 	auto ipl
 
-	if (localpteaddr@ ~~)
+	if (process@ ~~)
 		IPLDPC KeIPLRaise ipl!
 
 		0 // process
@@ -102,11 +102,14 @@ fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe o
 			// flag because it was written as an if elseif. these kinds of
 			// subtle bugs are extremely important to be vigilant for...
 
-			pri@ pfdbe@ MmEvictablePageWait ok!
+			process@ // process
+			pri@ // pri
+			pfdbe@ // pfdbe
+			MmEvictablePageWait ok!
 
 			if (ok@)
 				pfdbe@ MmEvictablePageDereference drop
-			end elseif (localpteaddr@)
+			end elseif (process@)
 				pfdbe@ MmEvictablePageDereference drop
 				STATUS_REFAULT ok!
 				return
@@ -121,7 +124,7 @@ fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe o
 			end
 		end
 
-		if (localpteaddr@ ~~)
+		if (process@ ~~)
 			ipl@ KeIPLLower
 		end
 
@@ -161,7 +164,7 @@ fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe o
 	end
 
 	if (ok@)
-		if (localpteaddr@ ~~)
+		if (process@ ~~)
 			ipl@ KeIPLLower
 		end
 
@@ -185,7 +188,7 @@ fn IOCachePageGet { localpteaddr iointent kflags offset fcb -- pageframe pfdbe o
 	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
 	ExSplayTreeInsert
 
-	if (localpteaddr@ ~~)
+	if (process@ ~~)
 		ipl@ KeIPLLower
 	end
 
@@ -244,6 +247,7 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	0 pagecount!
 
 	while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+		0 // process
 		kflags@ MmKflagToPriority // pri
 		pfdbe@ // pfdbe
 		MmEvictablePageWait ok!
@@ -485,7 +489,17 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 		end
 	end
 
-	localpteaddr@ // localpteaddr
+	auto process
+
+	if (localpteaddr@ ~~)
+		0 process!
+	end elseif (kflags@ IOKFLAG_SWAPIN &)
+		PsSystemProcess@ process!
+	end else
+		KeProcessCurrent process!
+	end
+
+	process@ // process
 	1 // iointent
 	kflags@ // kflags
 	offset@ // offset
@@ -538,6 +552,8 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 			transitionpte@ localpteaddr@!
 
 			IPLLOW KeIPLLower
+
+			process@ MmVADListUnlock
 		end
 
 		// perform the read operation
@@ -591,38 +607,35 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 			mdl@ MmMDLHeader_Status + @ ok!
 		end
 
+		if (process@)
+			process@ MmVADListLock drop
+		end
+
 		IPLDPC KeIPLRaise ipl!
 
 		pfdbe@ MmEvictablePageSatisfy
 
-		if (ok@)
-			// read failed
+		if (ok@ ~~)
+			// read succeeded, page is now valid
+
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 			if (localpteaddr@)
-				if (localpteaddr@@ transitionpte@ ==)
-					// restore old PTE
-					capturedpte@ localpteaddr@!
+				if (localpteaddr@@ transitionpte@ ~=)
+					// PTE was deleted.
+					STATUS_REFAULT ok!
 				end
-			end else
-				ipl@ KeIPLLower
-			end
-
-			pfdbe@ MmEvictablePageDereference drop
-
-			return
-		end elseif (localpteaddr@)
-			if (localpteaddr@@ transitionpte@ ~=)
-				// PTE was deleted.
-				STATUS_REFAULT ok!
 			end
 		end
 
-		// read succeeded, page is now valid
-
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
 		if (ok@)
+			if (localpteaddr@)
+				if (localpteaddr@@ transitionpte@ ==)
+					capturedpte@ localpteaddr@!
+				end
+			end
+
 			pfdbe@ MmEvictablePageDereference drop
 		end
 

@@ -221,13 +221,19 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 				pteaddr@ // pteaddr
 				process@ KeProcess_ASID + @ // asid
 				MmPTEUpdate drop drop drop
+
+				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
+					ipl@ // ipl
+					pfdbe@ // pfdbe
+					MmAnonymousPageDelete
+				end
 			end else
 				0 pteaddr@!
-			end
 
-			ipl@ // ipl
-			pfdbe@ // pfdbe
-			MmAnonymousPageDelete
+				ipl@ // ipl
+				pfdbe@ // pfdbe
+				MmAnonymousPageDelete
+			end
 		end else
 			if (process@)
 				0 // phyaddr
@@ -302,6 +308,21 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		end
 	end
 
+	auto lockprocess
+	0 lockprocess!
+
+	if (localpteaddr@)
+		if (pri@ TRYFOREVER &)
+			PsSystemProcess@ lockprocess!
+		end else
+			KeProcessCurrent lockprocess!
+		end
+
+		if (localpteaddr@ -1 ==)
+			0 localpteaddr!
+		end
+	end
+
 	0 ok!
 
 	auto createdpage
@@ -354,7 +375,14 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		PAGESHIFT phyaddr <<=
 
-		1 createdpage!
+		if (evictflag@ MMEVICTFLAG_PRIVATE &)
+			process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+			vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+		end
+
+		if (refpfdbe@)
+			refpfdbe@ MmEvictablePageReference drop
+		end
 
 		phyaddr@ // phyaddr
 		PTE_V // flags
@@ -380,6 +408,7 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		pfdbe@ MmEvictablePageReference drop
 
 		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+			lockprocess@ // process
 			pri@ CANBLOCK | // pri
 			pfdbe@ // pfdbe
 			MmEvictablePageWait ok!
@@ -427,6 +456,15 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		capturedpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
 
+		if (evictflag@ MMEVICTFLAG_PRIVATE &)
+			process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+			vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+		end
+
+		if (refpfdbe@)
+			refpfdbe@ MmEvictablePageReference drop
+		end
+
 		PAGESHIFT phyaddr <<=
 
 		pfdbe@ MmEvictablePageStartIO
@@ -450,6 +488,10 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		IPLLOW KeIPLLower
 
+		if (lockprocess@)
+			lockprocess@ MmVADListUnlock
+		end
+
 		auto kflags
 		IOKFLAG_PAGEIN kflags!
 
@@ -461,6 +503,10 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		phyaddr@ IDENTITYSPACE | // pageframe
 		capturedpte@ // pte
 		IOSwapPageReadPTE ok!
+
+		if (lockprocess@)
+			lockprocess@ MmVADListLock drop
+		end
 
 		IPLDPC KeIPLRaise drop
 
@@ -491,18 +537,22 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			// restore the old PTE.
 			capturedpte@ pteaddr@!
 
-			if (localpteaddr@)
-				if (localpteaddr@@ transitionpte@ ==)
-					capturedlocalpte@ pteaddr@!
-				end
-			end
-
 			IPLDPC // ipl
 			pfdbe@ // pfdbe
 			MmAnonymousPageDelete
 		end
 
 		if (ok@)
+			if (localpteaddr@)
+				if (localpteaddr@@ transitionpte@ ==)
+					capturedlocalpte@ pteaddr@!
+				end
+			end
+
+			if (refpfdbe@)
+				refpfdbe@ MmEvictablePageDereference drop
+			end
+
 			pfdbe@ MmEvictablePageDereference drop
 
 			return
@@ -511,30 +561,14 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		1 MmHardPageFaultCount +=
 		1 MmPageInCount +=
 
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
 		phyaddr@ // phyaddr
 		PTE_V // flags
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
 		asid@ // asid
 		MmPTEUpdate drop drop drop
-
-		1 createdpage!
 	end elseif (DEBUGCHECKS)
 		capturedpte@ "MmAnonymousPageReference: odd PTE %x\n" Printf
-	end
-
-	if (createdpage@)
-		if (evictflag@ MMEVICTFLAG_PRIVATE &)
-			process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
-			vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-		end
-
-		if (refpfdbe@)
-			refpfdbe@ MmEvictablePageReference drop
-		end
 	end
 end
 

@@ -387,10 +387,16 @@ fn MmEvictSinglePage { -- pfdbe ok }
 	0 ok!
 end
 
-fn MmEvictablePageWait { pri pfdbe -- ok }
+fn MmEvictablePageWait { process pri pfdbe -- ok }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"MmEvictablePageWait: ipl != IPLDPC\n" KeCrash
+		end
+
+		if (process@)
+			if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
+				"MmEvictablePageWait: kill not ignored\n" KeCrash
+			end
 		end
 	end
 
@@ -409,10 +415,18 @@ fn MmEvictablePageWait { pri pfdbe -- ok }
 
 		IPLLOW KeIPLLower
 
+		if (process@)
+			process@ MmVADListUnlock
+		end
+
 		MmEvictablePageEvent_SIZEOF // bytes
 		'IOCE' // tag
 		pri@ // flags
 		MmAllocWithTag ok! eventblock!
+
+		if (process@)
+			process@ MmVADListLock drop
+		end
 
 		IPLDPC KeIPLRaise drop
 
@@ -451,11 +465,19 @@ fn MmEvictablePageWait { pri pfdbe -- ok }
 
 	IPLLOW KeIPLLower
 
+	if (process@)
+		process@ MmVADListUnlock
+	end
+
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
 	eventblock@ MmEvictablePageEvent_Event + // object
 	KeThreadWaitForObject drop
+
+	if (process@)
+		process@ MmVADListLock drop
+	end
 
 	IPLDPC KeIPLRaise drop
 

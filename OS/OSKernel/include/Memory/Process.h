@@ -20,6 +20,7 @@ struct MmProcessHeader
 	4 WorkingSetFreeListHead
 	4 WorkingSetMaximumIndex
 	4 WorkingSetReplacementIndex
+	4 WorkingSetLastReplacedVirtual
 endstruct
 
 extern MmProcessHeaderCreate { process -- phdr pfdbe ok }

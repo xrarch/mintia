@@ -10,9 +10,7 @@
 
 #include "<inc>/Kernel.h"
 
-#include "<ll>/OSDLL/OSStatus.h"
-#include "<ll>/OSDLL/OSSignal.h"
-#include "<ll>/OSDLL/OSStatistics.h"
+#include "<ll>/OSDLL/OS.h"
 
 table KeThreadPriorityQueueHeads[PRIORITIES]
 public KeThreadPriorityQueueHeads
@@ -90,7 +88,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_QueuePrev + !
 
 	0 thread@ KeThread_SwapListNext + !
-
+	0 thread@ KeThread_PendingSwapIn + !
+	1 thread@ KeThread_KernelStackCanBeSwapped + !
 	1 thread@ KeThread_KernelStackResident + !
 
 	0 thread@ KeThread_Enqueued + !
@@ -142,6 +141,12 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_UserTimeMs + !
 	0 thread@ KeThread_SystemTimeMs + !
 	0 thread@ KeThread_DPCTimeMs + !
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"KeThreadSuspensionEvent" // name
+	thread@ KeThread_SuspensionEvent +
+	KeEventInitialize
 end
 
 fn KeThreadUninitialize { thread -- }
@@ -235,7 +240,12 @@ end
 
 fn KeThreadSuspend { thread -- }
 	// XXX this would not work at all in SMP. IPI needed here.
+	// and also in like 50 other places, like TLB shootdown, etc etc
+
 	1 thread@ KeThread_Suspended + !
+
+	thread@ KeThread_SuspensionEvent + // event
+	KeEventReset drop
 end
 
 fn KeThreadResume { thread -- }
@@ -244,12 +254,9 @@ fn KeThreadResume { thread -- }
 
 	0 thread@ KeThread_Suspended + !
 
-	if (thread@ KeThread_Status + @ THREADSTATUS_SUSPENDED ==)
-		0 // waitstatus
-		0 // priboost
-		thread@ // thread
-		KeThreadWakeup drop
-	end
+	0 // priboost
+	thread@ KeThread_SuspensionEvent + // event
+	KeEventSignal
 
 	ipl@ KeIPLLower
 end
@@ -628,10 +635,13 @@ fn KeThreadReady { front thread -- }
 		// place on process's list of threads pending swapin
 
 		if (DEBUGCHECKS)
-			if (thread@ KeThread_SwapListNext + @)
-				"KeThreadReady: thread enqueued on swaplist twice\n" KeCrash
+			if (thread@ KeThread_SwapListNext + @
+				process@ KeProcess_DeferredThreadListHead + @ thread@ == ||)
+				thread@ "KeThreadReady: (1) thread %x enqueued on swaplist twice\n" KeCrash
 			end
 		end
+
+		1 thread@ KeThread_PendingSwapIn + !
 
 		process@ KeProcess_DeferredThreadListHead + @ thread@ KeThread_SwapListNext + !
 		thread@ process@ KeProcess_DeferredThreadListHead + !
@@ -656,10 +666,13 @@ fn KeThreadReady { front thread -- }
 		// place on global list of threads pending swapin
 
 		if (DEBUGCHECKS)
-			if (thread@ KeThread_SwapListNext + @)
-				"KeThreadReady: thread enqueued on swaplist twice\n" KeCrash
+			if (thread@ KeThread_SwapListNext + @
+				KeThreadSwapInListHead@ thread@ == ||)
+				thread@ "KeThreadReady: (2) thread %x enqueued on swaplist twice\n" KeCrash
 			end
 		end
+
+		1 thread@ KeThread_PendingSwapIn + !
 
 		KeThreadSwapInListHead@ thread@ KeThread_SwapListNext + !
 		thread@ KeThreadSwapInListHead!
@@ -1015,13 +1028,13 @@ fn KeThreadNextSwitch { -- }
 
 		current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
 
-		QUEUEBACK current@ KeThreadReady
+		THREADSTATUS_READY current@ QUEUEBACK KeThreadTransition
 	end elseif (cause@ THREADYIELD_PREEMPTED ==)
 		// it was preempted, place it at the front
 
 		1 current@ KeThreadQuantumDecrement drop
 
-		QUEUEFRONT current@ KeThreadReady
+		THREADSTATUS_READY current@ QUEUEFRONT KeThreadTransition
 	end else
 		cause@ "KeThreadNextSwitch: weird cause (0x%x)\n" KeCrash
 	end

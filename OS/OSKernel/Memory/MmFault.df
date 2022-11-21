@@ -59,18 +59,48 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 	if (signal@ ~~)
 		// too complex to deal with being murdered here
 		KeThreadCurrent@ KeThreadIgnoreKill drop
-		process@ MmVADListLock drop
+
+		auto refaults
+		0 refaults!
 
 		STATUS_REFAULT signal!
 
+		if (kernelmapping@ ~~)
+			process@ MmVADListLock drop
+		end
+
 		while (signal@ STATUS_REFAULT ==)
+			if (refaults@ 10 >=)
+				// throttle
+
+				if (kernelmapping@ ~~)
+					process@ MmVADListUnlock
+				end
+
+				50 // ms
+				KERNELMODE // waitmode
+				0 // alertable
+				KeThreadSleep drop
+
+				if (kernelmapping@ ~~)
+					process@ MmVADListLock drop
+				end
+
+				0 refaults!
+			end
+
+			1 refaults +=
+
 			kernelmapping@ // kernelmapping
 			writing@ // writing
 			badaddr@ // vaddr
 			MmSatisfyFault signal!
 		end
 
-		process@ MmVADListUnlock
+		if (kernelmapping@ ~~)
+			process@ MmVADListUnlock
+		end
+
 		KeThreadCurrent@ KeThreadAcceptKill drop
 	end
 
@@ -235,16 +265,14 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 			end else
 				// private page. we need to do work here
 
-				flags@ PAGENUMBERMASK & phyaddr!
-
 				auto waited
 
 				if (kernelmapping@)
-					process@ // process
+					0 // process
 					CANBLOCK TRYFOREVER | // priority
 					MmPageWait ok! waited!
 				end else
-					process@ // process
+					0 // process
 					CANBLOCK // priority
 					MmPageWait ok! waited!
 				end
@@ -278,8 +306,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					OSSIGNAL_KILL signal!
 					return
 				end
-
-				process@ MmVADListUnlock // still at IPLDPC...
 
 				if (kernelmapping@)
 					PTE_KERNEL_DEMANDZERO // dzpte
@@ -317,8 +343,6 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 				ipl@ KeIPLLower
 
-				process@ MmVADListLock drop
-
 				if (ptpfdbe@)
 					ptpfdbe@ process@ MmPTEDereference
 				end
@@ -326,6 +350,8 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				if (ok@)
 					if (ok@ STATUS_REFAULT ~=)
 						OSSIGNAL_KILL signal!
+					end else
+						STATUS_REFAULT signal!
 					end
 				end elseif (writing@)
 					STATUS_REFAULT signal!
@@ -346,6 +372,26 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 			STATUS_FAULT_ERROR signal!
 			return
 		end
+
+		// lock the VAD list now
+
+		process@ MmVADListLock drop
+
+		// double check that the PTE is still zero.
+
+		if (pteaddr@@ MmPTEIsZero ~~)
+			// it's not! oops!
+
+			if (ptpfdbe@)
+				ptpfdbe@ process@ MmPTEDereference
+			end
+
+			process@ MmVADListUnlock
+
+			STATUS_REFAULT signal!
+
+			return
+		end
 	end
 
 	// we've determined the PTE is either zero or doesn't exist, so go forth
@@ -358,6 +404,10 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	if (ptpfdbe@)
 		ptpfdbe@ process@ MmPTEDereference
+	end
+
+	if (kernelmapping@)
+		process@ MmVADListUnlock
 	end
 
 	if (signal@ ~~)
@@ -523,8 +573,6 @@ fn MmNormalFault { vaddr process -- signal }
 		return
 	end
 
-	process@ MmVADListUnlock // still at IPLDPC...
-
 	if (object@ ~~)
 		process@ // process
 		vaddr@ // vaddr
@@ -565,8 +613,6 @@ fn MmNormalFault { vaddr process -- signal }
 	end
 
 	ipl@ KeIPLLower
-
-	process@ MmVADListLock drop
 
 	if (ok@)
 		if (kernelmapping@ ~~)
@@ -687,20 +733,6 @@ fn MmSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 end
 
 fn MmSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
-	auto waited
-	process@ // process
-	CANBLOCK // priority
-	MmPageWait ok! waited!
-
-	if (ok@)
-		return
-	end
-
-	if (waited@)
-		STATUS_REFAULT ok!
-		return
-	end
-
 	SWAPPTE_DEMANDZERO // dzpte
 	MMEVICTFLAG_PRIVATE // evictflag
 	0 // refpfdbe
@@ -729,6 +761,10 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	auto pageprot
 	0 pageprot!
 
+	if (process@ PsSystemProcess@ ==)
+		process@ MmVADListLock drop
+	end
+
 	// first check if this is a private page in order to determine if we
 	// need to look up the VAD or not. private PTEs are "sticky" so we can
 	// determine this regardless of trimming, so we don't need to lock the
@@ -744,8 +780,15 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 	if (ok@)
 		// invalid
+
 		ipl@ KeIPLLower
+
+		if (process@ PsSystemProcess@ ==)
+			process@ MmVADListUnlock
+		end
+
 		STATUS_REFAULT signal!
+
 		return
 	end
 
@@ -798,7 +841,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 		if (ok@)
 			// invalid
+
 			STATUS_REFAULT signal!
+
 			break
 		end
 
@@ -832,7 +877,12 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 				ipl@ KeIPLLower
 
 				if (ok@)
+					if (process@ PsSystemProcess@ ==)
+						process@ MmVADListUnlock
+					end
+
 					OSSIGNAL_KILL signal!
+
 					return
 				end
 
@@ -877,6 +927,10 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 			1 vad@ MmVAD_COWCount + +=
 
+			if (process@ PsSystemProcess@ ==)
+				process@ MmVADListUnlock
+			end
+
 			return
 		end elseif (pageprot@ PAGEACCESS_WRITE & ~~)
 			// privilege violation
@@ -910,5 +964,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		MmAnonymousPageDelete
 	end else
 		ipl@ KeIPLLower
+	end
+
+	if (process@ PsSystemProcess@ ==)
+		process@ MmVADListUnlock
 	end
 end

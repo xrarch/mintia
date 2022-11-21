@@ -27,7 +27,7 @@
 const MMWORKINGSETTABLESIZE       (PAGESIZE MmProcessHeader_SIZEOF -)
 const MMWORKINGSETENTRIESPERTABLE (MMWORKINGSETTABLESIZE 4 /)
 
-const MMWORKINGSETINITIALENTRIES  16
+const MMWORKINGSETINITIALENTRIES  256
 const MMWORKINGSETEXTENDENTRIES   8
 
 const MMWORKINGSETENTRY_VALID 1
@@ -58,6 +58,7 @@ fn MmWorkingSetListInitialize { process -- ok }
 
 	0 phdr@ MmProcessHeader_WorkingSetReplacementIndex + !
 	0 phdr@ MmProcessHeader_WorkingSetTrimFaultCount + !
+	0 phdr@ MmProcessHeader_WorkingSetLastReplacedVirtual + !
 
 	// initialize the working set list.
 
@@ -602,6 +603,9 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 		0 hint!
 	end
 
+	auto searchcount
+	0 searchcount!
+
 	// search from the replacement index to the end of the working set for a
 	// valid entry to replace, then from the start to the replacement index.
 
@@ -623,7 +627,6 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 			return
 		end
 
-
 		phdr@ MmProcessHeader_SIZEOF + wsleptr!
 		wsli@ 2 << wsleptr +=
 
@@ -632,15 +635,28 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 		while (wsli@ endindex@ <)
 			wsleptr@@ wsle!
 
-			if (wsle@ MMWORKINGSETENTRY_VALID &)
-				// found one
-				wsli@ 1 + phdr@ MmProcessHeader_WorkingSetReplacementIndex + !
+			auto useit
+			0 useit!
 
-				return
+			if (wsle@ MMWORKINGSETENTRY_VALID &)
+				if (searchcount@ 16 >=)
+					1 useit!
+				end elseif (wsle@ PAGENUMBERMASK & phdr@ MmProcessHeader_WorkingSetLastReplacedVirtual + @ ~=)
+					1 useit!
+				end
+
+				if (useit@)
+					// found one
+					wsli@ 1 + phdr@ MmProcessHeader_WorkingSetReplacementIndex + !
+					wsle@ PAGENUMBERMASK & phdr@ MmProcessHeader_WorkingSetLastReplacedVirtual + !
+
+					return
+				end
 			end
 
 			4 wsleptr +=
 			1 wsli +=
+			1 searchcount +=
 		end
 
 		1 i +=

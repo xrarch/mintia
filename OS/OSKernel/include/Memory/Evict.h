@@ -77,7 +77,7 @@ struct MmEvictablePageEvent
 	4 References
 endstruct
 
-extern MmEvictablePageWait { pri pfdbe -- ok }
+extern MmEvictablePageWait { process pri pfdbe -- ok }
 extern MmEvictablePageSatisfy { pfdbe -- }
 extern MmEvictablePageStartIO { pfdbe -- }
 

@@ -86,8 +86,9 @@ struct KeThread
 	4 QueuePrev
 
 	4 SwapListNext
-
 	4 KernelStackResident
+	4 KernelStackCanBeSwapped
+	4 PendingSwapIn
 
 	4 Status
 
@@ -120,6 +121,7 @@ struct KeThread
 	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock
 
 	KeTimer_SIZEOF Timer
+	KeEvent_SIZEOF SuspensionEvent
 
 	4 SafeAccessAbort
 	4 SafeAccessSP

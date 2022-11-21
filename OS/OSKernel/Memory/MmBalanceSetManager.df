@@ -138,6 +138,8 @@ fn MmBalanceSetManager { -- }
 				end
 			end
 
+			MmManageWorkingSets drop
+
 			auto stackscanperiod
 
 			if (MmPhysicalCommitUsage@ MmPhysicalCommitLimit@ >)
@@ -147,8 +149,6 @@ fn MmBalanceSetManager { -- }
 				5 stackscanperiod!
 				10 MmStackAge!
 			end
-
-			MmManageWorkingSets drop
 
 			if (stackperiod@ stackscanperiod@ >=)
 				HALCPUInterruptDisable rs!
@@ -284,32 +284,36 @@ fn MmSwapOutStacks { -- }
 		if (thread@ KeThread_KernelStackResident + @)
 			if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MmStackAge@ >=)
 				if (thread@ KeThread_WaitMode + @ USERMODE ==)
-					// yeet it.
-					thread@ MmKernelStackSwapOut
+					if (thread@ KeThread_KernelStackCanBeSwapped + @)
+						0 thread@ KeThread_KernelStackResident + !
 
-					auto process
-					thread@ KeThread_Process + @ process!
+						// yeet it.
+						thread@ MmKernelStackSwapOut
 
-					1 process@ KeProcess_ResidentStackCount + -=
+						auto process
+						thread@ KeThread_Process + @ process!
 
-					if (DEBUGCHECKS)
-						if (process@ KeProcess_ResidentStackCount + @ z<)
-							"MmSwapOutStacks: underflow\n" KeCrash
-						end
-					end
+						1 process@ KeProcess_ResidentStackCount + -=
 
-					if (process@ KeProcess_ResidentStackCount + @ ~~)
 						if (DEBUGCHECKS)
-							if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
-								process@ KeProcess_MemoryState + @
-								"MmSwapOutStacks: unexpected process state %d\n" Printf
+							if (process@ KeProcess_ResidentStackCount + @ z<)
+								"MmSwapOutStacks: underflow\n" KeCrash
 							end
 						end
 
-						PROCESSSTATE_TRANSITION process@ KeProcess_MemoryState + !
+						if (process@ KeProcess_ResidentStackCount + @ ~~)
+							if (DEBUGCHECKS)
+								if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+									process@ KeProcess_MemoryState + @
+									"MmSwapOutStacks: unexpected process state %d\n" Printf
+								end
+							end
 
-						MmProcessSwapOutListHead@ process@ KeProcess_SwapListNext + !
-						process@ MmProcessSwapOutListHead!
+							PROCESSSTATE_TRANSITION process@ KeProcess_MemoryState + !
+
+							MmProcessSwapOutListHead@ process@ KeProcess_SwapListNext + !
+							process@ MmProcessSwapOutListHead!
+						end
 					end
 				end
 			end
@@ -333,10 +337,10 @@ fn MmSwapInStacks { -- }
 		thread@ KeThread_SwapListNext + @ KeThreadSwapInListHead!
 		0 thread@ KeThread_SwapListNext + !
 
-		auto process
-		thread@ KeThread_Process + @ process!
-
 		if (DEBUGCHECKS)
+			auto process
+			thread@ KeThread_Process + @ process!
+
 			if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
 				process@ "MmSwapInStacks: process %x wasn't resident\n" KeCrash
 			end
@@ -345,9 +349,13 @@ fn MmSwapInStacks { -- }
 		IPLLOW KeIPLLower
 
 		thread@ MmKernelStackSwapIn
-		QUEUEBACK thread@ KeThreadReady
 
 		IPLDPC KeIPLRaise drop
+
+		1 thread@ KeThread_KernelStackResident + !
+		0 thread@ KeThread_PendingSwapIn + !
+
+		QUEUEBACK thread@ KeThreadReady
 	end
 end
 
@@ -416,6 +424,8 @@ fn MmSwapReadyDeferred { process -- }
 		if (thread@ ~~)
 			break
 		end
+
+		0 thread@ KeThread_PendingSwapIn + !
 
 		thread@ KeThread_SwapListNext + @ process@ KeProcess_DeferredThreadListHead + !
 		0 thread@ KeThread_SwapListNext + !

@@ -38,7 +38,32 @@ externptr KeThreadTimerWake
 
 // 'context1' and 'context2' are parameters passed to the start function
 
+fn KeThreadInitializeAddToList { thread process -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto h
+	process@ KeProcess_ThreadListHead + @ h!
+
+	0 thread@ KeThread_ProcessNext + !
+	0 thread@ KeThread_ProcessPrev + !
+
+	if (h@)
+		thread@ h@ KeThread_ProcessPrev + !
+		h@ thread@ KeThread_ProcessNext + !
+	end
+
+	thread@ process@ KeProcess_ThreadListHead + !
+
+	1 process@ KeProcess_ThreadCount + +=
+	1 process@ KeProcess_ResidentStackCount + +=
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -- }
+	fnsection "PAGE$text"
+
 	thread@ KeThread_Name + name@ KETHREADNAMELEN 1 - strncpy
 
 	THREADSTATUS_INITIALIZED thread@ KeThread_Status + !
@@ -63,26 +88,9 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	// add to the process's thread list
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto h
-	process@ KeProcess_ThreadListHead + @ h!
-
-	0 thread@ KeThread_ProcessNext + !
-	0 thread@ KeThread_ProcessPrev + !
-
-	if (h@)
-		thread@ h@ KeThread_ProcessPrev + !
-		h@ thread@ KeThread_ProcessNext + !
-	end
-
-	thread@ process@ KeProcess_ThreadListHead + !
-
-	1 process@ KeProcess_ThreadCount + +=
-	1 process@ KeProcess_ResidentStackCount + +=
-
-	rs@ HALCPUInterruptRestore
+	thread@ // thread
+	process@ // process
+	KeThreadInitializeAddToList
 
 	0 thread@ KeThread_QueueNext + !
 	0 thread@ KeThread_QueuePrev + !
@@ -225,6 +233,8 @@ fn KeThreadAcceptKill { thread -- oldcount }
 end
 
 fn KeThreadTerminate { status thread -- }
+	fnsection "PAGE$text"
+
 	status@ thread@ KeThread_KilledStatus + !
 
 	OSSIGNAL_KILL // signal
@@ -233,6 +243,8 @@ fn KeThreadTerminate { status thread -- }
 end
 
 fn KeThreadSuspend { thread -- }
+	fnsection "PAGE$text"
+
 	// XXX this would not work at all in SMP. IPI needed here.
 	// and also in like 50 other places, like TLB shootdown, etc etc
 

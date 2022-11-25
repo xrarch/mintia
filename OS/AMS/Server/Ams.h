@@ -42,4 +42,13 @@ extern AmsDbGroupGetProperty { property groupptr -- value ok }
 extern AmsDbGroupGetIterator { -- iterator ok }
 extern AmsDbGroupNext { iterator -- groupptr nextiterator ok }
 
+extern AmsGroupDelete { gid processhandle -- ok }
+extern AmsUserDelete { uid processhandle -- ok }
+
+extern AmsGroupCreate { info processhandle -- gid ok }
+extern AmsUserCreate { password info processhandle -- uid ok }
+
+extern AmsGroupEdit { info gid processhandle -- ok }
+extern AmsUserEdit { info uid processhandle -- ok }
+
 externptr AmsMemoryInformation

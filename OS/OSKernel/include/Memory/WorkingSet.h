@@ -4,6 +4,8 @@ extern MmWorkingSetListFree { process -- }
 extern MmWorkingSetTrim { dire pages process -- trimmed }
 extern MmWorkingSetTrimRange { startva endva process -- }
 
+extern MmWorkingSetSwapOut { process -- }
+
 extern MmWorkingSetPurge { process -- }
 
 extern MmWorkingSetRemap { flags startva endva process -- }

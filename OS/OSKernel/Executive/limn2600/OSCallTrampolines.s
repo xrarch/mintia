@@ -1714,6 +1714,7 @@ OSTOSCheckPermission:
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
 
 	jal  OSCheckPermission
 

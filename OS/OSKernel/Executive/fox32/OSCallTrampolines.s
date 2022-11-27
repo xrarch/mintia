@@ -2283,6 +2283,10 @@ OSTOSCheckPermission:
 	add  t0, 4 ;t1
 	mov  a0, [t0]
 
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
 	call OSCheckPermission
 
 

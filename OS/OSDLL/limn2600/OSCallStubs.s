@@ -1190,6 +1190,7 @@ OSAmIAdmin:
 OSCheckPermission:
 .global OSCheckPermission
 	mov  t1, a0
+	mov  t2, a1
 
 	li   t0, 97
 	sys  0

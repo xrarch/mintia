@@ -29,19 +29,14 @@ fn AmsCheckPassword { password upass -- ok }
 end
 
 fn AmsInternalLogon { flags password uid processhandle -- ok }
-	auto pinfo
-	OSObjectQuery_SIZEOF alloc pinfo!
+	// only the system can validate a logon since anyone else can be snooped
+	// on or malicious.
 
-	processhandle@ // handle
-	pinfo@ // query
-	OSQuery ok!
+	SYSTEMPERMISSION_SYSTEM // permission
+	processhandle@ // processhandle
+	OSCheckPermission ok!
 
 	if (ok@)
-		return
-	end
-
-	if (pinfo@ OSObjectQuery_UID + @ UID_SYSTEM ~=)
-		STATUS_FORBIDDEN_OPERATION ok!
 		return
 	end
 
@@ -77,20 +72,32 @@ fn AmsInternalLogon { flags password uid processhandle -- ok }
 end
 
 fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
-	auto pinfo
-	OSObjectQuery_SIZEOF alloc pinfo!
+	auto notadmin
 
-	processhandle@ // handle
-	pinfo@ // query
-	OSQuery ok!
+	SYSTEMPERMISSION_ADMIN // permission
+	processhandle@ // processhandle
+	OSCheckPermission notadmin!
 
-	if (ok@)
-		return
-	end
+	if (notadmin@)
+		// not admin, check if same UID at least
 
-	if (pinfo@ OSObjectQuery_UID + @ uid@ ~=)
-		if (pinfo@ OSObjectQuery_UID + @ UID_SYSTEM ~=)
+		auto pinfo
+		OSObjectQuery_SIZEOF alloc pinfo!
+
+		processhandle@ // handle
+		pinfo@ // query
+		OSQuery ok!
+
+		if (ok@)
+			return
+		end
+
+		if (pinfo@ OSObjectQuery_UID + @ uid@ ~=)
+			// not same UID; can't change password even if we have the correct
+			// old password.
+
 			STATUS_PERMISSION_DENIED ok!
+
 			return
 		end
 	end
@@ -102,7 +109,7 @@ fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 		return
 	end
 
-	if (pinfo@ OSObjectQuery_UID + @ UID_SYSTEM ~= uid@ UID_SYSTEM == ||)
+	if (notadmin@ uid@ UID_SYSTEM == ||)
 		auto upass
 		"password" // property
 		userptr@ // userptr
@@ -110,6 +117,13 @@ fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 
 		if (ok@)
 			return
+		end
+
+		if (uid@ UID_SYSTEM ~=)
+			if (upass@ "any" strcmp upass@ "none" strcmp ||)
+				STATUS_INCORRECT_PASSWORD ok!
+				return
+			end
 		end
 
 		oldpassword@ // password

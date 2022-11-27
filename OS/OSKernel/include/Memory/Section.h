@@ -3,7 +3,6 @@ extern MmSectionObjectDelete { object -- }
 struct MmSection
 	4 PageProtection // processes may only map with protections that are a subset of this
 	4 AnonSize
-	4 NoCommit
 	4 QuotaBlock
 endstruct
 

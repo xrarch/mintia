@@ -5,6 +5,10 @@ struct PsProcessActivationBlock
 	4 References
 endstruct
 
+// XXX if we ever have remote unmapping etc force the swap-in of the process
+// header then we will be able to move some more of the stuff below into there
+// instead of the process object body.
+
 struct PsProcess // contains things that may need to be accessed at all times
 	KeProcess_SIZEOF PCB
 

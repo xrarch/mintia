@@ -5,7 +5,7 @@ struct PsProcessActivationBlock
 	4 References
 endstruct
 
-struct PsProcess
+struct PsProcess // contains things that may need to be accessed at all times
 	KeProcess_SIZEOF PCB
 
 	4 GlobalListNext
@@ -32,18 +32,14 @@ struct PsProcess
 
 	4 SwappedOutTimeSec
 
-	4 ModifiedPages
-
 	4 PinnedPageCount
 
 	4 PageFaultCount
 
-	KeMutex_SIZEOF WorkingSetMutex
-
 	4 MmHeader
 endstruct
 
-struct PsProcessPaged
+struct PsProcessPaged // contains things that only need to be accessed at IPLLOW
 	4 ActivationBlock
 	4 ActivationStatus
 

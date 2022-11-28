@@ -10,7 +10,7 @@ extern MmProcessUnchargePageTables { process -- }
 extern MmThreadInitialize { thread -- ok }
 extern MmThreadUninitialize { thread -- ok }
 
-struct MmProcessHeader
+struct MmProcessHeader // contains things that only need to be accessed while process is swapped in
 	4 WorkingSetSize
 	4 WorkingSetMinimum
 	4 WorkingSetMaximum
@@ -21,7 +21,11 @@ struct MmProcessHeader
 	4 WorkingSetMaximumIndex
 	4 WorkingSetReplacementIndex
 	4 WorkingSetLastReplacedVirtual
+
+	4 ModifiedPageCount
 endstruct
+
+const MMMODIFIEDPAGETHROTTLE 20
 
 extern MmProcessHeaderCreate { process -- phdr pfdbe ok }
 extern MmProcessHeaderDestroy { process -- }

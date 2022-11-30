@@ -31,7 +31,7 @@ If it doesn't boot automatically, type this command at the firmware prompt:
 
 MINTIA should boot to the `username:` prompt.
 
-Logging in as `guest` works with any password, and the default password for `root` is `mintia`.
+Logging in as `guest` has no password, and the default password for `root` is `mintia`.
 
 ## Features
 

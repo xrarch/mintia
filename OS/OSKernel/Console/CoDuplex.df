@@ -486,8 +486,9 @@ struct CoDuplexRequest
 	4 Length
 endstruct
 
-const REQFLAG_WRITE  1
-const REQFLAG_SERVER 2
+const REQFLAG_WRITE     1
+const REQFLAG_SERVER    2
+const REQFLAG_RETURNANY 4
 
 fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 	auto req
@@ -668,12 +669,18 @@ fn CoDuplexCookedCopyClient { dest src maxdest maxsrc duplex -- bufread bytecnt 
 	end
 end
 
-fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
+fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
 	// server fcb, reading from the transmit buffer and/or client buffers.
 	// this may pend.
+
+	if (flags@ OSACCESSFLAG_RETURNANY &)
+		REQFLAG_RETURNANY flags!
+	end else
+		0 flags!
+	end
 
 	auto done
 	0 done!
@@ -834,6 +841,12 @@ fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
 			end
 		end
 
+		if (flags@ REQFLAG_RETURNANY &)
+			if (bytecnt@)
+				DONE_NORMAL done |=
+			end
+		end
+
 		if (done@ ~~)
 			if (timeout@)
 				// switch to user buffer.
@@ -857,19 +870,25 @@ fn CoDuplexServerRead { buf timeout mdl duplex -- ok }
 		bytecnt@ // lengthdone
 		buf@ bytecnt@ + // buf
 		mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
-		REQFLAG_SERVER // flags
+		REQFLAG_SERVER flags@ | // flags
 		mdl@ // mdl
 		duplex@ // duplex
 		CoDuplexEnqueueRequest
 	end
 end
 
-fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
+fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
 	// client fcb, reading from the receive buffer.
 	// this may pend.
+
+	if (flags@ OSACCESSFLAG_RETURNANY &)
+		REQFLAG_RETURNANY flags!
+	end else
+		0 flags!
+	end
 
 	auto done
 	0 done!
@@ -1054,6 +1073,12 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 			end
 		end
 
+		if (flags@ REQFLAG_RETURNANY &)
+			if (bytecnt@)
+				DONE_NORMAL done |=
+			end
+		end
+
 		if (done@ ~~)
 			if (timeout@)
 				if (duplex@ CoDuplex_Headless + @ ~~)
@@ -1085,7 +1110,7 @@ fn CoDuplexClientRead { buf timeout mdl duplex -- ok }
 		bytecnt@ // lengthdone
 		buf@ bytecnt@ + // buf
 		mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
-		0 // flags
+		flags@ // flags
 		mdl@ // mdl
 		duplex@ // duplex
 		CoDuplexEnqueueRequest
@@ -1240,7 +1265,8 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 		bufwritten@ header@ CoDuplexBuffer_UserBufferIndex + +=
 
 		if (header@ CoDuplexBuffer_UserBufferIndex + @
-			header@ CoDuplexBuffer_UserBufferLength + @ ==)
+			header@ CoDuplexBuffer_UserBufferLength + @ ==
+			req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY & ||)
 
 			// complete the server MDL.
 
@@ -1597,6 +1623,8 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 		if (header@ CoDuplexBuffer_UserBufferIndex + @
 			header@ CoDuplexBuffer_UserBufferLength + @ ==)
 			DONE_NORMAL clientdone |=
+		end elseif (req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY &)
+			DONE_NORMAL clientdone |=
 		end
 
 		if (clientdone@)
@@ -1888,6 +1916,8 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 			if (header@ CoDuplexBuffer_UserBufferIndex + @
 				header@ CoDuplexBuffer_UserBufferLength + @ ==)
 				DONE_NORMAL clientdone |=
+			end elseif (req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY &)
+				DONE_NORMAL clientdone |=
 			end
 
 			if (clientdone@)
@@ -2110,7 +2140,8 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 			end
 
 			if (header@ CoDuplexBuffer_UserBufferIndex + @
-				header@ CoDuplexBuffer_UserBufferLength + @ ==)
+				header@ CoDuplexBuffer_UserBufferLength + @ ==
+				req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY & ||)
 
 				// complete the server MDL.
 
@@ -2344,6 +2375,7 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		end
 
 		if (ok@ ~~)
+			flags@ // flags
 			buf@ // buf
 			timeout@ // timeout
 			mdl@ // mdl
@@ -2351,6 +2383,7 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 			CoDuplexServerRead ok!
 		end
 	end else
+		flags@ // flags
 		buf@ // buf
 		timeout@ // timeout
 		mdl@ // mdl

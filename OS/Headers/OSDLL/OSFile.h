@@ -12,7 +12,8 @@ const OSFILEFLAG_EXCLUSIVE   32
 
 const OSFILEPATHMAX        256
 
-const OSACCESSFLAG_NOREADAHEAD 2
+const OSACCESSFLAG_RETURNANY   1 // only block if theres nothing available, otherwise return whatever is there
+const OSACCESSFLAG_NOREADAHEAD 2 // avoid readahead in the IO layer
 
 const OSSEEK_SET             1
 const OSSEEK_CUR             2

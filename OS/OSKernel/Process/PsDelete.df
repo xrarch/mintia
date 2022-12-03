@@ -146,6 +146,11 @@ fn PsReaperWorker { context1 context2 -- }
 
 	IPLLOW KeIPLLower // kernel threads start in IPLDPC
 
+	// this thread reaps dead threads and dereferences them.
+	// it also is a worker thread for reaping dead objects.
+
+	auto object
+
 	while (1)
 		auto ok
 		USERMODE // waitmode
@@ -164,15 +169,37 @@ fn PsReaperWorker { context1 context2 -- }
 		IPLDPC KeIPLRaise ipl!
 
 		while (PsReaperThreadListHead@)
-			auto thread
-			PsReaperThreadListHead@ thread!
-			thread@ KeThread_QueueNext + @ PsReaperThreadListHead!
+			PsReaperThreadListHead@ object!
+			object@ KeThread_QueueNext + @ PsReaperThreadListHead!
 
-			0 thread@ KeThread_QueueNext + !
+			0 object@ KeThread_QueueNext + !
 
 			ipl@ KeIPLLower
 
-			thread@ ObObjectDereferenceByPointer drop
+			object@ ObObjectDereferenceByPointer drop
+
+			IPLDPC KeIPLRaise ipl!
+		end
+
+		while (ObReaperListHead@)
+			auto npheader
+			ObReaperListHead@ npheader!
+			npheader@ ObNonpagedHeader_PointerCount + @ ObReaperListHead!
+
+			npheader@ ObNonpagedHeader_HandleCount + @ object!
+
+			0 npheader@ ObNonpagedHeader_PointerCount + !
+			0 npheader@ ObNonpagedHeader_HandleCount + !
+
+			ipl@ KeIPLLower
+
+			object@ ObObjectFree ok!
+
+			if (DEBUGCHECKS)
+				if (ok@)
+					"PsReaperWorker: failed to free object\n" KeCrash
+				end
+			end
 
 			IPLDPC KeIPLRaise ipl!
 		end

@@ -98,7 +98,12 @@ fn ObObjectCloseProcess { handle process -- ok }
 		end
 	end
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
 	object@ ObObjectDereferenceByPointer drop
+
+	ipl@ KeIPLLower
 end
 
 fn ObObjectUncharge { object -- }
@@ -482,23 +487,11 @@ fn ObObjectReferenceByPointerCapturedHeader { npheader -- oldcount }
 end
 
 fn ObObjectReferenceByPointer { object -- oldcount }
-	auto npheader
-	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	npheader@ ObNonpagedHeader_PointerCount + @ oldcount!
-
-	oldcount@ 1 + npheader@ ObNonpagedHeader_PointerCount + !
-
-	rs@ HALCPUInterruptRestore
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ // npheader
+	ObObjectReferenceByPointerCapturedHeader oldcount!
 end
 
-fn ObObjectDereferenceByPointer { object -- oldcount }
-	auto npheader
-	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
+fn ObObjectDereferenceByPointerCapturedHeader { object npheader -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
@@ -536,13 +529,13 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 	if (oldcount@ 1 ==)
 		// just decremented the pointer count to zero. delete the object
 
-		if (DEBUGCHECKS)
-			if (object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_DirectoryObject + @)
-				"ObObjectDereferenceByPointer: object was still linked into a directory\n" KeCrash
-			end
-		end
-
 		if (KeIPLCurrentGet IPLLOW ==)
+			if (DEBUGCHECKS)
+				if (object@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ ObPagedHeader_DirectoryObject + @)
+					"ObObjectDereferenceByPointer: object was still linked into a directory\n" KeCrash
+				end
+			end
+
 			// delete immediately
 
 			// make sure to ignore weird wait effects etc due to having been
@@ -560,11 +553,39 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 
 			KeThreadCurrent@ KeThreadAcceptKill drop
 		end else
-			// can't delete objects at >=IPLAPC, queue a work item
+			// can't delete objects at >IPLLOW, queue it to the reaper
 
-			"ObObjectDereferenceByPointer: work items NYI\n" KeCrash
+			object@ // object
+			npheader@ // npheader
+			ObReaperEnqueue
 		end
 	end
+end
+
+fn ObObjectDereferenceByPointer { object -- oldcount }
+	object@ // object
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ // npheader
+	ObObjectDereferenceByPointerCapturedHeader oldcount!
+end
+
+fn ObReaperEnqueue { object npheader -- }
+	// enqueue the object to the object reaper worker.
+	// the handle and pointer counts are both known to be zero, so we can
+	// overlay them with the object pointer and the Next link respectively.
+
+	object@ npheader@ ObNonpagedHeader_HandleCount + !
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	ObReaperListHead@ npheader@ ObNonpagedHeader_PointerCount + !
+	npheader@ ObReaperListHead!
+
+	0 // priboost
+	PsReaperEvent // event
+	KeEventSignal
+
+	ipl@ KeIPLLower
 end
 
 fn ObObjectNonpagedHeader { object -- npheader }

@@ -20,30 +20,38 @@
 
 #include "<inc>/Security.h"
 
+#include "<inc>/Object.h"
+
 #include "<inc>/Process.h"
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmMDLInitialize { mode length vaddr mdl -- }
+fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> mdl@ MmMDLHeader_Pages + !
 	0 mdl@ MmMDLHeader_Flags + !
-	0 mdl@ MmMDLHeader_Process + !
-	mode@ mdl@ MmMDLHeader_Mode + !
+	0 mdl@ MmMDLHeader_Thread + !
+	mode@ mdl@ MmMDLHeader_ModeB + sb
 
 	0 mdl@ MmMDLHeader_MappedAddress + !
 
 	0 mdl@ MmMDLHeader_Status + !
-	0 mdl@ MmMDLHeader_PriorityBoost + !
+	0 mdl@ MmMDLHeader_PriorityBoostB + sb
 	0 mdl@ MmMDLHeader_Event + !
 	0 mdl@ MmMDLHeader_ParentMDL + !
-	1 mdl@ MmMDLHeader_IOCount + !
+	1 mdl@ MmMDLHeader_IOCountI + si
 
 	0 mdl@ MmMDLHeader_CompleteRoutine + !
+
+	fileobject@ mdl@ MmMDLHeader_FileObject + !
+
+	if (fileobject@)
+		fileobject@ ObObjectNonpagedHeader mdl@ MmMDLHeader_FileObjectCapturedHeader + !
+	end
 end
 
-fn MmMDLAllocate { mode length vaddr kflags -- mdl ok }
+fn MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
 	// try pretty hard not to call this since it puts IO integrity at the
 	// mercy of the memory manager.
 	//
@@ -73,7 +81,7 @@ fn MmMDLAllocate { mode length vaddr kflags -- mdl ok }
 		return
 	end
 
-	mode@ length@ vaddr@ mdl@ MmMDLInitialize
+	fileobject@ mode@ length@ vaddr@ mdl@ MmMDLInitialize
 
 	MMMDL_DELETE mdl@ MmMDLHeader_Flags + |=
 end
@@ -125,8 +133,8 @@ fn MmMDLSplit { vaddr length srcmdl destmdl -- }
 	srcmdl@ MmMDLHeader_Flags + @ MMMDL_FLAGS_NOT_TO_INHERIT ~ & destmdl@ MmMDLHeader_Flags + |=
 	MMMDL_DONTUNPIN destmdl@ MmMDLHeader_Flags + |=
 
-	srcmdl@ MmMDLHeader_Process + @ destmdl@ MmMDLHeader_Process + !
-	srcmdl@ MmMDLHeader_Mode + @ destmdl@ MmMDLHeader_Mode + !
+	srcmdl@ MmMDLHeader_Thread + @ destmdl@ MmMDLHeader_Thread + !
+	srcmdl@ MmMDLHeader_ModeB + gb destmdl@ MmMDLHeader_ModeB + sb
 
 	// reuse the mapping from the source MDL
 	srcmdl@ MmMDLHeader_MappedAddress + @ offset@ + destmdl@ MmMDLHeader_MappedAddress + !
@@ -135,7 +143,8 @@ fn MmMDLSplit { vaddr length srcmdl destmdl -- }
 
 	auto rs
 	HALCPUInterruptDisable rs!
-	1 srcmdl@ MmMDLHeader_IOCount + +=
+	srcmdl@ MmMDLHeader_IOCountI + gi 1 +
+	srcmdl@ MmMDLHeader_IOCountI + si
 	rs@ HALCPUInterruptRestore
 
 	auto destmdlpos
@@ -347,7 +356,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		return
 	end
 
-	process@ mdl@ MmMDLHeader_Process + !
+	KeThreadCurrent@ mdl@ MmMDLHeader_Thread + !
 
 	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
 	// clean up the partial pin if we fail at any point.
@@ -505,11 +514,11 @@ fn MmMDLUnpin { mdl -- }
 	MMMDL_PINNED ~ mdl@ MmMDLHeader_Flags + &=
 
 	auto process
-	mdl@ MmMDLHeader_Process + @ process!
+	mdl@ MmMDLHeader_Thread + @ KeThread_Process + @ process!
 
 	if (process@)
 		mdl@ MmMDLHeader_Pages + @ // count
-		mdl@ MmMDLHeader_Process + @ // process
+		process@ // process
 		MmMDLUnchargePinnedPages
 	end
 
@@ -525,7 +534,7 @@ fn MmMDLUnpin { mdl -- }
 
 		if (flags@ MMMDL_MODIFIED &)
 			pfdbe@ // pfdbe
-			mdl@ MmMDLHeader_Process + @ // process
+			process@ // process
 			MmEvictablePageModify
 		end
 
@@ -655,7 +664,7 @@ fn MmMDLComplete { status priboost mdl -- }
 	// usually called from DPC context.
 
 	if (priboost@)
-		priboost@ mdl@ MmMDLHeader_PriorityBoost + !
+		priboost@ mdl@ MmMDLHeader_PriorityBoostB + sb
 	end
 
 	if (mdl@ MmMDLHeader_Status + @ ~~)
@@ -667,7 +676,7 @@ fn MmMDLComplete { status priboost mdl -- }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	mdl@ MmMDLHeader_IOCount + @ oldcount!
+	mdl@ MmMDLHeader_IOCountI + gi oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ ~~)
@@ -675,7 +684,7 @@ fn MmMDLComplete { status priboost mdl -- }
 		end
 	end
 
-	oldcount@ 1 - mdl@ MmMDLHeader_IOCount + !
+	oldcount@ 1 - mdl@ MmMDLHeader_IOCountI + si
 
 	rs@ HALCPUInterruptRestore
 
@@ -703,7 +712,7 @@ fn MmMDLComplete { status priboost mdl -- }
 		// !!! RECURSION !!!
 
 		status@ // status
-		mdl@ MmMDLHeader_PriorityBoost + @ // priboost
+		mdl@ MmMDLHeader_PriorityBoostB + gb // priboost
 		parentmdl@ // mdl
 		MmMDLComplete
 	end else
@@ -720,7 +729,7 @@ fn MmMDLComplete { status priboost mdl -- }
 	mdl@ MmMDLHeader_Event + @ event!
 
 	if (event@)
-		mdl@ MmMDLHeader_PriorityBoost + @ // priboost
+		mdl@ MmMDLHeader_PriorityBoostB + gb // priboost
 		event@ // event
 		KeEventSignal
 	end

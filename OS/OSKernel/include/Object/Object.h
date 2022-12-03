@@ -23,8 +23,8 @@ endstruct
 struct ObNonpagedHeader
 	4 TypeObject
 
-	4 HandleCount
-	4 PointerCount
+	4 HandleCount  // overlaid with object pointer in deferred deletion
+	4 PointerCount // overlaid with Next link in deferred deletion
 
 	4 QuotaBlock
 endstruct
@@ -106,6 +106,7 @@ externptr ObTypeDirectoryType
 externptr ObRootDirectoryObject
 externptr ObObjectTypesDirectoryObject
 externptr ObRootRwLock
+externptr ObReaperListHead
 
 extern ObInitPhase0 { -- }
 extern ObInitPhase1 { -- }
@@ -133,6 +134,8 @@ extern ObObjectHandleCountDecrement { object -- oldcount }
 
 extern ObObjectReferenceByPointerCapturedHeader { npheader -- oldcount }
 extern ObObjectReferenceByPointer { object -- oldcount }
+
+extern ObObjectDereferenceByPointerCapturedHeader { object npheader -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
 
 extern ObObjectNonpagedHeader { object -- npheader }

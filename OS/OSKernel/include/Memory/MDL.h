@@ -1,18 +1,22 @@
 struct MmMDLHeader
+	1 ModeB
+	1 PriorityBoostB
+	2 IOCountI
+
 	4 VirtualAddress
-	4 Length
-	4 Pages
+	4 Length  // returns the number of bytes that were actually transferred
+	4 Pages   // unchanging, always describes how many pages are in the list
 	4 Flags
-	4 Process
-	4 Mode
+	4 Thread
 
 	4 MappedAddress
 
 	4 Status
-	4 PriorityBoost
 	4 Event
 	4 ParentMDL
-	4 IOCount
+
+	4 FileObject
+	4 FileObjectCapturedHeader
 
 	4 CompleteRoutine
 	4 Context1
@@ -34,11 +38,11 @@ const MMMDL_DONTUNMAP  256
 
 const MMMDL_FLAGS_NOT_TO_INHERIT MMMDL_DELETE
 
-extern MmMDLInitialize { mode length vaddr mdl -- }
+extern MmMDLInitialize { fileobject mode length vaddr mdl -- }
 
 extern MmMDLGetSize { vaddr length -- size }
 
-extern MmMDLAllocate { mode length vaddr kflags -- mdl ok }
+extern MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
 
 extern MmMDLSplit { vaddr length srcmdl destmdl -- }
 

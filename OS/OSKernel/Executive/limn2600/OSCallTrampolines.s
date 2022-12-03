@@ -34,11 +34,11 @@
 .extern OSWaitForMultipleObjects
 .extern OSWaitForObject
 .extern OSHandleDuplicate
-.extern OSDirectoryCountQuery
-.extern OSDirectoryQueryAll
-.extern OSDirectoryObjectCreate
-.extern OSDirectoryInsert
-.extern OSDirectoryRemove
+.extern OSObjectDirectoryCountQuery
+.extern OSObjectDirectoryQueryAll
+.extern OSObjectDirectoryObjectCreate
+.extern OSObjectDirectoryInsert
+.extern OSObjectDirectoryRemove
 .extern OSSetSecurity
 .extern OSFileQuery
 .extern OSFileTruncate
@@ -145,11 +145,11 @@ OSCallTable:
 	.dl OSTOSWaitForMultipleObjects                      ;30
 	.dl OSTOSWaitForObject                               ;31
 	.dl OSTOSHandleDuplicate                             ;32
-	.dl OSTOSDirectoryCountQuery                         ;33
-	.dl OSTOSDirectoryQueryAll                           ;34
-	.dl OSTOSDirectoryObjectCreate                       ;35
-	.dl OSTOSDirectoryInsert                             ;36
-	.dl OSTOSDirectoryRemove                             ;37
+	.dl OSTOSObjectDirectoryCountQuery                   ;33
+	.dl OSTOSObjectDirectoryQueryAll                     ;34
+	.dl OSTOSObjectDirectoryObjectCreate                 ;35
+	.dl OSTOSObjectDirectoryInsert                       ;36
+	.dl OSTOSObjectDirectoryRemove                       ;37
 	.dl OSTOSSetSecurity                                 ;38
 	.dl OSTOSFileQuery                                   ;39
 	.dl OSTOSFileTruncate                                ;40
@@ -704,13 +704,13 @@ OSTOSHandleDuplicate:
 	addi sp, sp, 4
 	ret
 
-OSTOSDirectoryCountQuery:
-.global OSTOSDirectoryCountQuery
+OSTOSObjectDirectoryCountQuery:
+.global OSTOSObjectDirectoryCountQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 
-	jal  OSDirectoryCountQuery
+	jal  OSObjectDirectoryCountQuery
 
 	mov  long [s17 + 4], a0 ;t1
 	mov  long [s17 + 8], a1 ;t2
@@ -719,15 +719,15 @@ OSTOSDirectoryCountQuery:
 	addi sp, sp, 4
 	ret
 
-OSTOSDirectoryQueryAll:
-.global OSTOSDirectoryQueryAll
+OSTOSObjectDirectoryQueryAll:
+.global OSTOSObjectDirectoryQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
 	mov  a2, long [s17 + 12] ;t3
 
-	jal  OSDirectoryQueryAll
+	jal  OSObjectDirectoryQueryAll
 
 	mov  long [s17 + 4], a0 ;t1
 	mov  long [s17 + 8], a1 ;t2
@@ -736,14 +736,14 @@ OSTOSDirectoryQueryAll:
 	addi sp, sp, 4
 	ret
 
-OSTOSDirectoryObjectCreate:
-.global OSTOSDirectoryObjectCreate
+OSTOSObjectDirectoryObjectCreate:
+.global OSTOSObjectDirectoryObjectCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
 
-	jal  OSDirectoryObjectCreate
+	jal  OSObjectDirectoryObjectCreate
 
 	mov  long [s17 + 4], a0 ;t1
 	mov  long [s17 + 8], a1 ;t2
@@ -752,14 +752,14 @@ OSTOSDirectoryObjectCreate:
 	addi sp, sp, 4
 	ret
 
-OSTOSDirectoryInsert:
-.global OSTOSDirectoryInsert
+OSTOSObjectDirectoryInsert:
+.global OSTOSObjectDirectoryInsert
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
 
-	jal  OSDirectoryInsert
+	jal  OSObjectDirectoryInsert
 
 	mov  long [s17 + 4], a0 ;t1
 
@@ -767,13 +767,13 @@ OSTOSDirectoryInsert:
 	addi sp, sp, 4
 	ret
 
-OSTOSDirectoryRemove:
-.global OSTOSDirectoryRemove
+OSTOSObjectDirectoryRemove:
+.global OSTOSObjectDirectoryRemove
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 
-	jal  OSDirectoryRemove
+	jal  OSObjectDirectoryRemove
 
 	mov  long [s17 + 4], a0 ;t1
 

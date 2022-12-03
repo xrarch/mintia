@@ -34,11 +34,11 @@
 .extern OSWaitForMultipleObjects
 .extern OSWaitForObject
 .extern OSHandleDuplicate
-.extern OSDirectoryCountQuery
-.extern OSDirectoryQueryAll
-.extern OSDirectoryObjectCreate
-.extern OSDirectoryInsert
-.extern OSDirectoryRemove
+.extern OSObjectDirectoryCountQuery
+.extern OSObjectDirectoryQueryAll
+.extern OSObjectDirectoryObjectCreate
+.extern OSObjectDirectoryInsert
+.extern OSObjectDirectoryRemove
 .extern OSSetSecurity
 .extern OSFileQuery
 .extern OSFileTruncate
@@ -145,11 +145,11 @@ OSCallTable:
 	.dl OSTOSWaitForMultipleObjects                      ;30
 	.dl OSTOSWaitForObject                               ;31
 	.dl OSTOSHandleDuplicate                             ;32
-	.dl OSTOSDirectoryCountQuery                         ;33
-	.dl OSTOSDirectoryQueryAll                           ;34
-	.dl OSTOSDirectoryObjectCreate                       ;35
-	.dl OSTOSDirectoryInsert                             ;36
-	.dl OSTOSDirectoryRemove                             ;37
+	.dl OSTOSObjectDirectoryCountQuery                   ;33
+	.dl OSTOSObjectDirectoryQueryAll                     ;34
+	.dl OSTOSObjectDirectoryObjectCreate                 ;35
+	.dl OSTOSObjectDirectoryInsert                       ;36
+	.dl OSTOSObjectDirectoryRemove                       ;37
 	.dl OSTOSSetSecurity                                 ;38
 	.dl OSTOSFileQuery                                   ;39
 	.dl OSTOSFileTruncate                                ;40
@@ -875,14 +875,14 @@ OSTOSHandleDuplicate:
 
 	ret
 
-OSTOSDirectoryCountQuery:
-.global OSTOSDirectoryCountQuery
+OSTOSObjectDirectoryCountQuery:
+.global OSTOSObjectDirectoryCountQuery
 
 	mov  t0, s17
 	add  t0, 4 ;t1
 	mov  a0, [t0]
 
-	call OSDirectoryCountQuery
+	call OSObjectDirectoryCountQuery
 
 
 	mov  t0, s17
@@ -895,8 +895,8 @@ OSTOSDirectoryCountQuery:
 
 	ret
 
-OSTOSDirectoryQueryAll:
-.global OSTOSDirectoryQueryAll
+OSTOSObjectDirectoryQueryAll:
+.global OSTOSObjectDirectoryQueryAll
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -910,7 +910,7 @@ OSTOSDirectoryQueryAll:
 	add  t0, 12 ;t3
 	mov  a2, [t0]
 
-	call OSDirectoryQueryAll
+	call OSObjectDirectoryQueryAll
 
 
 	mov  t0, s17
@@ -923,8 +923,8 @@ OSTOSDirectoryQueryAll:
 
 	ret
 
-OSTOSDirectoryObjectCreate:
-.global OSTOSDirectoryObjectCreate
+OSTOSObjectDirectoryObjectCreate:
+.global OSTOSObjectDirectoryObjectCreate
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -934,7 +934,7 @@ OSTOSDirectoryObjectCreate:
 	add  t0, 8 ;t2
 	mov  a1, [t0]
 
-	call OSDirectoryObjectCreate
+	call OSObjectDirectoryObjectCreate
 
 
 	mov  t0, s17
@@ -947,8 +947,8 @@ OSTOSDirectoryObjectCreate:
 
 	ret
 
-OSTOSDirectoryInsert:
-.global OSTOSDirectoryInsert
+OSTOSObjectDirectoryInsert:
+.global OSTOSObjectDirectoryInsert
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -958,7 +958,7 @@ OSTOSDirectoryInsert:
 	add  t0, 8 ;t2
 	mov  a1, [t0]
 
-	call OSDirectoryInsert
+	call OSObjectDirectoryInsert
 
 
 	mov  t0, s17
@@ -967,14 +967,14 @@ OSTOSDirectoryInsert:
 
 	ret
 
-OSTOSDirectoryRemove:
-.global OSTOSDirectoryRemove
+OSTOSObjectDirectoryRemove:
+.global OSTOSObjectDirectoryRemove
 
 	mov  t0, s17
 	add  t0, 4 ;t1
 	mov  a0, [t0]
 
-	call OSDirectoryRemove
+	call OSObjectDirectoryRemove
 
 
 	mov  t0, s17

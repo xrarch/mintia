@@ -393,8 +393,8 @@ OSHandleDuplicate:
 
 	ret
 
-OSDirectoryCountQuery:
-.global OSDirectoryCountQuery
+OSObjectDirectoryCountQuery:
+.global OSObjectDirectoryCountQuery
 	mov  t1, a0
 
 	mov  t0, 33
@@ -405,8 +405,8 @@ OSDirectoryCountQuery:
 
 	ret
 
-OSDirectoryQueryAll:
-.global OSDirectoryQueryAll
+OSObjectDirectoryQueryAll:
+.global OSObjectDirectoryQueryAll
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
@@ -419,8 +419,8 @@ OSDirectoryQueryAll:
 
 	ret
 
-OSDirectoryObjectCreate:
-.global OSDirectoryObjectCreate
+OSObjectDirectoryObjectCreate:
+.global OSObjectDirectoryObjectCreate
 	mov  t1, a0
 	mov  t2, a1
 
@@ -432,8 +432,8 @@ OSDirectoryObjectCreate:
 
 	ret
 
-OSDirectoryInsert:
-.global OSDirectoryInsert
+OSObjectDirectoryInsert:
+.global OSObjectDirectoryInsert
 	mov  t1, a0
 	mov  t2, a1
 
@@ -444,8 +444,8 @@ OSDirectoryInsert:
 
 	ret
 
-OSDirectoryRemove:
-.global OSDirectoryRemove
+OSObjectDirectoryRemove:
+.global OSObjectDirectoryRemove
 	mov  t1, a0
 
 	mov  t0, 37

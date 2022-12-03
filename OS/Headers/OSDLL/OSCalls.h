@@ -52,11 +52,11 @@ extern OSWaitForObject { alertable timeout objecthandle -- ok }
 
 extern OSHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }
 
-extern OSDirectoryCountQuery { directoryhandle -- count ok }
-extern OSDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
-extern OSDirectoryObjectCreate { permissions name -- dirhandle ok }
-extern OSDirectoryInsert { objecthandle directoryhandle -- ok }
-extern OSDirectoryRemove { objecthandle -- ok }
+extern OSObjectDirectoryCountQuery { directoryhandle -- count ok }
+extern OSObjectDirectoryQueryAll { buffer maxquery directoryhandle -- count ok }
+extern OSObjectDirectoryObjectCreate { permissions name -- dirhandle ok }
+extern OSObjectDirectoryInsert { objecthandle directoryhandle -- ok }
+extern OSObjectDirectoryRemove { objecthandle -- ok }
 
 extern OSSetSecurity { uid gid permissions handle -- ok }
 

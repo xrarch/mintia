@@ -3,6 +3,7 @@
 #include "<inc>/Kernel/Crash.h"
 #include "<inc>/Kernel/IPL.h"
 
+#include "<inc>/Kernel/APC.h"
 #include "<inc>/Kernel/DPC.h"
 #include "<inc>/Kernel/Time.h"
 #include "<inc>/Kernel/Dispatch.h"

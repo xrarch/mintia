@@ -133,6 +133,12 @@ struct KeThread
 	4 UserTimeMs
 	4 SystemTimeMs
 	4 DPCTimeMs
+
+	4 APCListHead
+	4 APCListTail
+	4 APCInProgress
+	4 APCDisableCount
+	4 APCEnqueued
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }

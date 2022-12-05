@@ -188,6 +188,8 @@ extern KeThreadPriorityBoost { boost thread -- }
 extern KeThreadNextSwitch { -- }
 extern KeThreadSleep { ms waitmode alertable -- ok }
 extern KeThreadPrioritySet { priority thread -- }
+extern KeThreadAPCDisable { thread -- oldcount }
+extern KeThreadAPCEnable { thread -- oldcount }
 
 externptr KeThreadNext
 externptr KeThreadNextReason

@@ -1,0 +1,133 @@
+//
+// Implements Interrupt Priority Level (IPL) management.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/HALInterrupt.h"
+
+#include "<ll>/OSDLL/OSStatistics.h"
+
+var KePendingSoftwareInterrupts 0
+public KePendingSoftwareInterrupts
+
+table KePendingSoftwareInterruptMask
+	6 // IPLLOW (none masked)
+	4 // IPLAPC (APCs masked)
+endtable
+public KePendingSoftwareInterruptMask
+
+table KePendingSoftwareInterruptFirst // which to service first based on the mask
+	0                                // 0
+	0                                // 1
+	pointerof KeSoftwareInterruptAPC // 2
+	pointerof KeSoftwareInterruptDPC // 3
+	pointerof KeSoftwareInterruptDPC // 4
+	pointerof KeSoftwareInterruptDPC // 5
+	pointerof KeSoftwareInterruptDPC // 6
+endtable
+public KePendingSoftwareInterruptFirst
+
+fn (KeSoftwareInterruptHandlerF) KeSoftwareInterruptAPC { -- }
+	1 IPLAPC << ~ KePendingSoftwareInterrupts &=
+
+	IPLAPC KeIPLCurrent!
+
+	if (KeThreadCurrent@ KeThread_APCListHead + @)
+		HALCPUInterruptEnable
+
+		KeAPCDispatchQueue
+
+		HALCPUInterruptDisable drop
+	end
+end
+
+fn (KeSoftwareInterruptHandlerF) KeSoftwareInterruptDPC { -- }
+	1 IPLDPC << ~ KePendingSoftwareInterrupts &=
+
+	IPLDPC KeIPLCurrent!
+
+	while (KeDPCListHead@ KeThreadNext@ ||)
+		if (KeDPCListHead@)
+			KeDPCDispatchQueue
+		end
+
+		if (KeThreadNext@)
+			HALCPUInterruptEnable
+
+			KeThreadNextSwitch
+
+			HALCPUInterruptDisable drop
+		end
+	end
+end
+
+fn KeSoftwareInterruptRequest { ipl -- }
+	1 ipl@ << KePendingSoftwareInterrupts |=
+end
+
+externptr KeIPLCurrent
+
+fn KeIPLRaise { newipl -- oldipl }
+	KeIPLCurrent@ oldipl!
+
+	if (newipl@ oldipl@ ==)
+		return
+	end
+
+	if (newipl@ oldipl@ <)
+		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not greater or equal (old=%s new=%s)\n" KeCrash
+	end
+
+	// only call into the HAL if hardware interrupt level changed.
+	// no need to call in for software interrupt levels IPLLOW-IPLDPC.
+
+	newipl@ KeIPLCurrent!
+
+	if (newipl@ IPLDPC >)
+		newipl@ HALPlatformIPLSet
+	end
+end
+
+fn KeIPLLower { newipl -- }
+	auto oldipl
+	KeIPLCurrent@ oldipl!
+
+	if (newipl@ oldipl@ ==)
+		return
+	end
+
+	if (newipl@ oldipl@ >)
+		[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not less or equal (old=%s new=%s)\n" KeCrash
+	end
+
+	if (oldipl@ IPLDPC >)
+		newipl@ HALPlatformIPLSet
+	end
+
+	if (newipl@ IPLDPC >=)
+		newipl@ KeIPLCurrent!
+		return
+	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto p
+	KePendingSoftwareInterrupts@ [newipl@]KePendingSoftwareInterruptMask@ & p!
+
+	while (p@)
+		[p@]KePendingSoftwareInterruptFirst@ KeSoftwareInterruptHandlerF
+
+		KePendingSoftwareInterrupts@ [newipl@]KePendingSoftwareInterruptMask@ & p!
+	end
+
+	newipl@ KeIPLCurrent!
+
+	rs@ HALCPUInterruptRestore
+end

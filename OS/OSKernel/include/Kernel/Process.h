@@ -1,6 +1,9 @@
 // needs KeTimer.h
 // needs KeDispatch.h
 
+const KERNELMODE 1
+const USERMODE   2
+
 const KEPROCESSNAMELEN 16
 
 const PROCESSSTATE_RESIDENT   1

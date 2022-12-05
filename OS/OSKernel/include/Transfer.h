@@ -1,5 +1,5 @@
 struct IOTransfer
-	(MmMDLHeader_SIZEOF IOTRANSFERMAX PAGESHIFT >> 1 + 4 * +) MDL
+	(MmMDLHeader_SIZEOF IOCLUSTERMAX PAGESHIFT >> 1 + 4 * +) MDL
 
 	4 TransferTable
 	4 Next

@@ -72,7 +72,7 @@ fn IPCPortObjectDeleteHelper { action object -- }
 	end elseif (action@ HELPER_SEND_DISCONNECT ==)
 		object@ IPCPort_DisconnectionMessage + @ // msg
 		object@ IPCPort_ServerPort + @ // portobject
-		IPCPortSendMessage
+		IPCPortSendMessage drop
 	end elseif (action@ HELPER_ORPHAN ==)
 		// orphan all of the pending messages in my queue
 
@@ -232,6 +232,8 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 	0 portobject@ IPCPort_MessageListHead + !
 	0 portobject@ IPCPort_MessageListTail + !
 
+	0 portobject@ IPCPort_QueueLength + !
+
 	0 portobject@ IPCPort_SentListHead + !
 	0 portobject@ IPCPort_SentListTail + !
 
@@ -277,6 +279,10 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 
 		serverport@ portobject@ IPCPort_ServerPort + !
 		0 portobject@ IPCPort_ClientTableHeader + !
+
+		// provide a way to inform the server that a client is not consuming
+		// its messages before the server exhausts all of its pool quota.
+		8 portobject@ IPCPort_MaximumQueueLength + !
 
 		auto kdms
 		OSMessageHeader_SIZEOF alloc kdms!
@@ -329,6 +335,8 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 		0 portobject@ IPCPort_ClientID + !
 
 		0 portobject@ IPCPort_ServerPort + !
+
+		-1 portobject@ IPCPort_MaximumQueueLength + !
 
 		portobject@ // context
 		owningprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
@@ -538,7 +546,7 @@ fn IPCPortWakeWaiter { rxmsg waiter portobject -- }
 	KeEventSignal
 end
 
-fn IPCPortSendMessage { msg portobject -- }
+fn IPCPortSendMessage { msg portobject -- ok }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"IPCPortEnqueueMessage: ipl != IPLDPC\n" KeCrash
@@ -560,6 +568,8 @@ fn IPCPortSendMessage { msg portobject -- }
 	// the check and the operation of this function. IPL sync is used instead
 	// of a mutex because it is anticipated that DPCs will need to enqueue IPC
 	// messages; additionally IPL sync comes with a shorter codepath.
+
+	0 ok!
 
 	msg@ IPCMessageEnqueueRundown
 
@@ -600,9 +610,35 @@ fn IPCPortSendMessage { msg portobject -- }
 		waiter@ IPCThreadBlock_WaiterNext + @ waiter!
 	end
 
-	msg@ // msg
-	portobject@ // portobject
-	IPCMessageEnqueue
+	// add message to message queue
+
+	if (portobject@ IPCPort_QueueLength + @ portobject@ IPCPort_MaximumQueueLength + @ >=)
+		// full. just ditch the message.
+
+		msg@ IPCMessageDequeueRundown
+		msg@ IPCMessageFree
+
+		STATUS_PORT_QUEUE_FULL ok!
+
+		return
+	end
+
+	1 portobject@ IPCPort_QueueLength + +=
+
+	auto t
+	portobject@ IPCPort_MessageListTail + @ t!
+
+	t@ msg@ IPCKernelMessage_QueuePrev + !
+
+	if (t@ ~~)
+		msg@ portobject@ IPCPort_MessageListHead + !
+	end else
+		msg@ t@ IPCKernelMessage_QueueNext + !
+	end
+
+	msg@ portobject@ IPCPort_MessageListTail + !
+
+	portobject@ msg@ IPCKernelMessage_EnqueuedTo + !
 end
 
 fn IPCPortReceiveMessage { umsg mode clientid conid timeout portobject -- ok }

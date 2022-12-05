@@ -1,14 +1,14 @@
 const IOVERSION_MAJOR 1
 const IOVERSION_MINOR 0
 
-const IOKFLAG_SWAPOUT 1 // this read is involved in a swapout operation which
-                        // means different page allocation behavior is needed
+const IOKFLAG_SWAPOUT 1  // this read is involved in a swapout operation which
+                         // means different page allocation behavior is needed
 
 const IOKFLAG_URGENT  2
-const IOKFLAG_ZEROES  4 // force IOCachePageGet to allocate zero pages
-const IOKFLAG_SWAPIN  8
-const IOKFLAG_PAGEIN  16
-const IOKFLAG_PAGEAC  32
+const IOKFLAG_ZEROES  4  // force IOCachePageGet to allocate zero pages
+const IOKFLAG_SWAPIN  8  // try forever to allocate pages
+const IOKFLAG_PAGEIN  16 // flush icache for page
+const IOKFLAG_PAGEAC  32 // do page-in accounting
 // NOTE: upper 4 bits of IOKFLAG are reserved for driver use
 
 extern IOInitPhase1 { -- }
@@ -71,16 +71,13 @@ const IOFCBFLAG_LOCKEDMETADATA      16
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
 
-// largest uncached IO allowed to occur in one transfer. the three main
-// constraints are:
-//   1. IOTRANSFERMAX/PAGESIZE * 4 should reasonably fit on a kernel stack so
-//      that we can allocate MDLs there idiomatically.
-//   2. shouldn't be so large that its easy to completely IO-starve the system
-//      by just doing huge uncached IO accesses.
-//   3. should be large enough to allow things like console IO to occur w/o
-//      odd effects due to transfer fragmentation by the IO system.
+// largest IO transfer clustered by the system for any purpose.
 
-const IOTRANSFERMAX (16 1024 *)
+const IOCLUSTERMAX (16 1024 *)
+
+// maximum amount of file to zero in page cache before resorting to direct IO.
+
+const IOCACHEZEROMAX (512 1024 *)
 
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }

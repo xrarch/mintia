@@ -81,5 +81,7 @@ const STATUS_NO_SUCH_CLIENT           -79
 const STATUS_INCORRECT_PASSWORD       -80
 const STATUS_REFAULT                  -81
 const STATUS_FAULT_ERROR              -82
+const STATUS_PASSWORD_TOO_LONG        -83
+const STATUS_PORT_QUEUE_FULL          -84
 
 extern OSStatusGetName { status -- name }

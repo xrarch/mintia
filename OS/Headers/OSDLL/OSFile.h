@@ -14,6 +14,7 @@ const OSFILEPATHMAX        256
 
 const OSACCESSFLAG_RETURNANY   1 // only block if theres nothing available, otherwise return whatever is there
 const OSACCESSFLAG_NOREADAHEAD 2 // avoid readahead in the IO layer
+const OSACCESSFLAG_ASYNC       4 // return immediately. post IO completion message to port object
 
 const OSSEEK_SET             1
 const OSSEEK_CUR             2

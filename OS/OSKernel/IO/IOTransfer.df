@@ -27,45 +27,13 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-// These should be used when the caller has little information on the
-// parameters. These may be pretty terrible in some places where situation-
-// specific information is handily available.
-
-fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write -- bytes ok }
+fn IOReadWrite { timeout flags kflags length offset buffer fileobject lastmode write -- bytes ok }
 	fnsection "PAGE$text"
 
-	auto event
-
-	if (length@ IOTRANSFERMAX >)
-		IOTRANSFERMAX event!
-	end else
-		length@ event!
-	end
-
-	buffer@ event@ MmMDLGetSize event!
+	0 bytes!
 
 	auto mdl
-	event@ KeEvent_SIZEOF + // bytes
-	'MMDL' // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! mdl!
-
-	if (ok@)
-		return
-	end
-
-	mdl@ event@ + event!
-
-	auto func
-
-	if (write@)
-		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ func!
-	end else
-		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ func!
-	end
-
-	auto cancelfunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
+	auto event
 
 	auto waitmode
 	lastmode@ waitmode!
@@ -73,105 +41,44 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 	auto alertable
 	1 alertable!
 
-	if (cancelfunc@ ~~)
+	// perform an I/O operation on behalf of a user process.
+
+	if (flags@ OSACCESSFLAG_ASYNC &)
+		fileobject@ ObObjectReferenceByPointer drop
+
+		fileobject@ // fileobject
+		lastmode@ // mode
+		length@ // length
+		buffer@ // vaddr
+		0 // kflags
+		MmMDLAllocateWithQuota ok! mdl!
+
+		if (ok@)
+			return
+		end
+
+		KeEvent_SIZEOF alloc event!
+
+		0 alertable!
 		KERNELMODE waitmode!
 		OSWAIT_TIMEOUTINFINITE timeout!
-		0 alertable!
-	end
 
-	auto wok
+		// initialize completion message and store in MDL.
 
-	0 bytes!
+		// TODO that
+	end else
+		buffer@ length@ MmMDLGetSize event!
 
-	while (length@ IOTRANSFERMAX >=)
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IORWEvent" // name
-		event@ // event
-		KeEventInitialize
-
-		0 // fileobject
-		lastmode@ // mode
-		IOTRANSFERMAX // length
-		buffer@ // vaddr
-		mdl@ // mdl
-		MmMDLInitialize
-
-		event@ mdl@ MmMDLHeader_Event + !
-
-		if (write@)
-			flags@ // flags
-			kflags@ // kflags
-			offset@ // offset
-			mdl@ // mdl
-			fcb@ // fcb
-			func@ IODispatchWriteFunction ok!
-		end else
-			timeout@ // timeout
-			flags@ // flags
-			kflags@ // kflags
-			offset@ // offset
-			mdl@ // mdl
-			fcb@ // fcb
-			func@ IODispatchReadFunction ok!
-		end
+		event@ KeEvent_SIZEOF + // bytes
+		'MMDL' // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! mdl!
 
 		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
-
-			0 alertable!
-			KERNELMODE waitmode!
-			OSWAIT_TIMEOUTINFINITE timeout!
-
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
+			return
 		end
 
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			waitmode@ // waitmode
-			alertable@ // alertable
-			timeout@ // timeout
-			event@ // object
-			KeThreadWaitForObject wok!
-
-			if (wok@)
-				wok@ ok!
-				mdl@ cancelfunc@ IODispatchCancelFunction
-			end
-		end
-
-		if (ok@)
-			0 length!
-			break
-		end
-
-		mdl@ MmMDLHeader_Status + @ ok!
-
-		if (ok@)
-			0 length!
-			break
-		end
-
-		mdl@ MmMDLHeader_Length + @ bytes +=
-
-		if (mdl@ MmMDLHeader_Length + @ IOTRANSFERMAX <)
-			0 length!
-			break
-		end
-
-		IOTRANSFERMAX offset +=
-		IOTRANSFERMAX buffer +=
-		IOTRANSFERMAX length -=
-	end
-
-	if (length@)
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IORWEvent" // name
-		event@ // event
-		KeEventInitialize
+		mdl@ event@ + event!
 
 		0 // fileobject
 		lastmode@ // mode
@@ -180,37 +87,59 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 		mdl@ // mdl
 		MmMDLInitialize
 
-		event@ mdl@ MmMDLHeader_Event + !
-
-		if (write@)
-			flags@ // flags
-			kflags@ // kflags
-			offset@ // offset
-			mdl@ // mdl
-			fcb@ // fcb
-			func@ IODispatchWriteFunction ok!
-		end else
-			timeout@ // timeout
-			flags@ // flags
-			kflags@ // kflags
-			offset@ // offset
-			mdl@ // mdl
-			fcb@ // fcb
-			func@ IODispatchReadFunction ok!
-		end
-
-		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
-
-			0 alertable!
+		if (fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ ~~)
 			KERNELMODE waitmode!
 			OSWAIT_TIMEOUTINFINITE timeout!
-
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
+			0 alertable!
 		end
+	end
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"IORWEvent" // name
+	event@ // event
+	KeEventInitialize
+
+	event@ mdl@ MmMDLHeader_Event + !
+
+	auto wok
+
+	if (write@)
+		flags@ // flags
+		kflags@ // kflags
+		offset@ // offset
+		mdl@ // mdl
+		fileobject@ IOFile_FileControlBlock + @ // fcb
+		fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ IODispatchWriteFunction ok!
+	end else
+		timeout@ // timeout
+		flags@ // flags
+		kflags@ // kflags
+		offset@ // offset
+		mdl@ // mdl
+		fileobject@ IOFile_FileControlBlock + @ // fcb
+		fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ IODispatchReadFunction ok!
+	end
+
+	if (ok@)
+		// complete the MDL so we can wait for any fragments to finish
+
+		0 alertable!
+		KERNELMODE waitmode!
+		OSWAIT_TIMEOUTINFINITE timeout!
+
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end elseif (flags@ OSACCESSFLAG_ASYNC &)
+		// XXX on SMP, this is not sufficient to ensure the event is never
+		// accessed after we return.
+		0 mdl@ MmMDLHeader_Event + !
+	end
+
+	if (flags@ OSACCESSFLAG_ASYNC & ~~ ok@ ||)
+		// the request is synchronous OR enqueuing it failed.
 
 		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			waitmode@ // waitmode
@@ -220,19 +149,32 @@ fn IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write --
 			KeThreadWaitForObject wok!
 
 			if (wok@)
+				// this is only possible if enqueuing the MDL succeeded, since
+				// we wait unalertable when it fails. therefore this can never
+				// try to cancel an MDL that has already been freed, since
+				// this codepath is unreachable for a successful async enqueue
+
 				wok@ ok!
-				mdl@ cancelfunc@ IODispatchCancelFunction
-			end
-		end
 
-		if (ok@ ~~)
-			mdl@ MmMDLHeader_Status + @ ok!
-
-			if (ok@ ~~)
-				mdl@ MmMDLHeader_Length + @ bytes +=
+				mdl@ // mdl
+				fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ IODispatchCancelFunction
 			end
 		end
 	end
 
-	mdl@ MmFree
+	if (flags@ OSACCESSFLAG_ASYNC & ~~)
+		if (ok@)
+			return
+		end
+
+		mdl@ MmMDLHeader_Status + @ ok!
+
+		if (ok@)
+			return
+		end
+
+		mdl@ MmMDLHeader_Length + @ bytes!
+
+		mdl@ MmFree
+	end
 end

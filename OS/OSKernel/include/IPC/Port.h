@@ -10,6 +10,9 @@ struct IPCPort
 
 	4 MaximumMessageBody
 
+	4 MaximumQueueLength
+	4 QueueLength
+
 	4 OwningProcess
 	4 ClientTableHeader
 	4 ServerPort
@@ -88,10 +91,9 @@ extern IPCMessageFree { msg -- }
 extern IPCMessageEnqueueRundown { msg -- }
 extern IPCMessageDequeueRundown { msg -- }
 
-extern IPCMessageEnqueue { msg portobject -- }
 extern IPCMessageDequeue { msg -- }
 
-extern IPCPortSendMessage { msg portobject -- }
+extern IPCPortSendMessage { msg portobject -- ok }
 extern IPCPortReceiveMessage { umsg mode clientid conid timeout portobject -- ok }
 
 extern IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }

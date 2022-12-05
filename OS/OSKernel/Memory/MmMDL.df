@@ -26,6 +26,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "<inc>/IPC.h"
+
 fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
@@ -41,6 +43,9 @@ fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_Event + !
 	0 mdl@ MmMDLHeader_ParentMDL + !
 	1 mdl@ MmMDLHeader_IOCountI + si
+
+	0 mdl@ MmMDLHeader_QuotaBlock + !
+	0 mdl@ MmMDLHeader_CompletionMessage + !
 
 	0 mdl@ MmMDLHeader_CompleteRoutine + !
 
@@ -84,6 +89,33 @@ fn MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
 	fileobject@ mode@ length@ vaddr@ mdl@ MmMDLInitialize
 
 	MMMDL_DELETE mdl@ MmMDLHeader_Flags + |=
+end
+
+fn MmMDLAllocateWithQuota { fileobject mode length vaddr kflags -- mdl ok }
+	auto quotablock
+	KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
+
+	auto bytes
+	vaddr@ length@ MmMDLGetSize bytes!
+
+	bytes@ // charge
+	quotablock@ // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		return
+	end
+
+	fileobject@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl!
+
+	if (ok@)
+		bytes@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+	end else
+		quotablock@ MmQuotaBlockReference
+		quotablock@ mdl@ MmMDLHeader_QuotaBlock + !
+	end
 end
 
 fn MmMDLGetSize { vaddr length -- size }
@@ -290,10 +322,6 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	if (DEBUGCHECKS)
 		if (mdl@ MmMDLHeader_Length + @ ~~)
 			"MmMDLPin: length=0\n" KeCrash
-		end
-
-		if (mdl@ MmMDLHeader_Length + @ IOTRANSFERMAX >)
-			"MmMDLPin: length>IOCHUNKMAX\n" KeCrash
 		end
 	end
 
@@ -732,6 +760,20 @@ fn MmMDLComplete { status priboost mdl -- }
 			mdl@ MmMDLHeader_FileObject + @ // object
 			mdl@ MmMDLHeader_FileObjectCapturedHeader + @ // npheader
 			ObObjectDereferenceByPointerCapturedHeader drop
+
+			auto msg
+			mdl@ MmMDLHeader_CompletionMessage + @ msg!
+
+			auto portobject
+			msg@ IPCKernelMessage_OriginatingPort + @ portobject!
+
+			// message fields were already initialized.
+
+			msg@ // msg
+			portobject@ // portobject
+			IPCPortSendMessage drop
+
+			portobject@ ObObjectDereferenceByPointer drop
 		end
 	end
 
@@ -745,6 +787,22 @@ fn MmMDLComplete { status priboost mdl -- }
 	end
 
 	if (flags@ MMMDL_DELETE &)
+		// free the MDL and uncharge any associated quota.
+
+		auto quotablock
+		mdl@ MmMDLHeader_QuotaBlock + @ quotablock!
+
+		auto charge
+		mdl@ MmBlockChargeGet charge!
+
 		mdl@ MmFree
+
+		if (quotablock@)
+			charge@ // charge
+			quotablock@ // quotablock
+			MmQuotaBlockUncharge
+
+			quotablock@ MmQuotaBlockDereference
+		end
 	end
 end

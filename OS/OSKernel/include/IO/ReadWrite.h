@@ -19,4 +19,4 @@ extern IODirectoryReadObject { dirent fileobject -- ok }
 
 // direct transfer helpers
 
-extern IOReadWrite { timeout flags kflags length offset buffer fcb lastmode write -- bytes ok }
+extern IOReadWrite { timeout flags kflags length offset buffer fileobject lastmode write -- bytes ok }

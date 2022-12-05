@@ -18,6 +18,10 @@ struct MmMDLHeader
 	4 FileObject
 	4 FileObjectCapturedHeader
 
+	4 CompletionMessage
+
+	4 QuotaBlock
+
 	4 CompleteRoutine
 	4 Context1
 	4 Context2
@@ -43,6 +47,7 @@ extern MmMDLInitialize { fileobject mode length vaddr mdl -- }
 extern MmMDLGetSize { vaddr length -- size }
 
 extern MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
+extern MmMDLAllocateWithQuota { fileobject mode length vaddr kflags -- mdl ok }
 
 extern MmMDLSplit { vaddr length srcmdl destmdl -- }
 

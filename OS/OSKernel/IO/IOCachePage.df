@@ -76,10 +76,9 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
 		end
 	end
 
-	auto lastnode
 	offset@ // value
 	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
-	ExSplayTreeFindNodeByValue pfdbe! lastnode!
+	ExSplayTreeFindNodeByValue pfdbe! drop
 
 	if (pfdbe@)
 		IOPageFrameEntryCache_Parent pfdbe -=
@@ -134,17 +133,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
 
 	// not in the cache -- allocate a page for it.
 
-	if (MmPageFreeListHead@ ~~)
-		if (MmPageZeroListHead@ ~~)
-			// can't use this hint since it might get reclaimed.
-			
-			// XXX this won't be synchronized properly in SMP unless we hold a
-			// big PFDB spinlock this entire time.
-
-			0 lastnode!
-		end
-	end
-
 	auto zeroes
 	filesize@ offset@ - PAGESIZE <
 	kflags@ IOKFLAG_ZEROES & || zeroes!
@@ -184,7 +172,7 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
 
 	1 IOCachePagesUsed +=
 
-	lastnode@ // insertat
+	0 // insertat
 	pfdbe@ IOPageFrameEntryCache_Parent + // node
 	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
 	ExSplayTreeInsert
@@ -330,6 +318,8 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 		end
 
 		pfdbe@ MmEvictablePageReference drop
+
+		// NOTE: this is an inlined version of MmEvictablePageStartIO
 
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ & MMEVICTFLAG_IOINPROGRESS |
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
@@ -516,8 +506,6 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 		return
 	end
 
-	auto rs
-
 	auto ipl
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
@@ -532,7 +520,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 			end
 		end
 
-		HALCPUInterruptDisable rs!
+		HALCPUInterruptDisable ipl!
 
 		if (kflags@ IOKFLAG_PAGEAC &)
 			1 MmHardPageFaultCount +=
@@ -540,7 +528,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 
 		1 MmPageInCount +=
 
-		rs@ HALCPUInterruptRestore
+		ipl@ HALCPUInterruptRestore
 
 		auto capturedpte
 		auto transitionpte
@@ -650,9 +638,9 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 			ipl@ KeIPLLower
 		end
 	end elseif (kflags@ IOKFLAG_PAGEAC &)
-		HALCPUInterruptDisable rs!
+		HALCPUInterruptDisable ipl!
 		1 MmSoftPageFaultCount +=
-		rs@ HALCPUInterruptRestore
+		ipl@ HALCPUInterruptRestore
 	end
 end
 

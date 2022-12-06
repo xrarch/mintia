@@ -1,4 +1,4 @@
-const OSSTATISTICSCOUNT (5 32 +)
+const OSSTATISTICSCOUNT (6 32 +)
 
 struct OSStatistics
 	4 Interrupts

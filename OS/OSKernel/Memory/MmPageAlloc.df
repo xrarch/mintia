@@ -185,99 +185,102 @@ fn MmPageWait { process priority -- waited ok }
 		end
 	end
 
+	0 waited!
+
+	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH >=)
+		0 ok!
+		return
+	end
+
 	auto wprocess
 	KeThreadCurrent@ KeThread_Process + @ wprocess!
-
-	0 waited!
 
 	auto blockon
 	auto alertable
 	auto tries
 
-	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
-		if (priority@ MUSTSUCCEED &)
-			// CANBLOCK page allocations have different wait rules if MUSTSUCCEED
-			// is also specified:
+	if (priority@ MUSTSUCCEED &)
+		// CANBLOCK page allocations have different wait rules if MUSTSUCCEED
+		// is also specified:
 
-			MMMUSTSUCCEEDTHRESH blockon! // can dip into MUSTSUCCEED page pool
-			0 alertable! // wait can't be interrupted
-			-1 tries! // try forever for a page
-		end elseif (priority@ MUSTSUCCEEDL2 &)
-			MMMUSTSUCCEEDL2THRESH blockon! // can dip into MUSTSUCCEEDL2 page pool
-			0 alertable! // wait can't be interrupted
-			-1 tries! // try forever for a page
-		end elseif (priority@ POOLALLOC &)
-			MMPOOLTHRESH blockon! // can dip into reserved pool pages
-			0 alertable! // wait can't be interrupted
-			-1 tries! // try forever for a page
-		end else
-			// normal rules:
-			MMNORMALTHRESH blockon! // don't dip into MUSTSUCCEED page pool
+		MMMUSTSUCCEEDTHRESH blockon!
+		0 alertable!
+		-1 tries!
+	end elseif (priority@ MUSTSUCCEEDL2 &)
+		MMMUSTSUCCEEDL2THRESH blockon!
+		0 alertable!
+		-1 tries!
+	end elseif (priority@ POOLALLOC &)
+		MMPOOLTHRESH blockon!
+		0 alertable!
+		-1 tries!
+	end else
+		// normal rules:
+		MMNORMALTHRESH blockon! // don't dip into MUSTSUCCEED page pool
+	end
 
-			if (wprocess@ PsSystemInitProcess@ ==)
-				-1 tries!
-				0 alertable!
-			end elseif (wprocess@ PsSystemProcess@ ==)
-				-1 tries!
-				0 alertable!
+	if (priority@ CANBLOCK & ~~)
+		if (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
+			STATUS_NO_MEMORY ok!
+			return
+		end
+	end
 
-				if (KeThreadCurrent@ MmModifiedPageWriterThread@ ==)
-					MMMUSTSUCCEEDTHRESH blockon!
+	if (priority@ TRYFOREVER &)
+		-1 tries!
+	end
+
+	if (wprocess@ PsSystemInitProcess@ ==)
+		-1 tries!
+		0 alertable!
+	end elseif (wprocess@ PsSystemProcess@ ==)
+		-1 tries!
+		0 alertable!
+
+		if (KeThreadCurrent@ MmModifiedPageWriterThread@ ==)
+			MMMUSTSUCCEEDTHRESH blockon!
+		end
+	end else
+		200 tries! // try 200 times to get a page (about 20 seconds)
+		1 alertable!
+	end
+
+	while (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
+		0 // priboost
+		MmEventLowMemory // event
+		KeEventSignal
+
+		IPLAPC KeIPLLower
+
+		if (process@)
+			process@ MmVADListUnlock
+		end
+
+		1 waited!
+
+		KERNELMODE // waitmode
+		alertable@ // alertable
+		100 // timeout
+		MmEventPageAvailable // object
+		KeThreadWaitForObject ok!
+
+		if (process@)
+			process@ MmVADListLock drop
+		end
+
+		IPLDPC KeIPLRaise drop
+
+		if (ok@ STATUS_WAIT_TIMEOUT ==)
+			if (tries@ -1 ~=)
+				1 tries -=
+
+				if (tries@ ~~)
+					STATUS_NO_MEMORY ok!
+					return
 				end
-			end else
-				200 tries! // try 200 times to get a page (about 20 seconds)
-				1 alertable!
 			end
-		end
-
-		if (priority@ TRYFOREVER &)
-			-1 tries!
-		end
-
-		if (priority@ CANBLOCK & ~~)
-			if (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
-				STATUS_NO_MEMORY ok!
-				return
-			end
-		end
-
-		while (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
-			0 // priboost
-			MmEventLowMemory // event
-			KeEventSignal
-
-			IPLAPC KeIPLLower
-
-			if (process@)
-				process@ MmVADListUnlock
-			end
-
-			1 waited!
-
-			KERNELMODE // waitmode
-			alertable@ // alertable
-			100 // timeout
-			MmEventPageAvailable // object
-			KeThreadWaitForObject ok!
-
-			if (process@)
-				process@ MmVADListLock drop
-			end
-
-			IPLDPC KeIPLRaise drop
-
-			if (ok@ STATUS_WAIT_TIMEOUT ==)
-				if (tries@ -1 ~=)
-					1 tries -=
-
-					if (tries@ ~~)
-						STATUS_NO_MEMORY ok!
-						return
-					end
-				end
-			end elseif (ok@)
-				return
-			end
+		end elseif (ok@)
+			return
 		end
 	end
 

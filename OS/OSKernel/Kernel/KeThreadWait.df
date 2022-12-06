@@ -269,78 +269,39 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 	auto current
 	KeThreadCurrent@ current!
 
-	auto i
-	0 i!
+	while (1)
+		auto i
+		0 i!
 
-	auto waitblock
-	current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
+		auto waitblock
+		current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
 
-	auto satisfied
+		auto satisfied
 
-	waittype@ OSWAITANY ~= satisfied!
+		waittype@ OSWAITANY ~= satisfied!
 
-	auto waitipl
-	IPLDPC KeIPLRaise waitipl!
+		auto waitipl
+		IPLDPC KeIPLRaise waitipl!
 
-	while (i@ objectcount@ <)
-		auto object
-		objecttable@ i@ 2 << + @ object!
+		while (i@ objectcount@ <)
+			auto object
+			objecttable@ i@ 2 << + @ object!
 
-		if (waittype@ OSWAITANY ==)
-			if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
-				if (object@ KeDispatchHeader_Signaled + @ z>)
-					// yoink!
+			if (waittype@ OSWAITANY ==)
+				if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+					if (object@ KeDispatchHeader_Signaled + @ z>)
+						// yoink!
 
-					current@ // thread
-					object@ // mutex
-					KeMutexOwnerSet
+						current@ // thread
+						object@ // mutex
+						KeMutexOwnerSet
 
-					i@ ok!
+						i@ ok!
 
-					1 satisfied!
+						1 satisfied!
 
-					break
-				end elseif (object@ KeMutex_OwningThread + @ current@ ==)
-					if (object@ KeDispatchHeader_Signaled + @ 0x80000000 ==)
-						// recursively acquiring this mutex again would cause
-						// an underflow.
-
-						current@ KeThreadWaitBlocksDequeue
-
-						waitipl@ KeIPLLower
-
-						STATUS_OVERFLOW ok!
-
-						return
-					end
-
-					i@ ok!
-
-					1 object@ KeDispatchHeader_Signaled + -=
-
-					1 satisfied!
-
-					break
-				end
-			end else
-				if (object@ KeDispatchHeader_Signaled + @ z>)
-					if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
-						0 object@ KeDispatchHeader_Signaled + !
-					end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
-						1 object@ KeDispatchHeader_Signaled + -=
-					end
-
-					i@ ok!
-
-					1 satisfied!
-
-					break
-				end
-			end
-		end else
-			if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
-				if (object@ KeDispatchHeader_Signaled + @ z> ~~)
-					if (object@ KeMutex_OwningThread + @ current@ ==)
+						break
+					end elseif (object@ KeMutex_OwningThread + @ current@ ==)
 						if (object@ KeDispatchHeader_Signaled + @ 0x80000000 ==)
 							// recursively acquiring this mutex again would cause
 							// an underflow.
@@ -353,93 +314,138 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 
 							return
 						end
-					end else
-						0 satisfied!
+
+						i@ ok!
+
+						1 object@ KeDispatchHeader_Signaled + -=
+
+						1 satisfied!
+
+						break
+					end
+				end else
+					if (object@ KeDispatchHeader_Signaled + @ z>)
+						if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
+							0 object@ KeDispatchHeader_Signaled + !
+						end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
+							1 object@ KeDispatchHeader_Signaled + -=
+						end
+
+						i@ ok!
+
+						1 satisfied!
+
+						break
 					end
 				end
-			end elseif (object@ KeDispatchHeader_Signaled + @ z> ~~)
-				0 satisfied!
+			end else
+				if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+					if (object@ KeDispatchHeader_Signaled + @ z> ~~)
+						if (object@ KeMutex_OwningThread + @ current@ ==)
+							if (object@ KeDispatchHeader_Signaled + @ 0x80000000 ==)
+								// recursively acquiring this mutex again would cause
+								// an underflow.
+
+								current@ KeThreadWaitBlocksDequeue
+
+								waitipl@ KeIPLLower
+
+								STATUS_OVERFLOW ok!
+
+								return
+							end
+						end else
+							0 satisfied!
+						end
+					end
+				end elseif (object@ KeDispatchHeader_Signaled + @ z> ~~)
+					0 satisfied!
+				end
 			end
+
+			if (timeout@)
+				i@ // waitindex
+				waittype@ // waittype
+				waitblock@ // waitblock
+				object@ // object
+				KeDispatchWaitBlockEnqueue
+			end
+
+			KeDispatchWaitBlock_SIZEOF waitblock +=
+			1 i +=
 		end
 
-		if (timeout@)
-			i@ // waitindex
-			waittype@ // waittype
+		if (timeout@ ~~)
+			// no timeout. just return even if the wait wasn't satisfied
+
+			waitipl@ KeIPLLower
+
+			satisfied@ ok!
+
+			return
+		end elseif (satisfied@)
+			// the wait is already satisfied. dequeue any wait blocks we just
+			// enqueued and then return.
+
+			current@ KeThreadWaitBlocksDequeue
+
+			waitipl@ KeIPLLower
+
+			return
+		end
+
+		waitmode@ // mode
+		alertable@ // alertable
+		current@ // thread
+		KeThreadIsKilled ok!
+
+		if (ok@)
+			// we died, don't sleep
+
+			current@ KeThreadWaitBlocksDequeue
+
+			waitipl@ KeIPLLower
+
+			return
+		end
+
+		objectcount@ current@ KeThread_WaitCount + !
+
+		if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
+			// there's a timeout and its not infinite, set up a timer waitblock
+
+			"WaitTimeout" // name
+			0 // function
+			current@ KeThread_Timer + // timer
+			KeTimerInitialize
+
+			current@ KeThread_TimeoutWaitBlock + waitblock!
+
+			STATUS_WAIT_TIMEOUT // waitindex
+			OSWAITANY // waittype
 			waitblock@ // waitblock
-			object@ // object
+			current@ KeThread_Timer + // object
 			KeDispatchWaitBlockEnqueue
+
+			0 // context1
+			0 // context2
+			timeout@ // interval
+			current@ KeThread_Timer + // timer
+			KeTimerEnqueue
 		end
 
-		KeDispatchWaitBlock_SIZEOF waitblock +=
-		1 i +=
-	end
-
-	if (timeout@ ~~)
-		// no timeout. just return even if the wait wasn't satisfied
-
-		waitipl@ KeIPLLower
-
-		satisfied@ ok!
-
-		return
-	end elseif (satisfied@)
-		// the wait is already satisfied. dequeue any wait blocks we just
-		// enqueued and then return.
-
-		current@ KeThreadWaitBlocksDequeue
+		waitipl@ // waitipl
+		waitmode@ // waitmode
+		alertable@ // alertable
+		0 // explicitstatus
+		KeThreadWait ok!
 
 		waitipl@ KeIPLLower
 
-		return
+		if (ok@ STATUS_KERNEL_APC ~=)
+			return
+		end
 	end
-
-	waitmode@ // mode
-	alertable@ // alertable
-	current@ // thread
-	KeThreadIsKilled ok!
-
-	if (ok@)
-		// we died, don't sleep
-
-		current@ KeThreadWaitBlocksDequeue
-
-		waitipl@ KeIPLLower
-
-		return
-	end
-
-	objectcount@ current@ KeThread_WaitCount + !
-
-	if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
-		// there's a timeout and its not infinite, set up a timer waitblock
-
-		"WaitTimeout" // name
-		0 // function
-		current@ KeThread_Timer + // timer
-		KeTimerInitialize
-
-		current@ KeThread_TimeoutWaitBlock + waitblock!
-
-		STATUS_WAIT_TIMEOUT // waitindex
-		OSWAITANY // waittype
-		waitblock@ // waitblock
-		current@ KeThread_Timer + // object
-		KeDispatchWaitBlockEnqueue
-
-		0 // context1
-		0 // context2
-		timeout@ // interval
-		current@ KeThread_Timer + // timer
-		KeTimerEnqueue
-	end
-
-	waitipl@ // waitipl
-	waitmode@ // waitmode
-	alertable@ // alertable
-	0 // explicitstatus
-	KeThreadWait ok!
-
-	waitipl@ KeIPLLower
 end
 
 fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
@@ -451,121 +457,127 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 
 	0 ok!
 
-	auto waitipl
-	IPLDPC KeIPLRaise waitipl!
+	while (1)
+		auto waitipl
+		IPLDPC KeIPLRaise waitipl!
 
-	if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
-		if (object@ KeDispatchHeader_Signaled + @ z>)
-			// yoink!
+		if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_MUTEX ==)
+			if (object@ KeDispatchHeader_Signaled + @ z>)
+				// yoink!
 
-			current@ // thread
-			object@ // mutex
-			KeMutexOwnerSet
-
-			waitipl@ KeIPLLower
-
-			if (timeout@ ~~)
-				1 ok!
-			end
-
-			return
-		end elseif (object@ KeMutex_OwningThread + @ current@ ==)
-			if (object@ KeDispatchHeader_Signaled + @ 0x80000000 ==)
-				// recursively acquiring this mutex again would cause
-				// an underflow.
+				current@ // thread
+				object@ // mutex
+				KeMutexOwnerSet
 
 				waitipl@ KeIPLLower
 
-				STATUS_OVERFLOW ok!
+				if (timeout@ ~~)
+					1 ok!
+				end
+
+				return
+			end elseif (object@ KeMutex_OwningThread + @ current@ ==)
+				if (object@ KeDispatchHeader_Signaled + @ 0x80000000 ==)
+					// recursively acquiring this mutex again would cause
+					// an underflow.
+
+					waitipl@ KeIPLLower
+
+					STATUS_OVERFLOW ok!
+
+					return
+				end
+
+				1 object@ KeDispatchHeader_Signaled + -=
+
+				waitipl@ KeIPLLower
+
+				if (timeout@ ~~)
+					1 ok!
+				end
 
 				return
 			end
+		end else
+			if (object@ KeDispatchHeader_Signaled + @ z>)
+				if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
+					0 object@ KeDispatchHeader_Signaled + !
+				end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
+					1 object@ KeDispatchHeader_Signaled + -=
+				end
 
-			1 object@ KeDispatchHeader_Signaled + -=
+				waitipl@ KeIPLLower
+
+				if (timeout@ ~~)
+					1 ok!
+				end
+
+				return
+			end
+		end
+
+		if (timeout@ ~~)
+			// no timeout. just return that the wait wasn't satisfied
 
 			waitipl@ KeIPLLower
 
-			if (timeout@ ~~)
-				1 ok!
-			end
+			0 ok!
 
 			return
 		end
-	end else
-		if (object@ KeDispatchHeader_Signaled + @ z>)
-			if (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_EVENTSYNCH ==)
-				0 object@ KeDispatchHeader_Signaled + !
-			end elseif (object@ KeDispatchHeader_Type + @ DISPATCHOBJECT_SEMAPHORE ==)
-				1 object@ KeDispatchHeader_Signaled + -=
-			end
+
+		waitmode@ // mode
+		alertable@ // alertable
+		current@ // thread
+		KeThreadIsKilled ok!
+
+		if (ok@)
+			// we died, don't go to sleep
 
 			waitipl@ KeIPLLower
 
-			if (timeout@ ~~)
-				1 ok!
-			end
-
 			return
 		end
-	end
 
-	if (timeout@ ~~)
-		// no timeout. just return that the wait wasn't satisfied
-
-		waitipl@ KeIPLLower
-
-		0 ok!
-
-		return
-	end
-
-	waitmode@ // mode
-	alertable@ // alertable
-	current@ // thread
-	KeThreadIsKilled ok!
-
-	if (ok@)
-		// we died, don't go to sleep
-
-		waitipl@ KeIPLLower
-
-		return
-	end
-
-	0 // waitindex
-	OSWAITANY // waittype
-	current@ KeThread_WaitBlocks + // waitblock
-	object@ // object
-	KeDispatchWaitBlockEnqueue
-
-	if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
-		// there's a timeout and its not infinite, set up a timer waitblock
-
-		"WaitTimeout" // name
-		0 // function
-		current@ KeThread_Timer + // timer
-		KeTimerInitialize
-
-		STATUS_WAIT_TIMEOUT // waitindex
+		0 // waitindex
 		OSWAITANY // waittype
-		current@ KeThread_TimeoutWaitBlock + // waitblock
-		current@ KeThread_Timer + // object
+		current@ KeThread_WaitBlocks + // waitblock
+		object@ // object
 		KeDispatchWaitBlockEnqueue
 
-		0 // context1
-		0 // context2
-		timeout@ // interval
-		current@ KeThread_Timer + // timer
-		KeTimerEnqueue
+		if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
+			// there's a timeout and its not infinite, set up a timer waitblock
+
+			"WaitTimeout" // name
+			0 // function
+			current@ KeThread_Timer + // timer
+			KeTimerInitialize
+
+			STATUS_WAIT_TIMEOUT // waitindex
+			OSWAITANY // waittype
+			current@ KeThread_TimeoutWaitBlock + // waitblock
+			current@ KeThread_Timer + // object
+			KeDispatchWaitBlockEnqueue
+
+			0 // context1
+			0 // context2
+			timeout@ // interval
+			current@ KeThread_Timer + // timer
+			KeTimerEnqueue
+		end
+
+		waitipl@ // waitipl
+		waitmode@ // waitmode
+		alertable@ // alertable
+		0 // explicitstatus
+		KeThreadWait ok!
+
+		waitipl@ KeIPLLower
+
+		if (ok@ STATUS_KERNEL_APC ~=)
+			return
+		end
 	end
-
-	waitipl@ // waitipl
-	waitmode@ // waitmode
-	alertable@ // alertable
-	0 // explicitstatus
-	KeThreadWait ok!
-
-	waitipl@ KeIPLLower
 end
 
 fn KeThreadWakeup { waitstatus priboost thread -- woken }

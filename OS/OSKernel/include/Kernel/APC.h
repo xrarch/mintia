@@ -19,7 +19,7 @@ struct KeAPC
 	4 Enqueued
 endstruct
 
-extern KeAPCInitialize { thread exitfunc specialfunc normalfunc apc -- ok }
+extern KeAPCInitialize { thread exitfunc specialfunc normalfunc apc -- }
 extern KeAPCDequeue { apc -- ok }
 extern KeAPCEnqueue { context1 context2 priboost apc -- ok }
 extern KeAPCDispatchQueue { -- }

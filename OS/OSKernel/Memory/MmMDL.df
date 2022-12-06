@@ -33,7 +33,6 @@ fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 	length@ mdl@ MmMDLHeader_Length + !
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> mdl@ MmMDLHeader_Pages + !
 	0 mdl@ MmMDLHeader_Flags + !
-	0 mdl@ MmMDLHeader_Thread + !
 	mode@ mdl@ MmMDLHeader_ModeB + sb
 
 	0 mdl@ MmMDLHeader_MappedAddress + !
@@ -44,16 +43,17 @@ fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_ParentMDL + !
 	1 mdl@ MmMDLHeader_IOCountI + si
 
-	0 mdl@ MmMDLHeader_QuotaBlock + !
-	0 mdl@ MmMDLHeader_CompletionMessage + !
-
 	0 mdl@ MmMDLHeader_CompleteRoutine + !
 
+	0 mdl@ MmMDLHeader_QuotaBlock + !
+	0 mdl@ MmMDLHeader_CompletionMessage + !
 	fileobject@ mdl@ MmMDLHeader_FileObject + !
 
-	if (fileobject@)
-		fileobject@ ObObjectNonpagedHeader mdl@ MmMDLHeader_FileObjectCapturedHeader + !
-	end
+	KeThreadCurrent@ // thread
+	pointerof MmMDLCompleteAPC // specialfunc
+	0 // normalfunc
+	mdl@ MmMDLHeader_CompletionAPC + // apc
+	KeAPCInitialize
 end
 
 fn MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
@@ -165,7 +165,7 @@ fn MmMDLSplit { vaddr length srcmdl destmdl -- }
 	srcmdl@ MmMDLHeader_Flags + @ MMMDL_FLAGS_NOT_TO_INHERIT ~ & destmdl@ MmMDLHeader_Flags + |=
 	MMMDL_DONTUNPIN destmdl@ MmMDLHeader_Flags + |=
 
-	srcmdl@ MmMDLHeader_Thread + @ destmdl@ MmMDLHeader_Thread + !
+	srcmdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + @ destmdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + !
 	srcmdl@ MmMDLHeader_ModeB + gb destmdl@ MmMDLHeader_ModeB + sb
 
 	// reuse the mapping from the source MDL
@@ -384,7 +384,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		return
 	end
 
-	KeThreadCurrent@ mdl@ MmMDLHeader_Thread + !
+	KeThreadCurrent@ mdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + !
 
 	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
 	// clean up the partial pin if we fail at any point.
@@ -542,7 +542,7 @@ fn MmMDLUnpin { mdl -- }
 	MMMDL_PINNED ~ mdl@ MmMDLHeader_Flags + &=
 
 	auto process
-	mdl@ MmMDLHeader_Thread + @ KeThread_Process + @ process!
+	mdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + @ KeThread_Process + @ process!
 
 	if (process@)
 		mdl@ MmMDLHeader_Pages + @ // count
@@ -725,9 +725,13 @@ fn MmMDLComplete { status priboost mdl -- }
 
 	// operation is completely done
 
+	auto enqueueapc
+	0 enqueueapc!
+
 	if (mdl@ MmMDLHeader_CompleteRoutine + @)
-		mdl@ // mdl
-		mdl@ MmMDLHeader_CompleteRoutine + @ MmMDLCompleteRoutine
+		1 enqueueapc!
+	end elseif (mdl@ MmMDLHeader_FileObject + @)
+		1 enqueueapc!
 	end
 
 	auto parentmdl
@@ -751,32 +755,54 @@ fn MmMDLComplete { status priboost mdl -- }
 		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED &)
 			mdl@ MmMDLUnpin
 		end
-
-		if (mdl@ MmMDLHeader_FileObject + @)
-			// this is an async IO operation requested by a user thread.
-			// dereference the file object and send a message to the port
-			// object.
-
-			mdl@ MmMDLHeader_FileObject + @ // object
-			mdl@ MmMDLHeader_FileObjectCapturedHeader + @ // npheader
-			ObObjectDereferenceByPointerCapturedHeader drop
-
-			auto msg
-			mdl@ MmMDLHeader_CompletionMessage + @ msg!
-
-			auto portobject
-			msg@ IPCKernelMessage_OriginatingPort + @ portobject!
-
-			// message fields were already initialized.
-
-			msg@ // msg
-			portobject@ // portobject
-			IPCPortSendMessage drop
-
-			portobject@ ObObjectDereferenceByPointer drop
-		end
 	end
 
+	if (enqueueapc@ ~~)
+		mdl@ MmMDLFinishEitherContext
+	end else
+		mdl@ // context1
+		0 // context2
+		priboost@ // priboost
+		mdl@ MmMDLHeader_CompletionAPC + // apc
+		KeAPCEnqueue drop
+	end
+end
+
+fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc -- }
+	auto mdl
+	context1@@ mdl!
+
+	if (mdl@ MmMDLHeader_CompleteRoutine + @)
+		mdl@ // mdl
+		mdl@ MmMDLHeader_CompleteRoutine + @ MmMDLCompleteRoutine
+	end
+
+	if (mdl@ MmMDLHeader_FileObject + @)
+		// this is an async IO operation requested by a user thread.
+		// dereference the file object and send a message to the port
+		// object.
+
+		mdl@ MmMDLHeader_FileObject + @ ObObjectDereferenceByPointer drop
+
+		auto msg
+		mdl@ MmMDLHeader_CompletionMessage + @ msg!
+
+		auto portobject
+		msg@ IPCKernelMessage_OriginatingPort + @ portobject!
+
+		// message fields were already initialized with context about the IO.
+
+		msg@ // msg
+		portobject@ // portobject
+		IPCPortSendMessage drop
+
+		portobject@ ObObjectDereferenceByPointer drop
+	end
+
+	mdl@ MmMDLFinishEitherContext
+end
+
+fn MmMDLFinishEitherContext { mdl -- }
 	auto event
 	mdl@ MmMDLHeader_Event + @ event!
 
@@ -786,7 +812,7 @@ fn MmMDLComplete { status priboost mdl -- }
 		KeEventSignal
 	end
 
-	if (flags@ MMMDL_DELETE &)
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_DELETE &)
 		// free the MDL and uncharge any associated quota.
 
 		auto quotablock

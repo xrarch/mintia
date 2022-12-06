@@ -4,10 +4,9 @@ struct MmMDLHeader
 	2 IOCountI
 
 	4 VirtualAddress
-	4 Length  // returns the number of bytes that were actually transferred
-	4 Pages   // unchanging, always describes how many pages are in the list
+	4 Length  // returns the number of bytes that were actually transferred.
+	4 Pages   // unchanging, always describes how many pages are in the list.
 	4 Flags
-	4 Thread
 
 	4 MappedAddress
 
@@ -16,13 +15,13 @@ struct MmMDLHeader
 	4 ParentMDL
 
 	4 FileObject
-	4 FileObjectCapturedHeader
-
 	4 CompletionMessage
-
 	4 QuotaBlock
 
 	4 CompleteRoutine
+
+	KeAPC_SIZEOF CompletionAPC
+
 	4 Context1
 	4 Context2
 	4 Context3

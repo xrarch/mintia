@@ -9,7 +9,6 @@ struct KeAPC
 	4 Prev
 	4 Next
 
-	4 FunctionExit // called if thread terminates before APC is executed
 	4 FunctionSpecial
 	4 FunctionNormal
 
@@ -19,7 +18,7 @@ struct KeAPC
 	4 Enqueued
 endstruct
 
-extern KeAPCInitialize { thread exitfunc specialfunc normalfunc apc -- }
+extern KeAPCInitialize { thread specialfunc normalfunc apc -- }
 extern KeAPCDequeue { apc -- ok }
 extern KeAPCEnqueue { context1 context2 priboost apc -- ok }
 extern KeAPCDispatchQueue { -- }

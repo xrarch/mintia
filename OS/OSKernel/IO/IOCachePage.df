@@ -431,17 +431,16 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
-	IPLDPC KeIPLRaise drop
-
 	if (transfer@ ~~)
+		IPLAPC KeIPLRaise drop
+
 		mdl@ IOCachePageMDLComplete
 	end
+
+	IPLDPC KeIPLRaise drop
 end
 
 fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
 	auto status
 	mdl@ MmMDLHeader_Status + @ status!
 
@@ -456,9 +455,13 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 	auto pagecount
 	mdl@ MmMDLHeader_Pages + @ pagecount!
 
+	auto ipl
+
 	while (pagecount@)
 		auto pfdbe
 		mdlpos@@ pfdbe!
+
+		IPLDPC KeIPLRaise ipl!
 
 		if (status@)
 			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
@@ -466,6 +469,9 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 		end
 
 		pfdbe@ MmEvictablePageSatisfy
+
+		ipl@ KeIPLLower
+
 		pfdbe@ MmEvictablePageDereference drop
 
 		1 pagecount -=
@@ -475,8 +481,6 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 	if (mdl@ MmMDLHeader_Context1 + @)
 		mdl@ MmMDLHeader_Context1 + @ IOTransferComplete
 	end
-
-	ipl@ KeIPLLower
 end
 
 fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok }

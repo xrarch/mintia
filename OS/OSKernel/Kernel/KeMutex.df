@@ -27,6 +27,10 @@ fn KeMutexInitialize { name mode mutex -- }
 end
 
 fn KeMutexOwnerSet { thread mutex -- }
+	if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+		1 thread@ KeThread_APCDisableCount + +=
+	end
+
 	thread@ mutex@ KeMutex_OwningThread + !
 
 	auto h
@@ -136,22 +140,11 @@ fn KeMutexRelease { abandon mutex -- ok }
 		// try to wake up a waiter.
 
 		auto wokenthread
-
-		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
-			// kernel mode mutex, boost waiter priority by 1
-
-			0 // waitstatus
-			1 // priboost
-			mutex@ // object
-			1 // signal
-			KeDispatchSatisfyFirst wokenthread!
-		end else
-			0 // waitstatus
-			1 // priboost
-			mutex@ // object
-			1 // signal
-			KeDispatchSatisfyFirst wokenthread!
-		end
+		0 // waitstatus
+		1 // priboost
+		mutex@ // object
+		1 // signal
+		KeDispatchSatisfyFirst wokenthread!
 
 		if (wokenthread@)
 			// we woke up a thread who was waiting. make them the owner of the
@@ -163,6 +156,16 @@ fn KeMutexRelease { abandon mutex -- ok }
 		end else
 			// just unown the mutex
 			0 mutex@ KeMutex_OwningThread + !
+		end
+
+		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+			1 current@ KeThread_APCDisableCount + -=
+
+			if (current@ KeThread_APCDisableCount + @ ~~)
+				if (current@ KeThread_APCListHead + @)
+					IPLAPC KeSoftwareInterruptRequest
+				end
+			end
 		end
 	end else
 		count@ mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !

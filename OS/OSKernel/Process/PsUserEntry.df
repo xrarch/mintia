@@ -79,6 +79,9 @@ fn PsPrepareUsermode { trapframe -- }
 
 	auto whatnow
 
+	auto signaled
+	0 signaled!
+
 	if (KeIPLCurrentGet IPLDPC >=)
 		"PsPrepareUsermode: ipl >= IPLDPC\n" KeCrash
 	end
@@ -114,11 +117,20 @@ fn PsPrepareUsermode { trapframe -- }
 			IPLDPC KeIPLRaise drop
 
 			while (current@ KeThread_Suspended + @)
+				auto ok
 				IPLLOW // waitipl
 				USERMODE // waitmode
 				1 // alertable
 				THREADSTATUS_SUSPENDED // explicitstatus
-				KeThreadWait drop
+				KeThreadWait ok!
+
+				if (ok@ STATUS_KERNEL_APC ==)
+					IPLLOW KeIPLLower
+
+					// APC interrupt occurs
+
+					IPLDPC KeIPLRaise drop
+				end
 			end
 
 			IPLLOW KeIPLLower
@@ -132,25 +144,24 @@ fn PsPrepareUsermode { trapframe -- }
 			auto nextsig
 			current@ KeThreadNextSignal nextsig!
 
-			if (trapframe@)
-				auto recheck
-
+			if (trapframe@ signaled@ ~~ &&)
 				HALCPUInterruptEnable
 
 				nextsig@ // signum
 				PsOSDLLInformation PsOSDLLInfo_SignalDispatchFunction + @ // dispatchfunc
 				current@ // thread
 				trapframe@ // trapframe
-				KeCopySignalFrame recheck!
+				KeCopySignalFrame drop
 
 				HALCPUInterruptDisable drop
 
-				if (recheck@)
-					continue
-				end
-			end
+				// only allow one signal at a time otherwise things may get hairy
+				1 signaled!
 
-			break
+				continue
+			end else
+				break
+			end
 		end else
 			break
 		end

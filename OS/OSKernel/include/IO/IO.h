@@ -79,6 +79,11 @@ const IOCLUSTERMAX (16 1024 *)
 
 const IOCACHEZEROMAX (512 1024 *)
 
+// arbitrary value estimating the amount of context an FCB requires from the
+// filesystem driver.
+
+const IOAVERAGEFCBCONTEXT 128
+
 extern IOFileControlBlockGetReferences { fcb -- references }
 extern IOFileControlBlockGetContext { fcb -- context }
 extern IOFileControlBlockSetContext { context fcb -- }

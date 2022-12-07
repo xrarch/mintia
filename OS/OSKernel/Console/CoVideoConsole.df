@@ -125,6 +125,8 @@ buffer CoVideoConsoleOutputEvent KeEvent_SIZEOF
 
 buffer CoVideoConsoleTimer KeTimer_SIZEOF
 
+buffer CoVideoConsoleInputAPC KeAPC_SIZEOF
+
 fn CoVideoConsoleInit { -- }
 	fnsection "INIT$text"
 
@@ -188,7 +190,7 @@ fn CoVideoConsoleInit { -- }
 	0 // txfunc
 	0 // flushfunc
 	OSDUPLEXFLAG_CONSOLE // flags
-	0 // pri
+	PAGED // pri
 	0 // quotablock
 	1 // permanent
 	"ttyV0" // name
@@ -277,6 +279,7 @@ fn CoVideoConsoleInit { -- }
 	CoVideoConsoleColumns@ CoVideoConsoleHeader@ CoConsoleHeader_WidthI + si
 	CoVideoConsoleRows@ CoVideoConsoleHeader@ CoConsoleHeader_HeightI + si
 
+	auto thread
 	0 // context1
 	0 // context2
 	pointerof CoVideoConsoleDrawWorker // startfunc
@@ -284,11 +287,17 @@ fn CoVideoConsoleInit { -- }
 	ACCESS_OWNER_ALL // permissions
 	"VideoConsoleDraw" // name
 	PsSystemProcess@ // processobject
-	PsThreadCreateObject ok! drop
+	PsThreadCreateObject ok! thread!
 
 	if (ok@)
 		ok@ "CoVideoConsoleInit: couldn't create 'VideoConsoleDraw' thread (%i)\n" KeCrash
 	end
+
+	thread@ // thread
+	pointerof CoVideoConsoleAPCRoutine // specialfunc
+	0 // normalfunc
+	CoVideoConsoleInputAPC // apc
+	KeAPCInitialize
 end
 
 const VIDEOCONSOLETITLEBGCOLOR 222 // light gray
@@ -1409,6 +1418,55 @@ const COVIDEOCONSOLECLUSTER 128
 
 buffer CoVideoConsoleCharBuf COVIDEOCONSOLECLUSTER
 
+const MAXINPUTBUFFER 8
+buffer CoVideoConsoleInputBuffer MAXINPUTBUFFER
+var CoVideoConsoleInputCount 0
+
+fn CoVideoConsoleInputCharacter { c -- }
+	if (CoVideoConsoleInputCount@ MAXINPUTBUFFER >=)
+		return
+	end
+
+	c@ CoVideoConsoleInputBuffer CoVideoConsoleInputCount@ + sb
+
+	1 CoVideoConsoleInputCount +=
+
+	c@ // context1
+	0 // context2
+	0 // priboost
+	CoVideoConsoleInputAPC // apc
+	KeAPCEnqueue drop
+end
+
+fn (KeAPCFunctionSpecial) CoVideoConsoleAPCRoutine { normalfunc context1 context2 apc -- }
+	auto capturedbuf
+	MAXINPUTBUFFER alloc capturedbuf!
+
+	auto count
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	capturedbuf@ // dest
+	CoVideoConsoleInputBuffer // src
+	CoVideoConsoleInputCount@ // sz
+	memcpy
+
+	CoVideoConsoleInputCount@ count!
+	0 CoVideoConsoleInputCount!
+
+	rs@ HALCPUInterruptRestore
+
+	while (count@)
+		capturedbuf@ gb // c
+		CoVideoConsole@ // duplex
+		CoDuplexInputCharacter drop
+
+		1 capturedbuf +=
+		1 count -=
+	end
+end
+
 fn CoVideoConsoleDrawLoop { -- }
 	fnsection "PAGE$text"
 
@@ -1442,6 +1500,9 @@ fn CoVideoConsoleDrawLoop { -- }
 
 	event@ readmdl@ MmMDLHeader_Event + !
 
+	auto ipl
+	IPLAPC KeIPLRaise ipl!
+
 	OSWAIT_TIMEOUTINFINITE // timeout
 	OSACCESSFLAG_RETURNANY // flags
 	0 // kflags
@@ -1449,6 +1510,8 @@ fn CoVideoConsoleDrawLoop { -- }
 	readmdl@ // mdl
 	fcb@ // fcb
 	readfunc@ IODispatchReadFunction drop
+
+	ipl@ KeIPLLower
 
 	CoVideoConsoleTimer objecttable@ !
 	event@ objecttable@ 4 + !
@@ -1495,6 +1558,8 @@ fn CoVideoConsoleDrawLoop { -- }
 
 			event@ readmdl@ MmMDLHeader_Event + !
 
+			IPLAPC KeIPLRaise ipl!
+
 			OSWAIT_TIMEOUTINFINITE // timeout
 			OSACCESSFLAG_RETURNANY // flags
 			0 // kflags
@@ -1502,6 +1567,8 @@ fn CoVideoConsoleDrawLoop { -- }
 			readmdl@ // mdl
 			fcb@ // fcb
 			readfunc@ IODispatchReadFunction drop
+
+			ipl@ KeIPLLower
 		end
 
 		if (reason@ 1 ~= CoVideoConsoleHeader@ CoConsoleHeader_Echoed + @ ||)

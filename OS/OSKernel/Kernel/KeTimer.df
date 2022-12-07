@@ -64,7 +64,7 @@ fn (DPCFunction) KeTimerExpiration { context1 context2 -- }
 			timer@ KeTimer_DPC + KeDPC_Context1 + @ // context2
 			DPCLOWIMPORTANCE // importance
 			timer@ KeTimer_DPC + // dpc
-			KeDPCEnqueue
+			KeDPCEnqueue drop
 		end
 
 		0 timer@ KeTimer_Enqueued + !
@@ -215,15 +215,19 @@ fn KeTimerInitialize { name function timer -- }
 	function@ timer@ KeTimer_DPC + KeDPCInitialize
 end
 
-fn KeTimerDequeue { timer -- }
+fn KeTimerDequeue { timer -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (DEBUGCHECKS)
-		if (timer@ KeTimer_Enqueued + @ ~~)
-			"KeTimerDequeue: attempt to dequeue a dequeued timer\n" KeCrash
-		end
+	if (timer@ KeTimer_Enqueued + @ ~~)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_NOT_ENQUEUED ok!
+
+		return
 	end
+
+	0 ok!
 
 	0 timer@ KeTimer_Enqueued + !
 
@@ -266,9 +270,11 @@ fn KeTimerEarliestSet { time -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn KeTimerEnqueue { context1 context2 interval timer -- }
-	if (interval@ 0 ==)
-		"KeTimerEnqueue: attempt to queue a timer with 0ms interval\n" KeCrash
+fn KeTimerEnqueue { context1 context2 interval timer -- ok }
+	if (DEBUGCHECKS)
+		if (interval@ 0 ==)
+			"KeTimerEnqueue: attempt to queue a timer with 0ms interval\n" KeCrash
+		end
 	end
 
 	auto time
@@ -286,11 +292,15 @@ fn KeTimerEnqueue { context1 context2 interval timer -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (DEBUGCHECKS)
-		if (timer@ KeTimer_Enqueued + @)
-			"KeTimerEnqueue: attempt to queue an enqueued timer\n" KeCrash
-		end
+	if (timer@ KeTimer_Enqueued + @)
+		ipl@ KeIPLLower
+
+		STATUS_ALREADY_ENQUEUED ok!
+
+		return
 	end
+
+	0 ok!
 
 	1 timer@ KeTimer_Enqueued + !
 

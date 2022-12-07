@@ -15,7 +15,7 @@ endstruct
 const DPCHIGHIMPORTANCE 1
 const DPCLOWIMPORTANCE 2
 
-extern KeDPCEnqueue { context1 context2 importance dpc -- }
+extern KeDPCEnqueue { context1 context2 importance dpc -- ok }
 extern KeDPCDispatchQueue { -- }
 extern KeDPCInitialize { function dpc -- }
 

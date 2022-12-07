@@ -1231,6 +1231,8 @@ fn CoVideoConsolePutCharacter { c -- }
 end
 
 fn CoVideoConsoleExpediteRedraw { -- }
+	fnsection "PAGE$text"
+
 	CoVideoConsoleTimer KeTimerDequeue drop
 
 	0 // priboost
@@ -1425,6 +1427,15 @@ buffer CoVideoConsoleInputBuffer MAXINPUTBUFFER
 var CoVideoConsoleInputCount 0
 
 fn CoVideoConsoleInputCharacter { c -- }
+	// called from keyboard DPC to place a character on the input buffer and
+	// enqueue the input APC to the video console thread.
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"CoVideoConsoleInputCharacter: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	if (CoVideoConsoleInputCount@ MAXINPUTBUFFER >=)
 		return
 	end
@@ -1441,6 +1452,9 @@ fn CoVideoConsoleInputCharacter { c -- }
 end
 
 fn (KeAPCFunctionSpecial) CoVideoConsoleAPCRoutine { normalfunc context1 context2 apc -- }
+	// APC routine enqueued by keyboard driver to the video console worker.
+	// inputs all of the buffered characters to the duplex.
+
 	auto capturedbuf
 	MAXINPUTBUFFER alloc capturedbuf!
 
@@ -1501,6 +1515,9 @@ fn CoVideoConsoleDrawLoop { -- }
 	MmMDLInitialize
 
 	event@ readmdl@ MmMDLHeader_Event + !
+
+	// raise IPL to IPLAPC during all reads of the video console duplex since
+	// we don't want race conditions with the keyboard input APC.
 
 	auto ipl
 	IPLAPC KeIPLRaise ipl!

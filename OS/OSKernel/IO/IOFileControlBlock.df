@@ -52,6 +52,14 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	0 fcb@ IOFileControlBlock_ReusableListNext + !
 	0 fcb@ IOFileControlBlock_ReusableListPrev + !
 
+	0 fcb@ IOFileControlBlock_AsyncIOCount + !
+
+	1 // signaled
+	OSEVENT_NOTIF // type
+	"FCBAsyncEvent" // name
+	fcb@ IOFileControlBlock_AsyncIOEvent + // event
+	KeEventInitialize
+
 	"FCBRwLock" // name
 	fcb@ IOFileControlBlock_RwLock + // rwlock
 	ExRwLockInitialize
@@ -569,6 +577,17 @@ fn IOFileControlBlockTruncate { newsize growing keeplocked zero flags fcb -- old
 
 	if (ok@)
 		return
+	end
+
+	if (fcb@ IOFileControlBlock_AsyncIOCount + @)
+		// wait for async IO to complete. no more can be enqueued after this
+		// value reaches zero because we are holding the rwlock exclusive.
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		fcb@ IOFileControlBlock_AsyncIOEvent + // object
+		KeThreadWaitForObject drop
 	end
 
 	while (1)

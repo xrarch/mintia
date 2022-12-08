@@ -824,6 +824,12 @@ fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc --
 		auto msg
 		mdl@ MmMDLHeader_CompletionMessage + @ msg!
 
+		auto fileobject
+		mdl@ MmMDLHeader_FileObject + @ fileobject!
+
+		auto fcb
+		fileobject@ IOFile_FileControlBlock + @ fcb!
+
 		// message fields were already initialized with context about the IO.
 
 		mdl@ MmMDLHeader_Length + @
@@ -861,16 +867,24 @@ fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc --
 			ls@ ns@ MmMDLHeader_IOListPrev + !
 		end
 
-		if (mdl@ MmMDLHeader_FileObject + @ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
-			// release the fcb rwlock, which was held shared throughout this
-			// operation
+		// decrement the AsyncIOCount on the FCB, if it reaches 0, signal the
+		// notification event.
 
-			mdl@ MmMDLHeader_FileObject + @ IOFile_FileControlBlock + @ IOFileControlBlockUnlock
+		IPLDPC KeIPLRaise ipl!
+
+		1 fcb@ IOFileControlBlock_AsyncIOCount + -=
+
+		if (fcb@ IOFileControlBlock_AsyncIOCount + @ ~~)
+			0 // priboost
+			fcb@ IOFileControlBlock_AsyncIOEvent + // event
+			KeEventSignal
 		end
+
+		ipl@ KeIPLLower
 
 		// dereference the file and port object
 
-		mdl@ MmMDLHeader_FileObject + @ ObObjectDereferenceByPointer drop
+		fileobject@ ObObjectDereferenceByPointer drop
 		msg@ IPCKernelMessage_OriginatingPort + @ ObObjectDereferenceByPointer drop
 	end
 

@@ -84,6 +84,17 @@ fn IOFileFlushObject { purge fileobject -- ok }
 		return
 	end
 
+	if (fcb@ IOFileControlBlock_AsyncIOCount + @)
+		// wait for async IO to complete. no more can be enqueued after this
+		// value reaches zero because we are holding the rwlock exclusive.
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		fcb@ IOFileControlBlock_AsyncIOEvent + // object
+		KeThreadWaitForObject drop
+	end
+
 	if (purge@)
 		0 // newsize
 		1 // writeout
@@ -631,11 +642,11 @@ fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fi
 	write@ // write
 	IOReadWrite ok! drop
 
-	if (ok@)
-		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
-			fcb@ IOFileControlBlockUnlock
-		end
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
+		fcb@ IOFileControlBlockUnlock
+	end
 
+	if (ok@)
 		return
 	end
 

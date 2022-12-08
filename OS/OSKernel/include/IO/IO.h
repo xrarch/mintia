@@ -59,6 +59,9 @@ struct IOFileControlBlock
 
 	ExRwLock_SIZEOF RwLock
 
+	4 AsyncIOCount
+	KeEvent_SIZEOF AsyncIOEvent
+
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
 	KeTime_SIZEOF ChangeTime

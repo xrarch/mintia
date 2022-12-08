@@ -673,3 +673,135 @@ fn (StressTestF) CacheFloodTest { -- ok }
 		"\n" Printf
 	end
 end
+
+// OSFileReadAsync { context porthandle flags offset length buffer filehandle -- ok }
+// OSFileWriteAsync { context porthandle flags offset length buffer filehandle -- ok }
+// OSFileCancelIO { wait filehandle -- ok }
+
+fn (StressTestF) AsyncIOTest { -- ok }
+	auto diskname
+	":ttyV0" diskname!
+
+	if (ArgCount@ 3 ==)
+		ArgTable@ 2 4 * + @ diskname!
+	end
+
+	auto count
+	0 count!
+
+	auto diskhandle
+	OSDEFAULTFILEPERMISSIONS // permissions
+	OSFILEFLAG_MUSTBEFILE OSFILEFLAG_NOCACHE | // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	diskname@ // path
+	OSFileCreate ok! diskhandle!
+
+	if (ok@)
+		ok@ OSStatusGetName diskname@ "couldn't open %s: %s\n" OSError
+	end
+
+	131072 // newsize
+	1 // growing
+	diskhandle@ // handle
+	OSFileTruncate drop drop
+
+	auto porthandle
+	0 // flags
+	0 // maxlen
+	ACCESS_OWNER_ALL // permissions
+	"TestPort" // name
+	OSPortCreate ok! porthandle!
+
+	if (ok@)
+		ok@ ok@ OSStatusGetName "couldn't create port: %s %i\n" OSError
+	end
+
+	auto bigbuf
+	131072 // length
+	HEAPSTART // startva
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSAllocate ok! bigbuf!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't allocate buffer: %s\n" OSError
+	end
+
+	count@ // context
+	porthandle@ // porthandle
+	OSACCESSFLAG_ASYNC // flags
+	0 // offset
+	65536 // length
+	bigbuf@ // buffer
+	diskhandle@ // filehandle
+	OSFileReadAsync ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't read: %s\n" OSError
+	end
+
+	count@ "q'd with new context: %x\n" Printf
+
+	1 count +=
+
+	auto rxmsg
+	OSMessageHeader_SIZEOF alloc rxmsg!
+
+	auto replymsg
+	0 replymsg!
+
+	while (1)
+		rxmsg@ // rxmsg
+		replymsg@ // txmsg
+		OSWAIT_TIMEOUTINFINITE // timeout
+		porthandle@ // porthandle
+		OSPortSendAndWaitReceive ok!
+
+		if (ok@)
+			if (ok@ STATUS_WAIT_TIMEOUT ==)
+				1 // wait
+				diskhandle@ // filehandle
+				OSFileCancelIO drop
+
+				continue
+			end else
+				ok@ OSStatusGetName "[server] couldn't receive: %s\n" OSError
+			end
+		end
+
+		0 replymsg!
+
+		if (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_IOCOMPLETE ==)
+			rxmsg@ OSMessageHeaderIOCompletion_Status + @
+			rxmsg@ OSMessageHeaderIOCompletion_BytesTransferred + @
+			rxmsg@ OSMessageHeaderIOCompletion_Context + @
+			"context=%x bytes=%d status=%i\n" Printf
+
+			if (rxmsg@ OSMessageHeaderIOCompletion_Status + @ ~~)
+				0 bigbuf@ rxmsg@ OSMessageHeaderIOCompletion_BytesTransferred + @ + sb
+
+				bigbuf@ "buffer contents: %s\n" Printf
+			end
+
+			count@ // context
+			porthandle@ // porthandle
+			OSACCESSFLAG_ASYNC // flags
+			0 // offset
+			65536 // length
+			bigbuf@ // buffer
+			diskhandle@ // filehandle
+			OSFileReadAsync ok!
+
+			if (ok@)
+				ok@ OSStatusGetName "couldn't read: %s\n" OSError
+			end
+
+			count@ "q'd with new context: %x\n" Printf
+
+			1 count +=
+		end else
+			rxmsg@ OSMessageHeader_TypeB + gb "[server] dunno type %d\n" Printf
+		end
+	end
+end

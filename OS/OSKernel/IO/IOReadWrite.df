@@ -61,6 +61,12 @@ fn IOFileFlushObject { purge fileobject -- ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
+	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		// no cacheblock, nothing to do
+
+		return
+	end
+
 	fcb@ IOFileControlBlockLock ok!
 
 	if (ok@)
@@ -395,13 +401,6 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes
 			end
 		end
 
-		fcb@ // fcb
-		IOFileControlBlockLockShared ok!
-
-		if (ok@)
-			return
-		end
-
 		timeout@ // timeout
 		flags@ // flags
 		0 // kflags
@@ -413,8 +412,6 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes
 		lastmode@ // lastmode
 		write@ // write
 		IOReadWrite ok! bytes!
-
-		fcb@ IOFileControlBlockUnlock
 
 		bytes@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
 
@@ -612,10 +609,12 @@ fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fi
 		return
 	end
 
-	fcb@ IOFileControlBlockLockShared ok!
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
+		fcb@ IOFileControlBlockLockShared ok!
 
-	if (ok@)
-		return
+		if (ok@)
+			return
+		end
 	end
 
 	// FCB is kept locked shared for the duration of the IO.
@@ -633,7 +632,9 @@ fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fi
 	IOReadWrite ok! drop
 
 	if (ok@)
-		fcb@ IOFileControlBlockUnlock
+		if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ~=)
+			fcb@ IOFileControlBlockUnlock
+		end
 
 		return
 	end

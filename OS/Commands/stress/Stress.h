@@ -13,6 +13,7 @@ extern IPCTestServer { -- ok }
 extern IPCTestClient { -- ok }
 extern InfiniteLoopTest { -- ok }
 extern CacheFloodTest { -- ok }
+extern AsyncIOTest { -- ok }
 
 externptr ArgTable
 externptr ArgCount

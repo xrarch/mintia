@@ -242,10 +242,82 @@ end
 fn IOFileControlBlockLock { fcb -- ok }
 	fnsection "PAGE$text"
 
-	1 // alertable
-	0 // nowait
-	fcb@ IOFileControlBlock_RwLock + // rwlock
-	ExRwLockAcquireExclusive ok!
+	if (KeThreadCurrent@ PsThread_IOListHead + @ ~~)
+		// fast path. if we have pending IO requests, there is an opportunity
+		// for deadlock with ourselves if we try to i.e. truncate the file
+		// in the middle of that operation, so we need to check that below.
+		// in this case however, we just do a normal lock.
+
+		1 // alertable
+		0 // nowait
+		fcb@ IOFileControlBlock_RwLock + // rwlock
+		ExRwLockAcquireExclusive ok!
+
+		return
+	end
+
+	auto tries
+	5 tries!
+
+	while (1)
+		1 // alertable
+		1 // nowait
+		fcb@ IOFileControlBlock_RwLock + // rwlock
+		ExRwLockAcquireExclusive ok!
+
+		if (ok@)
+			break
+		end
+
+		// didn't acquire it, check if it's because we have outstanding IO on
+		// it. we don't wanna deadlock on ourselves.
+
+		auto ipl
+		IPLAPC KeIPLRaise ipl!
+
+		auto mdl
+		KeThreadCurrent@ PsThread_IOListHead + @ mdl!
+
+		while (mdl@)
+			if (mdl@ MmMDLHeader_FileObject + @ IOFile_FileControlBlock + @ fcb@ ==)
+				break
+			end
+
+			mdl@ MmMDLHeader_IOListNext + @ mdl!
+		end
+
+		ipl@ KeIPLLower
+
+		if (mdl@)
+			// it is, wait 100ms and try again
+
+			if (tries@ ~~)
+				STATUS_TRY_AGAIN_LATER ok!
+
+				return
+			end
+
+			100 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+
+			1 tries -=
+
+			continue
+		end else
+			// it's not, try again waitable this time
+
+			1 // alertable
+			0 // nowait
+			fcb@ IOFileControlBlock_RwLock + // rwlock
+			ExRwLockAcquireExclusive ok!
+
+			return
+		end
+	end
+
+	0 ok!
 end
 
 fn IOFileControlBlockDemoteToShared { fcb -- ok }

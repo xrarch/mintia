@@ -502,6 +502,9 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 	buf@ req@ CoDuplexRequest_Buffer + !
 	length@ req@ CoDuplexRequest_Length + !
 
+	auto header
+	0 header!
+
 	auto t
 
 	if (flags@ REQFLAG_SERVER &)
@@ -518,6 +521,7 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			if (t@ ~~)
 				req@ duplex@ CoDuplex_ServerWriteListHead + !
+				duplex@ CoDuplex_ReceiveBuffer + header!
 			end else
 				req@ t@ CoDuplexRequest_Next + !
 			end
@@ -536,6 +540,7 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			if (t@ ~~)
 				req@ duplex@ CoDuplex_ServerReadListHead + !
+				duplex@ CoDuplex_TransmitBuffer + header!
 			end else
 				req@ t@ CoDuplexRequest_Next + !
 			end
@@ -556,6 +561,7 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			if (t@ ~~)
 				req@ duplex@ CoDuplex_ClientWriteListHead + !
+				duplex@ CoDuplex_TransmitBuffer + header!
 			end else
 				req@ t@ CoDuplexRequest_Next + !
 			end
@@ -574,12 +580,19 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			if (t@ ~~)
 				req@ duplex@ CoDuplex_ClientReadListHead + !
+				duplex@ CoDuplex_ReceiveBuffer + header!
 			end else
 				req@ t@ CoDuplexRequest_Next + !
 			end
 
 			req@ duplex@ CoDuplex_ClientReadListTail + !
 		end
+	end
+
+	if (header@)
+		buf@ header@ CoDuplexBuffer_UserBuffer + !
+		0 header@ CoDuplexBuffer_UserBufferIndex + !
+		length@ header@ CoDuplexBuffer_UserBufferLength + !
 	end
 end
 
@@ -818,14 +831,17 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 				req@ CoDuplexRequest_LengthDone + @ +
 				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+				// unlink the client request.
+
+				auto nreq
+				req@ CoDuplexRequest_Next + @ nreq!
+
 				0 // status
 				0 // priboost
 				req@ CoDuplexRequest_MDL + @ // mdl
 				MmMDLComplete
 
-				// unlink the client request.
-
-				req@ CoDuplexRequest_Next + @ req!
+				nreq@ req!
 
 				req@ duplex@ CoDuplex_ClientWriteListHead + !
 
@@ -851,10 +867,6 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 		if (done@ ~~)
 			if (timeout@)
 				// switch to user buffer.
-
-				buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
 
 				STATUS_OTHER_CONDITION ok!
 			end else
@@ -1051,14 +1063,17 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 				req@ CoDuplexRequest_LengthDone + @ +
 				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+				// unlink the server request.
+
+				auto nreq
+				req@ CoDuplexRequest_Next + @ nreq!
+
 				0 // status
 				0 // priboost
 				req@ CoDuplexRequest_MDL + @ // mdl
 				MmMDLComplete
 
-				// unlink the server request.
-
-				req@ CoDuplexRequest_Next + @ req!
+				nreq@ req!
 
 				req@ duplex@ CoDuplex_ServerWriteListHead + !
 
@@ -1276,14 +1291,17 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 			req@ CoDuplexRequest_LengthDone + @ +
 			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+			// unlink the server request.
+
+			auto nreq
+			req@ CoDuplexRequest_Next + @ nreq!
+
 			0 // status
 			0 // priboost
 			req@ CoDuplexRequest_MDL + @ // mdl
 			MmMDLComplete
 
-			// unlink the server request.
-
-			req@ CoDuplexRequest_Next + @ req!
+			nreq@ req!
 
 			req@ duplex@ CoDuplex_ServerReadListHead + !
 
@@ -1433,14 +1451,17 @@ fn CoDuplexReadTransmitCharacter { duplex -- c ok }
 			req@ CoDuplexRequest_LengthDone + @ +
 			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+			// unlink the client request.
+
+			auto nreq
+			req@ CoDuplexRequest_Next + @ nreq!
+
 			0 // status
 			0 // priboost
 			req@ CoDuplexRequest_MDL + @ // mdl
 			MmMDLComplete
 
-			// unlink the client request.
-
-			req@ CoDuplexRequest_Next + @ req!
+			nreq@ req!
 
 			req@ duplex@ CoDuplex_ClientWriteListHead + !
 
@@ -1653,14 +1674,17 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 			req@ CoDuplexRequest_LengthDone + @ +
 			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+			// unlink the client request.
+
+			auto nreq
+			req@ CoDuplexRequest_Next + @ nreq!
+
 			0 // status
 			0 // priboost
 			req@ CoDuplexRequest_MDL + @ // mdl
 			MmMDLComplete
 
-			// unlink the client request.
-
-			req@ CoDuplexRequest_Next + @ req!
+			nreq@ req!
 
 			req@ duplex@ CoDuplex_ClientReadListHead + !
 
@@ -1948,14 +1972,17 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 				req@ CoDuplexRequest_LengthDone + @ +
 				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+				// unlink the client request.
+
+				auto nreq
+				req@ CoDuplexRequest_Next + @ nreq!
+
 				0 // status
 				0 // priboost
 				req@ CoDuplexRequest_MDL + @ // mdl
 				MmMDLComplete
 
-				// unlink the client request.
-
-				req@ CoDuplexRequest_Next + @ req!
+				nreq@ req!
 
 				req@ duplex@ CoDuplex_ClientReadListHead + !
 
@@ -2170,14 +2197,17 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 				req@ CoDuplexRequest_LengthDone + @ +
 				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 
+				// unlink the server request.
+
+				auto nreq
+				req@ CoDuplexRequest_Next + @ nreq!
+
 				0 // status
 				0 // priboost
 				req@ CoDuplexRequest_MDL + @ // mdl
 				MmMDLComplete
 
-				// unlink the server request.
-
-				req@ CoDuplexRequest_Next + @ req!
+				nreq@ req!
 
 				req@ duplex@ CoDuplex_ServerReadListHead + !
 
@@ -2287,10 +2317,6 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 		if (done@ ~~)
 			// enqueue the request.
-
-			buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
-			0 header@ CoDuplexBuffer_UserBufferIndex + !
-			mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
 
 			bytecnt@ // lengthdone
 			buf@ bytecnt@ + // buf
@@ -2555,18 +2581,22 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 	auto flags
 	ior@ CoDuplexRequest_Flags + @ flags!
 
+	auto header
+	0 header!
+
 	auto ls
 	auto ns
 
+	ior@ CoDuplexRequest_Prev + @ ls!
+	ior@ CoDuplexRequest_Next + @ ns!
+
 	if (flags@ REQFLAG_SERVER &)
 		if (flags@ REQFLAG_WRITE &)
-			ior@ CoDuplexRequest_Prev + @ ls!
-			ior@ CoDuplexRequest_Next + @ ns!
-
 			if (ls@)
 				ns@ ls@ CoDuplexRequest_Next + !
 			end else
 				ns@ duplex@ CoDuplex_ServerWriteListHead + !
+				duplex@ CoDuplex_ReceiveBuffer + header!
 			end
 
 			if (ns@)
@@ -2575,13 +2605,11 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 				ls@ duplex@ CoDuplex_ServerWriteListTail + !
 			end
 		end else
-			ior@ CoDuplexRequest_Prev + @ ls!
-			ior@ CoDuplexRequest_Next + @ ns!
-
 			if (ls@)
 				ns@ ls@ CoDuplexRequest_Next + !
 			end else
 				ns@ duplex@ CoDuplex_ServerReadListHead + !
+				duplex@ CoDuplex_TransmitBuffer + header!
 			end
 
 			if (ns@)
@@ -2592,13 +2620,11 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 		end
 	end else
 		if (flags@ REQFLAG_WRITE &)
-			ior@ CoDuplexRequest_Prev + @ ls!
-			ior@ CoDuplexRequest_Next + @ ns!
-
 			if (ls@)
 				ns@ ls@ CoDuplexRequest_Next + !
 			end else
 				ns@ duplex@ CoDuplex_ClientWriteListHead + !
+				duplex@ CoDuplex_TransmitBuffer + header!
 			end
 
 			if (ns@)
@@ -2607,13 +2633,11 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 				ls@ duplex@ CoDuplex_ClientWriteListTail + !
 			end
 		end else
-			ior@ CoDuplexRequest_Prev + @ ls!
-			ior@ CoDuplexRequest_Next + @ ns!
-
 			if (ls@)
 				ns@ ls@ CoDuplexRequest_Next + !
 			end else
 				ns@ duplex@ CoDuplex_ClientReadListHead + !
+				duplex@ CoDuplex_ReceiveBuffer + header!
 			end
 
 			if (ns@)
@@ -2622,6 +2646,12 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 				ls@ duplex@ CoDuplex_ClientReadListTail + !
 			end
 		end
+	end
+
+	if (header@ ns@ &&)
+		ns@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
+		0 header@ CoDuplexBuffer_UserBufferIndex + !
+		ns@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 	end
 
 	ipl@ duplex@ CoDuplexUnlock
@@ -2646,6 +2676,7 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 
 	auto ipl
 	auto req
+	auto nreq
 
 	if (fcb@ IOFileControlBlock_FSContext + @)
 		// server fcb! mark duplex headless and satisfy any pending requests.
@@ -2659,12 +2690,14 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 		duplex@ CoDuplex_ClientWriteListHead + @ req!
 
 		while (req@)
+			req@ CoDuplexRequest_Next + @ nreq!
+
 			STATUS_CONSOLE_HUNG_UP // status
 			0 // priboost
 			req@ CoDuplexRequest_MDL + @ // mdl
 			MmMDLComplete
 
-			req@ CoDuplexRequest_Next + @ req!
+			nreq@ req!
 		end
 
 		duplex@ CoDuplex_ClientReadListHead + @ req!
@@ -2678,12 +2711,14 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 				0 req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 			end
 
+			req@ CoDuplexRequest_Next + @ nreq!
+
 			0 // status
 			0 // priboost
 			req@ CoDuplexRequest_MDL + @ // mdl
 			MmMDLComplete
 
-			req@ CoDuplexRequest_Next + @ req!
+			nreq@ req!
 		end
 
 		0 duplex@ CoDuplex_ClientReadListHead + !
@@ -2719,12 +2754,14 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 					0 req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
 				end
 
+				req@ CoDuplexRequest_Next + @ nreq!
+
 				0 // status
 				0 // priboost
 				req@ CoDuplexRequest_MDL + @ // mdl
 				MmMDLComplete
 
-				req@ CoDuplexRequest_Next + @ req!
+				nreq@ req!
 			end
 
 			0 duplex@ CoDuplex_ServerWriteListHead + !

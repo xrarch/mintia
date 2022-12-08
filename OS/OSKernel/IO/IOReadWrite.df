@@ -229,6 +229,42 @@ fn IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
+fn IOValidateBuffer { length buffer process -- lastmode ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	if (process@ ~~)
+		// no process provided to read into. therefore, we must be reading
+		// directly into system space.
+
+		if (buffer@ MMLOWESTSYSTEMADDRESS <)
+			"IOValidateBuffer: buffer was not in system space\n" KeCrash
+		end
+
+		KERNELMODE lastmode!
+	end else
+		// do these checks first to make sure no overflow
+		if (buffer@ MMHIGHESTUSERADDRESS >)
+			STATUS_FAULT ok!
+
+			return
+		end elseif (length@ MMHIGHESTUSERADDRESS >)
+			STATUS_FAULT ok!
+
+			return
+		end
+
+		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
+			STATUS_FAULT ok!
+
+			return
+		end
+
+		USERMODE lastmode!
+	end
+end
+
 fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesread ok }
 	fnsection "PAGE$text"
 
@@ -287,35 +323,13 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 	0 bytesread!
 
 	auto lastmode
+	length@ // length
+	buffer@ // buffer
+	process@ // process
+	IOValidateBuffer ok! lastmode!
 
-	if (process@ ~~)
-		// no process provided to read into. therefore, we must be reading
-		// directly into system space.
-
-		if (buffer@ MMLOWESTSYSTEMADDRESS <)
-			"IOFileReadProcess: buffer was not in system space\n" KeCrash
-		end
-
-		KERNELMODE lastmode!
-	end else
-		// do these checks first to make sure no overflow
-		if (buffer@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end elseif (length@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		USERMODE lastmode!
+	if (ok@)
+		return
 	end
 
 	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
@@ -333,6 +347,7 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 		length@ // length
 		fileobject@ IOFile_Offset + @ // offset
 		buffer@ // buffer
+		0 // portobject
 		fileobject@ // fileobject
 		lastmode@ // lastmode
 		0 // write
@@ -373,6 +388,7 @@ fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesrea
 		length@ // length
 		fileobject@ IOFile_Offset + @ // offset
 		buffer@ // buffer
+		0 // portobject
 		fileobject@ // fileobject
 		lastmode@ // lastmode
 		0 // write
@@ -499,35 +515,13 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 	0 byteswritten!
 
 	auto lastmode
+	length@ // length
+	buffer@ // buffer
+	process@ // process
+	IOValidateBuffer ok! lastmode!
 
-	if (process@ ~~)
-		// no process provided to read into. therefore, we must be writing
-		// directly from system space.
-
-		if (buffer@ MMLOWESTSYSTEMADDRESS <)
-			"IOFileWriteProcess: buffer was not in system space\n" KeCrash
-		end
-
-		KERNELMODE lastmode!
-	end else
-		// do these checks first to make sure no overflow
-		if (buffer@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end elseif (length@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		USERMODE lastmode!
+	if (ok@)
+		return
 	end
 
 	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
@@ -545,6 +539,7 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 		length@ // length
 		fileobject@ IOFile_Offset + @ // offset
 		buffer@ // buffer
+		0 // portobject
 		fileobject@ // fileobject
 		lastmode@ // lastmode
 		1 // write
@@ -585,6 +580,7 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 		length@ // length
 		fileobject@ IOFile_Offset + @ // offset
 		buffer@ // buffer
+		0 // portobject
 		fileobject@ // fileobject
 		lastmode@ // lastmode
 		1 // write

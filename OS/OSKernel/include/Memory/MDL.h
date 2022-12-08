@@ -41,12 +41,13 @@ const MMMDL_DONTUNMAP  256
 
 const MMMDL_FLAGS_NOT_TO_INHERIT MMMDL_DELETE
 
-extern MmMDLInitialize { fileobject mode length vaddr mdl -- }
+extern MmMDLInitialize { mode length vaddr mdl -- }
 
 extern MmMDLGetSize { vaddr length -- size }
 
-extern MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
-extern MmMDLAllocateWithQuota { fileobject mode length vaddr kflags -- mdl ok }
+extern MmMDLAllocate { extraspace mode length vaddr kflags -- extra mdl ok }
+extern MmMDLAllocateWithQuota { extraspace mode length vaddr kflags -- extra mdl ok }
+extern MmMDLFree { mdl -- }
 
 extern MmMDLSplit { vaddr length srcmdl destmdl -- }
 

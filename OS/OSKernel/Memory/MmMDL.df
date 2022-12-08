@@ -28,7 +28,7 @@
 
 #include "<inc>/IPC.h"
 
-fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
+fn MmMDLInitialize { mode length vaddr mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> mdl@ MmMDLHeader_Pages + !
@@ -47,7 +47,7 @@ fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 
 	0 mdl@ MmMDLHeader_QuotaBlock + !
 	0 mdl@ MmMDLHeader_CompletionMessage + !
-	fileobject@ mdl@ MmMDLHeader_FileObject + !
+	0 mdl@ MmMDLHeader_FileObject + !
 
 	KeThreadCurrent@ // thread
 	pointerof MmMDLCompleteAPC // specialfunc
@@ -56,7 +56,7 @@ fn MmMDLInitialize { fileobject mode length vaddr mdl -- }
 	KeAPCInitialize
 end
 
-fn MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
+fn MmMDLAllocate { extraspace mode length vaddr kflags -- extra mdl ok }
 	// try pretty hard not to call this since it puts IO integrity at the
 	// mercy of the memory manager.
 	//
@@ -77,7 +77,7 @@ fn MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
 
 	kflags@ MmKflagToPriority flags |=
 
-	bytes@ // bytes
+	bytes@ extraspace@ + // bytes
 	'MMDL' // tag
 	flags@ // flags
 	MmAllocWithTag ok! mdl!
@@ -86,16 +86,18 @@ fn MmMDLAllocate { fileobject mode length vaddr kflags -- mdl ok }
 		return
 	end
 
-	fileobject@ mode@ length@ vaddr@ mdl@ MmMDLInitialize
+	mode@ length@ vaddr@ mdl@ MmMDLInitialize
 
 	MMMDL_DELETE mdl@ MmMDLHeader_Flags + |=
+
+	mdl@ bytes@ + extra!
 end
 
-fn MmMDLAllocateWithQuota { fileobject mode length vaddr kflags -- mdl ok }
+fn MmMDLAllocateWithQuota { extraspace mode length vaddr kflags -- extra mdl ok }
 	if (kflags@ IOKFLAG_PAGEIN &)
 		// nope, don't charge quota for paging IO
 
-		fileobject@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl!
+		extraspace@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl! extra!
 
 		return
 	end
@@ -104,7 +106,7 @@ fn MmMDLAllocateWithQuota { fileobject mode length vaddr kflags -- mdl ok }
 	KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
 
 	auto bytes
-	vaddr@ length@ MmMDLGetSize bytes!
+	vaddr@ length@ MmMDLGetSize extraspace@ + bytes!
 
 	bytes@ MmChargeBytesGet // charge
 	quotablock@ // quotablock
@@ -114,15 +116,35 @@ fn MmMDLAllocateWithQuota { fileobject mode length vaddr kflags -- mdl ok }
 		return
 	end
 
-	fileobject@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl!
+	extraspace@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl! extra!
 
 	if (ok@)
-		bytes@ // charge
+		bytes@ MmChargeBytesGet // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
 	end else
 		quotablock@ MmQuotaBlockReference
 		quotablock@ mdl@ MmMDLHeader_QuotaBlock + !
+	end
+end
+
+fn MmMDLFree { mdl -- }
+	// free the MDL and uncharge any associated quota.
+
+	auto quotablock
+	mdl@ MmMDLHeader_QuotaBlock + @ quotablock!
+
+	auto charge
+	mdl@ MmBlockChargeGet charge!
+
+	mdl@ MmFree
+
+	if (quotablock@)
+		charge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		quotablock@ MmQuotaBlockDereference
 	end
 end
 
@@ -738,7 +760,7 @@ fn MmMDLComplete { status priboost mdl -- }
 
 	if (mdl@ MmMDLHeader_CompleteRoutine + @)
 		1 enqueueapc!
-	end elseif (mdl@ MmMDLHeader_FileObject + @)
+	end elseif (mdl@ MmMDLHeader_CompletionMessage + @)
 		1 enqueueapc!
 	end
 
@@ -785,26 +807,26 @@ fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc --
 		mdl@ MmMDLHeader_CompleteRoutine + @ MmMDLCompleteRoutine
 	end
 
-	if (mdl@ MmMDLHeader_FileObject + @)
+	if (mdl@ MmMDLHeader_CompletionMessage + @)
 		// this is an async IO operation requested by a user thread.
 		// dereference the file object and send a message to the port
 		// object.
 
-		mdl@ MmMDLHeader_FileObject + @ ObObjectDereferenceByPointer drop
-
 		auto msg
 		mdl@ MmMDLHeader_CompletionMessage + @ msg!
-
-		auto portobject
-		msg@ IPCKernelMessage_OriginatingPort + @ portobject!
 
 		// message fields were already initialized with context about the IO.
 
 		msg@ // msg
-		portobject@ // portobject
+		msg@ IPCKernelMessage_OriginatingPort + @ // portobject
 		IPCPortSendMessage drop
 
-		portobject@ ObObjectDereferenceByPointer drop
+		mdl@ MmMDLHeader_FileObject + @ ObObjectDereferenceByPointer drop
+		msg@ IPCKernelMessage_OriginatingPort + @ ObObjectDereferenceByPointer drop
+
+		// dequeue this request from the thread's outstanding IO list.
+
+		// TODO that
 	end
 
 	mdl@ MmMDLFinishEitherContext
@@ -821,22 +843,6 @@ fn MmMDLFinishEitherContext { mdl -- }
 	end
 
 	if (mdl@ MmMDLHeader_Flags + @ MMMDL_DELETE &)
-		// free the MDL and uncharge any associated quota.
-
-		auto quotablock
-		mdl@ MmMDLHeader_QuotaBlock + @ quotablock!
-
-		auto charge
-		mdl@ MmBlockChargeGet charge!
-
-		mdl@ MmFree
-
-		if (quotablock@)
-			charge@ // charge
-			quotablock@ // quotablock
-			MmQuotaBlockUncharge
-
-			quotablock@ MmQuotaBlockDereference
-		end
+		mdl@ MmMDLFree
 	end
 end

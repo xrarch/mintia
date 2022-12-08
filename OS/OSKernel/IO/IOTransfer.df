@@ -27,7 +27,7 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn IOReadWrite { timeout flags kflags length offset buffer fileobject lastmode write -- bytes ok }
+fn IOReadWrite { timeout flags kflags length offset buffer portobject fileobject lastmode write -- bytes ok }
 	fnsection "PAGE$text"
 
 	0 bytes!
@@ -47,17 +47,23 @@ fn IOReadWrite { timeout flags kflags length offset buffer fileobject lastmode w
 		// async request. bias the file and port object refcounts.
 
 		fileobject@ ObObjectReferenceByPointer drop
+		portobject@ ObObjectReferenceByPointer drop
 
-		fileobject@ // fileobject
+		0 // extraspace
 		lastmode@ // mode
 		length@ // length
 		buffer@ // vaddr
 		0 // kflags
-		MmMDLAllocateWithQuota ok! mdl!
+		MmMDLAllocateWithQuota ok! mdl! drop
 
 		if (ok@)
+			fileobject@ ObObjectDereferenceByPointer drop
+			portobject@ ObObjectDereferenceByPointer drop
+
 			return
 		end
+
+		fileobject@ mdl@ MmMDLHeader_FileObject + !
 
 		KeEvent_SIZEOF alloc event!
 
@@ -69,25 +75,18 @@ fn IOReadWrite { timeout flags kflags length offset buffer fileobject lastmode w
 
 		// TODO that
 	end else
-		buffer@ length@ MmMDLGetSize event!
-
-		event@ KeEvent_SIZEOF + // bytes
-		'MMDL' // tag
-		CANBLOCK // flags
-		MmAllocWithTag ok! mdl!
+		KeEvent_SIZEOF // extraspace
+		lastmode@ // mode
+		length@ // length
+		buffer@ // vaddr
+		0 // kflags
+		MmMDLAllocateWithQuota ok! mdl! event!
 
 		if (ok@)
 			return
 		end
 
-		mdl@ event@ + event!
-
-		0 // fileobject
-		lastmode@ // mode
-		length@ // length
-		buffer@ // vaddr
-		mdl@ // mdl
-		MmMDLInitialize
+		MMMDL_DELETE ~ mdl@ MmMDLHeader_Flags + &=
 
 		if (fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ ~~)
 			KERNELMODE waitmode!
@@ -170,17 +169,14 @@ fn IOReadWrite { timeout flags kflags length offset buffer fileobject lastmode w
 
 	if (flags@ OSACCESSFLAG_ASYNC & ~~)
 		if (ok@)
+			mdl@ MmMDLFree
+
 			return
 		end
 
 		mdl@ MmMDLHeader_Status + @ ok!
-
-		if (ok@)
-			return
-		end
-
 		mdl@ MmMDLHeader_Length + @ bytes!
 
-		mdl@ MmFree
+		mdl@ MmMDLFree
 	end
 end

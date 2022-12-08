@@ -552,62 +552,6 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 	end
 end
 
-fn AFSPinChain { lookuptable blkno mount -- }
-	// pin a FAT chain in memory.
-
-	auto fatblkno
-	0 fatblkno!
-
-	auto curfatblkno
-	-1 curfatblkno!
-
-	auto fatpfdbe
-	0 fatpfdbe!
-
-	auto ok
-
-	auto off
-
-	auto fatdata
-
-	auto afsdata
-	mount@ IOMountGetContext afsdata!
-
-	while (blkno@ 0xFFFFFFFF ~=)
-		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
-		blkno@ 2 << AFSBLOCKOFFMASK & off!
-
-		if (fatblkno@ curfatblkno@ ~=)
-			// must read in a new FAT block
-
-			if (fatpfdbe@)
-				fatpfdbe@ MmEvictablePageDereference drop
-			end
-
-			0 // flags
-			IOKFLAG_URGENT // kflags
-			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
-
-			if (ok@)
-				ok@ "AFSPinChain: failed to read FAT block (%i)\n" KeCrash
-			end
-
-			fatblkno@ curfatblkno!
-		end
-
-		blkno@ lookuptable@!
-		4 lookuptable +=
-
-		fatdata@ off@ + @ blkno!
-	end
-
-	if (fatpfdbe@)
-		fatpfdbe@ MmEvictablePageDereference drop
-	end
-end
-
 fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	// convert a block offset within an FCB to an absolute disk block number.
 
@@ -641,16 +585,6 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	HALCPUInterruptDisable rs!
 
 	auto lastlookup
-	fcbdata@ AFSFCBData_PinnedFATLookupTable + @ lastlookup!
-
-	if (lastlookup@)
-		blkoff@ 4 * lastlookup@ + @ blkno!
-
-		rs@ HALCPUInterruptRestore
-
-		return
-	end
-
 	fcbdata@ AFSFCBData_LastFATLinkBlkOff + @ lastlookup!
 
 	auto walkcount

@@ -18,7 +18,6 @@ fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
 fnptr IODispatchReclaimFCBFunction { fcb -- reclaimed }
 fnptr IODispatchCancelFunction { mdl -- }
-fnptr IODispatchPinMetadataFunction { fcb -- ok }
 
 struct IODispatchTable
 	4 Open
@@ -42,6 +41,6 @@ struct IODispatchTable
 	4 DeleteDeviceObject
 	4 ReclaimFCB
 	4 Cancel
-	4 PinMetadata
+	4 Reserved6
 	4 Reserved7
 endstruct

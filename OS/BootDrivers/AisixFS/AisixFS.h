@@ -60,8 +60,6 @@ struct AFSFCBData
 	4 GID
 	4 Permissions
 	4 IParent
-	4 PinnedFATLookupTable
-	4 PinnedFATLookupTableSize
 
 	4 LastFATLinkBlkOff
 	4 LastFATLinkValue

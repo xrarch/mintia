@@ -81,6 +81,8 @@ endstruct
 struct PsThread
 	KeThread_SIZEOF TCB
 
+	4 IOListHead
+
 	4 UTEB
 
 	4 TID

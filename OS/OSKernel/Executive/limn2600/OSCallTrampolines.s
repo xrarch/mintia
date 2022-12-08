@@ -48,7 +48,7 @@
 .extern OSFileFlush
 .extern OSFileReadAsync
 .extern OSFileWriteAsync
-.extern OSFileIOCancel
+.extern OSFileCancelIO
 .extern OSDirectoryRename
 .extern OSDirectoryUnlink
 .extern OSDirectoryRead
@@ -162,7 +162,7 @@ OSCallTable:
 	.dl OSTOSFileFlush                                   ;44
 	.dl OSTOSFileReadAsync                               ;45
 	.dl OSTOSFileWriteAsync                              ;46
-	.dl OSTOSFileIOCancel                                ;47
+	.dl OSTOSFileCancelIO                                ;47
 	.dl OSTOSDirectoryRename                             ;48
 	.dl OSTOSDirectoryUnlink                             ;49
 	.dl OSTOSDirectoryRead                               ;50
@@ -909,7 +909,7 @@ OSTOSFileFlush:
 
 OSTOSFileReadAsync:
 .global OSTOSFileReadAsync
-	subi sp, sp, 12
+	subi sp, sp, 16
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
@@ -921,18 +921,21 @@ OSTOSFileReadAsync:
 
 	mov  t0, long [s17 + 24] ;a0
 	mov  long [sp + 8], t0
+
+	mov  t0, long [s17 + 28] ;a1
+	mov  long [sp + 12], t0
 
 	jal  OSFileReadAsync
 
 	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
-	addi sp, sp, 12
+	addi sp, sp, 16
 	ret
 
 OSTOSFileWriteAsync:
 .global OSTOSFileWriteAsync
-	subi sp, sp, 12
+	subi sp, sp, 16
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
@@ -945,22 +948,25 @@ OSTOSFileWriteAsync:
 	mov  t0, long [s17 + 24] ;a0
 	mov  long [sp + 8], t0
 
+	mov  t0, long [s17 + 28] ;a1
+	mov  long [sp + 12], t0
+
 	jal  OSFileWriteAsync
 
 	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
-	addi sp, sp, 12
+	addi sp, sp, 16
 	ret
 
-OSTOSFileIOCancel:
-.global OSTOSFileIOCancel
+OSTOSFileCancelIO:
+.global OSTOSFileCancelIO
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
 
-	jal  OSFileIOCancel
+	jal  OSFileCancelIO
 
 	mov  long [s17 + 4], a0 ;t1
 

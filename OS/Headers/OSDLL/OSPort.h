@@ -9,6 +9,17 @@ struct OSMessageHeader
 	4 Access
 endstruct
 
+struct OSMessageHeaderIOCompletion
+	1 TypeB
+	1 SubtypeB
+	2 LengthI
+	4 ConversationID
+	4 BytesTransferred
+	4 Context
+	4 Status
+	4 Reserved
+endstruct
+
 const OSPORT_FLAG_NO_HANDLES    1 // forbid handle passing
 
 const OSPORT_CID_SYSTEM -1
@@ -26,3 +37,4 @@ const OSPORT_CONID_ALL          0
 const OSPORT_CONID_NEW          0
 const OSPORT_CONID_CONNECTION   1
 const OSPORT_CONID_DISCONNECT   2
+const OSPORT_CONID_IOCOMPLETE   3

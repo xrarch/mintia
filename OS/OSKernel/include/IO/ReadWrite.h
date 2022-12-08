@@ -4,11 +4,13 @@ extern IOFileTruncate { newsize growing handle -- oldsize ok }
 
 extern IOFileSeek { offset handle mode -- newoffset ok }
 
-extern IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
-extern IOFileReadObject { timeout flags length buffer fileobject process -- bytesread ok }
+extern IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes ok }
 
+extern IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern IOFileWrite { flags length buffer filehandle -- byteswritten ok }
-extern IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok }
+
+extern IOFileReadAsync { context porthandle flags offset length buffer filehandle -- ok }
+extern IOFileWriteAsync { context porthandle flags offset length buffer filehandle -- ok }
 
 extern IODirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 

@@ -27,8 +27,16 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "<inc>/IPC.h"
+
 fn IOReadWrite { timeout flags kflags length offset buffer portobject fileobject lastmode write -- bytes ok }
 	fnsection "PAGE$text"
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLLOW ~=)
+			"IOReadWrite: ipl != IPLLOW\n" KeCrash
+		end
+	end
 
 	0 bytes!
 
@@ -65,15 +73,64 @@ fn IOReadWrite { timeout flags kflags length offset buffer portobject fileobject
 
 		fileobject@ mdl@ MmMDLHeader_FileObject + !
 
-		KeEvent_SIZEOF alloc event!
-
 		0 alertable!
 		KERNELMODE waitmode!
 		OSWAIT_TIMEOUTINFINITE timeout!
 
+		// allocate completion message from port object.
+
+		// reuse event for the message.
+
+		OSMessageHeaderIOCompletion_SIZEOF alloc event!
+
+		0 event@ OSMessageHeader_LengthI + si
+		OSNONE event@ OSMessageHeader_Handle + !
+
+		0 // allowhandle
+		event@ // umsg
+		KERNELMODE // mode
+		OSPORT_CONID_IOCOMPLETE // conid
+		portobject@ // portobject
+		IPCMessageAllocate ok! event! drop
+
+		if (ok@)
+			mdl@ MmMDLFree
+
+			fileobject@ ObObjectDereferenceByPointer drop
+			portobject@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+
 		// initialize completion message and store in MDL.
 
-		// TODO that
+		0 event@ IPCKernelMessage_Header + OSMessageHeaderIOCompletion_BytesTransferred + !
+		timeout@ event@ IPCKernelMessage_Header + OSMessageHeaderIOCompletion_Context + !
+		0 event@ IPCKernelMessage_Header + OSMessageHeaderIOCompletion_Status + !
+
+		event@ mdl@ MmMDLHeader_CompletionMessage + !
+
+		// enqueue MDL in thread IO list.
+		// mask out APCs to prevent them from messing with this list while we
+		// are touching it. this works because this list is NEVER modified
+		// except from the context of THIS thread.
+
+		IPLAPC KeIPLRaise drop
+
+		// reuse event for head
+		KeThreadCurrent@ PsThread_IOListHead + @ event!
+
+		event@ mdl@ MmMDLHeader_IOListNext + !
+
+		if (event@)
+			mdl@ event@ MmMDLHeader_IOListPrev + !
+		end
+
+		mdl@ KeThreadCurrent@ PsThread_IOListHead + !
+
+		IPLLOW KeIPLLower
+
+		KeEvent_SIZEOF alloc event!
 	end else
 		KeEvent_SIZEOF // extraspace
 		lastmode@ // mode
@@ -131,6 +188,19 @@ fn IOReadWrite { timeout flags kflags length offset buffer portobject fileobject
 
 		event@ mdl@ MmMDLHeader_Event + !
 
+		if (flags@ OSACCESSFLAG_ASYNC &)
+			// clean up this stuff so the thread doesn't get a spurious
+			// completion message.
+
+			mdl@ MmMDLHeader_CompletionMessage + @ IPCMessageFree
+			0 mdl@ MmMDLHeader_CompletionMessage + !
+
+			0 mdl@ MmMDLHeader_FileObject + !
+
+			fileobject@ ObObjectDereferenceByPointer drop
+			portobject@ ObObjectDereferenceByPointer drop
+		end
+
 		ok@ // status
 		0 // priboost
 		mdl@ // mdl
@@ -161,8 +231,12 @@ fn IOReadWrite { timeout flags kflags length offset buffer portobject fileobject
 
 				wok@ ok!
 
+				IPLAPC KeIPLRaise drop
+
 				mdl@ // mdl
 				fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ IODispatchCancelFunction
+
+				IPLLOW KeIPLLower
 			end
 		end
 	end

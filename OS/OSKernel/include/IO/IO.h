@@ -30,6 +30,8 @@ extern IOFileOpenObject { access object process -- ok }
 extern IOFileCloseObject { access object process -- }
 extern IOFileDeleteObject { object -- }
 extern IOFileSetSecurityObject { uid gid permissions object -- ok }
+extern IOFileCancelIOObject { wait fileobject -- ok }
+extern IOFileCancelIO { wait filehandle -- ok }
 
 struct IOFile
 	4 FileControlBlock
@@ -139,6 +141,8 @@ extern IOFileInformationQuery { filehandle query -- ok }
 
 extern IOScheduleWritebehind { -- }
 extern IOTriggerWritebehind { -- }
+
+extern IOThreadRundown { -- }
 
 externptr IOBootDevice
 

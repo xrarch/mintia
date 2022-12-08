@@ -49,6 +49,9 @@ fn MmMDLInitialize { mode length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_CompletionMessage + !
 	0 mdl@ MmMDLHeader_FileObject + !
 
+	0 mdl@ MmMDLHeader_IOListNext + !
+	0 mdl@ MmMDLHeader_IOListPrev + !
+
 	KeThreadCurrent@ // thread
 	pointerof MmMDLCompleteAPC // specialfunc
 	0 // normalfunc
@@ -817,16 +820,45 @@ fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc --
 
 		// message fields were already initialized with context about the IO.
 
+		mdl@ MmMDLHeader_Length + @
+		msg@ IPCKernelMessage_Header + OSMessageHeaderIOCompletion_BytesTransferred + !
+
+		mdl@ MmMDLHeader_Status + @
+		msg@ IPCKernelMessage_Header + OSMessageHeaderIOCompletion_Status + !
+
 		msg@ // msg
 		msg@ IPCKernelMessage_OriginatingPort + @ // portobject
 		IPCPortSendMessage drop
 
+		// dequeue this request from the thread's outstanding IO list.
+		// no synchronization is required because we are running at IPLAPC
+		// and only this thread can manipulate this list.
+
+		auto ls
+		mdl@ MmMDLHeader_IOListPrev + @ ls!
+
+		auto ns
+		mdl@ MmMDLHeader_IOListNext + @ ns!
+
+		if (ls@)
+			ns@ ls@ MmMDLHeader_IOListNext + !
+		end else
+			ns@ KeThreadCurrent@ PsThread_IOListHead + !
+		end
+
+		if (ns@)
+			ls@ ns@ MmMDLHeader_IOListPrev + !
+		end
+
+		// release the fcb rwlock, which was held shared throughout this
+		// operation
+
+		mdl@ MmMDLHeader_FileObject + @ IOFile_FileControlBlock + @ IOFileControlBlockUnlock
+
+		// dereference the file and port object
+
 		mdl@ MmMDLHeader_FileObject + @ ObObjectDereferenceByPointer drop
 		msg@ IPCKernelMessage_OriginatingPort + @ ObObjectDereferenceByPointer drop
-
-		// dequeue this request from the thread's outstanding IO list.
-
-		// TODO that
 	end
 
 	mdl@ MmMDLFinishEitherContext

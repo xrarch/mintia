@@ -26,6 +26,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "<inc>/IPC.h"
+
 fn IOFileFlush { purge filehandle -- ok }
 	fnsection "PAGE$text"
 
@@ -191,6 +193,99 @@ fn IOFileSeekObject { offset fileobject mode -- newoffset ok }
 	newoffset@ fileobject@ IOFile_Offset + !
 end
 
+fn IOFileAccessPoke { write fileobject -- }
+	auto pokefunc
+	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Poke + @ pokefunc!
+
+	if (pokefunc@)
+		// notify driver that the file was touched so it can update timestamps
+		// etc.
+
+		if (write@)
+			IOPOKE_WRITE // poketype
+			fileobject@ // object
+			pokefunc@ IODispatchPokeFunction
+		end else
+			IOPOKE_READ // poketype
+			fileobject@ // object
+			pokefunc@ IODispatchPokeFunction
+		end
+	end
+end
+
+fn IOFileAccessValidate { length buffer fileobject write -- fcb lastmode ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	if (KeProcessCurrent PsSystemProcess@ ==)
+		// no process provided to read into. therefore, we must be reading
+		// directly into system space.
+
+		if (buffer@ MMLOWESTSYSTEMADDRESS <)
+			"IOFileAccessValidate: buffer was not in system space\n" KeCrash
+		end
+
+		KERNELMODE lastmode!
+	end else
+		// do these checks first to make sure no overflow
+		if (buffer@ MMHIGHESTUSERADDRESS >)
+			STATUS_FAULT ok!
+
+			return
+		end elseif (length@ MMHIGHESTUSERADDRESS >)
+			STATUS_FAULT ok!
+
+			return
+		end
+
+		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
+			STATUS_FAULT ok!
+
+			return
+		end
+
+		USERMODE lastmode!
+	end
+
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	if (DEBUGCHECKS)
+		if (fcb@ ~~)
+			"IOFileAccessValidate: file object had no FCB\n" KeCrash
+		end
+	end
+
+	auto dispatchtable
+	fcb@ IOFileControlBlock_DispatchTable + @ dispatchtable!
+
+	if (write@)
+		if (dispatchtable@ IODispatchTable_Write + @ ~~)
+			STATUS_NOT_SUPPORTED ok!
+
+			return
+		end
+	end else
+		if (dispatchtable@ IODispatchTable_Read + @ ~~)
+			STATUS_NOT_SUPPORTED ok!
+
+			return
+		end
+	end
+
+	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
+		STATUS_FORBIDDEN_OPERATION ok!
+
+		return
+	end
+end
+
 fn IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 	fnsection "PAGE$text"
 
@@ -223,203 +318,10 @@ fn IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	KeProcessCurrent // process
-	IOFileReadObject ok! bytesread!
+	0 // write
+	IOFileReadWriteObject ok! bytesread!
 
 	fileobject@ ObObjectDereferenceByPointer drop
-end
-
-fn IOValidateBuffer { length buffer process -- lastmode ok }
-	fnsection "PAGE$text"
-
-	0 ok!
-
-	if (process@ ~~)
-		// no process provided to read into. therefore, we must be reading
-		// directly into system space.
-
-		if (buffer@ MMLOWESTSYSTEMADDRESS <)
-			"IOValidateBuffer: buffer was not in system space\n" KeCrash
-		end
-
-		KERNELMODE lastmode!
-	end else
-		// do these checks first to make sure no overflow
-		if (buffer@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end elseif (length@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		USERMODE lastmode!
-	end
-end
-
-fn IOFileReadObject { timeout flags length buffer fileobject process -- bytesread ok }
-	fnsection "PAGE$text"
-
-	if (process@ PsSystemProcess@ ==)
-		0 process!
-	end
-
-	auto fcb
-	auto dispatchtable
-
-	fileobject@ IOFile_FileControlBlock + @ fcb!
-
-	if (DEBUGCHECKS)
-		if (fcb@ 0 ==)
-			"IOFileReadProcess: file object had no FCB\n" KeCrash
-		end
-	end
-
-	fcb@ IOFileControlBlock_DispatchTable + @ dispatchtable!
-
-	if (DEBUGCHECKS)
-		if (dispatchtable@ 0 ==)
-			"IOFileReadProcess: file object had no dispatch table\n" KeCrash
-		end
-	end
-
-	auto readfunc
-	dispatchtable@ IODispatchTable_Read + @ readfunc!
-
-	if (readfunc@ ~~)
-		STATUS_NOT_SUPPORTED ok!
-
-		return
-	end
-
-	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
-		STATUS_IS_A_DIRECTORY ok!
-
-		return
-	end
-
-	auto fileflags
-	fileobject@ IOFile_Flags + @ fileflags!
-
-	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
-		if (fileflags@ OSFILEFLAG_NOCACHE & ~~)
-			STATUS_FORBIDDEN_OPERATION ok!
-
-			return
-		end
-	end
-
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	0 bytesread!
-
-	auto lastmode
-	length@ // length
-	buffer@ // buffer
-	process@ // process
-	IOValidateBuffer ok! lastmode!
-
-	if (ok@)
-		return
-	end
-
-	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-		// always bypass cache for character devices -- call directly into driver.
-
-		if (DEBUGCHECKS)
-			if (cacheblock@)
-				"IOFileReadProcess: file was character device, but is cached?\n" KeCrash
-			end
-		end
-
-		timeout@ // timeout
-		flags@ // flags
-		0 // kflags
-		length@ // length
-		fileobject@ IOFile_Offset + @ // offset
-		buffer@ // buffer
-		0 // portobject
-		fileobject@ // fileobject
-		lastmode@ // lastmode
-		0 // write
-		IOReadWrite ok! bytesread!
-
-		bytesread@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
-
-		return
-	end
-
-	auto rs
-
-	if (fileflags@ OSFILEFLAG_NOCACHE & ~~)
-		if (cacheblock@ ~~)
-			fcb@ IOFileControlBlockCacheCheck ok! cacheblock!
-
-			if (ok@)
-				return
-			end
-		end
-	end else
-		0 cacheblock!
-	end
-
-	fcb@ // fcb
-	IOFileControlBlockLockShared ok!
-
-	if (ok@)
-		return
-	end
-
-	if (cacheblock@ ~~)
-		// no caching -- call directly into driver.
-
-		timeout@ // timeout
-		flags@ // flags
-		0 // kflags
-		length@ // length
-		fileobject@ IOFile_Offset + @ // offset
-		buffer@ // buffer
-		0 // portobject
-		fileobject@ // fileobject
-		lastmode@ // lastmode
-		0 // write
-		IOReadWrite ok! bytesread!
-	end else
-		// caching -- call into cache read function.
-
-		flags@ // flags
-		length@ // length
-		fileobject@ IOFile_Offset + @ // offset
-		buffer@ // buffer
-		fcb@ // fcb
-		lastmode@ // lastmode
-		IOCacheFileRead ok! bytesread!
-	end
-
-	fcb@ IOFileControlBlockUnlock
-
-	bytesread@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
-
-	auto pokefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Poke + @ pokefunc!
-
-	if (pokefunc@)
-		// notify driver that the FCB was read so it can update timestamps
-		// etc.
-
-		IOPOKE_READ // poketype
-		fileobject@ // object
-		pokefunc@ IODispatchPokeFunction
-	end
 end
 
 fn IOFileWrite { flags length buffer filehandle -- byteswritten ok }
@@ -449,60 +351,30 @@ fn IOFileWrite { flags length buffer filehandle -- byteswritten ok }
 		return
 	end
 
+	OSWAIT_TIMEOUTINFINITE // timeout
 	flags@ // flags
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	KeProcessCurrent // process
-	IOFileWriteObject ok! byteswritten!
+	1 // write
+	IOFileReadWriteObject ok! byteswritten!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok }
+fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes ok }
 	fnsection "PAGE$text"
 
-	if (process@ PsSystemProcess@ ==)
-		0 process!
-	end
-
+	auto lastmode
 	auto fcb
-	auto dispatchtable
 
-	fileobject@ IOFile_FileControlBlock + @ fcb!
+	length@ // length
+	buffer@ // buffer
+	fileobject@ // fileobject
+	write@ // write
+	IOFileAccessValidate ok! lastmode! fcb!
 
-	if (DEBUGCHECKS)
-		if (fcb@ 0 ==)
-			"IOFileWriteProcess: file object had no FCB\n" KeCrash
-		end
-	end
-
-	fcb@ IOFileControlBlock_DispatchTable + @ dispatchtable!
-
-	if (DEBUGCHECKS)
-		if (dispatchtable@ 0 ==)
-			"IOFileWriteProcess: file object had no dispatch table\n" KeCrash
-		end
-	end
-
-	auto writefunc
-	dispatchtable@ IODispatchTable_Write + @ writefunc!
-
-	if (writefunc@ ~~)
-		STATUS_NOT_SUPPORTED ok!
-
-		return
-	end
-
-	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
-		STATUS_IS_A_DIRECTORY ok!
-
-		return
-	end
-
-	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
-		STATUS_FORBIDDEN_OPERATION ok!
-
+	if (ok@)
 		return
 	end
 
@@ -512,28 +384,25 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 	auto fileflags
 	fileobject@ IOFile_Flags + @ fileflags!
 
-	0 byteswritten!
-
-	auto lastmode
-	length@ // length
-	buffer@ // buffer
-	process@ // process
-	IOValidateBuffer ok! lastmode!
-
-	if (ok@)
-		return
-	end
+	0 bytes!
 
 	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
 		// always bypass cache for character devices -- call directly into driver.
 
 		if (DEBUGCHECKS)
 			if (cacheblock@)
-				"IOFileWriteProcess: file was character device, but is cached?\n" KeCrash
+				"IOFileReadWriteObject: file was character device, but is cached?\n" KeCrash
 			end
 		end
 
-		OSWAIT_TIMEOUTINFINITE // timeout
+		fcb@ // fcb
+		IOFileControlBlockLockShared ok!
+
+		if (ok@)
+			return
+		end
+
+		timeout@ // timeout
 		flags@ // flags
 		0 // kflags
 		length@ // length
@@ -542,10 +411,12 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 		0 // portobject
 		fileobject@ // fileobject
 		lastmode@ // lastmode
-		1 // write
-		IOReadWrite ok! byteswritten!
+		write@ // write
+		IOReadWrite ok! bytes!
 
-		byteswritten@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
+		fcb@ IOFileControlBlockUnlock
+
+		bytes@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
 
 		return
 	end
@@ -574,7 +445,7 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 	if (cacheblock@ ~~)
 		// no caching -- call directly into driver.
 
-		OSWAIT_TIMEOUTINFINITE // timeout
+		timeout@ // timeout
 		flags@ // flags
 		0 // kflags
 		length@ // length
@@ -583,38 +454,193 @@ fn IOFileWriteObject { flags length buffer fileobject process -- byteswritten ok
 		0 // portobject
 		fileobject@ // fileobject
 		lastmode@ // lastmode
-		1 // write
-		IOReadWrite ok! byteswritten!
+		write@ // write
+		IOReadWrite ok! bytes!
 
 		fcb@ IOFileControlBlockUnlock
 	end else
-		// caching -- call into cache write function.
+		// caching -- call into cache function.
 
-		flags@ // flags
-		length@ // length
-		fileobject@ IOFile_Offset + @ // offset
-		buffer@ // buffer
-		fcb@ // fcb
-		lastmode@ // lastmode
-		IOCacheFileWrite ok! byteswritten!
+		if (write@)
+			flags@ // flags
+			length@ // length
+			fileobject@ IOFile_Offset + @ // offset
+			buffer@ // buffer
+			fcb@ // fcb
+			lastmode@ // lastmode
+			IOCacheFileWrite ok! bytes!
 
-		// IOCacheFileWrite is responsible for unlocking the FCB now.
-		// fcb@ IOFileControlBlockUnlock
+			// IOCacheFileWrite is responsible for unlocking the FCB now.
+			// fcb@ IOFileControlBlockUnlock
+		end else
+			flags@ // flags
+			length@ // length
+			fileobject@ IOFile_Offset + @ // offset
+			buffer@ // buffer
+			fcb@ // fcb
+			lastmode@ // lastmode
+			IOCacheFileRead ok! bytes!
+
+			fcb@ IOFileControlBlockUnlock
+		end
 	end
 
-	byteswritten@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
+	bytes@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
 
-	auto pokefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Poke + @ pokefunc!
+	write@ // write
+	fileobject@ // fileobject
+	IOFileAccessPoke
+end
 
-	if (pokefunc@)
-		// notify driver that the FCB was modified so it can update timestamps
-		// etc.
+fn IOFileReadAsync { context porthandle flags offset length buffer filehandle -- ok }
+	fnsection "PAGE$text"
 
-		IOPOKE_WRITE // poketype
-		fileobject@ // object
-		pokefunc@ IODispatchPokeFunction
+	auto access
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	filehandle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
 	end
+
+	access@ ACCESS_READ SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto portobject
+	IPCPortObjectType@ // type
+	porthandle@ // handle
+	ObObjectReferenceByHandle ok! portobject! access!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	context@ // context
+	portobject@ // portobject
+	flags@ // flags
+	offset@ // offset
+	length@ // length
+	buffer@ // buffer
+	fileobject@ // fileobject
+	0 // write
+	IOFileReadWriteAsyncObject ok!
+
+	portobject@ ObObjectDereferenceByPointer drop
+	fileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IOFileWriteAsync { context porthandle flags offset length buffer filehandle -- ok }
+	fnsection "PAGE$text"
+
+	auto access
+	auto fileobject
+
+	IOFileTypeObject@ // type
+	filehandle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ ACCESS_WRITE SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	auto portobject
+	IPCPortObjectType@ // type
+	porthandle@ // handle
+	ObObjectReferenceByHandle ok! portobject! access!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	context@ // context
+	portobject@ // portobject
+	flags@ // flags
+	offset@ // offset
+	length@ // length
+	buffer@ // buffer
+	fileobject@ // fileobject
+	1 // write
+	IOFileReadWriteAsyncObject ok!
+
+	portobject@ ObObjectDereferenceByPointer drop
+	fileobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fileobject write -- ok }
+	fnsection "PAGE$text"
+
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_NOCACHE & ~~)
+		// we don't currently support cached async IO
+
+		STATUS_NOT_IMPLEMENTED ok!
+
+		return
+	end
+
+	OSACCESSFLAG_ASYNC flags |=
+
+	auto lastmode
+	auto fcb
+
+	length@ // length
+	buffer@ // buffer
+	fileobject@ // fileobject
+	write@ // write
+	IOFileAccessValidate ok! lastmode! fcb!
+
+	if (ok@)
+		return
+	end
+
+	fcb@ IOFileControlBlockLockShared ok!
+
+	if (ok@)
+		return
+	end
+
+	// FCB is kept locked shared for the duration of the IO.
+
+	context@ // timeout
+	flags@ // flags
+	0 // kflags
+	length@ // length
+	offset@ // offset
+	buffer@ // buffer
+	portobject@ // portobject
+	fileobject@ // fileobject
+	lastmode@ // lastmode
+	write@ // write
+	IOReadWrite ok! drop
+
+	if (ok@)
+		fcb@ IOFileControlBlockUnlock
+
+		return
+	end
+
+	write@ // write
+	fileobject@ // fileobject
+	IOFileAccessPoke
 end
 
 fn IODirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }

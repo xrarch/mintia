@@ -93,15 +93,14 @@ externptr MmPageFreeCount
 externptr MmConstantZeroPage
 externptr MmInited
 externptr MmEventPageAvailable
+externptr MmEventMSPageAvailable
 externptr MmEventLowMemory
 externptr MmModifiedPageEvent
 externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
 externptr MmModifiedPageWriterThread
-
-externptr MmForcedOutProcessListHead
-externptr MmForcedOutProcessListTail
+externptr MmBalanceSetManagerThread
 
 externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize
@@ -119,12 +118,24 @@ externptr MmPhysicalCommitLimit // physical memory available, sans a minimum mar
 externptr MmPhysicalCommitUsage // physical memory promised to nonpaged pool and working set minimums
 
 // free page count thresholds at which various types/priorities of page
-// allocation will block or fail.
+// allocation will block or fail. the intent is that the number of available
+// pages will drop below MMNORMALTHRESH only temporarily and in exceptional
+// circumstances, and that paging activity will rebalance it again upwards.
+//
+// The maximum number of possible extant bytes allocated needs not be bounded
+// (other than by quota and physical commit limit) down to MMMUSTSUCCEEDTHRESH
+// which represents what the system MUST HAVE AVAILABLE in order not to crash,
+// to fulfill page-out activity such as file writeback and anonymous page
+// cleaning to swapfile.
+//
+// MUSTSUCCEED should not be taken as a get-out-of-deadlock-free card, as the
+// issues related to page-out are very complex and can vary depending on the
+// mechanics of the filesystem on which the swapfiles reside.
 
-const MMNORMALTHRESH        8 // normal allocations
-const MMPOOLTHRESH          5 // nonblocking pool allocations
-const MMMUSTSUCCEEDL2THRESH 3 // mustsucceed level 2
-const MMMUSTSUCCEEDTHRESH   1 // mustsucceed
+const MMNORMALTHRESH        16 // normal allocations           (blocking user allocations)
+const MMPOOLTHRESH          12 // nonblocking pool allocations (nonblocking non-fatal allocations)
+const MMMUSTSUCCEEDL2THRESH 4  // mustsucceed level 2          (i would really like this to not fail)
+const MMMUSTSUCCEEDTHRESH   1  // mustsucceed                  (if this fails the system will definitely go down)
 
 // free page count threshold that counts as "dire", meaning the working set
 // trimmer will ignore working set lower limits and go woo wild.

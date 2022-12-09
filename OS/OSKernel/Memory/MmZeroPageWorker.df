@@ -28,13 +28,13 @@
 var MmOkToUnwire 0
 public MmOkToUnwire
 
-extern MmUnwireKernel { -- }
-
 fn MmZeroPageWorker { -- }
 	// the fate of the idle thread is to endlessly spin and check for page
 	// frames in the free list. if it finds any, it zeroes them out and places
 	// them on the zero list. if it doesn't, it halts the processor until next
 	// interrupt.
+
+	1 MmOkToUnwire!
 
 	while (1)
 		auto pfdbe
@@ -81,11 +81,29 @@ fn MmZeroPageWorker { -- }
 
 			1 MmPageFreeCount +=
 
-			rs@ HALCPUInterruptRestore
-		end elseif (MmOkToUnwire@)
-			0 MmOkToUnwire!
+			auto ipl
 
-			MmUnwireKernel
+			if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH ==)
+				IPLDPC KeIPLRaise ipl!
+				rs@ HALCPUInterruptRestore
+
+				0 // priboost
+				MmEventPageAvailable // event
+				KeEventSignal
+
+				ipl@ KeIPLLower
+			end elseif (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
+				IPLDPC KeIPLRaise ipl!
+				rs@ HALCPUInterruptRestore
+
+				0 // priboost
+				MmEventMSPageAvailable // event
+				KeEventSignal
+
+				ipl@ KeIPLLower
+			end else
+				rs@ HALCPUInterruptRestore
+			end
 		end else
 			// there are no free list pages for now, halt
 

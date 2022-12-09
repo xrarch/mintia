@@ -40,6 +40,8 @@ fn MmKflagToPriority { kflags -- pri }
 end
 
 fn MmPageGet { priority -- pfdbe pfn ok }
+	0 ok!
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -55,12 +57,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 			0 pfdbe@ MmPageFrameEntryFree_Next + !
 
 			1 MmPageFreeCount -=
-
-			ipl@ KeIPLLower
-
-			0 ok!
-
-			return
 		end else
 			// resort to a zero page
 
@@ -72,12 +68,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 				0 pfdbe@ MmPageFrameEntryFree_Next + !
 
 				1 MmPageFreeCount -=
-
-				ipl@ KeIPLLower
-
-				0 ok!
-
-				return
 			end
 		end
 	end elseif (priority@ 0xFF & ZEROMUST ==)
@@ -92,12 +82,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 			0 pfdbe@ MmPageFrameEntryFree_Next + !
 
 			1 MmPageFreeCount -=
-
-			ipl@ KeIPLLower
-
-			0 ok!
-
-			return
 		end else
 			// resort to a free page
 
@@ -112,8 +96,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 
 				ipl@ KeIPLLower
 
-				0 ok!
-
 				// zero the free page out
 
 				pfn@ PAGESHIFT << IDENTITYSPACE |
@@ -121,31 +103,43 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 				0
 				memset
 
-				return
+				IPLDPC KeIPLRaise ipl!
 			end
 		end
 	end elseif (DEBUGCHECKS)
 		priority@ "MmPageGet: unknown priority %d\n" KeCrash
 	end
 
-	// none in free or zero list, get one from standby list
+	if (pfdbe@ ~~)
+		// none in free or zero list, get one from standby list
 
-	MmEvictSinglePage ok! pfdbe!
+		MmEvictSinglePage ok! pfdbe!
+
+		if (ok@ ~~)
+			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
+
+			if (priority@ 0xFF & ZEROMUST ==)
+				// zero out the standby page
+
+				ipl@ KeIPLLower
+
+				pfn@ PAGESHIFT << IDENTITYSPACE |
+				PAGESIZE
+				0
+				memset
+
+				IPLDPC KeIPLRaise ipl!
+			end
+		end
+	end
+
+	if (MmEvictablePageCount@ MmPageFreeCount@ + MmPageFreeCountLow@ <)
+		0 // priboost
+		MmEventLowMemory // event
+		KeEventSignal
+	end
 
 	ipl@ KeIPLLower
-
-	if (ok@ ~~)
-		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
-
-		if (priority@ 0xFF & ZEROMUST ==)
-			pfn@ PAGESHIFT << IDENTITYSPACE |
-			PAGESIZE
-			0
-			memset
-		end
-
-		return
-	end
 end
 
 fn MmPageAlloc { priority -- pfdbe pfn ok }
@@ -199,7 +193,6 @@ fn MmPageWait { process priority -- waited ok }
 
 	auto blockon
 	auto alertable
-	auto tries
 
 	if (priority@ MUSTSUCCEED &)
 		// CANBLOCK page allocations have different wait rules if MUSTSUCCEED
@@ -207,36 +200,28 @@ fn MmPageWait { process priority -- waited ok }
 
 		MMMUSTSUCCEEDTHRESH blockon!
 		0 alertable!
-		-1 tries!
 	end elseif (priority@ MUSTSUCCEEDL2 &)
 		MMMUSTSUCCEEDL2THRESH blockon!
 		0 alertable!
-		-1 tries!
 	end elseif (priority@ POOLALLOC &)
 		MMPOOLTHRESH blockon!
 		0 alertable!
-		-1 tries!
 	end else
 		// normal rules:
 		MMNORMALTHRESH blockon! // don't dip into MUSTSUCCEED page pool
 	end
 
-	if (priority@ TRYFOREVER &)
-		-1 tries!
-	end
-
 	if (wprocess@ PsSystemInitProcess@ ==)
-		-1 tries!
 		0 alertable!
 	end elseif (wprocess@ PsSystemProcess@ ==)
-		-1 tries!
 		0 alertable!
 
 		if (KeThreadCurrent@ MmModifiedPageWriterThread@ ==)
 			MMMUSTSUCCEEDTHRESH blockon!
+		end elseif (KeThreadCurrent@ MmBalanceSetManagerThread@ ==)
+			MMMUSTSUCCEEDTHRESH blockon!
 		end
 	end else
-		200 tries! // try 200 times to get a page (about 20 seconds)
 		1 alertable!
 	end
 
@@ -250,10 +235,17 @@ fn MmPageWait { process priority -- waited ok }
 		end
 	end
 
+	auto event
+
+	if (blockon@ MMNORMALTHRESH >=)
+		MmEventPageAvailable event!
+	end else
+		MmEventMSPageAvailable event!
+	end
+
 	while (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
-		0 // priboost
-		MmEventLowMemory // event
-		KeEventSignal
+		event@ // event
+		KeEventReset drop
 
 		IPLAPC KeIPLLower
 
@@ -265,8 +257,8 @@ fn MmPageWait { process priority -- waited ok }
 
 		KERNELMODE // waitmode
 		alertable@ // alertable
-		100 // timeout
-		MmEventPageAvailable // object
+		600000 // timeout (10 minutes)
+		event@ // object
 		KeThreadWaitForObject ok!
 
 		if (process@)
@@ -275,16 +267,7 @@ fn MmPageWait { process priority -- waited ok }
 
 		IPLDPC KeIPLRaise drop
 
-		if (ok@ STATUS_WAIT_TIMEOUT ==)
-			if (tries@ -1 ~=)
-				1 tries -=
-
-				if (tries@ ~~)
-					STATUS_NO_MEMORY ok!
-					return
-				end
-			end
-		end elseif (ok@)
+		if (ok@)
 			return
 		end
 	end
@@ -303,19 +286,23 @@ fn MmPageFreeByEntry { pfdbe -- }
 
 	1 MmPageFreeCount +=
 
-	if (MmEventPageAvailable KeEvent_DispatchHeader + KeDispatchHeader_WaitBlockListHead + @)
-		// there's a waiter for a free page, wake him up
+	auto ipl
 
-		// restore interrupts and go to IPLDPC since this is a much lengthier
-		// operation...
-
-		auto ipl
+	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH ==)
 		IPLDPC KeIPLRaise ipl!
-
 		rs@ HALCPUInterruptRestore
 
 		0 // priboost
 		MmEventPageAvailable // event
+		KeEventSignal
+
+		ipl@ KeIPLLower
+	end elseif (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
+		IPLDPC KeIPLRaise ipl!
+		rs@ HALCPUInterruptRestore
+
+		0 // priboost
+		MmEventMSPageAvailable // event
 		KeEventSignal
 
 		ipl@ KeIPLLower

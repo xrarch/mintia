@@ -48,7 +48,7 @@
 .extern OSFileFlush
 .extern OSFileReadAsync
 .extern OSFileWriteAsync
-.extern OSFileIOCancel
+.extern OSFileCancelIO
 .extern OSDirectoryRename
 .extern OSDirectoryUnlink
 .extern OSDirectoryRead
@@ -162,7 +162,7 @@ OSCallTable:
 	.dl OSTOSFileFlush                                   ;44
 	.dl OSTOSFileReadAsync                               ;45
 	.dl OSTOSFileWriteAsync                              ;46
-	.dl OSTOSFileIOCancel                                ;47
+	.dl OSTOSFileCancelIO                                ;47
 	.dl OSTOSDirectoryRename                             ;48
 	.dl OSTOSDirectoryUnlink                             ;49
 	.dl OSTOSDirectoryRead                               ;50
@@ -1209,6 +1209,10 @@ OSTOSFileReadAsync:
 	add  t0, 24 ;t6
 	push [t0]
 
+	mov  t0, s17
+	add  t0, 28 ;a0
+	push [t0]
+
 	call OSFileReadAsync
 
 
@@ -1216,7 +1220,7 @@ OSTOSFileReadAsync:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
-	add  sp, 8
+	add  sp, 12
 	ret
 
 OSTOSFileWriteAsync:
@@ -1246,6 +1250,10 @@ OSTOSFileWriteAsync:
 	add  t0, 24 ;t6
 	push [t0]
 
+	mov  t0, s17
+	add  t0, 28 ;a0
+	push [t0]
+
 	call OSFileWriteAsync
 
 
@@ -1253,11 +1261,11 @@ OSTOSFileWriteAsync:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
-	add  sp, 8
+	add  sp, 12
 	ret
 
-OSTOSFileIOCancel:
-.global OSTOSFileIOCancel
+OSTOSFileCancelIO:
+.global OSTOSFileCancelIO
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1267,7 +1275,7 @@ OSTOSFileIOCancel:
 	add  t0, 8 ;t2
 	mov  a1, [t0]
 
-	call OSFileIOCancel
+	call OSFileCancelIO
 
 
 	mov  t0, s17

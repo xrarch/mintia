@@ -37,7 +37,7 @@ endstruct
 
 struct MmPageFrameEntryWaitable
 	4 EventBlock
-	4 Context1
+	4 OwningThread
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 Context2
 	4 Context3
@@ -49,9 +49,8 @@ endstruct
 const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_PRIVATE    16
-const MMEVICTFLAG_WORKINGSET 32 // indicates that a page has been pinned by
-                                // the I/O system, usually as a result of
-                                // being part of the swapfile's metadata.
+const MMEVICTFLAG_WORKINGSET 32 // indicates that a page is considered for
+                                // working set accounting.
 const MMEVICTFLAG_VALID      64 // file cache
 const MMEVICTFLAG_PAGETABLE  64 // page table (reused bit from filecache
                                 // because that bit will NEVER be on in an
@@ -75,6 +74,7 @@ extern MmEvictSinglePage { -- pfdbe ok }
 struct MmEvictablePageEvent
 	KeEvent_SIZEOF Event
 	4 References
+	4 WasMemoryPrivileged
 endstruct
 
 extern MmEvictablePageWait { process pri pfdbe -- ok }

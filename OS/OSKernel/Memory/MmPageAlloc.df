@@ -215,14 +215,12 @@ fn MmPageWait { process priority -- waited ok }
 		0 alertable!
 	end elseif (wprocess@ PsSystemProcess@ ==)
 		0 alertable!
-
-		if (KeThreadCurrent@ MmModifiedPageWriterThread@ ==)
-			MMMUSTSUCCEEDTHRESH blockon!
-		end elseif (KeThreadCurrent@ MmBalanceSetManagerThread@ ==)
-			MMMUSTSUCCEEDTHRESH blockon!
-		end
 	end else
 		1 alertable!
+	end
+
+	if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+		MMMUSTSUCCEEDTHRESH blockon!
 	end
 
 	if (priority@ CANBLOCK & ~~)
@@ -234,6 +232,9 @@ fn MmPageWait { process priority -- waited ok }
 			return
 		end
 	end
+
+	auto timeouts
+	600 timeouts!
 
 	auto event
 
@@ -257,7 +258,7 @@ fn MmPageWait { process priority -- waited ok }
 
 		KERNELMODE // waitmode
 		alertable@ // alertable
-		600000 // timeout (10 minutes)
+		100 // timeout
 		event@ // object
 		KeThreadWaitForObject ok!
 
@@ -268,7 +269,27 @@ fn MmPageWait { process priority -- waited ok }
 		IPLDPC KeIPLRaise drop
 
 		if (ok@)
-			return
+			if (ok@ STATUS_WAIT_TIMEOUT ==)
+				if (timeouts@ ~~)
+					MmModifiedPageCount@
+					MmPageFreeCount@
+					MmEvictablePageCount@
+					"Many timeouts, MPW is likely deadlocked (evic=%d,free=%d,mod=%d)\n" KeCrash
+				end
+
+				1 timeouts -=
+
+				// recheck this since it may have changed
+
+				if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+					MMMUSTSUCCEEDTHRESH blockon!
+					MmEventMSPageAvailable event!
+				end
+			end else
+				return
+			end
+		end else
+			600 timeouts!
 		end
 	end
 

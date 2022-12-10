@@ -491,6 +491,18 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 			KeEventInitialize
 
 			0 eventblock@ MmEvictablePageEvent_References + !
+			0 eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + !
+		end
+	end
+
+	if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+		// i am a memory privileged thread! before i block and potentially
+		// deadlock the system, sneeze on the thread performing IO on this
+		// page and give it the memory privilege sickness temporarily.
+
+		if (eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + @ ~~)
+			1 eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + !
+			1 pfdbe@ MmPageFrameEntryWaitable_OwningThread + @ PsThread_MemoryPrivilegedCount + +=
 		end
 	end
 
@@ -526,6 +538,10 @@ fn MmEvictablePageSatisfy { pfdbe -- }
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"MmEvictablePageSatisfy: ipl != IPLDPC \n" KeCrash
 		end
+
+		if (pfdbe@ MmPageFrameEntryWaitable_OwningThread + @ KeThreadCurrent@ ~=)
+			"MmEvictablePageSatisfy: IO satisfied from other context\n" KeCrash
+		end
 	end
 
 	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS ~ &
@@ -535,6 +551,10 @@ fn MmEvictablePageSatisfy { pfdbe -- }
 	pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
 
 	if (eventblock@)
+		if (eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + @)
+			1 KeThreadCurrent@ PsThread_MemoryPrivilegedCount + -=
+		end
+
 		0 // priboost
 		eventblock@ MmEvictablePageEvent_Event + // event
 		KeEventSignal
@@ -542,10 +562,9 @@ fn MmEvictablePageSatisfy { pfdbe -- }
 end
 
 fn MmEvictablePageStartIO { pfdbe -- }
-	// NOTE: this routine is inlined in IOCachePageWrite
-
 	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
 	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
+	KeThreadCurrent@ pfdbe@ MmPageFrameEntryWaitable_OwningThread + !
 	0 pfdbe@ MmPageFrameEntryWaitable_EventBlock + !
 end

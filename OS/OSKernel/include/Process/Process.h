@@ -83,6 +83,8 @@ struct PsThread
 
 	4 IOListHead
 
+	4 MemoryPrivilegedCount
+
 	4 UTEB
 
 	4 TID

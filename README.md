@@ -1,10 +1,12 @@
 # MINTIA
 
 MINTIA is an overengineered operating system written in a custom programming
-language for a fictional RISC workstation computer. Its overall design pays homage
-to the Windows NT and VMS operating systems, especially its object manager and
-virtual memory manager, with the capability to swap to disk not only user pages
-but also kernel stacks, page tables, and even its own kernel code and heap.
+language as part of a project to develop a hyperrealistic fictional RISC
+workstation computer called [LIMNstation](https://github.com/limnarch/limnemu).
+Its overall design pays homage to the Windows NT and VMS operating systems,
+especially its object manager and virtual memory manager, with the capability
+to swap to disk not only user pages but also kernel stacks, page tables, and
+even its own kernel code and heap.
 
 It aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered

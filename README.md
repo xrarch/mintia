@@ -1,7 +1,7 @@
 # MINTIA
 
 MINTIA is an overengineered operating system written in a custom programming
-language for a fictional workstation computer. Its overall design pays homage
+language for a fictional RISC workstation computer. Its overall design pays homage
 to the Windows NT and VMS operating systems, especially its object manager and
 virtual memory manager, with the capability to swap to disk not only user pages
 but also kernel stacks, page tables, and even its own kernel code and heap.
@@ -9,7 +9,8 @@ but also kernel stacks, page tables, and even its own kernel code and heap.
 It aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
 a pretty strong system at the time. It also tries to be portable to other
-32-bit architectures, with plans for i386, m68k, and SPARC ports some day.
+32-bit architectures, with a finished port to the [fox32](https://github.com/fox32-arch/fox32)
+CISC fantasy computer and planned future ports to other architectures as well.
 
 ![Running](https://raw.githubusercontent.com/limnarch/mintia/main/screenshot.png)
 
@@ -37,6 +38,7 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 
 ### Kernel
 
+- [x] Targets a 2MB RAM minimum for headless use, 4MB for graphical.
 - [x] Dynamically-linked kernel.
 - [x] Priority-based preemptive multitasking with wait boosting.
 - [x] Waiting on multiple objects simultaneously.
@@ -63,6 +65,7 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 - [x] Demand paging.
 - [x] Up to 16 swapfiles that can dynamically grow and shrink with the needs of the system.
 - [x] Dynamic working set management.
+- [x] Extensive swapping: all user pages, along with kernel stacks, page tables, and 50% of the kernel itself, can be swapped to disk to free memory.
 
 ## TODO
 

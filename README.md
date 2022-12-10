@@ -35,21 +35,36 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 
 ## Features
 
-- [x] Dynamically-linked kernel modules.
+### Kernel
+
+- [x] Dynamically-linked kernel.
 - [x] Priority-based preemptive multitasking with wait boosting.
-- [x] Nested interrupts, managed by IPLs (analogous to Windows IRQLs) and DPCs.
-- [x] Waiting on multiple events at once.
-- [x] An Object Manager for centralized resource tracking and IPC.
+- [x] Waiting on multiple objects simultaneously.
+- [x] Nested interrupts, managed by IPLs (analogous to Windows IRQLs); DPCs and APCs.
+- [x] Kernel-mode debugger with stack tracing.
+- [x] Swappable kernel code and heap.
+- [x] Layered design model.
+
+### Executive
+
+- [x] An object manager for centralized resource tracking.
+- [x] Port-based IPC.
 - [x] Unix-like permissions model.
-- [x] Loadable kernel-mode debugger with stack tracing.
-- [x] File page cache.
-- [x] AisixFS support.
-- [x] Demand paging, memory-mapped files, etc.
+- [x] Sophisticated memory manager.
 - [x] Userspace dynamic linking.
-- [x] Up to 16 dynamically-growable swapfiles and working set management.
 - [x] Minimal command-line interface over TTY.
 - [x] Support for native and MBR partition table formats.
-- [x] Swappable kernel sections and heap.
+- [x] Fully asynchronous I/O API.
+
+### Memory Management
+
+- [x] File page cache.
+- [x] Memory mapped files.
+- [x] Demand paging.
+- [x] Up to 16 swapfiles that can dynamically grow and shrink with the needs of the system.
+- [x] Dynamic working set management.
+
+## TODO
 
 - [ ] FAT12/16/32 driver.
 - [ ] Mac OS 9-lookalike window system.

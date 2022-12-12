@@ -16,6 +16,12 @@ extern IOSwapFileExtend { -- }
 
 extern IOSwapFileContract { -- }
 
+extern IOSwapFileGetPriority { swapfile -- pri }
+
+const IOSWAPFILEMAX 16
+
+const IOSWAPFILEMAXPRI 8
+
 externptr IOSwapFileExtendEvent
 
 externptr IOSwapPagesUsed

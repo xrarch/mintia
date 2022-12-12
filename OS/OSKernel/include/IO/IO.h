@@ -153,7 +153,6 @@ externptr IOFileControlBlockCacheSize
 
 externptr IOWritebehindTimer
 externptr IOWritebehindEvent
-externptr IOSwapFileCreationEvent
 
 externptr IOCacheInfoBlockDirtyCount
 externptr IOCacheInfoBlockDirtyListHead

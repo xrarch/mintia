@@ -81,6 +81,8 @@ extern MmModifiedPageWriter { context1 context2 -- }
 extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 
+extern MmMPWAnonTransferInitialize { swapfile transfer -- }
+
 extern MmPageFault { writing badaddr trapframe -- handled }
 
 extern MmThrottle { -- }

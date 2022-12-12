@@ -44,14 +44,6 @@ public IOSwapPagesWritten
 var IOSwapPagesRead 0
 public IOSwapPagesRead
 
-buffer IOSwapFileCreationMutex KeMutex_SIZEOF
-
-buffer IOSwapFileExtendEvent KeEvent_SIZEOF
-public IOSwapFileExtendEvent
-
-buffer IOSwapFileCreationEvent KeEvent_SIZEOF
-public IOSwapFileCreationEvent
-
 struct IOSwapFile
 	4 MinimumSize
 	4 MaximumSize
@@ -66,8 +58,10 @@ struct IOSwapFile
 	4 Next
 endstruct
 
-const IOSWAPFILEMAX 16
-const IOSWAPFILEMAXPRI 8
+buffer IOSwapFileCreationMutex KeMutex_SIZEOF
+
+buffer IOSwapFileExtendEvent KeEvent_SIZEOF
+public IOSwapFileExtendEvent
 
 table IOSwapFiles[IOSWAPFILEMAX]
 
@@ -106,10 +100,6 @@ fn IOSwapFileInsert { pri fcb swapfile -- }
 
 		swapfile@ IOSwapFile_MinimumSize + @ MmCommitLimit!
 		swapfile@ IOSwapFile_MaximumSize + @ MmTheoreticalCommitLimit!
-
-		0 // priboost
-		IOSwapFileCreationEvent // event
-		KeEventSignal
 	end else
 		HALCPUInterruptDisable rs!
 		swapfile@ IOSwapFile_MinimumSize + @ MmCommitLimit +=
@@ -118,6 +108,10 @@ fn IOSwapFileInsert { pri fcb swapfile -- }
 	end
 
 	1 IOSwapFileCount +=
+end
+
+fn IOSwapFileGetPriority { swapfile -- pri }
+	swapfile@ IOSwapFile_Priority + @ pri!
 end
 
 fn IOSwapFileInit { -- }
@@ -278,41 +272,13 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
-	auto qcharge
-	maxpages@ 7 + 3 >> IOSwapFile_SIZEOF + MmChargeBytesGet qcharge!
-
-	qcharge@ // charge
-	MmQuotaSystem // quotablock
-	MmQuotaBlockCharge ok!
-
-	if (ok@)
-		IOSwapFileCreateUnlock
-
-		fileobject@ ObObjectDereferenceByPointer drop
-
-		return
-	end
-
-	auto bitmap
-	maxpages@ 7 + 3 >> // bytes
-	'SwBm' // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! bitmap!
-
-	if (ok@)
-		IOSwapFileCreateUnlock
-
-		qcharge@ // charge
-		MmQuotaSystem // quotablock
-		MmQuotaBlockUncharge
-
-		fileobject@ ObObjectDereferenceByPointer drop
-
-		return
-	end
+	// do an inline allocation of the swapfile, two transfer structures, and
+	// the bitmap.
 
 	auto swapfile
-	IOSwapFile_SIZEOF // bytes
+	IOSwapFile_SIZEOF
+	IOTransfer_SIZEOF 2 * +
+	maxpages@ 7 + 3 >> + // bytes
 	'SwFi' // tag
 	CANBLOCK // flags
 	MmAllocWithTag ok! swapfile!
@@ -322,14 +288,24 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
-		bitmap@ MmFree
-
-		qcharge@ // charge
-		MmQuotaSystem // quotablock
-		MmQuotaBlockUncharge
-
 		return
 	end
+
+	auto transfer1
+	swapfile@ IOSwapFile_SIZEOF + transfer1!
+
+	swapfile@ // swapfile
+	transfer1@ // transfer
+	MmMPWAnonTransferInitialize
+
+	auto transfer2
+	transfer1@ IOTransfer_SIZEOF + transfer2!
+
+	swapfile@ // swapfile
+	transfer2@ // transfer
+	MmMPWAnonTransferInitialize
+
+	transfer2@ IOTransfer_SIZEOF + bitmap!
 
 	// initialize the bitmap
 	maxpages@ // sizeinbits
@@ -364,6 +340,9 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	fcb@ // fcb
 	swapfile@ // swapfile
 	IOSwapFileInsert
+
+	transfer1@ IOTransferComplete
+	transfer2@ IOTransferComplete
 
 	IOSwapFileCreateUnlock
 

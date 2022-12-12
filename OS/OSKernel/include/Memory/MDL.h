@@ -25,9 +25,7 @@ struct MmMDLHeader
 	4 IOListNext
 	4 IOListPrev
 
-	4 Context1
-	4 Context2
-	4 Context3
+	4 Context
 
 	32 DriverGoWild
 endstruct

@@ -29,6 +29,8 @@
 
 #include "../../Common/Common.h"
 
+extern MmMPWAssessTransfers { transfer1 -- }
+
 var IOSwapPagesUsed 0
 public IOSwapPagesUsed
 
@@ -92,6 +94,8 @@ fn IOSwapFileInsert { pri fcb swapfile -- }
 		swapfile@ [pri@]IOSwapFilePriorityListTails!
 	end
 
+	2 MmAnonTransfersAvailable +=
+
 	rs@ HALCPUInterruptRestore
 
 	if (IOSwapFileCount@ 0 ==)
@@ -112,6 +116,10 @@ end
 
 fn IOSwapFileGetPriority { swapfile -- pri }
 	swapfile@ IOSwapFile_Priority + @ pri!
+end
+
+fn IOSwapFileGetFree { swapfile -- free }
+	swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - free!
 end
 
 fn IOSwapFileInit { -- }
@@ -305,6 +313,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	transfer2@ // transfer
 	MmMPWAnonTransferInitialize
 
+	auto bitmap
 	transfer2@ IOTransfer_SIZEOF + bitmap!
 
 	// initialize the bitmap
@@ -429,6 +438,10 @@ fn IOSwapFileReserve { pagesneeded swapfile -- offset ok }
 end
 
 fn IOSwapFileRelease { pages offset swapfile -- }
+	if (pages@ ~~)
+		return
+	end
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -439,6 +452,11 @@ fn IOSwapFileRelease { pages offset swapfile -- }
 	offset@ // index
 	swapfile@ IOSwapFile_BitmapHeader + // header
 	ComBitmapClearBits
+
+	if (MmAnonTransfersAvailable@ ~~
+		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - IOSWAPFILEFREELOW >= ||)
+		swapfile@ IOSwapFile_SIZEOF + MmMPWAssessTransfers
+	end
 
 	ipl@ KeIPLLower
 end
@@ -461,6 +479,11 @@ fn IOSwapPageFree { pno swapfile -- }
 		if (IOSwapPagesUsed@ z<)
 			"IOSwapPageFree: underflow\n" KeCrash
 		end
+	end
+
+	if (MmAnonTransfersAvailable@ ~~
+		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - IOSWAPFILEFREELOW >= ||)
+		swapfile@ IOSwapFile_SIZEOF + MmMPWAssessTransfers
 	end
 
 	ipl@ KeIPLLower
@@ -564,9 +587,7 @@ fn IOSwapPageReadPTE { kflags pageframe pte -- ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOSwapFileWriteMDL { pagecount mdl -- ok }
-	0 ok!
-
+fn IOSwapFileWriteMDL { pagecount offset mdl -- ok }
 	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length
 	0 // vaddr
@@ -575,226 +596,10 @@ fn IOSwapFileWriteMDL { pagecount mdl -- ok }
 
 	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
 	pointerof IOSwapPageWriteMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
-	0 mdl@ MmMDLHeader_Context1 + !
+	offset@ mdl@ MmMDLHeader_Context + !
 
-	auto pri
-	0 pri!
-
-	auto offset
-	0 offset!
-
-	auto fragged
-	0 fragged!
-
-	while (pri@ IOSWAPFILEMAXPRI <)
-		auto swapfile
-		[pri@]IOSwapFilePriorityListHeads@ swapfile!
-
-		if (swapfile@)
-			auto writtencount
-			pagecount@ // pagecount
-			offset@ // offset
-			mdl@ // mdl
-			pri@ // pri
-			IOSwapFileWritePriorityLevel ok! writtencount! fragged |=
-
-			if (ok@ ~~)
-				writtencount@ offset +=
-				writtencount@ pagecount -=
-
-				if (pagecount@ ~~)
-					if (fragged@)
-						0 // status
-						0 // priboost
-						mdl@ // mdl
-						MmMDLComplete
-					end
-
-					return
-				end
-			end else
-				break
-			end
-		end
-
-		1 pri +=
-	end
-
-	if (pagecount@)
-		if (ok@ ~~)
-			STATUS_NO_SWAP ok!
-		end
-
-		ok@ // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end
-end
-
-fn IOSwapFileWritePriorityLevel { pagecount offset mdl pri -- fragged writtenpagecount ok }
-	// write as many pages as possible at this swapfile priority level.
-
-	0 writtenpagecount!
-	0 ok!
-	0 fragged!
-
-	auto pagestowrite
-	pagecount@ pagestowrite!
-
-	while (pagestowrite@)
-		auto swapfile
-		[pri@]IOSwapFilePriorityListHeads@ swapfile!
-
-		while (swapfile@)
-			while (1)
-				// try to write clusters of this size until we either run out of
-				// pages to write or we discover that this swapfile no longer has
-				// room for them.
-
-				pagestowrite@ // pagecount
-				offset@ // mdloffset
-				mdl@ // mdl
-				swapfile@ // swapfile
-				IOSwapFileWritePages ok!
-
-				if (ok@ ~~)
-					if (mdl@ MmMDLHeader_Pages + @ pagestowrite@ ~=)
-						1 fragged!
-					end
-
-					pagestowrite@ pagecount -=
-					pagestowrite@ writtenpagecount +=
-					pagestowrite@ offset +=
-
-					if (pagecount@ pagestowrite@ <)
-						if (pagecount@ ~~)
-							break
-						end
-
-						pagecount@ pagestowrite!
-					end
-				end else
-					if (ok@ STATUS_NO_SWAP ~=)
-						break
-					end
-
-					0 ok!
-
-					break
-				end
-			end
-
-			if (ok@)
-				break
-			end
-
-			if (pagecount@ pagestowrite@ <)
-				if (pagecount@ ~~)
-					break
-				end
-
-				pagecount@ pagestowrite!
-			end
-
-			swapfile@ IOSwapFile_Next + @ swapfile!
-		end
-
-		if (ok@)
-			break
-		end
-
-		if (pagecount@ ~~)
-			break
-		end
-
-		1 pagestowrite >>=
-	end
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto h
-	[pri@]IOSwapFilePriorityListHeads@ h!
-
-	auto t
-	[pri@]IOSwapFilePriorityListTails@ t!
-
-	if (h@ t@ ~=)
-		// move the first swapfile to the end of the priority queue so we
-		// fill them in a round-robin fashion to help avoid fragmentation.
-
-		h@ IOSwapFile_Next + @ [pri@]IOSwapFilePriorityListHeads!
-		0 h@ IOSwapFile_Next + !
-		h@ t@ IOSwapFile_Next + !
-		h@ [pri@]IOSwapFilePriorityListTails!
-	end
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- ok }
-	// try to write this many pages as a single clustered operation to the
-	// swapfile.
-
-	auto offset
-	pagecount@ // pagecount
-	swapfile@ // swapfile
-	IOSwapFileReserve ok! offset!
-
-	if (ok@)
-		return
-	end
-
-	auto fragged
-	0 fragged!
-
-	auto writemdl
-
-	if (mdl@ MmMDLHeader_Pages + @ pagecount@ ~=)
-		// have to split the mdl
-
-		0 // extraspace
-		KERNELMODE // mode
-		pagecount@ PAGESHIFT << // length
-		mdloffset@ PAGESHIFT << // vaddr
-		IOKFLAG_SWAPOUT // kflags
-		MmMDLAllocate ok! writemdl! drop
-
-		if (ok@)
-			pagecount@ // pages
-			offset@ // offset
-			swapfile@ // swapfile
-			IOSwapFileRelease
-
-			return
-		end
-
-		mdloffset@ PAGESHIFT << // vaddr
-		pagecount@ PAGESHIFT << // length
-		mdl@ // srcmdl
-		writemdl@ // destmdl
-		MmMDLSplit
-
-		1 fragged!
-	end else
-		if (DEBUGCHECKS)
-			if (mdloffset@)
-				"IOSwapFileWritePages: mdloffset\n" KeCrash
-			end
-		end
-
-		// can use the MDL as-is
-		mdl@ writemdl!
-	end
-
-	// perform the write operation
-
-	mdl@ writemdl@ MmMDLHeader_Context1 + !
-	offset@ writemdl@ MmMDLHeader_Context2 + !
-	swapfile@ writemdl@ MmMDLHeader_Context3 + !
-
-	pointerof IOSwapPageWriteMDLComplete writemdl@ MmMDLHeader_CompleteRoutine + !
+	auto swapfile
+	mdl@ IOTransfer_SwapFile + @ swapfile!
 
 	auto fcb
 	swapfile@ IOSwapFile_CapturedFCB + @ fcb!
@@ -805,17 +610,15 @@ fn IOSwapFileWritePages { pagecount mdloffset mdl swapfile -- ok }
 	0 // flags
 	IOKFLAG_SWAPOUT // kflags
 	offset@ PAGESHIFT << // offset
-	writemdl@ // mdl
+	mdl@ // mdl
 	fcb@ // fcb
 	writefunc@ IODispatchWriteFunction ok!
 
 	if (ok@)
-		if (fragged@)
-			ok@ // status
-			0 // priboost
-			writemdl@ // mdl
-			MmMDLComplete
-		end
+		ok@ // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
 
 		return
 	end
@@ -826,9 +629,6 @@ end
 fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	// runs as an APC in the context of the modified page writer.
 
-	auto transfer
-	mdl@ MmMDLHeader_Context1 + @ transfer!
-
 	auto status
 	mdl@ MmMDLHeader_Status + @ status!
 
@@ -836,92 +636,68 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	mdl@ MmMDLHeader_Pages + @ pagecount!
 
 	auto swapfile
-	mdl@ MmMDLHeader_Context3 + @ swapfile!
+	mdl@ IOTransfer_SwapFile + @ swapfile!
 
 	auto offset
-	mdl@ MmMDLHeader_Context2 + @ offset!
+	mdl@ MmMDLHeader_Context + @ offset!
 
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	auto number
-
-	if (transfer@)
-		swapfile@ IOSwapFile_Number + @ number!
-	end
-
-	// this loop will either run once if the root MDL was never fragmented,
-	// or it will run (number of fragments)+1 times. When any fragments are
-	// completed, they come through here and either complete their journey by
-	// recording swap PTEs in anon pfdbes, or they see that the operation
-	// failed and they free those swap PTEs. When the root MDL comes through,
-	// it dereferences all the anon pages. This is done in one step if the
-	// root MDL was never fragmented.
+	swapfile@ IOSwapFile_Number + @ number!
 
 	while (pagecount@)
 		auto pfdbe
 		mdlpos@@ pfdbe!
 
-		if (transfer@)
-			if (status@)
-				// IO error, don't save the swap page
+		if (status@)
+			// IO error, don't save the swap page
+
+			offset@ swapfile@ IOSwapPageFree
+
+			auto rs
+			HALCPUInterruptDisable rs!
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+			rs@ HALCPUInterruptRestore
+		end else
+			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
+				MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
+				// modified or deleted, free the swap page :(
 
 				offset@ swapfile@ IOSwapPageFree
 			end else
-				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
-					MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
-					// modified or deleted, free the swap page :(
+				auto swappte
+				pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ swappte!
 
-					offset@ swapfile@ IOSwapPageFree
-				end else
-					auto swappte
-					pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ swappte!
-
-					offset@ PAGESHIFT << number@ PTE_SWAPFILE_SHIFT << | PTE_INSWAP |
-					swappte@ PTE_TLBHACK & |
+				offset@ PAGESHIFT << number@ PTE_SWAPFILE_SHIFT << | PTE_INSWAP |
+				swappte@ PTE_TLBHACK & |
 #ifdef DEBUGCHECKS
-					swappte@ PTE_KERNELSTACK & |
+				swappte@ PTE_KERNELSTACK & |
 #endif
-					pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
-				end
+				pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
 			end
 		end
 
-		if (mdl@ MmMDLHeader_ParentMDL + @ ~~)
-			if (status@)
-				if (pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP & ~~)
-					// no need to mark the page modified again if it was
-					// written to swap successfully.
-
-					auto rs
-					HALCPUInterruptDisable rs!
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-					pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-					rs@ HALCPUInterruptRestore
-				end
-			end
-
-			pfdbe@ MmEvictablePageDereference drop
-		end
+		pfdbe@ MmEvictablePageDereference drop
 
 		1 offset +=
 		1 pagecount -=
 		4 mdlpos +=
 	end
 
-	if (mdl@ MmMDLHeader_ParentMDL + @ ~~)
-		if (status@)
-			// TODO pop-up window or something
-			status@ "IO error while writing data to swap (%i)\n" Printf
-		end
-
-		// root MDL, complete transfer.
-		// this requires no synchronization as the transfer structures are
-		// only accessed by the modified page writer, which is currently
-		// executing this routine.
-
-		mdl@ IOTransferComplete
+	if (status@)
+		// TODO pop-up window or something
+		status@ "IO error while writing data to swap (%i)\n" Printf
 	end
+
+	// root MDL, complete transfer.
+	// this requires no synchronization as the transfer structures are
+	// only accessed by the modified page writer, which is currently
+	// executing this routine
+
+	mdl@ IOTransferComplete
 end
 
 var IOSwapFileExtensionListHead 0
@@ -1223,6 +999,8 @@ fn IOSwapFileTryExtend { extension swapfile -- realextension }
 	realextension@ MmCommitLimit +=
 
 	0 swapfile@ IOSwapFile_Hint + !
+
+	swapfile@ IOSwapFile_SIZEOF + MmMPWAssessTransfers
 
 	ipl@ KeIPLLower
 end

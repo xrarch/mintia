@@ -119,6 +119,8 @@ externptr MmCommitUsage            // virtual memory promised
 externptr MmPhysicalCommitLimit // physical memory available, sans a minimum margin for paging activity
 externptr MmPhysicalCommitUsage // physical memory promised to nonpaged pool and working set minimums
 
+externptr MmAnonTransfersAvailable
+
 // free page count thresholds at which various types/priorities of page
 // allocation will block or fail. the intent is that the number of available
 // pages will drop below MMNORMALTHRESH only temporarily and in exceptional

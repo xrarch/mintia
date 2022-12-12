@@ -236,23 +236,27 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	0 pagecount!
 
 	while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+		if (DEBUGCHECKS)
+			if (transfer@)
+				"IOCachePageWrite: in progress yet transfer exists\n" KeCrash
+			end
+		end
+
 		0 // process
 		kflags@ MmKflagToPriority // pri
 		pfdbe@ // pfdbe
 		MmEvictablePageWait ok!
 
 		if (ok@)
-			if (transfer@)
-				transfer@ IOTransferComplete
-			end
-
 			return
 		end
 	end
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
-		if (transfer@)
-			transfer@ IOTransferComplete
+		if (DEBUGCHECKS)
+			if (transfer@)
+				"IOCachePageWrite: not modified yet transfer exists\n" KeCrash
+			end
 		end
 	
 		return
@@ -320,6 +324,9 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 		pfdbe@ MmEvictablePageReference drop
 		pfdbe@ MmEvictablePageStartIO
 
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
 		pfdbe@ mdlpos@!
 
 		pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ off!
@@ -375,7 +382,13 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 
 	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
 
-	transfer@ mdl@ MmMDLHeader_Context1 + !
+	transfer@ mdl@ MmMDLHeader_Context + !
+
+	if (transfer@)
+		IPLDPC KeIPLRaise drop
+
+		return
+	end
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
@@ -398,27 +411,23 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 		MmMDLComplete
 	end
 
-	if (transfer@ ~~)
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
-			0 // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
-			event@ // object
-			KeThreadWaitForObject drop
-		end
+	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject drop
+	end
 
-		if (ok@ ~~)
-			mdl@ MmMDLHeader_Status + @ ok!
-		end
+	if (ok@ ~~)
+		mdl@ MmMDLHeader_Status + @ ok!
 	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
-	if (transfer@ ~~)
-		IPLAPC KeIPLRaise drop
+	IPLAPC KeIPLRaise drop
 
-		mdl@ IOCachePageMDLComplete
-	end
+	mdl@ IOCachePageMDLComplete
 
 	IPLDPC KeIPLRaise drop
 end
@@ -461,12 +470,12 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 		4 mdlpos +=
 	end
 
-	if (mdl@ MmMDLHeader_Context1 + @)
+	if (mdl@ MmMDLHeader_Context + @)
 		// this requires no synchronization as the transfer structures are
 		// only accessed by the modified page writer, which is currently
 		// executing this routine.
 	
-		mdl@ MmMDLHeader_Context1 + @ IOTransferComplete
+		mdl@ MmMDLHeader_Context + @ IOTransferComplete
 	end
 end
 

@@ -7,7 +7,7 @@ extern IOSwapPageFree { pno swapfile -- }
 extern IOSwapPageFreePTE { pte -- }
 extern IOSwapPageReadPTE { kflags pageframe pte -- ok }
 
-extern IOSwapFileWriteMDL { pagecount mdl -- ok }
+extern IOSwapFileWriteMDL { pagecount offset mdl -- ok }
 
 extern IOSwapFileAwaitCreation { -- }
 
@@ -17,10 +17,16 @@ extern IOSwapFileExtend { -- }
 extern IOSwapFileContract { -- }
 
 extern IOSwapFileGetPriority { swapfile -- pri }
+extern IOSwapFileGetFree { swapfile -- free }
+
+extern IOSwapFileReserve { pagesneeded swapfile -- offset ok }
+extern IOSwapFileRelease { pages offset swapfile -- }
 
 const IOSWAPFILEMAX 16
 
 const IOSWAPFILEMAXPRI 8
+
+const IOSWAPFILEFREELOW 32
 
 externptr IOSwapFileExtendEvent
 

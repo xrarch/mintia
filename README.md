@@ -55,10 +55,9 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 - [x] Port-based IPC.
 - [x] Unix-like permissions model.
 - [x] Sophisticated memory manager.
-- [x] Userspace dynamic linking.
-- [x] Minimal command-line interface over TTY.
 - [x] Support for native and MBR partition table formats.
 - [x] Fully asynchronous I/O API.
+- [x] Fully asynchronous PTY driver.
 
 ### Memory Management
 
@@ -68,6 +67,11 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 - [x] Up to 16 swapfiles that can dynamically grow and shrink with the needs of the system.
 - [x] Dynamic working set management.
 - [x] Extensive swapping: all user pages, along with kernel stacks, page tables, and 50% of the kernel itself, can be swapped to disk to free memory.
+
+### Userspace
+
+- [x] Userspace dynamic linking.
+- [x] Minimal command-line interface over TTY.
 
 ## TODO
 

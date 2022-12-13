@@ -40,18 +40,23 @@ end
 
 // initializes a WaitBlock
 
-fn KeDispatchWaitBlockInitialize { thread waitblock -- }
-	0 waitblock@ KeDispatchWaitBlock_Prev + !
-	0 waitblock@ KeDispatchWaitBlock_Next + !
+fn KeDispatchWaitBlockTableInitialize { thread count waitblocktable -- }
+	while (count@)
+		0 waitblocktable@ KeDispatchWaitBlock_Prev + !
+		0 waitblocktable@ KeDispatchWaitBlock_Next + !
 
-	0 waitblock@ KeDispatchWaitBlock_WaitStatusReturn + !
-	0 waitblock@ KeDispatchWaitBlock_WaitType + !
+		0 waitblocktable@ KeDispatchWaitBlock_WaitStatusReturn + !
+		0 waitblocktable@ KeDispatchWaitBlock_WaitType + !
 
-	thread@ waitblock@ KeDispatchWaitBlock_Thread + !
+		thread@ waitblocktable@ KeDispatchWaitBlock_Thread + !
 
-	0 waitblock@ KeDispatchWaitBlock_Object + !
+		0 waitblocktable@ KeDispatchWaitBlock_Object + !
 
-	0 waitblock@ KeDispatchWaitBlock_WaitIndex + !
+		0 waitblocktable@ KeDispatchWaitBlock_WaitIndex + !
+
+		KeDispatchWaitBlock_SIZEOF waitblocktable +=
+		1 count -=
+	end
 end
 
 fn KeDispatchWaitBlockDequeue { waitstatus waitblock -- }
@@ -244,18 +249,10 @@ fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable -- ok }
+fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable waitblocktable -- ok }
 	0 ok!
 
-	if (objectcount@ 0 ==)
-		return
-	end
-
 	if (DEBUGCHECKS)
-		if (objectcount@ THREADWAITBLOCKS >)
-			"KeThreadWaitForMultipleObjects: objectcount>THREADWAITBLOCKS\n" KeCrash
-		end
-
 		if (waittype@ OSWAITALL <)
 			waittype@ "KeThreadWaitBlocksDequeue: waittype=%d\n" KeCrash
 		end
@@ -265,17 +262,32 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		end
 	end
 
+	if (objectcount@ 0 ==)
+		return
+	end
+
 	auto current
 	KeThreadCurrent@ current!
 
+	if (waitblocktable@ ~~)
+		if (objectcount@ THREADWAITBLOCKS >)
+			"KeThreadWaitForMultipleObjects: objectcount>THREADWAITBLOCKS\n" KeCrash
+		end
+
+		current@ KeThread_WaitBlocks + waitblocktable!
+	end
+
 	while (1)
+		waitblocktable@ current@ KeThread_WaitBlockTable + !
+		objectcount@ current@ KeThread_WaitBlockCount + !
+
 		0 ok!
 
 		auto i
 		0 i!
 
 		auto waitblock
-		current@ KeThread_WaitBlocks + waitblock! // now points to current thread's first waitblock
+		waitblocktable@ waitblock! // now points to current thread's first waitblock
 
 		auto satisfied
 
@@ -458,6 +470,9 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 
 	while (1)
 		0 ok!
+
+		current@ KeThread_WaitBlocks + current@ KeThread_WaitBlockTable + !
+		1 current@ KeThread_WaitBlockCount + !
 
 		auto waitipl
 		IPLDPC KeIPLRaise waitipl!
@@ -650,19 +665,19 @@ fn KeThreadWaitBlocksDequeue { thread -- }
 	end
 
 	auto wb
-	thread@ KeThread_WaitBlocks + wb!
+	thread@ KeThread_WaitBlockTable + @ wb!
 
-	auto i
-	0 i!
+	auto count
+	thread@ KeThread_WaitBlockCount + @ count!
 
-	while (i@ THREADWAITBLOCKS <)
+	while (count@)
 		if (wb@ KeDispatchWaitBlock_Object + @)
 			0 // waitstatus
 			wb@ // waitblock
 			KeDispatchWaitBlockDequeue
 		end
 
-		1 i +=
+		1 count -=
 		KeDispatchWaitBlock_SIZEOF wb +=
 	end
 
@@ -746,6 +761,9 @@ fn KeThreadSleep { ms waitmode alertable -- ok }
 	KeThreadCurrent@ current!
 
 	while (1)
+		0 current@ KeThread_WaitBlockCount + !
+		0 current@ KeThread_WaitBlockTable + !
+
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 

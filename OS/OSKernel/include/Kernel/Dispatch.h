@@ -34,14 +34,14 @@ struct KeDispatchWaitBlock
 	4 Object
 endstruct
 
-const THREADWAITBLOCKS 4
+const THREADWAITBLOCKS 2
 
 extern KeDispatchInitialize { name type dobject -- }
 extern KeDispatchIsSignaled { dobject -- signaled }
-extern KeDispatchWaitBlockInitialize { thread waitblock -- }
+extern KeDispatchWaitBlockTableInitialize { thread count waitblocktable -- }
 extern KeDispatchSatisfyAll { waitstatus priboost object -- count }
 extern KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
-extern KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable -- ok }
+extern KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable waitblocktable -- ok }
 extern KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 
 extern KeThreadWakeup { waitstatus priboost thread -- woken }

@@ -123,6 +123,9 @@ struct KeThread
 
 	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock
 
+	4 WaitBlockTable
+	4 WaitBlockCount
+
 	KeTimer_SIZEOF Timer
 
 	4 SafeAccessAbort

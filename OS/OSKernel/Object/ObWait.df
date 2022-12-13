@@ -51,15 +51,36 @@ fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandl
 		return
 	end
 
-	auto objecttable
+	auto qcharge
+	if (objectcount@ THREADWAITBLOCKS >)
+		objectcount@ 4 *
+		objectcount@ KeDispatchWaitBlock_SIZEOF * + qcharge!
+	end else
+		objectcount@ 4 * qcharge!
+	end
 
-	objectcount@ 4 * // bytes
+	qcharge@ // buffersize
+	MmQuotaChargeBuffer ok!
+
+	if (ok@)
+		return
+	end
+
+	auto objecttable
+	qcharge@ // bytes
 	'ObWt' // tag
 	CANBLOCK // flags
 	MmAllocWithTag ok! objecttable!
 
 	if (ok@)
 		return
+	end
+
+	auto waitblocktable
+	0 waitblocktable!
+
+	if (objectcount@ THREADWAITBLOCKS >)
+		objecttable@ objectcount@ 4 * + waitblocktable!
 	end
 
 	auto ptr
@@ -71,17 +92,17 @@ fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandl
 	auto i
 	0 i!
 
-	auto access
 	auto object
 	auto dobject
 
 	while (i@ objectcount@ <)
 		0 // type (any)
 		ptr@@ // handle
-		ObObjectReferenceByHandle ok! object! access!
+		ObObjectReferenceByHandle ok! object! drop
 
 		if (ok@)
 			objecttable@ MmFree
+			qcharge@ MmQuotaUnchargeBuffer
 
 			// go back and deref all the ones we ref'd
 
@@ -110,6 +131,7 @@ fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandl
 			// object type doesn't support waiting
 
 			objecttable@ MmFree
+			qcharge@ MmQuotaUnchargeBuffer
 
 			object@ ObObjectDereferenceByPointer drop
 
@@ -128,27 +150,6 @@ fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandl
 		end
 
 		object@ dobject +=
-
-		access@ // access
-		ACCESS_EXEC // permission
-		SeCheckAccess ok!
-
-		if (ok@)
-			objecttable@ MmFree
-
-			object@ ObObjectDereferenceByPointer drop
-
-			// go back and deref all the ones we ref'd
-
-			while (i@)
-				4 ptr -=
-				1 i -=
-
-				ptr@@ ObObjectDereferenceByPointer drop
-			end
-
-			return
-		end
 
 		dobject@ optr@!
 		object@ ptr@!
@@ -179,6 +180,7 @@ fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandl
 				// object was specified twice
 
 				objecttable@ MmFree
+				qcharge@ MmQuotaUnchargeBuffer
 
 				while (objectcount@)
 					objecthandletable@@ ObObjectDereferenceByPointer drop
@@ -206,16 +208,21 @@ fn ObWaitForMultipleObjects { alertable waittype timeout objectcount objecthandl
 	timeout@ // timeout
 	objectcount@ // objectcount
 	objecttable@ // objecttable
+	waitblocktable@ // waitblocktable
 	KeThreadWaitForMultipleObjects ok!
 
-	while (objectcount@)
-		objecthandletable@@ ObObjectDereferenceByPointer drop
+	0 i!
+	objecthandletable@ ptr!
 
-		4 objecthandletable +=
-		1 objectcount -=
+	while (i@ objectcount@ <)
+		ptr@@ ObObjectDereferenceByPointer drop
+
+		4 ptr +=
+		1 i +=
 	end
 
 	objecttable@ MmFree
+	qcharge@ MmQuotaUnchargeBuffer
 end
 
 fn ObWaitForObject { alertable timeout objecthandle -- ok }

@@ -1,0 +1,313 @@
+//
+// Implements the initial system launch and management loop.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "SystemInit.h"
+
+const WATCHEDPROCESS_SERVER  1
+const WATCHEDPROCESS_MANAGER 2
+
+struct SiWatchedProcess
+	4 Type
+	4 Executable
+	4 Argument
+	4 Handle
+endstruct
+
+var SiWatchedProcessTable 0
+var SiWatchedProcessHandleTable 0
+var SiWatchedProcessLookupTable 0
+var SiWatchedProcessCount 0
+
+var SiLivingProcessCount 0
+
+var SiManagerCount 0
+var SiServerCount 0
+
+fnptr SiIterateSectionFunction { context value name -- }
+
+fn SiIterateSection { context func sectionname -- ok }
+	auto iterator
+	sectionname@ // sectionname
+	SiConfigFile@ // config
+	OSConfigGetKeyIterator ok! iterator!
+
+	if (ok@)
+		ok@ OSStatusGetName sectionname@ "* Couldn't find %s section: %s\n" Printf
+		return
+	end
+
+	while (iterator@)
+		auto key
+		auto value
+		auto name
+
+		iterator@ // iterator
+		SiConfigFile@ // config
+		OSConfigNextKey ok! iterator! value! key!
+
+		if (ok@)
+			return
+		end
+
+		key@ OSConfigGetKeyName name!
+
+		context@ // context
+		value@ // value
+		name@ // name
+		func@ SiIterateSectionFunction
+	end
+end
+
+fn (SiIterateSectionFunction) SiIterateTotal { context value name -- }
+	1 context@ +=
+end
+
+fn (SiIterateSectionFunction) SiIterateRegisterWatchedProcess { context value name -- }
+	auto wp
+	SiWatchedProcessCount@ SiWatchedProcess_SIZEOF * SiWatchedProcessTable@ + wp!
+
+	context@ wp@ SiWatchedProcess_Type + !
+
+	name@ wp@ SiWatchedProcess_Executable + !
+	value@ wp@ SiWatchedProcess_Argument + !
+
+	OSNONE wp@ SiWatchedProcess_Handle + !
+
+	1 SiWatchedProcessCount +=
+end
+
+fn SiRegisterAll { -- ok }
+	0 SiManagerCount!
+	0 SiServerCount!
+	0 SiWatchedProcessCount!
+
+	// tally the total number of system servers and device managers
+
+	SiManagerCount // context
+	pointerof SiIterateTotal // func
+	"Managers" // sectionname
+	SiIterateSection ok!
+
+	if (ok@)
+		return
+	end
+
+	SiServerCount // context
+	pointerof SiIterateTotal // func
+	"Servers" // sectionname
+	SiIterateSection ok!
+
+	if (ok@)
+		return
+	end
+
+	SiManagerCount@ SiServerCount@ + SiWatchedProcessCount!
+
+	// allocate the tables needed to track these
+
+	SiWatchedProcessCount@ SiWatchedProcess_SIZEOF *
+	SiWatchedProcessCount@ 4 * + SiWatchedProcessCount@ 4 * + // bytes
+	OSHeapAllocate ok! SiWatchedProcessTable!
+
+	if (ok@)
+		return
+	end
+
+	SiWatchedProcessTable@ SiWatchedProcessCount@ SiWatchedProcess_SIZEOF * + SiWatchedProcessHandleTable!
+	SiWatchedProcessHandleTable@ SiWatchedProcessCount@ 4 * + SiWatchedProcessLookupTable!
+
+	0 SiWatchedProcessCount!
+
+	// fill in the tables
+
+	WATCHEDPROCESS_SERVER // context
+	pointerof SiIterateRegisterWatchedProcess // func
+	"Servers" // sectionname
+	SiIterateSection drop
+
+	WATCHEDPROCESS_MANAGER // context
+	pointerof SiIterateRegisterWatchedProcess // func
+	"Managers" // sectionname
+	SiIterateSection drop
+end
+
+fn SiRestartProcess { wp -- ok }
+	auto phandle
+	auto thandle
+
+	if (wp@ SiWatchedProcess_Handle + @ OSNONE ~=)
+		wp@ SiWatchedProcess_Handle + @ OSClose drop
+	end
+
+	if (wp@ SiWatchedProcess_Argument + @)
+		wp@ SiWatchedProcess_Argument + @ // arg
+		wp@ SiWatchedProcess_Executable + @ // path
+		0 // creationflags
+		0 // creationparams
+		ACCESS_OWNER_ALL // permissions
+		0 // name
+		OSSpawn ok! phandle! thandle!
+	end else
+		wp@ SiWatchedProcess_Executable + @ // path
+		0 // creationflags
+		0 // creationparams
+		ACCESS_OWNER_ALL // permissions
+		0 // name
+		OSSpawn ok! phandle! thandle!
+	end
+
+	if (ok@ ~~)
+		if (wp@ SiWatchedProcess_Type + @ WATCHEDPROCESS_MANAGER ==)
+			thandle@ OSClose drop
+			phandle@ wp@ SiWatchedProcess_Handle + !
+		end else
+			phandle@ wp@ SiWatchedProcess_Handle + !
+
+			0 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			thandle@ // objecthandle
+			OSWaitForObject drop
+
+			thandle@ OSThreadReadStatus drop ok!
+
+			thandle@ OSClose drop
+		end
+	end
+
+	if (ok@)
+		OSNONE wp@ SiWatchedProcess_Handle + !
+	end
+end
+
+fn SiStartServers { -- }
+	"Starting servers: " Printf
+	OSFlushLine
+
+	auto ok
+
+	auto i
+	0 i!
+
+	auto wp
+	SiWatchedProcessTable@ wp!
+
+	while (i@ SiServerCount@ <)
+		auto handle
+		wp@ SiRestartProcess ok!
+
+		if (ok@ ~~)
+			wp@ SiWatchedProcess_Executable + @ OSLastComponent "%s " Printf
+		end else
+			ok@ OSStatusGetName
+			wp@ SiWatchedProcess_Executable + @ OSLastComponent "(%s failed: %s)\n" Printf
+		end
+
+		SiWatchedProcess_SIZEOF wp +=
+		1 i +=
+	end
+
+	"\n" Printf
+end
+
+fn SiStartManagers { -- }
+	"Starting device managers: " Printf
+	OSFlushLine
+
+	auto ok
+
+	auto i
+	0 i!
+
+	auto wp
+	SiWatchedProcessTable@ SiServerCount@ SiWatchedProcess_SIZEOF * + wp!
+
+	while (i@ SiManagerCount@ <)
+		auto handle
+		wp@ SiRestartProcess ok!
+
+		if (ok@ ~~)
+			wp@ SiWatchedProcess_Argument + @ "%s " Printf
+		end else
+			ok@ OSStatusGetName
+			wp@ SiWatchedProcess_Argument + @ "(%s failed: %s)\n" Printf
+		end
+
+		SiWatchedProcess_SIZEOF wp +=
+		1 i +=
+	end
+
+	"\n" Printf
+end
+
+fn SiBuildHandleTable { -- }
+	auto hp
+	SiWatchedProcessHandleTable@ hp!
+
+	auto lp
+	SiWatchedProcessLookupTable@ lp!
+
+	auto wp
+	SiWatchedProcessTable@ wp!
+
+	0 SiLivingProcessCount!
+
+	auto i
+	0 i!
+
+	while (i@ SiWatchedProcessCount@ <)
+		if (wp@ SiWatchedProcess_Handle + @ OSNONE ~=)
+			wp@ SiWatchedProcess_Handle + @ hp@!
+			wp@ lp@!
+
+			4 hp +=
+			4 lp +=
+			1 SiLivingProcessCount +=
+		end
+
+		1 i +=
+		SiWatchedProcess_SIZEOF wp +=
+	end
+end
+
+fn SiSystemManagementLoop { -- ok }
+	SiRegisterAll ok!
+
+	if (ok@)
+		return
+	end
+
+	SiStartServers
+	SiStartManagers
+
+	while (1)
+		SiBuildHandleTable
+
+		if (SiLivingProcessCount@ ~~)
+			return
+		end
+
+		auto index
+		0 // alertable
+		OSWAITANY // waittype
+		OSWAIT_TIMEOUTINFINITE // timeout
+		SiLivingProcessCount@ // objectcount
+		SiWatchedProcessHandleTable@ // objecthandletable
+		OSWaitForMultipleObjects index!
+
+		if (DEBUGCHECKS)
+			if (index@ z<)
+				index@ OSStatusGetName "SiSystemManagementLoop: %s\n" OSAbort
+			end
+		end
+
+		auto wp
+		SiWatchedProcessLookupTable@ index@ 4 * + @ wp!
+
+		wp@ SiRestartProcess drop
+	end
+end

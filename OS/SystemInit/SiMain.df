@@ -1,0 +1,257 @@
+//
+// Implements SystemInit, the first user program to run in the system. It is
+// responsible for starting services and maintaining device "lines" such as
+// tty logins.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/OSDLL/OSBootFlags.h"
+#include "<ll>/OSDLL/OSConsoleControl.h"
+
+#include "SystemInit.h"
+
+var SiConfigFile 0
+public SiConfigFile
+
+buffer BootDevicePath OSFILEPATHMAX
+buffer BootFilesystemName OBNAMEMAX
+
+buffer BootMemoryInformation OSMemoryInformation_SIZEOF
+
+var SiBootFlags 0
+public SiBootFlags
+
+var SiSwapFileCount 0
+public SiSwapFileCount
+
+fn Main { ... -- ret }
+	auto count
+	OSProcessCountQuery drop count!
+
+	if (count@ 2 ~=)
+		"SystemInit: cannot be directly invoked\n" OSError
+	end
+
+	18 OSSetUMask
+
+	OSSignalSetDefaults
+
+	"/" OSChangeCWD drop
+
+	SiTrySystemConsole ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "Failed to set system console: %s\n" OSAbort
+	end
+
+	OSGetBootFlags ret! SiBootFlags!
+
+	if (ret@)
+		ret@ OSStatusGetName "Failed to get bootflags: %s\n" OSAbort
+	end
+
+	BootDevicePath OSGetBootDevicePath ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "Failed to get boot device path: %s\n" OSAbort
+	end
+
+	auto bootdevicehandle
+
+	0 // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	BootDevicePath // path
+	OSFILETYPE_BLOCKDEVICE // ftype
+	OSFileOpen ret! bootdevicehandle!
+
+	if (ret@)
+		ret@ OSStatusGetName "Failed to open boot device: %s\n" OSAbort
+	end
+
+	BootFilesystemName // buffer
+	bootdevicehandle@ // handle
+	OSMountGetFilesystemName ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "Failed to get boot filesystem name: %s\n" OSAbort
+	end
+
+	BootFilesystemName
+	BootDevicePath
+	"Boot device is %s (%s)\n" Printf
+
+	// TODO check boot filesystem using program "[BootFilesystemName]Check.exe"
+
+	// try to make boot filesystem writable
+
+	0
+	bootdevicehandle@ // handle
+	OSMountUpdateFlags ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "Couldn't remount writable: %s\n" Printf
+		"Continuing with readonly boot filesystem\n" Printf
+	end
+
+	bootdevicehandle@ OSClose drop
+
+	SiLoadConfigFile
+
+	SiSetSwapFiles
+
+	if (SiBootFlags@ OSBOOTFLAG_SINGLEUSERMODE &)
+		"\n" Printf
+
+		SiSingleUserMode ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "Singleuser mode failed: %s\n" Printf
+		end
+	end
+
+	if (SiSwapFileCount@ ~~)
+		"* WARNING: No swapfiles! The system may behave strangely.\n" Printf
+	end
+
+	while (1)
+		SiSystemManagementLoop ret!
+
+		if (ret@)
+			ret@ OSStatusGetName "\nFailed to enter management loop: %s\nPlease correct this.\n" Printf
+
+			SiSingleUserMode ret!
+
+			if (ret@)
+				ret@ OSStatusGetName "Singleuser mode failed: %s\n" Printf
+
+				OSSHUTDOWN_HALT OSShutdownSystem drop
+			end
+
+			SiLoadConfigFile
+		end else
+			break
+		end
+	end
+
+	OSSHUTDOWN_REBOOT OSShutdownSystem drop
+end
+
+fn SiSetSystemConsole { path -- ok }
+	auto handle
+	0 // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	path@ // path
+	0 // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@ ~~)
+		handle@ OSSetSystemConsole ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "Failed to set system console: %s\n" OSAbort
+		end
+
+		0 // arg2
+		OSCONSOLEIOCONTROL_RESETMODE // arg1
+		handle@ // filehandle
+		OSIOControl drop drop
+
+		handle@ OSSetStdOut
+		handle@ OSSetStdErr
+		handle@ OSSetStdIn
+	end
+end
+
+fn SiTrySystemConsole { -- ok }
+	":ttyV0" // path
+	SiSetSystemConsole ok!
+
+	if (ok@ ~~)
+		return
+	end
+
+	":ttyS0" // path
+	SiSetSystemConsole ok!
+
+	if (ok@ ~~)
+		return
+	end
+
+	":ttyS1" // path
+	SiSetSystemConsole ok!
+end
+
+fn SiLoadConfigFile { -- }
+	// load or reload the config file.
+
+	auto ok
+	auto config
+
+	"/mintia/SystemInit.cfg" // path
+	0 // create
+	0 // write
+	OSConfigFileLoad ok! config!
+
+	if (SiConfigFile@ ~~)
+		while (ok@)
+			ok@ OSStatusGetName "Couldn't load /mintia/SystemInit.cfg: %s\nPlease correct this.\n\n" Printf
+
+			SiSingleUserMode ok!
+
+			if (ok@)
+				ok@ OSStatusGetName "Singleuser mode failed: %s\n" Printf
+
+				OSSHUTDOWN_HALT OSShutdownSystem drop
+			end
+
+			"/mintia/SystemInit.cfg" // path
+			0 // create
+			0 // write
+			OSConfigFileLoad ok! config!
+		end
+	end elseif (ok@)
+		ok@ OSStatusGetName "SystemInit: couldn't reload SystemInit.cfg: %s\n" Printf
+	end
+
+	if (ok@ ~~)
+		if (SiConfigFile@)
+			SiConfigFile@ OSConfigFileFree
+		end
+
+		config@ SiConfigFile!
+	end
+end
+
+fn SiSingleUserMode { -- ok }
+	if (SiSwapFileCount@ ~~)
+		"* WARNING: No swapfiles! The system may behave strangely.\n\n" Printf
+	end
+
+	"Strike ^D to start multiuser mode.\n" Printf
+
+	auto phandle
+	auto thandle
+
+	"/mintia/bin/cmd.exe" // path
+	0 // creationflags
+	0 // creationparams
+	ACCESS_OWNER_ALL // permissions
+	"cmd.exe" // name
+	OSSpawn ok! phandle! thandle!
+
+	if (ok@)
+		return
+	end
+
+	thandle@ OSClose drop
+
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	phandle@ // objecthandle
+	OSWaitForObject drop
+
+	phandle@ OSClose drop
+end

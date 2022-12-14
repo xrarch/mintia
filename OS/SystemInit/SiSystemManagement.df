@@ -24,6 +24,7 @@ var SiWatchedProcessLookupTable 0
 var SiWatchedProcessCount 0
 
 var SiLivingProcessCount 0
+var SiLivingManagerCount 0
 
 var SiManagerCount 0
 var SiServerCount 0
@@ -110,11 +111,16 @@ fn SiRegisterAll { -- ok }
 
 	// allocate the tables needed to track these
 
+	if (SiWatchedProcessTable@)
+		SiWatchedProcessTable@ OSHeapFree
+	end
+
 	SiWatchedProcessCount@ SiWatchedProcess_SIZEOF *
 	SiWatchedProcessCount@ 4 * + SiWatchedProcessCount@ 4 * + // bytes
 	OSHeapAllocate ok! SiWatchedProcessTable!
 
 	if (ok@)
+		0 SiWatchedProcessTable!
 		return
 	end
 
@@ -255,6 +261,7 @@ fn SiBuildHandleTable { -- }
 	SiWatchedProcessTable@ wp!
 
 	0 SiLivingProcessCount!
+	0 SiLivingManagerCount!
 
 	auto i
 	0 i!
@@ -267,6 +274,53 @@ fn SiBuildHandleTable { -- }
 			4 hp +=
 			4 lp +=
 			1 SiLivingProcessCount +=
+
+			if (wp@ SiWatchedProcess_Type + @ WATCHEDPROCESS_MANAGER ==)
+				1 SiLivingManagerCount +=
+			end
+		end
+
+		1 i +=
+		SiWatchedProcess_SIZEOF wp +=
+	end
+end
+
+fn SiTearDown { -- }
+	// terminate all of the watched processes
+
+	auto wp
+	SiWatchedProcessTable@ wp!
+
+	0 SiLivingProcessCount!
+
+	auto ok
+
+	auto i
+	0 i!
+
+	while (i@ SiWatchedProcessCount@ <)
+		if (wp@ SiWatchedProcess_Handle + @ OSNONE ~=)
+			OSSIGNAL_TERM // signal
+			wp@ SiWatchedProcess_Handle + @ // processhandle
+			OSProcessSignal drop
+
+			0 // alertable
+			1000 // timeout
+			wp@ SiWatchedProcess_Handle + @ // objecthandle
+			OSWaitForObject ok!
+
+			if (ok@)
+				OSSIGNAL_KILL // signal
+				wp@ SiWatchedProcess_Handle + @ // processhandle
+				OSProcessSignal drop
+
+				0 // alertable
+				OSWAIT_TIMEOUTINFINITE // timeout
+				wp@ SiWatchedProcess_Handle + @ // objecthandle
+				OSWaitForObject drop
+			end
+
+			wp@ SiWatchedProcess_Handle + @ OSClose drop
 		end
 
 		1 i +=
@@ -278,6 +332,10 @@ fn SiSystemManagementLoop { -- ok }
 	SiRegisterAll ok!
 
 	if (ok@)
+		if (ok@ -1 ==)
+			STATUS_INVALID_CONFIG_FILE ok!
+		end
+
 		return
 	end
 
@@ -290,6 +348,17 @@ fn SiSystemManagementLoop { -- ok }
 		if (SiLivingProcessCount@ ~~)
 			return
 		end
+
+		if (SiLivingManagerCount@ ~~)
+			SiTearDown
+
+			STATUS_DEAD_SYSTEM ok!
+
+			return
+		end
+
+		// obliterate my own working set since I will be sleeping indefinitely
+		OSWorkingSetPurge drop
 
 		auto index
 		0 // alertable

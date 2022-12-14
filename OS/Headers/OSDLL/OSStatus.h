@@ -84,5 +84,6 @@ const STATUS_FAULT_ERROR              -82
 const STATUS_PASSWORD_TOO_LONG        -83
 const STATUS_PORT_QUEUE_FULL          -84
 const STATUS_IO_CANCEL_INCOMPLETE     -85
+const STATUS_DEAD_SYSTEM              -86
 
 extern OSStatusGetName { status -- name }

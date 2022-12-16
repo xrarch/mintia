@@ -9,6 +9,7 @@ const IOKFLAG_ZEROES   4  // force IOCachePageGet to allocate zero pages
 const IOKFLAG_SWAPIN   8  // try forever to allocate pages
 const IOKFLAG_PAGEIN   16 // flush icache for page
 const IOKFLAG_PAGEAC   32 // do page-in accounting
+const IOKFLAG_CLUSTR   64 // return error if IO in progress
 // NOTE: upper 4 bits of IOKFLAG are reserved for driver use
 
 extern IOInitPhase1 { -- }
@@ -78,6 +79,7 @@ const IOPOKE_READ  2
 // largest IO transfer clustered by the system for any purpose.
 
 const IOCLUSTERMAX (16 1024 *)
+const IOREADCLUSTERMAX (32 1024 *)
 
 // maximum amount of file to zero in page cache before resorting to direct IO.
 

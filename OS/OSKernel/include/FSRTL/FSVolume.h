@@ -13,5 +13,7 @@ extern FSVolumeBlockWrite { pfdbe mount -- ok }
 
 extern FSVolumeGetFCB { fcb -- volfcb }
 
+extern FSVolumeGetFile { mount -- volfile }
+
 extern FSVolumeFCBGetReadFunction { volfcb -- readfunc }
 extern FSVolumeFCBGetWriteFunction { volfcb -- writefunc }

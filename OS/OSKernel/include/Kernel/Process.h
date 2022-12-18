@@ -1,3 +1,5 @@
+#include "<inc>/HALRTC.h"
+
 // needs KeTimer.h
 // needs KeDispatch.h
 
@@ -145,6 +147,8 @@ struct KeThread
 	4 APCInProgress
 	4 APCDisableCount
 endstruct
+
+const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
 
 extern KeSafeCopyIn { dest src size -- ok }
 extern KeSafeCopyOut { dest src size -- ok }

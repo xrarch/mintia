@@ -1,3 +1,7 @@
+#ifndef _HALRTC_
+
+#define _HALRTC_
+
 fnptr HALRTCQueryF { time -- }
 fnptr HALUptimeQueryF { time -- }
 
@@ -12,7 +16,11 @@ externptr HALUptimeQueryFunction
 const HALRTCINTERVAL 15
 
 #else
+#ifdef LIMNSTATION
 
 const HALRTCINTERVAL 10
+
+#endif
+#endif
 
 #endif

@@ -34,8 +34,6 @@ struct PsProcess // contains things that may need to be accessed at all times
 
 	KeMutex_SIZEOF VADListMutex
 
-	4 SwappedOutTimeSec
-
 	4 PinnedPageCount
 
 	4 PageFaultCount

@@ -31,6 +31,7 @@ struct KeProcess
 	4 ThreadListHead
 
 	4 BasePriority
+	4 BaseQuantum
 
 	4 SignalThread
 
@@ -95,6 +96,8 @@ struct KeThread
 	4 KernelStackCanBeSwapped
 	4 PendingSwapIn
 
+	4 InstantDecay
+
 	4 Status
 
 	4 Enqueued
@@ -102,7 +105,6 @@ struct KeThread
 	4 BasePriority
 	4 Priority
 
-	4 BaseQuantum
 	4 Quantum
 
 	4 IgnoreKill
@@ -200,6 +202,8 @@ extern KeThreadSleep { ms waitmode alertable -- ok }
 extern KeThreadPrioritySet { priority thread -- }
 extern KeThreadAPCDisable { thread -- oldcount }
 extern KeThreadAPCEnable { thread -- oldcount }
+
+extern KeBoostReadyThreads { -- }
 
 externptr KeThreadNext
 externptr KeThreadNextReason

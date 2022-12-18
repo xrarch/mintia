@@ -310,7 +310,13 @@ fn KeThreadQuantumEnd { -- }
 	if (pri@ PRIORITY_IDLE >)
 		if (pri@ PRIORITY_LOWREALTIME <)
 			auto newpri
-			pri@ 1 - newpri!
+
+			if (current@ KeThread_InstantDecay + @)
+				current@ KeThread_BasePriority + @ newpri!
+				0 current@ KeThread_InstantDecay + !
+			end else
+				pri@ 1 - newpri!
+			end
 
 			if (newpri@ current@ KeThread_BasePriority + @ >=)
 				newpri@ current@ KeThread_Priority + !
@@ -593,7 +599,7 @@ fn KeThreadNextSwitch { -- }
 	if (cause@ THREADYIELD_QUANTUMEND ==)
 		// the quantum ended, place it at the back
 
-		current@ KeThread_BaseQuantum + @ current@ KeThread_Quantum + !
+		current@ KeThread_Process + @ KeProcess_BaseQuantum + @ current@ KeThread_Quantum + !
 
 		THREADSTATUS_READY current@ QUEUEBACK KeThreadTransition
 	end elseif (cause@ THREADYIELD_PREEMPTED ==)
@@ -639,6 +645,60 @@ fn KeThreadYield { yieldstatus -- }
 	0 KeThreadNext!
 
 	KeThreadNextPick KeThreadSwitch
+
+	ipl@ KeIPLLower
+end
+
+fn KeBoostReadyThreads { -- }
+	// scan the ready queues and find threads that have been ready for a long
+	// time but aren't being scheduled, and boost them. this helps prevent
+	// priority inversion.
+
+	auto uptime
+	KeTime_SIZEOF alloc uptime!
+
+	uptime@ HALUptimeQuery
+
+	auto uptimesec
+	uptime@ KeTime_SecPart + @ uptimesec!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto pri
+	PRIORITY_IDLE 1 + pri!
+
+	while (pri@ PRIORITY_HIGHUSER <)
+		auto thread
+		[pri@]KeThreadPriorityQueueHeads@ thread!
+
+		while (thread@)
+			auto nthread
+			thread@ KeThread_QueueNext + @ nthread!
+
+			if (DEBUGCHECKS)
+				if (thread@ KeThread_Status + @ THREADSTATUS_READY ~=)
+					thread@ "KeBoostReadyThreads: %x is not READY but is on queue\n" KeCrash
+				end
+			end
+
+			if (thread@ KeThread_WaitOrReadyTimeSec + @ uptimesec@ - 3 >=)
+				if (thread@ KeThread_InstantDecay + @ ~~)
+					thread@ KeThread_Process + @ KeProcess_BaseQuantum + @ 2 * thread@ KeThread_Quantum + !
+
+					1 thread@ KeThread_InstantDecay + !
+
+					PRIORITY_HIGHUSER // priority
+					thread@ // thread
+					KeThreadPrioritySet
+				end
+			end
+
+			nthread@ thread!
+		end
+
+		1 pri +=
+	end
 
 	ipl@ KeIPLLower
 end

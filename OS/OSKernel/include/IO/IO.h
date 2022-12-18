@@ -76,7 +76,10 @@ const IOFCBFLAG_MOUNTBUSY           8
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
 
-// largest IO transfer clustered by the system for any purpose.
+// largest IO transfer clustered by the system for page-out and page-in
+// respectively.
+//
+// both must be a power of two!!!!
 
 const IOCLUSTERMAX (16 1024 *)
 const IOREADCLUSTERMAX (32 1024 *)

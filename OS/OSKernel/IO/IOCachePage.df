@@ -491,20 +491,62 @@ fn (MmMDLCompleteRoutine) IOCachePageMDLComplete { mdl -- }
 	end
 end
 
-fn IOCachePageReadCluster { offset fcb mdl -- pagecount }
-	// cluster pages into the MDL. there's already one page in there.
+fn IOCachePageReadCluster { firstpfdbe fcb mdl -- pagecount }
+	// cluster pages into the MDL.
+	// try to create a cluster that covers a naturally aligned 32K region of
+	// the file, since this will lead to an effect that each page-in will tend
+	// to do a much more efficient contiguous 32K read rather than a random
+	// access piecemeal pattern. This is especially beneficial for executable
+	// image pages.
 
 	auto ipl
 
-	1 pagecount!
+	0 pagecount!
 
 	IPLDPC KeIPLRaise ipl!
+
+	// check this here since everything will break if we block in MmPageWait.
 
 	if (MmEvictablePageCount@ MmPageFreeCount@ +
 		MmPageFreeCountSufficient@ IOREADCLUSTERMAX PAGESHIFT >> + <)
 		ipl@ KeIPLLower
 
+		1 pagecount!
+
+		firstpfdbe@ mdl@ MmMDLHeader_SIZEOF + !
+		-1 mdl@ MmMDLHeader_SIZEOF + 4 + !
+
 		return
+	end
+
+	auto firstoffset
+	firstpfdbe@ IOPageFrameEntryCache_OffsetInFile + @ firstoffset!
+
+	auto offset
+	firstoffset@ offset!
+
+	auto ok
+	auto pfdbe
+
+	if (firstoffset@ IOREADCLUSTERMAX 1 - &)
+		// try to get to the beginning of a clusterbehind sequence
+
+		firstpfdbe@ IOPageFrameEntryCache_Parent + // node
+		ExSplayTreeNodePrevious pfdbe!
+
+		auto gapstart
+		if (pfdbe@)
+			IOPageFrameEntryCache_Parent pfdbe -=
+			pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ PAGESIZE + gapstart!
+		end else
+			0 gapstart!
+		end
+
+		gapstart@ offset!
+
+		if (offset@ firstoffset@ IOREADCLUSTERMAX 1 - ~ & <)
+			firstoffset@ IOREADCLUSTERMAX 1 - ~ & offset!
+		end
 	end
 
 	auto clusterable
@@ -514,35 +556,25 @@ fn IOCachePageReadCluster { offset fcb mdl -- pagecount }
 		IOREADCLUSTERMAX PAGESHIFT >> clusterable!
 	end
 
-	if (clusterable@ 1 <=)
-		ipl@ KeIPLLower
-
-		return
-	end
-
-	PAGESIZE offset +=
-	1 clusterable -=
-
-	// skip first page because that one doesn't belong to us.
-
 	auto mdlpos
-	mdl@ MmMDLHeader_SIZEOF + 4 + mdlpos!
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	while (clusterable@)
-		auto ok
-		auto pfdbe
+		if (offset@ firstoffset@ ==)
+			firstpfdbe@ pfdbe!
+		end else
+			0 // process
+			1 // iointent
+			IOKFLAG_CLUSTR // kflags
+			offset@ // offset
+			fcb@ // fcb
+			IOCachePageGet ok! pfdbe! drop
 
-		0 // process
-		1 // iointent
-		IOKFLAG_CLUSTR // kflags
-		offset@ // offset
-		fcb@ // fcb
-		IOCachePageGet ok! pfdbe! drop
+			if (ok@)
+				ipl@ KeIPLLower
 
-		if (ok@)
-			ipl@ KeIPLLower
-
-			return
+				return
+			end
 		end
 
 		pfdbe@ mdlpos@!
@@ -557,7 +589,7 @@ fn IOCachePageReadCluster { offset fcb mdl -- pagecount }
 	ipl@ KeIPLLower
 end
 
-fn IOCachePageReadClusterComplete { mdl -- }
+fn IOCachePageReadClusterComplete { firstpfdbe mdl -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"IOCachePageReadClusterComplete: ipl != IPLDPC\n" KeCrash
@@ -567,26 +599,26 @@ fn IOCachePageReadClusterComplete { mdl -- }
 	auto status
 	mdl@ MmMDLHeader_Status + @ status!
 
-	// skip first page because that one doesn't belong to us.
-
 	auto mdlpos
-	mdl@ MmMDLHeader_SIZEOF + 4 + mdlpos!
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	auto pagecount
-	mdl@ MmMDLHeader_Pages + @ 1 - pagecount!
+	mdl@ MmMDLHeader_Pages + @ pagecount!
 
 	while (pagecount@)
 		auto pfdbe
 		mdlpos@@ pfdbe!
 
-		if (status@ ~~)
-			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
-			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		if (pfdbe@ firstpfdbe@ ~=)
+			if (status@ ~~)
+				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
+				pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+			end
+
+			pfdbe@ MmEvictablePageSatisfy
+
+			pfdbe@ MmEvictablePageDereference drop
 		end
-
-		pfdbe@ MmEvictablePageSatisfy
-
-		pfdbe@ MmEvictablePageDereference drop
 
 		1 pagecount -=
 		4 mdlpos +=
@@ -684,11 +716,8 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 		auto mdl
 		MmMDLHeader_SIZEOF IOREADCLUSTERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
 
-		pfdbe@ mdl@ MmMDLHeader_SIZEOF + !
-		-1 mdl@ MmMDLHeader_SIZEOF + 4 + !
-
 		auto pagecount
-		offset@ // offset
+		pfdbe@ // firstpfdbe
 		fcb@ // fcb
 		mdl@ // mdl
 		IOCachePageReadCluster pagecount!
@@ -706,7 +735,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 		OSWAIT_TIMEOUTINFINITE // timeout
 		flags@ // flags
 		kflags@ IOKFLAG_PAGEIN | // kflags
-		offset@ PAGENUMBERMASK & // offset
+		mdl@ MmMDLHeader_SIZEOF + @ IOPageFrameEntryCache_OffsetInFile + @ // offset
 		mdl@ // mdl
 		fcb@ // fcb
 		readfunc@ IODispatchReadFunction ok!
@@ -739,7 +768,9 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 		IPLDPC KeIPLRaise ipl!
 
 		if (pagecount@ 1 >)
-			mdl@ IOCachePageReadClusterComplete
+			pfdbe@ // firstpfdbe
+			mdl@ // mdl
+			IOCachePageReadClusterComplete
 		end
 
 		pfdbe@ MmEvictablePageSatisfy

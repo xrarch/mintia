@@ -75,5 +75,16 @@ struct OSCreationParams
 	// UID to charge the process's quota to
 	4 QuotaUID
 
-	44 Reserved
+	// base priority for the new process
+	4 BasePriority
+
+	40 Reserved
 endstruct
+
+const PRIORITY_IDLE           0
+const PRIORITY_LOWUSER        1
+const PRIORITY_DEFAULT        8
+const PRIORITY_HIGHUSER       23
+const PRIORITY_LOWREALTIME    24
+const PRIORITY_MEDIUMREALTIME 28
+const PRIORITY_HIGHREALTIME   31

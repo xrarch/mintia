@@ -195,6 +195,8 @@ extern PsProcessQueryAll { buffer maxquery -- count ok }
 extern PsProcessSetConsoleGroup { filehandle processhandle -- ok }
 extern PsProcessClearConsoleGroup { processhandle -- ok }
 
+extern PsProcessBasePrioritySet { priority processhandle -- ok }
+
 extern PsProcessCreateObject { quotauid sectionobject creationflags parentprocess permissions name -- processobject ok }
 extern PsProcessCreate { quotauid sectionhandle creationflags permissions name -- processhandle ok }
 extern PsThreadCreateObject { context1 context2 startfunc creationflags permissions name processobject -- threadobject ok }

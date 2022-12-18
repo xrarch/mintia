@@ -985,11 +985,23 @@ OSProcessClearConsoleGroup:
 
 	ret
 
+OSProcessBasePrioritySet:
+.global OSProcessBasePrioritySet
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 79
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSProcessSignalActivation:
 .global OSProcessSignalActivation
 	mov  t1, a0
 
-	li   t0, 79
+	li   t0, 80
 	sys  0
 
 	mov  a0, t1
@@ -1001,7 +1013,7 @@ OSProcessWaitForActivation:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 80
+	li   t0, 81
 	sys  0
 
 	mov  a1, t2
@@ -1013,7 +1025,7 @@ OSProcessExit:
 .global OSProcessExit
 	mov  t1, a0
 
-	li   t0, 81
+	li   t0, 82
 	sys  0
 
 
@@ -1022,7 +1034,7 @@ OSProcessExit:
 OSProcessCountQuery:
 .global OSProcessCountQuery
 
-	li   t0, 82
+	li   t0, 83
 	sys  0
 
 	mov  a1, t2
@@ -1035,7 +1047,7 @@ OSProcessQueryAll:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 83
+	li   t0, 84
 	sys  0
 
 	mov  a1, t2
@@ -1048,7 +1060,7 @@ OSSetQuota:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 84
+	li   t0, 85
 	sys  0
 
 	mov  a0, t1
@@ -1060,7 +1072,7 @@ OSQuotaQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 85
+	li   t0, 86
 	sys  0
 
 	mov  a0, t1
@@ -1071,7 +1083,7 @@ OSThreadSetFilePermissions:
 .global OSThreadSetFilePermissions
 	mov  t1, a0
 
-	li   t0, 86
+	li   t0, 87
 	sys  0
 
 	mov  a0, t1
@@ -1082,7 +1094,7 @@ OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 87
+	li   t0, 88
 	sys  0
 
 	mov  a0, t1
@@ -1098,7 +1110,7 @@ OSThreadCreate:
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
 
-	li   t0, 88
+	li   t0, 89
 	sys  0
 
 	mov  a1, t2
@@ -1111,7 +1123,7 @@ OSThreadTerminate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 89
+	li   t0, 90
 	sys  0
 
 	mov  a0, t1
@@ -1122,7 +1134,7 @@ OSThreadSuspend:
 .global OSThreadSuspend
 	mov  t1, a0
 
-	li   t0, 90
+	li   t0, 91
 	sys  0
 
 	mov  a0, t1
@@ -1133,7 +1145,7 @@ OSThreadResume:
 .global OSThreadResume
 	mov  t1, a0
 
-	li   t0, 91
+	li   t0, 92
 	sys  0
 
 	mov  a0, t1
@@ -1144,7 +1156,7 @@ OSThreadReadStatus:
 .global OSThreadReadStatus
 	mov  t1, a0
 
-	li   t0, 92
+	li   t0, 93
 	sys  0
 
 	mov  a1, t2
@@ -1157,7 +1169,7 @@ OSThreadQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 93
+	li   t0, 94
 	sys  0
 
 	mov  a0, t1
@@ -1169,7 +1181,7 @@ OSThreadSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 94
+	li   t0, 95
 	sys  0
 
 	mov  a0, t1
@@ -1181,7 +1193,7 @@ OSThreadMaskSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 95
+	li   t0, 96
 	sys  0
 
 	mov  a0, t1
@@ -1193,7 +1205,7 @@ OSThreadUnmaskSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 96
+	li   t0, 97
 	sys  0
 
 	mov  a0, t1
@@ -1204,7 +1216,7 @@ OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 97
+	li   t0, 98
 	sys  0
 
 	mov  a0, t1
@@ -1216,7 +1228,7 @@ OSConsoleSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 98
+	li   t0, 99
 	sys  0
 
 	mov  a0, t1
@@ -1226,7 +1238,7 @@ OSConsoleSignal:
 OSAmIAdmin:
 .global OSAmIAdmin
 
-	li   t0, 99
+	li   t0, 100
 	sys  0
 
 	mov  a0, t1
@@ -1238,7 +1250,7 @@ OSCheckPermission:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 100
+	li   t0, 101
 	sys  0
 
 	mov  a0, t1
@@ -1252,7 +1264,7 @@ OSPortCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 101
+	li   t0, 102
 	sys  0
 
 	mov  a1, t2
@@ -1267,7 +1279,7 @@ OSPortConnect:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 102
+	li   t0, 103
 	sys  0
 
 	mov  a1, t2
@@ -1282,7 +1294,7 @@ OSPortAccept:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 103
+	li   t0, 104
 	sys  0
 
 	mov  a0, t1
@@ -1296,7 +1308,7 @@ OSPortSendAndWaitReceive:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 104
+	li   t0, 105
 	sys  0
 
 	mov  a0, t1
@@ -1310,7 +1322,7 @@ OSPortSendAndWaitReply:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 105
+	li   t0, 106
 	sys  0
 
 	mov  a0, t1
@@ -1323,7 +1335,7 @@ OSPortOpenProcessByClientID:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 106
+	li   t0, 107
 	sys  0
 
 	mov  a1, t2

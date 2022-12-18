@@ -80,6 +80,7 @@
 .extern OSProcessReadStatus
 .extern OSProcessSetConsoleGroup
 .extern OSProcessClearConsoleGroup
+.extern OSProcessBasePrioritySet
 .extern OSProcessSignalActivation
 .extern OSProcessWaitForActivation
 .extern OSProcessExit
@@ -111,7 +112,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 106
+	.dl 107
 
 OSCallTable:
 .global OSCallTable
@@ -194,38 +195,38 @@ OSCallTable:
 	.dl OSTOSProcessReadStatus                           ;76
 	.dl OSTOSProcessSetConsoleGroup                      ;77
 	.dl OSTOSProcessClearConsoleGroup                    ;78
-	.dl OSTOSProcessSignalActivation                     ;79
-	.dl OSTOSProcessWaitForActivation                    ;80
-	.dl OSTOSProcessExit                                 ;81
-	.dl OSTOSProcessCountQuery                           ;82
-	.dl OSTOSProcessQueryAll                             ;83
-	.dl OSTOSSetQuota                                    ;84
-	.dl OSTOSQuotaQuery                                  ;85
-	.dl OSTOSThreadSetFilePermissions                    ;86
-	.dl OSTOSThreadSleep                                 ;87
-	.dl OSTOSThreadCreate                                ;88
-	.dl OSTOSThreadTerminate                             ;89
-	.dl OSTOSThreadSuspend                               ;90
-	.dl OSTOSThreadResume                                ;91
-	.dl OSTOSThreadReadStatus                            ;92
-	.dl OSTOSThreadQuery                                 ;93
-	.dl OSTOSThreadSignal                                ;94
-	.dl OSTOSThreadMaskSignal                            ;95
-	.dl OSTOSThreadUnmaskSignal                          ;96
-	.dl OSTOSSetSystemConsole                            ;97
-	.dl OSTOSConsoleSignal                               ;98
-	.dl OSTOSAmIAdmin                                    ;99
-	.dl OSTOSCheckPermission                             ;100
-	.dl OSTOSPortCreate                                  ;101
-	.dl OSTOSPortConnect                                 ;102
-	.dl OSTOSPortAccept                                  ;103
-	.dl OSTOSPortSendAndWaitReceive                      ;104
-	.dl OSTOSPortSendAndWaitReply                        ;105
-	.dl OSTOSPortOpenProcessByClientID                   ;106
+	.dl OSTOSProcessBasePrioritySet                      ;79
+	.dl OSTOSProcessSignalActivation                     ;80
+	.dl OSTOSProcessWaitForActivation                    ;81
+	.dl OSTOSProcessExit                                 ;82
+	.dl OSTOSProcessCountQuery                           ;83
+	.dl OSTOSProcessQueryAll                             ;84
+	.dl OSTOSSetQuota                                    ;85
+	.dl OSTOSQuotaQuery                                  ;86
+	.dl OSTOSThreadSetFilePermissions                    ;87
+	.dl OSTOSThreadSleep                                 ;88
+	.dl OSTOSThreadCreate                                ;89
+	.dl OSTOSThreadTerminate                             ;90
+	.dl OSTOSThreadSuspend                               ;91
+	.dl OSTOSThreadResume                                ;92
+	.dl OSTOSThreadReadStatus                            ;93
+	.dl OSTOSThreadQuery                                 ;94
+	.dl OSTOSThreadSignal                                ;95
+	.dl OSTOSThreadMaskSignal                            ;96
+	.dl OSTOSThreadUnmaskSignal                          ;97
+	.dl OSTOSSetSystemConsole                            ;98
+	.dl OSTOSConsoleSignal                               ;99
+	.dl OSTOSAmIAdmin                                    ;100
+	.dl OSTOSCheckPermission                             ;101
+	.dl OSTOSPortCreate                                  ;102
+	.dl OSTOSPortConnect                                 ;103
+	.dl OSTOSPortAccept                                  ;104
+	.dl OSTOSPortSendAndWaitReceive                      ;105
+	.dl OSTOSPortSendAndWaitReply                        ;106
+	.dl OSTOSPortOpenProcessByClientID                   ;107
 
 
 OSTOSConsolePutCharacter:
-.global OSTOSConsolePutCharacter
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -239,7 +240,6 @@ OSTOSConsolePutCharacter:
 	ret
 
 OSTOSSystemAbort:
-.global OSTOSSystemAbort
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -255,7 +255,6 @@ OSTOSSystemAbort:
 	ret
 
 OSTOSGetSystemConsoleName:
-.global OSTOSGetSystemConsoleName
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -269,7 +268,6 @@ OSTOSGetSystemConsoleName:
 	ret
 
 OSTOSGetBootFlags:
-.global OSTOSGetBootFlags
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -283,7 +281,6 @@ OSTOSGetBootFlags:
 	ret
 
 OSTOSContinue:
-.global OSTOSContinue
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -297,7 +294,6 @@ OSTOSContinue:
 	ret
 
 OSTOSQueryTime:
-.global OSTOSQueryTime
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -311,7 +307,6 @@ OSTOSQueryTime:
 	ret
 
 OSTOSQueryUptime:
-.global OSTOSQueryUptime
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -325,7 +320,6 @@ OSTOSQueryUptime:
 	ret
 
 OSTOSShutdownSystem:
-.global OSTOSShutdownSystem
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -339,7 +333,6 @@ OSTOSShutdownSystem:
 	ret
 
 OSTOSVersion:
-.global OSTOSVersion
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -353,7 +346,6 @@ OSTOSVersion:
 	ret
 
 OSTOSEventCreate:
-.global OSTOSEventCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -371,7 +363,6 @@ OSTOSEventCreate:
 	ret
 
 OSTOSEventReset:
-.global OSTOSEventReset
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -386,7 +377,6 @@ OSTOSEventReset:
 	ret
 
 OSTOSEventSignal:
-.global OSTOSEventSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -400,7 +390,6 @@ OSTOSEventSignal:
 	ret
 
 OSTOSEventPulse:
-.global OSTOSEventPulse
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -414,7 +403,6 @@ OSTOSEventPulse:
 	ret
 
 OSTOSEventReadState:
-.global OSTOSEventReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -429,7 +417,6 @@ OSTOSEventReadState:
 	ret
 
 OSTOSSemaphoreCreate:
-.global OSTOSSemaphoreCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -446,7 +433,6 @@ OSTOSSemaphoreCreate:
 	ret
 
 OSTOSSemaphoreRelease:
-.global OSTOSSemaphoreRelease
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -461,7 +447,6 @@ OSTOSSemaphoreRelease:
 	ret
 
 OSTOSSemaphoreReadState:
-.global OSTOSSemaphoreReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -476,7 +461,6 @@ OSTOSSemaphoreReadState:
 	ret
 
 OSTOSMutexCreate:
-.global OSTOSMutexCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -492,7 +476,6 @@ OSTOSMutexCreate:
 	ret
 
 OSTOSMutexRelease:
-.global OSTOSMutexRelease
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -506,7 +489,6 @@ OSTOSMutexRelease:
 	ret
 
 OSTOSMutexReadState:
-.global OSTOSMutexReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -521,7 +503,6 @@ OSTOSMutexReadState:
 	ret
 
 OSTOSTimerCreate:
-.global OSTOSTimerCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -537,7 +518,6 @@ OSTOSTimerCreate:
 	ret
 
 OSTOSTimerReset:
-.global OSTOSTimerReset
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -552,7 +532,6 @@ OSTOSTimerReset:
 	ret
 
 OSTOSTimerEnqueue:
-.global OSTOSTimerEnqueue
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -567,7 +546,6 @@ OSTOSTimerEnqueue:
 	ret
 
 OSTOSTimerDequeue:
-.global OSTOSTimerDequeue
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -581,7 +559,6 @@ OSTOSTimerDequeue:
 	ret
 
 OSTOSTimerReadState:
-.global OSTOSTimerReadState
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -596,7 +573,6 @@ OSTOSTimerReadState:
 	ret
 
 OSTOSGetStatistics:
-.global OSTOSGetStatistics
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -610,7 +586,6 @@ OSTOSGetStatistics:
 	ret
 
 OSTOSObjectOpen:
-.global OSTOSObjectOpen
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -628,7 +603,6 @@ OSTOSObjectOpen:
 	ret
 
 OSTOSQuery:
-.global OSTOSQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -643,7 +617,6 @@ OSTOSQuery:
 	ret
 
 OSTOSClose:
-.global OSTOSClose
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -657,7 +630,6 @@ OSTOSClose:
 	ret
 
 OSTOSWaitForMultipleObjects:
-.global OSTOSWaitForMultipleObjects
 	subi sp, sp, 8
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -677,7 +649,6 @@ OSTOSWaitForMultipleObjects:
 	ret
 
 OSTOSWaitForObject:
-.global OSTOSWaitForObject
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -693,7 +664,6 @@ OSTOSWaitForObject:
 	ret
 
 OSTOSHandleDuplicate:
-.global OSTOSHandleDuplicate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -711,7 +681,6 @@ OSTOSHandleDuplicate:
 	ret
 
 OSTOSObjectDirectoryCountQuery:
-.global OSTOSObjectDirectoryCountQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -726,7 +695,6 @@ OSTOSObjectDirectoryCountQuery:
 	ret
 
 OSTOSObjectDirectoryQueryAll:
-.global OSTOSObjectDirectoryQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -743,7 +711,6 @@ OSTOSObjectDirectoryQueryAll:
 	ret
 
 OSTOSObjectDirectoryObjectCreate:
-.global OSTOSObjectDirectoryObjectCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -759,7 +726,6 @@ OSTOSObjectDirectoryObjectCreate:
 	ret
 
 OSTOSObjectDirectoryInsert:
-.global OSTOSObjectDirectoryInsert
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -774,7 +740,6 @@ OSTOSObjectDirectoryInsert:
 	ret
 
 OSTOSObjectDirectoryRemove:
-.global OSTOSObjectDirectoryRemove
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -788,7 +753,6 @@ OSTOSObjectDirectoryRemove:
 	ret
 
 OSTOSSetSecurity:
-.global OSTOSSetSecurity
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -805,7 +769,6 @@ OSTOSSetSecurity:
 	ret
 
 OSTOSFileQuery:
-.global OSTOSFileQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -820,7 +783,6 @@ OSTOSFileQuery:
 	ret
 
 OSTOSFileTruncate:
-.global OSTOSFileTruncate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -837,7 +799,6 @@ OSTOSFileTruncate:
 	ret
 
 OSTOSFileSeek:
-.global OSTOSFileSeek
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -854,7 +815,6 @@ OSTOSFileSeek:
 	ret
 
 OSTOSFileRead:
-.global OSTOSFileRead
 	subi sp, sp, 8
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -875,7 +835,6 @@ OSTOSFileRead:
 	ret
 
 OSTOSFileWrite:
-.global OSTOSFileWrite
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -893,7 +852,6 @@ OSTOSFileWrite:
 	ret
 
 OSTOSFileFlush:
-.global OSTOSFileFlush
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -908,7 +866,6 @@ OSTOSFileFlush:
 	ret
 
 OSTOSFileReadAsync:
-.global OSTOSFileReadAsync
 	subi sp, sp, 16
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -934,7 +891,6 @@ OSTOSFileReadAsync:
 	ret
 
 OSTOSFileWriteAsync:
-.global OSTOSFileWriteAsync
 	subi sp, sp, 16
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -960,7 +916,6 @@ OSTOSFileWriteAsync:
 	ret
 
 OSTOSFileCancelIO:
-.global OSTOSFileCancelIO
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -975,7 +930,6 @@ OSTOSFileCancelIO:
 	ret
 
 OSTOSDirectoryRename:
-.global OSTOSDirectoryRename
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -992,7 +946,6 @@ OSTOSDirectoryRename:
 	ret
 
 OSTOSDirectoryUnlink:
-.global OSTOSDirectoryUnlink
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1007,7 +960,6 @@ OSTOSDirectoryUnlink:
 	ret
 
 OSTOSDirectoryRead:
-.global OSTOSDirectoryRead
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1022,7 +974,6 @@ OSTOSDirectoryRead:
 	ret
 
 OSTOSSwapFileCreate:
-.global OSTOSSwapFileCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1039,7 +990,6 @@ OSTOSSwapFileCreate:
 	ret
 
 OSTOSSwapFileQuery:
-.global OSTOSSwapFileQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1054,7 +1004,6 @@ OSTOSSwapFileQuery:
 	ret
 
 OSTOSIOControl:
-.global OSTOSIOControl
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1071,7 +1020,6 @@ OSTOSIOControl:
 	ret
 
 OSTOSGetBootDevicePath:
-.global OSTOSGetBootDevicePath
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1085,7 +1033,6 @@ OSTOSGetBootDevicePath:
 	ret
 
 OSTOSFilesystemMount:
-.global OSTOSFilesystemMount
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1101,7 +1048,6 @@ OSTOSFilesystemMount:
 	ret
 
 OSTOSFilesystemUnmount:
-.global OSTOSFilesystemUnmount
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1115,7 +1061,6 @@ OSTOSFilesystemUnmount:
 	ret
 
 OSTOSMountQueryAll:
-.global OSTOSMountQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1131,7 +1076,6 @@ OSTOSMountQueryAll:
 	ret
 
 OSTOSMountCountQuery:
-.global OSTOSMountCountQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -1145,7 +1089,6 @@ OSTOSMountCountQuery:
 	ret
 
 OSTOSMountUpdateFlags:
-.global OSTOSMountUpdateFlags
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1160,7 +1103,6 @@ OSTOSMountUpdateFlags:
 	ret
 
 OSTOSMountGetFilesystemName:
-.global OSTOSMountGetFilesystemName
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1175,7 +1117,6 @@ OSTOSMountGetFilesystemName:
 	ret
 
 OSTOSFlushModifiedPages:
-.global OSTOSFlushModifiedPages
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -1188,7 +1129,6 @@ OSTOSFlushModifiedPages:
 	ret
 
 OSTOSSectionCreate:
-.global OSTOSSectionCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1206,7 +1146,6 @@ OSTOSSectionCreate:
 	ret
 
 OSTOSMapView:
-.global OSTOSMapView
 	subi sp, sp, 16
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1233,7 +1172,6 @@ OSTOSMapView:
 	ret
 
 OSTOSUnmapView:
-.global OSTOSUnmapView
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1249,7 +1187,6 @@ OSTOSUnmapView:
 	ret
 
 OSTOSRemapView:
-.global OSTOSRemapView
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1266,7 +1203,6 @@ OSTOSRemapView:
 	ret
 
 OSTOSFlushView:
-.global OSTOSFlushView
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1282,7 +1218,6 @@ OSTOSFlushView:
 	ret
 
 OSTOSAllocate:
-.global OSTOSAllocate
 	subi sp, sp, 8
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1303,7 +1238,6 @@ OSTOSAllocate:
 	ret
 
 OSTOSMemoryQuery:
-.global OSTOSMemoryQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1317,7 +1251,6 @@ OSTOSMemoryQuery:
 	ret
 
 OSTOSWorkingSetPurge:
-.global OSTOSWorkingSetPurge
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -1330,7 +1263,6 @@ OSTOSWorkingSetPurge:
 	ret
 
 OSTOSSynchronizeIcache:
-.global OSTOSSynchronizeIcache
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -1342,7 +1274,6 @@ OSTOSSynchronizeIcache:
 	ret
 
 OSTOSProcessCreate:
-.global OSTOSProcessCreate
 	subi sp, sp, 8
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1363,7 +1294,6 @@ OSTOSProcessCreate:
 	ret
 
 OSTOSProcessSignal:
-.global OSTOSProcessSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1378,7 +1308,6 @@ OSTOSProcessSignal:
 	ret
 
 OSTOSProcessOpenByPID:
-.global OSTOSProcessOpenByPID
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1394,7 +1323,6 @@ OSTOSProcessOpenByPID:
 	ret
 
 OSTOSProcessQuery:
-.global OSTOSProcessQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1409,7 +1337,6 @@ OSTOSProcessQuery:
 	ret
 
 OSTOSProcessQueryByPID:
-.global OSTOSProcessQueryByPID
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1424,7 +1351,6 @@ OSTOSProcessQueryByPID:
 	ret
 
 OSTOSProcessReadStatus:
-.global OSTOSProcessReadStatus
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1439,7 +1365,6 @@ OSTOSProcessReadStatus:
 	ret
 
 OSTOSProcessSetConsoleGroup:
-.global OSTOSProcessSetConsoleGroup
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1454,7 +1379,6 @@ OSTOSProcessSetConsoleGroup:
 	ret
 
 OSTOSProcessClearConsoleGroup:
-.global OSTOSProcessClearConsoleGroup
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1467,8 +1391,21 @@ OSTOSProcessClearConsoleGroup:
 	addi sp, sp, 4
 	ret
 
+OSTOSProcessBasePrioritySet:
+	subi sp, sp, 4
+	mov  long [sp], lr
+	mov  a0, long [s17 + 4] ;t1
+	mov  a1, long [s17 + 8] ;t2
+
+	jal  OSProcessBasePrioritySet
+
+	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
 OSTOSProcessSignalActivation:
-.global OSTOSProcessSignalActivation
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1482,7 +1419,6 @@ OSTOSProcessSignalActivation:
 	ret
 
 OSTOSProcessWaitForActivation:
-.global OSTOSProcessWaitForActivation
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1498,7 +1434,6 @@ OSTOSProcessWaitForActivation:
 	ret
 
 OSTOSProcessExit:
-.global OSTOSProcessExit
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1511,7 +1446,6 @@ OSTOSProcessExit:
 	ret
 
 OSTOSProcessCountQuery:
-.global OSTOSProcessCountQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -1525,7 +1459,6 @@ OSTOSProcessCountQuery:
 	ret
 
 OSTOSProcessQueryAll:
-.global OSTOSProcessQueryAll
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1541,7 +1474,6 @@ OSTOSProcessQueryAll:
 	ret
 
 OSTOSSetQuota:
-.global OSTOSSetQuota
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1556,7 +1488,6 @@ OSTOSSetQuota:
 	ret
 
 OSTOSQuotaQuery:
-.global OSTOSQuotaQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1571,7 +1502,6 @@ OSTOSQuotaQuery:
 	ret
 
 OSTOSThreadSetFilePermissions:
-.global OSTOSThreadSetFilePermissions
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1585,7 +1515,6 @@ OSTOSThreadSetFilePermissions:
 	ret
 
 OSTOSThreadSleep:
-.global OSTOSThreadSleep
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1599,7 +1528,6 @@ OSTOSThreadSleep:
 	ret
 
 OSTOSThreadCreate:
-.global OSTOSThreadCreate
 	subi sp, sp, 12
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1623,7 +1551,6 @@ OSTOSThreadCreate:
 	ret
 
 OSTOSThreadTerminate:
-.global OSTOSThreadTerminate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1638,7 +1565,6 @@ OSTOSThreadTerminate:
 	ret
 
 OSTOSThreadSuspend:
-.global OSTOSThreadSuspend
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1652,7 +1578,6 @@ OSTOSThreadSuspend:
 	ret
 
 OSTOSThreadResume:
-.global OSTOSThreadResume
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1666,7 +1591,6 @@ OSTOSThreadResume:
 	ret
 
 OSTOSThreadReadStatus:
-.global OSTOSThreadReadStatus
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1681,7 +1605,6 @@ OSTOSThreadReadStatus:
 	ret
 
 OSTOSThreadQuery:
-.global OSTOSThreadQuery
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1696,7 +1619,6 @@ OSTOSThreadQuery:
 	ret
 
 OSTOSThreadSignal:
-.global OSTOSThreadSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1711,7 +1633,6 @@ OSTOSThreadSignal:
 	ret
 
 OSTOSThreadMaskSignal:
-.global OSTOSThreadMaskSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1726,7 +1647,6 @@ OSTOSThreadMaskSignal:
 	ret
 
 OSTOSThreadUnmaskSignal:
-.global OSTOSThreadUnmaskSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1741,7 +1661,6 @@ OSTOSThreadUnmaskSignal:
 	ret
 
 OSTOSSetSystemConsole:
-.global OSTOSSetSystemConsole
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1755,7 +1674,6 @@ OSTOSSetSystemConsole:
 	ret
 
 OSTOSConsoleSignal:
-.global OSTOSConsoleSignal
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1770,7 +1688,6 @@ OSTOSConsoleSignal:
 	ret
 
 OSTOSAmIAdmin:
-.global OSTOSAmIAdmin
 	subi sp, sp, 4
 	mov  long [sp], lr
 
@@ -1783,7 +1700,6 @@ OSTOSAmIAdmin:
 	ret
 
 OSTOSCheckPermission:
-.global OSTOSCheckPermission
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1798,7 +1714,6 @@ OSTOSCheckPermission:
 	ret
 
 OSTOSPortCreate:
-.global OSTOSPortCreate
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1816,7 +1731,6 @@ OSTOSPortCreate:
 	ret
 
 OSTOSPortConnect:
-.global OSTOSPortConnect
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1834,7 +1748,6 @@ OSTOSPortConnect:
 	ret
 
 OSTOSPortAccept:
-.global OSTOSPortAccept
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1851,7 +1764,6 @@ OSTOSPortAccept:
 	ret
 
 OSTOSPortSendAndWaitReceive:
-.global OSTOSPortSendAndWaitReceive
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1868,7 +1780,6 @@ OSTOSPortSendAndWaitReceive:
 	ret
 
 OSTOSPortSendAndWaitReply:
-.global OSTOSPortSendAndWaitReply
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -1885,7 +1796,6 @@ OSTOSPortSendAndWaitReply:
 	ret
 
 OSTOSPortOpenProcessByClientID:
-.global OSTOSPortOpenProcessByClientID
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1

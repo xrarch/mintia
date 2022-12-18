@@ -12,14 +12,6 @@ const PROCESSSTATE_RESIDENT   1
 const PROCESSSTATE_TRANSITION 2
 const PROCESSSTATE_OUTSWAPPED 3
 
-const PRIORITY_IDLE           0
-const PRIORITY_LOWUSER        1
-const PRIORITY_DEFAULT        8
-const PRIORITY_HIGHUSER       23
-const PRIORITY_LOWREALTIME    24
-const PRIORITY_MEDIUMREALTIME 28
-const PRIORITY_HIGHREALTIME   31
-
 const PRIORITIES 32
 
 struct KeProcess
@@ -170,6 +162,7 @@ extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name asid parentprocess process -- }
 extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
+extern KeProcessBasePrioritySet { priority process -- }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess
@@ -198,6 +191,7 @@ extern KeThreadYield { yieldstatus -- }
 extern KeThreadPriorityBoost { boost thread -- }
 extern KeThreadNextSwitch { -- }
 extern KeThreadSleep { ms waitmode alertable -- ok }
+extern KeThreadBasePrioritySet { priority thread -- }
 extern KeThreadPrioritySet { priority thread -- }
 extern KeThreadAPCDisable { thread -- oldcount }
 extern KeThreadAPCEnable { thread -- oldcount }

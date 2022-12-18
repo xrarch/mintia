@@ -31,8 +31,11 @@ fn KeThreadInitializeAddToList { thread process -- }
 
 	thread@ process@ KeProcess_ThreadListHead + !
 
-	1 process@ KeProcess_ThreadCount + +=
-	1 process@ KeProcess_ResidentStackCount + +=
+	process@ KeProcess_ThreadCountI + gi 1 +
+	process@ KeProcess_ThreadCountI + si
+
+	process@ KeProcess_ResidentStackCountI + gi 1 +
+	process@ KeProcess_ResidentStackCountI + si
 
 	rs@ HALCPUInterruptRestore
 end
@@ -42,14 +45,14 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	thread@ KeThread_Name + name@ KETHREADNAMELEN 1 - strncpy
 
-	THREADSTATUS_INITIALIZED thread@ KeThread_Status + !
+	THREADSTATUS_INITIALIZED thread@ KeThread_StatusB + sb
 
-	process@ KeProcess_BaseQuantum + @ thread@ KeThread_Quantum + !
+	process@ KeProcess_BaseQuantumB + gb thread@ KeThread_QuantumB + sb
 
 	process@ thread@ KeThread_Process + !
 
-	process@ KeProcess_BasePriority + @ thread@ KeThread_Priority + !
-	process@ KeProcess_BasePriority + @ thread@ KeThread_BasePriority + !
+	process@ KeProcess_BasePriorityB + gb thread@ KeThread_PriorityB + sb
+	process@ KeProcess_BasePriorityB + gb thread@ KeThread_BasePriorityB + sb
 
 	context1@ // context1
 	context2@ // context2
@@ -58,7 +61,6 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	process@ // process
 	HALCPUContextInit thread@ KeThread_Context + !
 
-	kstack@ thread@ KeThread_KernelStackBottom + !
 	kstack@ KETHREADSTACKSIZE + thread@ KeThread_KernelStackTop + !
 
 	// add to the process's thread list
@@ -71,27 +73,27 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_QueuePrev + !
 
 	0 thread@ KeThread_SwapListNext + !
-	0 thread@ KeThread_PendingSwapIn + !
-	1 thread@ KeThread_KernelStackCanBeSwapped + !
-	1 thread@ KeThread_KernelStackResident + !
+	0 thread@ KeThread_PendingSwapInB + sb
+	1 thread@ KeThread_KernelStackCanBeSwappedB + sb
+	1 thread@ KeThread_KernelStackResidentB + sb
 
-	0 thread@ KeThread_InstantDecay + !
+	0 thread@ KeThread_InstantDecayB + sb
 
-	0 thread@ KeThread_Enqueued + !
+	0 thread@ KeThread_EnqueuedB + sb
 
 	0 thread@ KeThread_WaitStatus + !
-	0 thread@ KeThread_WaitMode + !
-	0 thread@ KeThread_WaitIPL + !
+	0 thread@ KeThread_WaitModeB + sb
+	0 thread@ KeThread_WaitIPLB + sb
 
 	0 thread@ KeThread_MutexListHead + !
 
-	0 thread@ KeThread_WaitCount + !
+	0 thread@ KeThread_WaitCountI + si
 
 	0 thread@ KeThread_IgnoreKill + !
 
 	0 thread@ KeThread_KilledStatus + !
 
-	0 thread@ KeThread_Suspended + !
+	0 thread@ KeThread_SuspendedB + sb
 
 	if (process@ KeProcess_SignalThread + @ ~~)
 		// this is synchronized by the CreateDeleteMutex
@@ -124,11 +126,11 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_APCListHead + !
 	0 thread@ KeThread_APCListTail + !
-	0 thread@ KeThread_APCInProgress + !
+	0 thread@ KeThread_APCInProgressB + sb
 	0 thread@ KeThread_APCDisableCount + !
 
 	0 thread@ KeThread_WaitBlockTable + !
-	0 thread@ KeThread_WaitBlockCount + !
+	0 thread@ KeThread_WaitBlockCountI + si
 end
 
 fn KeThreadUninitialize { thread -- }
@@ -138,7 +140,7 @@ fn KeThreadUninitialize { thread -- }
 	IPLDPC KeIPLRaise ipl!
 
 	if (DEBUGCHECKS)
-		if (thread@ KeThread_KernelStackResident + @ ~~)
+		if (thread@ KeThread_KernelStackResidentB + gb ~~)
 			"KeThreadUninitialize: stack not resident\n" KeCrash
 		end
 	end
@@ -173,13 +175,16 @@ fn KeThreadUninitialize { thread -- }
 	end
 
 	if (DEBUGCHECKS)
-		if (process@ KeProcess_ThreadCount + @ ~~)
+		if (process@ KeProcess_ThreadCountI + gi ~~)
 			"KeThreadUninitialize: thread count underflow\n" KeCrash
 		end
 	end
 
-	1 process@ KeProcess_ThreadCount + -=
-	1 process@ KeProcess_ResidentStackCount + -=
+	process@ KeProcess_ThreadCountI + gi 1 -
+	process@ KeProcess_ThreadCountI + si
+
+	process@ KeProcess_ResidentStackCountI + gi 1 -
+	process@ KeProcess_ResidentStackCountI + si
 
 	ipl@ KeIPLLower
 end
@@ -267,16 +272,16 @@ fn KeThreadSuspend { thread -- }
 	// XXX this would not work at all in SMP. IPI needed here.
 	// and also in like 50 other places, like TLB shootdown, etc etc
 
-	1 thread@ KeThread_Suspended + !
+	1 thread@ KeThread_SuspendedB + sb
 end
 
 fn KeThreadResume { thread -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	0 thread@ KeThread_Suspended + !
+	0 thread@ KeThread_SuspendedB + sb
 
-	if (thread@ KeThread_Status + @ THREADSTATUS_SUSPENDED ==)
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_SUSPENDED ==)
 		0 // waitstatus
 		0 // priboost
 		thread@ // thread
@@ -354,19 +359,19 @@ fn KeThreadWakeForSignal { thread -- }
 		return
 	end
 
-	if (thread@ KeThread_Suspended + @)
+	if (thread@ KeThread_SuspendedB + gb)
 		thread@ KeThreadResume
 	end
 
-	if (thread@ KeThread_Status + @ THREADSTATUS_WAITINGALERTABLE ==)
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGALERTABLE ==)
 		// yes, wake it up
 
 		status@ // waitstatus
 		0 // priboost
 		thread@ // thread
 		KeThreadWakeup drop
-	end elseif (thread@ KeThread_Status + @ THREADSTATUS_WAITINGUNALERTABLE ==)
-		if (thread@ KeThread_WaitMode + @ USERMODE ==)
+	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGUNALERTABLE ==)
+		if (thread@ KeThread_WaitModeB + gb USERMODE ==)
 			if (sig@ 1 OSSIGNAL_KILL << &)
 				// yes, wake it up
 
@@ -451,7 +456,7 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 	auto sig
 	thread@ KeThread_Signals + @ sig!
 
-	if (process@ KeProcess_Terminated + @)
+	if (process@ KeProcess_TerminatedB + gb)
 		1 OSSIGNAL_KILL << sig |=
 	end
 

@@ -27,15 +27,10 @@ struct KeProcess
 
 	// scheduler information
 
-	4 ThreadCount
 	4 ThreadListHead
-
-	4 BasePriority
-	4 BaseQuantum
 
 	4 SignalThread
 
-	4 Terminated
 	4 KilledStatus
 
 	4 UserTimeMs
@@ -49,8 +44,14 @@ struct KeProcess
 
 	4 SwapListNext
 	4 DeferredThreadListHead
-	4 ResidentStackCount
-	4 MemoryState
+
+	2 ResidentStackCountI
+	2 ThreadCountI
+
+	1 MemoryStateB
+	1 TerminatedB
+	1 BasePriorityB
+	1 BaseQuantumB
 endstruct
 
 const THREADYIELD_PREEMPTED  1
@@ -76,7 +77,6 @@ const KETHREADNAMELEN   16
 const KETHREADSTACKSIZE 4096
 
 struct KeThread
-	4 KernelStackBottom
 	4 KernelStackTop
 
 	KETHREADNAMELEN Name
@@ -92,34 +92,12 @@ struct KeThread
 	4 QueuePrev
 
 	4 SwapListNext
-	4 KernelStackResident
-	4 KernelStackCanBeSwapped
-	4 PendingSwapIn
-
-	4 InstantDecay
-
-	4 Status
-
-	4 Enqueued
-
-	4 BasePriority
-	4 Priority
-
-	4 Quantum
-
-	4 IgnoreKill
 
 	4 KilledStatus
 
-	4 Suspended
-
-	4 WaitMode
 	4 WaitStatus
-	4 WaitIPL
 
 	4 MutexListHead
-
-	4 WaitCount
 
 	4 WaitOrReadyTimeSec
 
@@ -128,7 +106,6 @@ struct KeThread
 	KeDispatchWaitBlock_SIZEOF TimeoutWaitBlock
 
 	4 WaitBlockTable
-	4 WaitBlockCount
 
 	KeTimer_SIZEOF Timer
 
@@ -146,8 +123,30 @@ struct KeThread
 
 	4 APCListHead
 	4 APCListTail
-	4 APCInProgress
+
 	4 APCDisableCount
+	4 IgnoreKill
+
+	1 PendingSwapInB
+	1 KernelStackResidentB
+	1 KernelStackCanBeSwappedB
+	1 InstantDecayB
+
+	1 EnqueuedB
+	1 BasePriorityB
+	1 PriorityB
+	1 QuantumB
+
+	1 SuspendedB
+	1 APCInProgressB
+	1 StatusB
+	1 WaitIPLB
+
+	1 WaitModeB
+	3 Padding
+
+	2 WaitBlockCountI
+	2 WaitCountI
 endstruct
 
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)

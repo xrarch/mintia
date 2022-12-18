@@ -15,8 +15,10 @@
 var KeThreadCurrent 0
 public KeThreadCurrent
 
+var KeThreadCurrentStackBottom 0
+public KeThreadCurrentStackBottom
+
 externptr KeThreadCurrentStackTop
-externptr KeThreadCurrentStackBottom
 
 var KeThreadNext 0
 public KeThreadNext
@@ -44,15 +46,15 @@ fn KeThreadEnqueue { front thread -- }
 	// add thread to the tail of the proper ready queue for its priority level
 
 	if (DEBUGCHECKS)
-		if (thread@ KeThread_Enqueued + @)
+		if (thread@ KeThread_EnqueuedB + gb)
 			"KeThreadEnqueue: attempt to enqueue an enqueued thread\n" KeCrash
 		end
 	end
 
-	1 thread@ KeThread_Enqueued + !
+	1 thread@ KeThread_EnqueuedB + sb
 
 	auto pri
-	thread@ KeThread_Priority + @ pri!
+	thread@ KeThread_PriorityB + gb pri!
 
 	auto t
 
@@ -101,15 +103,15 @@ fn KeThreadDequeue { thread -- }
 	// remove thread from the proper ready queue for its priority level
 
 	if (DEBUGCHECKS)
-		if (thread@ KeThread_Enqueued + @ ~~)
+		if (thread@ KeThread_EnqueuedB + gb ~~)
 			"KeThreadDequeue: attempt to dequeue a dequeued thread\n" KeCrash
 		end
 	end
 
-	0 thread@ KeThread_Enqueued + !
+	0 thread@ KeThread_EnqueuedB + sb
 
 	auto pri
-	thread@ KeThread_Priority + @ pri!
+	thread@ KeThread_PriorityB + gb pri!
 
 	auto n
 	thread@ KeThread_QueueNext + @ n!
@@ -143,7 +145,7 @@ fn KeThreadTransition { status thread front -- }
 	end
 
 	auto oldstatus
-	thread@ KeThread_Status + @ oldstatus!
+	thread@ KeThread_StatusB + gb oldstatus!
 
 	if (status@ oldstatus@ ==)
 		// no change, return
@@ -168,14 +170,14 @@ fn KeThreadTransition { status thread front -- }
 			end
 		end
 
-		if (thread@ KeThread_Priority + @ current@ KeThread_Priority + @ >)
+		if (thread@ KeThread_PriorityB + gb current@ KeThread_PriorityB + gb >)
 			// this thread's priority is greater than the current thread's
 
 			thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
 		end
 	end
 
-	status@ thread@ KeThread_Status + !
+	status@ thread@ KeThread_StatusB + sb
 end
 
 externptr MmSwapEvent
@@ -193,7 +195,7 @@ fn KeThreadReady { front thread -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (process@ KeProcess_MemoryState + @ PROCESSSTATE_RESIDENT ~=)
+	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
 		// place on process's list of threads pending swapin
 
 		if (DEBUGCHECKS)
@@ -203,15 +205,15 @@ fn KeThreadReady { front thread -- }
 			end
 		end
 
-		1 thread@ KeThread_PendingSwapIn + !
+		1 thread@ KeThread_PendingSwapInB + sb
 
 		process@ KeProcess_DeferredThreadListHead + @ thread@ KeThread_SwapListNext + !
 		thread@ process@ KeProcess_DeferredThreadListHead + !
 
-		if (process@ KeProcess_MemoryState + @ PROCESSSTATE_OUTSWAPPED ==)
+		if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_OUTSWAPPED ==)
 			// enqueue process to be swapped in
 
-			PROCESSSTATE_TRANSITION process@ KeProcess_MemoryState + !
+			PROCESSSTATE_TRANSITION process@ KeProcess_MemoryStateB + sb
 
 			KeProcessSwapInListHead@ process@ KeProcess_SwapListNext + !
 			process@ KeProcessSwapInListHead!
@@ -224,7 +226,7 @@ fn KeThreadReady { front thread -- }
 		KeEventSignal
 
 		return
-	end elseif (thread@ KeThread_KernelStackResident + @ ~~)
+	end elseif (thread@ KeThread_KernelStackResidentB + gb ~~)
 		// place on global list of threads pending swapin
 
 		if (DEBUGCHECKS)
@@ -234,12 +236,13 @@ fn KeThreadReady { front thread -- }
 			end
 		end
 
-		1 thread@ KeThread_PendingSwapIn + !
+		1 thread@ KeThread_PendingSwapInB + sb
 
 		KeThreadSwapInListHead@ thread@ KeThread_SwapListNext + !
 		thread@ KeThreadSwapInListHead!
 
-		1 process@ KeProcess_ResidentStackCount + +=
+		process@ KeProcess_ResidentStackCountI + gi 1 +
+		process@ KeProcess_ResidentStackCountI + si
 
 		ipl@ KeIPLLower
 
@@ -262,11 +265,11 @@ fn KeThreadQuantumIncrement { inc thread -- qt }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	thread@ KeThread_Quantum + @ qt!
+	thread@ KeThread_QuantumB + gb qt!
 
 	inc@ qt +=
 
-	qt@ thread@ KeThread_Quantum + !
+	qt@ thread@ KeThread_QuantumB + sb
 
 	rs@ HALCPUInterruptRestore
 end
@@ -275,7 +278,7 @@ fn KeThreadQuantumDecrement { dec thread -- qt }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	thread@ KeThread_Quantum + @ qt!
+	thread@ KeThread_QuantumB + gb qt!
 
 	if (qt@ dec@ <=)
 		0 qt!
@@ -283,7 +286,7 @@ fn KeThreadQuantumDecrement { dec thread -- qt }
 		dec@ qt -=
 	end
 
-	qt@ thread@ KeThread_Quantum + !
+	qt@ thread@ KeThread_QuantumB + sb
 
 	rs@ HALCPUInterruptRestore
 end
@@ -293,11 +296,11 @@ fn KeThreadQuantumEnd { -- }
 	KeThreadCurrent@ current!
 
 	if (DEBUGCHECKS)
-		if (current@ KeThread_Status + @ THREADSTATUS_RUNNING ~=)
+		if (current@ KeThread_StatusB + gb THREADSTATUS_RUNNING ~=)
 			"KeThreadQuantumEnd: current thread isn't RUNNING\n" KeCrash
 		end
 
-		if (current@ KeThread_Enqueued + @)
+		if (current@ KeThread_EnqueuedB + gb)
 			"KeThreadQuantumEnd: current thread is RUNNING yet enqueued\n" KeCrash
 		end
 	end
@@ -305,21 +308,21 @@ fn KeThreadQuantumEnd { -- }
 	// decrement the thread's priority in order to decay boosting.
 
 	auto pri
-	current@ KeThread_Priority + @ pri!
+	current@ KeThread_PriorityB + gb pri!
 
 	if (pri@ PRIORITY_IDLE >)
 		if (pri@ PRIORITY_LOWREALTIME <)
 			auto newpri
 
-			if (current@ KeThread_InstantDecay + @)
-				current@ KeThread_BasePriority + @ newpri!
-				0 current@ KeThread_InstantDecay + !
+			if (current@ KeThread_InstantDecayB + gb)
+				current@ KeThread_BasePriorityB + gb newpri!
+				0 current@ KeThread_InstantDecayB + sb
 			end else
 				pri@ 1 - newpri!
 			end
 
-			if (newpri@ current@ KeThread_BasePriority + @ >=)
-				newpri@ current@ KeThread_Priority + !
+			if (newpri@ current@ KeThread_BasePriorityB + gb >=)
+				newpri@ current@ KeThread_PriorityB + sb
 			end
 		end
 	end
@@ -348,7 +351,7 @@ fn KeThreadNextPick { -- thread }
 
 		if (thread@)
 			if (DEBUGCHECKS)
-				if (thread@ KeThread_Status + @ THREADSTATUS_READY ~=)
+				if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ~=)
 					"KeThreadNextPick: thread on ready queue but not READY\n" KeCrash
 				end
 			end
@@ -416,14 +419,14 @@ fn KeThreadSwitch { thread -- }
 	HALCPUInterruptDisable rs!
 
 	thread@ KeThread_KernelStackTop + @ KeThreadCurrentStackTop!
-	thread@ KeThread_KernelStackBottom + @ KeThreadCurrentStackBottom!
+	thread@ KeThread_KernelStackTop + @ KETHREADSTACKSIZE - KeThreadCurrentStackBottom!
 
 	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
 
 	rs@ HALCPUInterruptRestore
 
 	auto qtm
-	current@ KeThread_Quantum + @ qtm!
+	current@ KeThread_QuantumB + gb qtm!
 
 	if (qtm@ ~~)
 		// no more quantum, do a quantum end
@@ -444,7 +447,7 @@ fn KeThreadPrioritySet { priority thread -- }
 	end
 
 	auto pri
-	thread@ KeThread_Priority + @ pri!
+	thread@ KeThread_PriorityB + gb pri!
 
 	if (pri@ priority@ ==)
 		return
@@ -456,24 +459,24 @@ fn KeThreadPrioritySet { priority thread -- }
 		// requeued. if this action raises its priority above that of the
 		// current thread, ask the scheduler to run.
 
-		if (thread@ KeThread_Status + @ THREADSTATUS_READY ==)
+		if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ==)
 			thread@ KeThreadDequeue
 
-			priority@ thread@ KeThread_Priority + !
+			priority@ thread@ KeThread_PriorityB + sb
 
 			QUEUEBACK thread@ KeThreadEnqueue
 
-			if (priority@ KeThreadCurrent@ KeThread_Priority + @ >)
+			if (priority@ KeThreadCurrent@ KeThread_PriorityB + gb >)
 				thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
 			end
 		end else
 			if (DEBUGCHECKS)
-				if (thread@ KeThread_Enqueued + @)
+				if (thread@ KeThread_EnqueuedB + gb)
 					"KeThreadPrioritySet: thread was enqueued despite not being READY\n" KeCrash
 				end
 			end
 
-			priority@ thread@ KeThread_Priority + !
+			priority@ thread@ KeThread_PriorityB + sb
 		end
 	end else
 		// the priority has been lowered. if the thread is in a ready queue,
@@ -482,12 +485,12 @@ fn KeThreadPrioritySet { priority thread -- }
 		// scheduler to run.
 
 		auto status
-		thread@ KeThread_Status + @ status!
+		thread@ KeThread_StatusB + gb status!
 
 		if (status@ THREADSTATUS_READY ==)
 			thread@ KeThreadDequeue
 
-			priority@ thread@ KeThread_Priority + !
+			priority@ thread@ KeThread_PriorityB + sb
 
 			QUEUEBACK thread@ KeThreadEnqueue
 		end elseif (status@ THREADSTATUS_RUNNING ==)
@@ -497,7 +500,7 @@ fn KeThreadPrioritySet { priority thread -- }
 				end
 			end
 
-			priority@ thread@ KeThread_Priority + !
+			priority@ thread@ KeThread_PriorityB + sb
 
 			auto i
 			PRIORITIES 1 - i!
@@ -523,14 +526,14 @@ fn KeThreadNextSelect { next reason -- }
 	KeThreadNext@ onext!
 
 	auto curpri
-	KeThreadCurrent@ KeThread_Priority + @ curpri!
+	KeThreadCurrent@ KeThread_PriorityB + gb curpri!
 
 	if (reason@ THREADYIELD_QUANTUMEND ==)
 		if (curpri@ PRIORITY_IDLE ~=)
 			1 KeStatistics OSStatistics_QuantumEnds + +=
 		end
 
-		if (curpri@ next@ KeThread_Priority + @ >)
+		if (curpri@ next@ KeThread_PriorityB + gb >)
 			return
 		end
 	end elseif (reason@ THREADYIELD_PREEMPTED ==)
@@ -540,7 +543,7 @@ fn KeThreadNextSelect { next reason -- }
 	end
 
 	if (onext@)
-		if (next@ KeThread_Priority + @ onext@ KeThread_Priority + @ >=)
+		if (next@ KeThread_PriorityB + gb onext@ KeThread_PriorityB + gb >=)
 			next@ KeThreadNext!
 			reason@ KeThreadNextReason!
 		end
@@ -566,11 +569,11 @@ fn KeThreadPriorityBoost { boost thread -- }
 	end
 
 	auto pri
-	thread@ KeThread_Priority + @ pri!
+	thread@ KeThread_PriorityB + gb pri!
 
 	if (pri@ PRIORITY_LOWREALTIME <)
 		auto newpri
-		thread@ KeThread_BasePriority + @ boost@ + newpri!
+		thread@ KeThread_BasePriorityB + gb boost@ + newpri!
 
 		if (newpri@ PRIORITY_HIGHUSER >)
 			PRIORITY_HIGHUSER newpri!
@@ -599,7 +602,7 @@ fn KeThreadNextSwitch { -- }
 	if (cause@ THREADYIELD_QUANTUMEND ==)
 		// the quantum ended, place it at the back
 
-		current@ KeThread_Process + @ KeProcess_BaseQuantum + @ current@ KeThread_Quantum + !
+		current@ KeThread_Process + @ KeProcess_BaseQuantumB + gb current@ KeThread_QuantumB + sb
 
 		THREADSTATUS_READY current@ QUEUEBACK KeThreadTransition
 	end elseif (cause@ THREADYIELD_PREEMPTED ==)
@@ -677,16 +680,16 @@ fn KeBoostReadyThreads { -- }
 			thread@ KeThread_QueueNext + @ nthread!
 
 			if (DEBUGCHECKS)
-				if (thread@ KeThread_Status + @ THREADSTATUS_READY ~=)
+				if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ~=)
 					thread@ "KeBoostReadyThreads: %x is not READY but is on queue\n" KeCrash
 				end
 			end
 
 			if (thread@ KeThread_WaitOrReadyTimeSec + @ uptimesec@ - 3 >=)
-				if (thread@ KeThread_InstantDecay + @ ~~)
-					thread@ KeThread_Process + @ KeProcess_BaseQuantum + @ 2 * thread@ KeThread_Quantum + !
+				if (thread@ KeThread_InstantDecayB + gb ~~)
+					thread@ KeThread_Process + @ KeProcess_BaseQuantumB + gb 2 * thread@ KeThread_QuantumB + sb
 
-					1 thread@ KeThread_InstantDecay + !
+					1 thread@ KeThread_InstantDecayB + sb
 
 					PRIORITY_HIGHUSER // priority
 					thread@ // thread

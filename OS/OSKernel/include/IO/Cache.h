@@ -50,6 +50,8 @@ extern IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe
 
 extern IOCachePageWrite { transfer kflags pfdbe -- ok }
 
+extern IOCachePageFlush { pfdbe -- ok }
+
 extern IOCacheFileWrite { flags length offset buffer fcb lastmode -- byteswritten ok }
 extern IOCacheFileRead { flags length offset buffer fcb lastmode -- bytesread ok }
 

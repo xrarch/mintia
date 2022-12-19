@@ -1,6 +1,6 @@
 fnptr IOFilesystemMountFunction { mount -- ok }
 fnptr IOFilesystemUnmountFunction { mount -- ok }
-fnptr IOFilesystemFlushFunction { mount -- ok }
+fnptr IOFilesystemFlushFunction { shutdown mount -- ok }
 fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags mount -- ok }
 
 struct IOFilesystem
@@ -73,7 +73,7 @@ extern IOMountGetContext { mount -- context }
 extern IOMountSetRootFCB { fcb mount -- }
 extern IOMountGetRootFCB { mount -- fcb }
 
-extern IOFilesystemSyncAll { -- ok }
+extern IOFilesystemSyncAll { shutdown -- ok }
 
 externptr IOMountListMutex
 externptr IOMountCount

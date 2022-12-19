@@ -31,40 +31,45 @@
 var ExShuttingDown 0
 public ExShuttingDown
 
-fn ExShutdownCheck { -- go }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	if (ExShuttingDown@)
-		rs@ HALCPUInterruptRestore
-		0 go!
-		return
-	end
-
-	1 ExShuttingDown!
-
-	rs@ HALCPUInterruptRestore
-
-	1 go!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-	PRIORITY_HIGHREALTIME // priority
-	KeThreadCurrent@ // thread
-	KeThreadPrioritySet
-	ipl@ KeIPLLower
-end
+var ExFinishShutdown 0
+public ExFinishShutdown
 
 fn ExShutdownSystem { mode -- }
 	fnsection "PAGE$text"
 
-	if (ExShutdownCheck ~~)
-		return
+	1 ExShuttingDown!
+
+	// request the worker thread to finish shutdown.
+
+	mode@ ExFinishShutdown!
+
+	while (1)
+		auto ok
+		10000 // ms
+		KERNELMODE // waitmode
+		1 // alertable
+		KeThreadSleep ok!
+
+		if (ok@)
+			return
+		end
 	end
+end
+
+fn ExShutdownSystemFinish { -- }
+	fnsection "PAGE$text"
+
+	// this part of system shutdown takes place in the context of a system
+	// worker thread. it's done this way so that the user thread who initiated
+	// shutdown can exit and its parent process's handles can all be closed,
+	// allowing us to unmount the filesystems.
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	"\n" Printf
+
+	auto mode
+	ExFinishShutdown@ mode!
 
 	if (mode@ OSSHUTDOWN_HALT ==)
 		"MINTIA -- SHUTTING DOWN\n" Printf
@@ -73,6 +78,10 @@ fn ExShutdownSystem { mode -- }
 	end
 
 	"Killing all processes...\n" Printf
+
+	// dereference the SystemInit process object.
+
+	PsSystemInitProcess@ ObObjectDereferenceByPointer drop
 
 	// send OSSIGNAL_TERM to all processes
 
@@ -93,50 +102,82 @@ fn ExShutdownSystem { mode -- }
 
 	PsProcessListUnlock
 
-	// give all the processes 2.5 seconds to get their affairs in order.
-	2500 // ms
-	KERNELMODE // waitmode
-	0 // alertable
-	KeThreadSleep drop
+	if (PsActiveProcessCount@ 1 >)
+		// give all the processes 2.5 seconds to get their affairs in order.
+		2500 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
 
-	// send OSSIGNAL_KILL to all processes
+		while (PsActiveProcessCount@ 1 >)
+			// send OSSIGNAL_KILL to all processes
 
-	PsProcessListLock drop
+			PsProcessListLock drop
 
-	PsProcessListHead@ process!
+			PsProcessListHead@ process!
 
-	while (process@)
-		if (process@ PsSystemProcess@ ~=)
-			OSSIGNAL_KILL // signal
-			process@ // process
-			KeProcessSignal drop
+			while (process@)
+				if (process@ PsSystemProcess@ ~=)
+					OSSIGNAL_KILL // signal
+					process@ // process
+					KeProcessSignal drop
+				end
+
+				process@ PsProcess_GlobalListNext + @ process!
+			end
+
+			PsProcessListUnlock
+
+			// give all the processes 500ms to die.
+			100 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
 		end
-
-		process@ PsProcess_GlobalListNext + @ process!
 	end
 
-	PsProcessListUnlock
-
-	// give all the processes 500ms to die.
-	500 // ms
-	KERNELMODE // waitmode
-	0 // alertable
-	KeThreadSleep drop
-
-	// TODO nuke all file objects and unmount all volumes
-
 	"Flushing dirty pages to disk...\n" Printf
+
+	while (1)
+		// the swapfile extending thread will flush the filesystems when it
+		// wakes up.
+
+		0 // priboost
+		IOSwapFileExtendEvent // event
+		KeEventSignal
+
+		if (ExShuttingDown@ 2 ==)
+			break
+		end
+
+		500 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
+	end
+
+	0 // priboost
+	MmModifiedPageEvent // event
+	KeEventSignal
 
 	IOTriggerWritebehind
 
 	while (1)
-		if (IOCacheInfoBlockDirtyCount@ ~~)
+		if (IOCacheInfoBlockDirtyCount@ MmModifiedPageCount@ + ~~)
 			// complete flush
 			break
 		end
 
+		0 // priboost
+		MmModifiedPageEvent // event
+		KeEventSignal
+
 		IOTriggerWritebehind
-		100 OSThreadSleep drop
+
+		500 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
 	end
 
 	// "Exiting.\n" Printf
@@ -159,15 +200,10 @@ fn ExShutdownSystem { mode -- }
 
 	"                   It is now safe to shut down your computer.\n" Printf
 
-	// give video console worker thread enough time to draw our message.
-	// it won't run again since we're such high priority and won't yield.
-
-	250 // ms
-	KERNELMODE // waitmode
-	0 // alertable
-	KeThreadSleep drop
-
 	while (1)
-		HALCPUHalt
+		10000 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
 	end
 end

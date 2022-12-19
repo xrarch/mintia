@@ -227,6 +227,8 @@ OSCallTable:
 
 
 OSTOSConsolePutCharacter:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -239,9 +241,12 @@ OSTOSConsolePutCharacter:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSystemAbort:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -262,9 +267,12 @@ OSTOSSystemAbort:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSGetSystemConsoleName:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -277,9 +285,12 @@ OSTOSGetSystemConsoleName:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSGetBootFlags:
+	push fp
+	mov  fp, sp
 
 	call OSGetBootFlags
 
@@ -292,9 +303,12 @@ OSTOSGetBootFlags:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSContinue:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -307,9 +321,12 @@ OSTOSContinue:
 	call OSContinue
 
 
+	pop  fp
 	ret
 
 OSTOSQueryTime:
+	push fp
+	mov  fp, sp
 
 	call OSQueryTime
 
@@ -322,9 +339,12 @@ OSTOSQueryTime:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSQueryUptime:
+	push fp
+	mov  fp, sp
 
 	call OSQueryUptime
 
@@ -337,9 +357,12 @@ OSTOSQueryUptime:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSShutdownSystem:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -352,9 +375,12 @@ OSTOSShutdownSystem:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSVersion:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -367,9 +393,12 @@ OSTOSVersion:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSEventCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -398,9 +427,12 @@ OSTOSEventCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSEventReset:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -417,9 +449,12 @@ OSTOSEventReset:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSEventSignal:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -432,9 +467,12 @@ OSTOSEventSignal:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSEventPulse:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -447,9 +485,12 @@ OSTOSEventPulse:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSEventReadState:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -466,9 +507,12 @@ OSTOSEventReadState:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSSemaphoreCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -493,9 +537,12 @@ OSTOSSemaphoreCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSSemaphoreRelease:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -512,9 +559,12 @@ OSTOSSemaphoreRelease:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSemaphoreReadState:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -531,9 +581,12 @@ OSTOSSemaphoreReadState:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSMutexCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -554,9 +607,12 @@ OSTOSMutexCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSMutexRelease:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -569,9 +625,12 @@ OSTOSMutexRelease:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSMutexReadState:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -588,9 +647,12 @@ OSTOSMutexReadState:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSTimerCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -611,9 +673,12 @@ OSTOSTimerCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSTimerReset:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -630,9 +695,12 @@ OSTOSTimerReset:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSTimerEnqueue:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -649,9 +717,12 @@ OSTOSTimerEnqueue:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSTimerDequeue:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -664,9 +735,12 @@ OSTOSTimerDequeue:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSTimerReadState:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -683,9 +757,12 @@ OSTOSTimerReadState:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSGetStatistics:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -698,9 +775,12 @@ OSTOSGetStatistics:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSObjectOpen:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -729,9 +809,12 @@ OSTOSObjectOpen:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -748,9 +831,12 @@ OSTOSQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSClose:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -763,9 +849,12 @@ OSTOSClose:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSWaitForMultipleObjects:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -795,9 +884,12 @@ OSTOSWaitForMultipleObjects:
 	mov  [t0], a0
 
 	add  sp, 4
+	pop  fp
 	ret
 
 OSTOSWaitForObject:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -818,9 +910,12 @@ OSTOSWaitForObject:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSHandleDuplicate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -849,9 +944,12 @@ OSTOSHandleDuplicate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSObjectDirectoryCountQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -868,9 +966,12 @@ OSTOSObjectDirectoryCountQuery:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSObjectDirectoryQueryAll:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -895,9 +996,12 @@ OSTOSObjectDirectoryQueryAll:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSObjectDirectoryObjectCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -918,9 +1022,12 @@ OSTOSObjectDirectoryObjectCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSObjectDirectoryInsert:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -937,9 +1044,12 @@ OSTOSObjectDirectoryInsert:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSObjectDirectoryRemove:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -952,9 +1062,12 @@ OSTOSObjectDirectoryRemove:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSetSecurity:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -979,9 +1092,12 @@ OSTOSSetSecurity:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFileQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -998,9 +1114,12 @@ OSTOSFileQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFileTruncate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1025,9 +1144,12 @@ OSTOSFileTruncate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSFileSeek:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1052,9 +1174,12 @@ OSTOSFileSeek:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSFileRead:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1088,9 +1213,12 @@ OSTOSFileRead:
 	mov  [t0], a1
 
 	add  sp, 4
+	pop  fp
 	ret
 
 OSTOSFileWrite:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1119,9 +1247,12 @@ OSTOSFileWrite:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSFileFlush:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1138,9 +1269,12 @@ OSTOSFileFlush:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFileReadAsync:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1178,9 +1312,12 @@ OSTOSFileReadAsync:
 	mov  [t0], a0
 
 	add  sp, 12
+	pop  fp
 	ret
 
 OSTOSFileWriteAsync:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1218,9 +1355,12 @@ OSTOSFileWriteAsync:
 	mov  [t0], a0
 
 	add  sp, 12
+	pop  fp
 	ret
 
 OSTOSFileCancelIO:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1237,9 +1377,12 @@ OSTOSFileCancelIO:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSDirectoryRename:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1264,9 +1407,12 @@ OSTOSDirectoryRename:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSDirectoryUnlink:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1283,9 +1429,12 @@ OSTOSDirectoryUnlink:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSDirectoryRead:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1302,9 +1451,12 @@ OSTOSDirectoryRead:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSwapFileCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1329,9 +1481,12 @@ OSTOSSwapFileCreate:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSwapFileQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1348,9 +1503,12 @@ OSTOSSwapFileQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSIOControl:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1375,9 +1533,12 @@ OSTOSIOControl:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSGetBootDevicePath:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1390,9 +1551,12 @@ OSTOSGetBootDevicePath:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFilesystemMount:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1413,9 +1577,12 @@ OSTOSFilesystemMount:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFilesystemUnmount:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1428,9 +1595,12 @@ OSTOSFilesystemUnmount:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSMountQueryAll:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1451,9 +1621,12 @@ OSTOSMountQueryAll:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSMountCountQuery:
+	push fp
+	mov  fp, sp
 
 	call OSMountCountQuery
 
@@ -1466,9 +1639,12 @@ OSTOSMountCountQuery:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSMountUpdateFlags:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1485,9 +1661,12 @@ OSTOSMountUpdateFlags:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSMountGetFilesystemName:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1504,9 +1683,12 @@ OSTOSMountGetFilesystemName:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFlushModifiedPages:
+	push fp
+	mov  fp, sp
 
 	call OSFlushModifiedPages
 
@@ -1515,9 +1697,12 @@ OSTOSFlushModifiedPages:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSectionCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1546,9 +1731,12 @@ OSTOSSectionCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSMapView:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1590,9 +1778,12 @@ OSTOSMapView:
 	mov  [t0], a1
 
 	add  sp, 12
+	pop  fp
 	ret
 
 OSTOSUnmapView:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1613,9 +1804,12 @@ OSTOSUnmapView:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSRemapView:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1640,9 +1834,12 @@ OSTOSRemapView:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSFlushView:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1663,9 +1860,12 @@ OSTOSFlushView:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSAllocate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1699,9 +1899,12 @@ OSTOSAllocate:
 	mov  [t0], a1
 
 	add  sp, 4
+	pop  fp
 	ret
 
 OSTOSMemoryQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1714,9 +1917,12 @@ OSTOSMemoryQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSWorkingSetPurge:
+	push fp
+	mov  fp, sp
 
 	call OSWorkingSetPurge
 
@@ -1725,16 +1931,22 @@ OSTOSWorkingSetPurge:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSynchronizeIcache:
+	push fp
+	mov  fp, sp
 
 	call OSSynchronizeIcache
 
 
+	pop  fp
 	ret
 
 OSTOSProcessCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1768,9 +1980,12 @@ OSTOSProcessCreate:
 	mov  [t0], a1
 
 	add  sp, 4
+	pop  fp
 	ret
 
 OSTOSProcessSignal:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1787,9 +2002,12 @@ OSTOSProcessSignal:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessOpenByPID:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1810,9 +2028,12 @@ OSTOSProcessOpenByPID:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSProcessQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1829,9 +2050,12 @@ OSTOSProcessQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessQueryByPID:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1848,9 +2072,12 @@ OSTOSProcessQueryByPID:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessReadStatus:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1867,9 +2094,12 @@ OSTOSProcessReadStatus:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSProcessSetConsoleGroup:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1886,9 +2116,12 @@ OSTOSProcessSetConsoleGroup:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessClearConsoleGroup:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1901,9 +2134,12 @@ OSTOSProcessClearConsoleGroup:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessBasePrioritySet:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1920,9 +2156,12 @@ OSTOSProcessBasePrioritySet:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessSignalActivation:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1935,9 +2174,12 @@ OSTOSProcessSignalActivation:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSProcessWaitForActivation:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1958,9 +2200,12 @@ OSTOSProcessWaitForActivation:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSProcessExit:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -1969,9 +2214,12 @@ OSTOSProcessExit:
 	call OSProcessExit
 
 
+	pop  fp
 	ret
 
 OSTOSProcessCountQuery:
+	push fp
+	mov  fp, sp
 
 	call OSProcessCountQuery
 
@@ -1984,9 +2232,12 @@ OSTOSProcessCountQuery:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSProcessQueryAll:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2007,9 +2258,12 @@ OSTOSProcessQueryAll:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSSetQuota:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2026,9 +2280,12 @@ OSTOSSetQuota:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSQuotaQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2045,9 +2302,12 @@ OSTOSQuotaQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadSetFilePermissions:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2060,9 +2320,12 @@ OSTOSThreadSetFilePermissions:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadSleep:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2075,9 +2338,12 @@ OSTOSThreadSleep:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2115,9 +2381,12 @@ OSTOSThreadCreate:
 	mov  [t0], a1
 
 	add  sp, 8
+	pop  fp
 	ret
 
 OSTOSThreadTerminate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2134,9 +2403,12 @@ OSTOSThreadTerminate:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadSuspend:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2149,9 +2421,12 @@ OSTOSThreadSuspend:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadResume:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2164,9 +2439,12 @@ OSTOSThreadResume:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadReadStatus:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2183,9 +2461,12 @@ OSTOSThreadReadStatus:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSThreadQuery:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2202,9 +2483,12 @@ OSTOSThreadQuery:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadSignal:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2221,9 +2505,12 @@ OSTOSThreadSignal:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadMaskSignal:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2240,9 +2527,12 @@ OSTOSThreadMaskSignal:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSThreadUnmaskSignal:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2259,9 +2549,12 @@ OSTOSThreadUnmaskSignal:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSSetSystemConsole:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2274,9 +2567,12 @@ OSTOSSetSystemConsole:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSConsoleSignal:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2293,9 +2589,12 @@ OSTOSConsoleSignal:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSAmIAdmin:
+	push fp
+	mov  fp, sp
 
 	call OSAmIAdmin
 
@@ -2304,9 +2603,12 @@ OSTOSAmIAdmin:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSCheckPermission:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2323,9 +2625,12 @@ OSTOSCheckPermission:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSPortCreate:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2354,9 +2659,12 @@ OSTOSPortCreate:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSPortConnect:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2385,9 +2693,12 @@ OSTOSPortConnect:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 
 OSTOSPortAccept:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2412,9 +2723,12 @@ OSTOSPortAccept:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSPortSendAndWaitReceive:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2439,9 +2753,12 @@ OSTOSPortSendAndWaitReceive:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSPortSendAndWaitReply:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2466,9 +2783,12 @@ OSTOSPortSendAndWaitReply:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
 	ret
 
 OSTOSPortOpenProcessByClientID:
+	push fp
+	mov  fp, sp
 
 	mov  t0, s17
 	add  t0, 4 ;t1
@@ -2493,5 +2813,6 @@ OSTOSPortOpenProcessByClientID:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	pop  fp
 	ret
 

@@ -47,42 +47,6 @@ fn IOFilesystemRegister { filesystem -- ok }
 	filesystem@ IOFilesystemListHead!
 end
 
-fn IOMountListLock { -- ok }
-	fnsection "PAGE$text"
-
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	IOMountListMutex // object
-	KeThreadWaitForObject ok!
-end
-
-fn IOMountListLockUnalertable { -- }
-	fnsection "PAGE$text"
-
-	auto ok
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	IOMountListMutex // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "IOMountListLockUnalertable: failed to lock mount list (%i)\n" KeCrash
-		end
-	end
-end
-
-fn IOMountListUnlock { -- }
-	fnsection "PAGE$text"
-
-	0 // abandon
-	IOMountListMutex // mutex
-	KeMutexRelease drop
-end
-
 fn IOFilesystemMount { flags handle fsname -- mount ok }
 	fnsection "PAGE$text"
 
@@ -170,32 +134,19 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 		end
 	end
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	1 ObRootDirectoryLock ok!
+
+	if (ok@)
+		return
+	end
 
 	if (fcb@ IOFileControlBlock_Mount + @)
-		rs@ HALCPUInterruptRestore
+		ObRootDirectoryUnlock
 
 		STATUS_DEVICE_BUSY ok!
 
 		return
-	end elseif (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_MOUNTBUSY &)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
-	end elseif (fcb@ IOFileControlBlock_ParseCount + @)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
 	end
-
-	IOFCBFLAG_MOUNTBUSY fcb@ IOFileControlBlock_Flags + |=
-
-	rs@ HALCPUInterruptRestore
 
 	IOMount_SIZEOF // bytes
 	'IOMt' // tag
@@ -203,9 +154,7 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	MmAllocWithTag ok! mount!
 
 	if (ok@)
-		HALCPUInterruptDisable rs!
-		IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-		rs@ HALCPUInterruptRestore
+		ObRootDirectoryUnlock
 
 		return
 	end
@@ -271,13 +220,11 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	end
 
 	if (ok@)
+		ObRootDirectoryUnlock
+
 		// did not successfully mount
 
 		mount@ MmFree
-
-		HALCPUInterruptDisable rs!
-		IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-		rs@ HALCPUInterruptRestore
 
 		return
 	end
@@ -286,8 +233,6 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 
 	// bias the reference count of the volume file object
 	fileobject@ ObObjectReferenceByPointer drop
-
-	IOMountListLockUnalertable
 
 	// add to head of mount list
 
@@ -303,11 +248,7 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 
 	1 IOMountCount +=
 
-	IOMountListUnlock
-
-	HALCPUInterruptDisable rs!
-	IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-	rs@ HALCPUInterruptRestore
+	ObRootDirectoryUnlock
 end
 
 fn IOFilesystemUnmount { handle -- ok }
@@ -345,35 +286,22 @@ fn IOUnmountObject { fileobject -- ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	1 ObRootDirectoryLock ok!
+
+	if (ok@)
+		return
+	end
 
 	auto mount
 	fcb@ IOFileControlBlock_Mount + @ mount!
 
 	if (mount@ ~~)
-		rs@ HALCPUInterruptRestore
+		ObRootDirectoryUnlock
 
 		STATUS_NOT_MOUNTED ok!
 
 		return
-	end elseif (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_MOUNTBUSY &)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
-	end elseif (fcb@ IOFileControlBlock_ParseCount + @)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
 	end
-
-	IOFCBFLAG_MOUNTBUSY fcb@ IOFileControlBlock_Flags + |=
-
-	rs@ HALCPUInterruptRestore
 
 	auto filesystem
 	mount@ IOMount_Filesystem + @ filesystem!
@@ -387,19 +315,13 @@ fn IOUnmountObject { fileobject -- ok }
 		end
 	end
 
-	IOMountListLockUnalertable
-
 	mount@ // mount
 	unmountfunc@ IOFilesystemUnmountFunction ok!
 
 	if (ok@)
 		// failed to unmount
 
-		IOMountListUnlock
-
-		HALCPUInterruptDisable rs!
-		IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-		rs@ HALCPUInterruptRestore
+		ObRootDirectoryUnlock
 
 		return
 	end
@@ -423,8 +345,6 @@ fn IOUnmountObject { fileobject -- ok }
 
 	1 IOMountCount -=
 
-	IOMountListUnlock
-
 	auto volfile
 	mount@ IOMount_VolumeFile + @ volfile!
 
@@ -438,9 +358,7 @@ fn IOUnmountObject { fileobject -- ok }
 
 	volfile@ ObObjectDereferenceByPointer drop
 
-	HALCPUInterruptDisable rs!
-	IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-	rs@ HALCPUInterruptRestore
+	ObRootDirectoryUnlock
 end
 
 fn IOMountUpdateFlags { newflags handle -- ok }
@@ -491,43 +409,28 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	1 ObRootDirectoryLock ok!
+
+	if (ok@)
+		return
+	end
 
 	auto mount
 	fcb@ IOFileControlBlock_Mount + @ mount!
 
 	if (mount@ ~~)
-		rs@ HALCPUInterruptRestore
+		ObRootDirectoryUnlock
 
 		STATUS_NOT_MOUNTED ok!
 
 		return
-	end elseif (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_MOUNTBUSY &)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
-	end elseif (fcb@ IOFileControlBlock_ParseCount + @)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
 	end
-
-	IOFCBFLAG_MOUNTBUSY fcb@ IOFileControlBlock_Flags + |=
-
-	rs@ HALCPUInterruptRestore
 
 	auto oldflags
 	mount@ IOMount_Flags + @ oldflags!
 
 	if (oldflags@ newflags@ ==)
-		HALCPUInterruptDisable rs!
-		IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-		rs@ HALCPUInterruptRestore
+		ObRootDirectoryUnlock
 
 		return
 	end
@@ -553,9 +456,7 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 		newflags@ mount@ IOMount_Flags + !
 	end
 
-	HALCPUInterruptDisable rs!
-	IOFCBFLAG_MOUNTBUSY ~ fcb@ IOFileControlBlock_Flags + &=
-	rs@ HALCPUInterruptRestore
+	ObRootDirectoryUnlock
 end
 
 fn IOMountGetFilesystemName { buffer handle -- ok }
@@ -599,14 +500,17 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 	0 // word
 	memset
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	1 ObRootDirectoryLockShared ok!
+
+	if (ok@)
+		return
+	end
 
 	auto mount
 	fcb@ IOFileControlBlock_Mount + @ mount!
 
 	if (mount@ ~~)
-		ipl@ KeIPLLower
+		ObRootDirectoryUnlock
 
 		STATUS_NOT_MOUNTED ok!
 
@@ -618,7 +522,7 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 	OBNAMEMAX 1 -
 	strncpy
 
-	ipl@ KeIPLLower
+	ObRootDirectoryUnlock
 end
 
 fn IOMountQueryAll { buffer maxquery -- count ok }
@@ -629,7 +533,7 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 	0 // word
 	memset
 
-	IOMountListLock ok!
+	1 ObRootDirectoryLockShared ok!
 
 	if (ok@)
 		return
@@ -676,7 +580,7 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	IOMountListUnlock
+	ObRootDirectoryUnlock
 end
 
 fn IOMountGetFlags { mount -- flags }
@@ -706,7 +610,7 @@ end
 fn IOFilesystemSyncAll { shutdown -- ok }
 	fnsection "PAGE$text"
 
-	IOMountListLock ok!
+	1 ObRootDirectoryLockShared ok!
 
 	if (ok@)
 		return
@@ -731,5 +635,5 @@ fn IOFilesystemSyncAll { shutdown -- ok }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	IOMountListUnlock
+	ObRootDirectoryUnlock
 end

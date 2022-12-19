@@ -77,5 +77,4 @@ extern IOMountGetRootFCB { mount -- fcb }
 
 extern IOFilesystemSyncAll { shutdown -- ok }
 
-externptr IOMountListMutex
 externptr IOMountCount

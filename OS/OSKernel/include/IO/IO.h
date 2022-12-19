@@ -53,7 +53,6 @@ struct IOFileControlBlock
 	4 SizeInBytes
 	4 FSContext
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
-	4 ParseCount
 
 	4 ReusableListNext
 	4 ReusableListPrev
@@ -71,7 +70,6 @@ endstruct
 const IOFCBFLAG_DELETELASTREFERENCE 1
 const IOFCBFLAG_SYSTEMFILE          2
 const IOFCBFLAG_REUSABLEINSERTED    4
-const IOFCBFLAG_MOUNTBUSY           8
 
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2

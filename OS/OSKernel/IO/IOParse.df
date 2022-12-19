@@ -26,48 +26,6 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn IOParseCountIncrement { fcb -- mount ok }
-	0 ok!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	fcb@ IOFileControlBlock_Mount + @ mount!
-
-	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_MOUNTBUSY &)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_TRY_AGAIN_LATER ok!
-
-		return
-	end elseif (mount@ ~~)
-		rs@ HALCPUInterruptRestore
-
-		STATUS_NOT_A_DIRECTORY ok!
-
-		return
-	end
-
-	1 fcb@ IOFileControlBlock_ParseCount + +=
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOParseCountDecrement { fcb -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	if (DEBUGCHECKS)
-		if (fcb@ IOFileControlBlock_ParseCount + @ 0 ==)
-			"IOParseCountDecrement: underflow 1\n" KeCrash
-		end
-	end
-
-	1 fcb@ IOFileControlBlock_ParseCount + -=
-
-	rs@ HALCPUInterruptRestore
-end
-
 fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepath object ok }
 	fnsection "PAGE$text"
 
@@ -107,10 +65,11 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			// object, because the ref operation implied by having that file
 			// object precludes nasty stuff from happening anyway.
 
-			fcb@ // fcb
-			IOParseCountIncrement ok! mount!
+			fcb@ IOFileControlBlock_Mount + @ mount!
 
-			if (ok@)
+			if (mount@ ~~)
+				STATUS_NOT_A_DIRECTORY ok!
+
 				return
 			end
 
@@ -118,8 +77,6 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			mount@ IOMount_RootFCB + @ rootfcb!
 
 			if (rootfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ~=)
-				fcb@ IOParseCountDecrement
-
 				STATUS_NOT_A_DIRECTORY ok!
 
 				return
@@ -128,8 +85,6 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			rootfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Parse + @ parsefunc!
 
 			if (parsefunc@ ~~)
-				fcb@ IOParseCountDecrement
-
 				STATUS_NOT_A_DIRECTORY ok!
 
 				return
@@ -140,8 +95,6 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			rootfcb@ // initialfcb
 			process@ // process
 			parsefunc@ IODispatchParseFunction ok! object! reparsepath!
-
-			fcb@ IOParseCountDecrement
 		end
 	end elseif (type@ IOFileTypeObject@ ==)
 		// we need to call into the filesystem whether there is remaining path

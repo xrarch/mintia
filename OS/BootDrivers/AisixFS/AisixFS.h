@@ -35,6 +35,8 @@ struct AFSData
 	4 ICount
 	4 VolSize
 
+	4 UsedBlocks
+
 	ComBitmapHeader_SIZEOF FreeBlockBitmap
 	4 FreeBlockHint
 

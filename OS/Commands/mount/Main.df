@@ -3,7 +3,7 @@
 #include "<ll>/OSDLL/OS.h"
 
 fn private Usage { -- }
-	"usage: mount [[-ru] device [fstype]]\n" OSGetStdErr FPrintf
+	"usage: mount [[-iru] device [fstype]]\n" OSGetStdErr FPrintf
 end
 
 fn Main { ... -- ret }
@@ -23,6 +23,9 @@ fn Main { ... -- ret }
 	auto flags
 	0 flags!
 
+	auto update
+	0 update!
+
 	auto sw
 	[1]argv@ sw!
 
@@ -35,8 +38,10 @@ fn Main { ... -- ret }
 		while (sw@ gb)
 			if (sw@ gb 'r' ==)
 				OSMOUNT_READONLY flags |=
-			end elseif (sw@ gb 'u' ==)
+			end elseif (sw@ gb 'i' ==)
 				OSMOUNT_NOUID flags |=
+			end elseif (sw@ gb 'u' ==)
+				1 update!
 			end else
 				Usage
 				-1 OSExit
@@ -86,10 +91,16 @@ fn Main { ... -- ret }
 		ret@ OSStatusGetName dev@ "mount: %s: %s\n" OSError
 	end
 
-	flags@ // flags
-	devhandle@ // handle
-	fst@ // fsname
-	OSFilesystemMount ret!
+	if (update@ ~~)
+		flags@ // flags
+		devhandle@ // handle
+		fst@ // fsname
+		OSFilesystemMount ret!
+	end else
+		flags@ // newflags
+		devhandle@ // handle
+		OSMountUpdateFlags ret!
+	end
 
 	devhandle@ OSClose drop
 
@@ -125,49 +136,54 @@ fn MountListPrint { -- }
 		ok@ OSStatusGetName "mount: couldn't query mount list: %s\n" OSError
 	end
 
+	"USAGE"
+	"FILESYS"
 	"OPTIONS"
 	"DEVICE"
 
-	"%12s %s\n" Printf
+	"%8s %8s %9s %s\n" Printf
 
 	auto record
 	querybuffer@ record!
 
 	while (count@)
-		record@ OSMountInformation_VolumeName + "%12s " Printf
-
 		auto flags
 		record@ OSMountInformation_Flags + @ flags!
-
-		flags@ "%08x " Printf
 
 		auto didone
 		0 didone!
 
+		auto options
+		32 alloc options!
+
 		if (flags@ ~~)
-			"(none)\n" Printf
+			options@ "none" strcpy
 		end else
-			"(" Printf
+			0 options@ sb
 
 			if (flags@ OSMOUNT_READONLY &)
-				"ro" Printf
+				options@ options@ strlen + "ro" strcpy
+
 				1 didone!
 			end
 
 			if (flags@ OSMOUNT_NOUID &)
 				if (didone@)
-					"," Printf
+					options@ options@ strlen + "," strcpy
 				end
 
-				"nouid" Printf
+				options@ options@ strlen + "nouid" strcpy
 
 				1 didone!
 			end
-
-			")" Printf
-
-			"\n" Printf
 		end
+
+		record@ OSMountInformation_VolumeCapacity + @ 1024 /
+		record@ OSMountInformation_VolumeUsed + @ 1024 /
+		record@ OSMountInformation_FilesystemName +
+		options@
+		record@ OSMountInformation_VolumeName +
+		"%8s %8s %9s %dKB/%dKB\n" Printf
 
 		1 count -=
 		OSMountInformation_SIZEOF record +=

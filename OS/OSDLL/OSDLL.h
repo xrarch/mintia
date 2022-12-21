@@ -95,6 +95,7 @@ const DLLNOSTREAM 2
 extern DLLStreamInit { -- }
 
 extern DLLStreamWindowFreeAll { streamptr -- }
+extern DLLStreamWindowFlushAll { streamptr -- }
 
 extern DLLStreamWindowRead { length buffer streamptr -- bytesread ok }
 extern DLLStreamWindowWrite { length buffer streamptr -- byteswritten ok }

@@ -7,7 +7,8 @@ COMPONENTS := Console \
 			Object \
 			Process \
 			Security \
-			IPC
+			IPC \
+			ViewCache
 
 LINKOPT = -nostubs
 

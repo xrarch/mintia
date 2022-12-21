@@ -6,10 +6,14 @@ struct IOCacheInfoBlock
 
 	4 ModifiedPageCount
 
+	4 FirstModifiedPage
+	4 LastModifiedPage
+
 	4 MapCount
 	4 Flags
 
 	4 SplayTreeRoot
+	4 BCBRoot
 endstruct
 
 const IOCACHEBLOCKFLAG_TRUNCATING 1

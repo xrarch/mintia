@@ -6,9 +6,6 @@ const FILEVIEWGRANULARITY (1 FILEVIEWSHIFT <<)
 struct VcBuffer
 	4 FileControlBlock
 
-	4 MapCount
-	4 PinCount
-
 	4 ReclaimNext
 	4 ReclaimPrev
 
@@ -18,5 +15,8 @@ struct VcBuffer
 	4 Parent
 	4 LeftChild
 	4 RightChild
-	4 Value // file offset
+	4 FileOffset // splay tree value
+
+	2 MapCountI // when nonzero, this BCB cannot be reclaimed
+	2 PinCountI // when nonzero, the pages described by this BCB have a biased refcount
 endstruct

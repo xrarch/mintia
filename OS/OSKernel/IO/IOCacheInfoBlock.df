@@ -57,9 +57,14 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 
 	0 cacheblock@ IOCacheInfoBlock_ModifiedPageCount + !
 
+	-1 cacheblock@ IOCacheInfoBlock_FirstModifiedPage + !
+	0 cacheblock@ IOCacheInfoBlock_LastModifiedPage + !
+
 	0 cacheblock@ IOCacheInfoBlock_MapCount + !
 	0 cacheblock@ IOCacheInfoBlock_Flags + !
+	
 	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
+	0 cacheblock@ IOCacheInfoBlock_BCBRoot + !
 end
 
 fn IOCacheInfoBlockReference { cacheblock -- oldcount }
@@ -142,10 +147,31 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + @ ExSplayTreeNodeFirst pfdbe!
+	auto first
+	cacheblock@ IOCacheInfoBlock_FirstModifiedPage + @ first!
+
+	auto last
+	cacheblock@ IOCacheInfoBlock_LastModifiedPage + @ last!
+
+	-1 cacheblock@ IOCacheInfoBlock_FirstModifiedPage + !
+	0 cacheblock@ IOCacheInfoBlock_LastModifiedPage + !
+
+	first@ // value
+	cacheblock@ IOCacheInfoBlock_SplayTreeRoot + // rootptr
+	ExSplayTreeFindNodeByValue pfdbe! first!
+
+	if (pfdbe@ ~~)
+		// something happened to our first modified page since that hint was
+		// set, so use the next closest node.
+		first@ pfdbe!
+	end
 
 	while (pfdbe@)
 		IOPageFrameEntryCache_Parent pfdbe -=
+
+		if (pfdbe@ IOPageFrameEntryCache_OffsetInFile + @ last@ >)
+			break
+		end
 
 		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			pfdbe@ MmEvictablePageReference drop

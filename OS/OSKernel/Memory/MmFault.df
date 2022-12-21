@@ -23,6 +23,8 @@
 
 #include "<inc>/Process.h"
 
+#include "<inc>/ViewCache.h"
+
 #include "<ll>/OSDLL/OS.h"
 
 var MmPageFaultCount 0
@@ -473,41 +475,61 @@ fn MmNormalFault { vaddr process -- signal }
 	auto kernelmapping
 	process@ PsSystemProcess@ == kernelmapping!
 
-	vaddr@ // vaddr
-	process@ // process
-	MmFaultParameters ok! vad! object! offset!
-
-	if (ok@)
-		OSSIGNAL_SEGV signal!
-		return
-	end
-
-	if (vad@ MmVAD_PageProtection + @ ~~)
-		// guard region
-		OSSIGNAL_SEGV signal!
-		return
-	end
-
-	vad@ MmVAD_Flags + @ flags!
+	auto cache
+	vaddr@ VIEWSPACE >= vaddr@ VIEWSPACEEND < && cache!
 
 	auto capturedfcb
 
-	if (flags@ MMVADFLAG_FILE &)
-		object@ IOFile_FileControlBlock + @ capturedfcb!
+	if (cache@)
+		[vaddr@ FILEVIEWSHIFT >>]MmBufferMappings@ vad!
 
-		if (capturedfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-			vaddr@ // vaddr
-			process@ // process
-			object@ // fileobject
-			offset@ // offset
-			vad@ // vad
-			MmSatisfyCharFault ok!
-
-			if (ok@)
-				OSSIGNAL_KILL signal!
+		if (DEBUGCHECKS)
+			if (vad@ ~~)
+				vaddr@ "MmNormalFault: no buffer mapping for %x\n" KeCrash
 			end
+		end
 
+		-1 object!
+		vad@ VcBuffer_FileControlBlock + @ capturedfcb!
+		vaddr@ vad@ VcBuffer_WindowAddress + @ - vad@ VcBuffer_Value + @ + offset!
+		MMVADFLAG_FILE flags!
+
+		0 ok!
+	end else
+		vaddr@ // vaddr
+		process@ // process
+		MmFaultParameters ok! vad! object! offset!
+
+		if (ok@)
+			OSSIGNAL_SEGV signal!
 			return
+		end
+
+		if (vad@ MmVAD_PageProtection + @ ~~)
+			// guard region
+			OSSIGNAL_SEGV signal!
+			return
+		end
+
+		vad@ MmVAD_Flags + @ flags!
+
+		if (flags@ MMVADFLAG_FILE &)
+			object@ IOFile_FileControlBlock + @ capturedfcb!
+
+			if (capturedfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
+				vaddr@ // vaddr
+				process@ // process
+				object@ // fileobject
+				offset@ // offset
+				vad@ // vad
+				MmSatisfyCharFault ok!
+
+				if (ok@)
+					OSSIGNAL_KILL signal!
+				end
+
+				return
+			end
 		end
 	end
 
@@ -779,8 +801,16 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	auto pageprot
 	0 pageprot!
 
+	auto cache
+	0 cache!
+
 	if (process@ PsSystemProcess@ ==)
-		process@ MmVADListLock drop
+		if (vaddr@ VIEWSPACE < vaddr@ VIEWSPACEEND >= ||)
+			process@ MmVADListLock drop
+		end else
+			1 cache!
+			PAGEACCESS_READ PAGEACCESS_WRITE | pageprot!
+		end
 	end
 
 	// first check if this is a private page in order to determine if we
@@ -802,7 +832,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		ipl@ KeIPLLower
 
 		if (process@ PsSystemProcess@ ==)
-			process@ MmVADListUnlock
+			if (cache@ ~~)
+				process@ MmVADListUnlock
+			end
 		end
 
 		STATUS_REFAULT signal!
@@ -896,7 +928,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 				if (ok@)
 					if (process@ PsSystemProcess@ ==)
-						process@ MmVADListUnlock
+						if (cache@ ~~)
+							process@ MmVADListUnlock
+						end
 					end
 
 					OSSIGNAL_KILL signal!
@@ -946,7 +980,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 			1 vad@ MmVAD_COWCount + +=
 
 			if (process@ PsSystemProcess@ ==)
-				process@ MmVADListUnlock
+				if (cache@ ~~)
+					process@ MmVADListUnlock
+				end
 			end
 
 			return
@@ -985,6 +1021,8 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	end
 
 	if (process@ PsSystemProcess@ ==)
-		process@ MmVADListUnlock
+		if (cache@ ~~)
+			process@ MmVADListUnlock
+		end
 	end
 end

@@ -1,0 +1,176 @@
+//
+// Implements initialization for the MINTIA File View Cache.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+// Terminology:
+//   Window - Region of virtual address space into which a file view is mapped
+//   Buffer/BCB - Outstanding mapping for a file, possibly pinned
+
+var VcWindowFreeListHead 0
+
+var VcBufferReclaimListHead 0
+var VcBufferReclaimListTail 0
+
+buffer VcWindowAvailableEvent KeEvent_SIZEOF
+
+fn VcInitPhase1 { -- }
+	fnsection "INIT$text"
+
+	// initialize the file cache windows by linking the VIEWSPACE PTEs into a
+	// free list.
+
+	auto vaddr
+	VIEWSPACE VIEWSIZE + vaddr!
+
+	auto kdir
+	HALPlatformKernelPageDirectory@ kdir!
+
+	while (vaddr@ VIEWSPACE >)
+		FILEVIEWGRANULARITY vaddr -=
+
+		auto pteaddr
+		vaddr@ // vaddr
+		kdir@ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
+
+		VcWindowFreeListHead@ pteaddr@!
+		vaddr@ VcWindowFreeListHead!
+	end
+
+rosection "INIT$text"
+
+	VIEWSIZE FILEVIEWSHIFT >>
+	"Managing %d file views\n" "VcInitPhase1" HALLog
+
+rosection "text"
+
+	1 // signaled
+	OSEVENT_NOTIF // type
+	"VcWindowAvailableEvent" // name
+	VcWindowAvailableEvent // event
+	KeEventInitialize
+end
+
+fn VcWindowAllocate { -- bcb vaddr }
+	// allocate a window by either grabbing a free one or reclaiming a BCB.
+	// this routine has the possibility to return a BCB if it reclaims a non-
+	// permanent one, so the caller should check for this case and free the
+	// BCB if it doesn't want it.
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC >=)
+			"VcWindowAllocate: ipl >= IPLDPC\n" KeCrash
+		end
+	end
+
+	0 bcb!
+
+	while (1)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		VcWindowFreeListHead@ vaddr!
+
+		if (vaddr@)
+			// found a free window, take it
+
+			auto pteaddr
+			vaddr@ // vaddr
+			HALPlatformKernelPageDirectory@ // pagemap
+			MmVirtualtoPTEAddress pteaddr!
+
+			pteaddr@@ VcWindowFreeListHead!
+
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		// no free windows, reclaim one
+
+		if (VcBufferReclaimListHead@)
+			// found a reclaimable buffer, take it.
+
+			VcBufferReclaim vaddr! bcb!
+
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		// no free or reclaimable windows.
+		// wait and spin until we get one.
+
+		VcWindowAvailableEvent KeEventReset drop
+
+		ipl@ KeIPLLower
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		VcWindowAvailableEvent // object
+		KeThreadWaitForObject drop
+	end
+end
+
+fn VcWindowFree { vaddr -- }
+	// window MUST be unmapped!
+
+	auto pteaddr
+	vaddr@ // vaddr
+	HALPlatformKernelPageDirectory@ // pagemap
+	MmVirtualtoPTEAddress pteaddr!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	VcWindowFreeListHead@ pteaddr@!
+	vaddr@ VcWindowFreeListHead!
+
+	if (VcWindowAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		0 // priboost
+		VcWindowAvailableEvent // event
+		KeEventSignal
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn VcBufferReclaim { -- bcb vaddr }
+	VcBufferReclaimListHead@ bcb!
+
+	if (DEBUGCHECKS)
+		if (bcb@ ~~)
+			"VcBufferReclaim: no buffer to reclaim\n" KeCrash
+		end
+	end
+
+	// disassociate the BCB from the file and unmap it.
+	// if the BCB is non-permanent, return it to the caller so that it can be
+	// reused without performing an extra allocation.
+
+end

@@ -11,3 +11,4 @@
 #include "<inc>/Memory/IORegion.h"
 #include "<inc>/Memory/MDL.h"
 #include "<inc>/Memory/Zone.h"
+#include "<inc>/Memory/ViewCache.h"

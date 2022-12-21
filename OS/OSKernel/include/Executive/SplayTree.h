@@ -1,5 +1,5 @@
 // this structure gets inlined in funky ways in a lot of places, such as VADs
-// and file cache PFDBEs.
+// and file cache PFDBEs and view cache buffers.
 // don't change its layout without fully understanding them or you will be
 // brutally executed.
 

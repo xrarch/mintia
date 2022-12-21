@@ -1,5 +1,7 @@
 #define OSLOADER
 
+#include "../HAL/include/HALMap.h"
+
 extern LdrMain { -- ret }
 extern LdrCrash { ... fmt -- }
 extern LdrExit { ret -- }
@@ -65,20 +67,7 @@ const LDRMEM_CACHED       0
 const LDRMEM_NONCACHED    1
 const LDRMEM_WRITECOMBINE 2
 
-const KERNELSPACE      0x80000000
-const KERNELSTRUCTURES 0xA0000000
-const POOLSPACE        0xB8000000
-const POOLSPACESIZE    (16 1024 * 1024 *)
-const IDENTITYSPACE    0xC0000000
-
 const PFDBESIZE        32
-
-const PAGESIZE 4096
-const PAGEOFFSETMASK (PAGESIZE 1 -)
-const PAGENUMBERMASK (PAGEOFFSETMASK ~)
-const PAGESHIFT 12
-
-const IDENTITYSPACEMASK (IDENTITYSPACE ~)
 
 extern LdrArgsValue { arg -- out }
 extern LdrArgsCheck { arg -- present }

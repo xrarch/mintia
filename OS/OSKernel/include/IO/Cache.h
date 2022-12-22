@@ -13,7 +13,7 @@ struct IOCacheInfoBlock
 	4 Flags
 
 	4 SplayTreeRoot
-	4 BCBRoot
+	4 BCBTreeRoot
 endstruct
 
 const IOCACHEBLOCKFLAG_TRUNCATING 1

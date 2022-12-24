@@ -15,7 +15,7 @@ struct IOCacheInfoBlock
 	4 SplayTreeRoot
 	4 BCBTreeRoot
 
-	KeMutex_SIZEOF BCBTreeMutex
+	KeEvent_SIZEOF BCBTreeEvent
 endstruct
 
 const IOCACHEBLOCKFLAG_TRUNCATING 1

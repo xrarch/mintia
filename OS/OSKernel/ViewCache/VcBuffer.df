@@ -171,6 +171,8 @@ fn VcBufferGet { offset fcb -- bcb ok }
 	// create this BCB at the same time, but does not guard against an
 	// existing BCB being reclaimed, so we still need IPL synch for that.
 
+	0 ok!
+
 	cacheblock@ IOCacheInfoBlockLockBCB
 
 	auto ipl
@@ -331,4 +333,60 @@ fn VcBufferDecrementMapCount { bcb -- oldcount }
 	if (free@)
 		bcb@ VcBufferFree
 	end
+end
+
+fn VcBufferLargeMap { offset length fileobject -- vaddr bcb ok }
+	VcBuffer_SIZEOF // bytes
+	'VcBl' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! bcb!
+
+	if (ok@)
+		return
+	end
+
+	VCBCBTYPE_LARGE bcb@ VcBuffer_Type + !
+	fileobject@ IOFile_FileControlBlock + @ bcb@ VcBuffer_FileControlBlock + !
+
+	1 bcb@ VcBuffer_MapCountI + si
+	0 bcb@ VcBuffer_PinCountI + si
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & bcb@ VcBuffer_Length + !
+
+	0 bcb@ VcBuffer_Parent + !
+	0 bcb@ VcBuffer_LeftChild + !
+	0 bcb@ VcBuffer_RightChild + !
+	offset@ PAGENUMBERMASK & bcb@ VcBuffer_FileOffset + !
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & // length
+	0 // startva
+	offset@ PAGENUMBERMASK & // sectionoffset
+	fileobject@ // mappedobject
+	PsSystemProcess@ // processobject
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	MmMapViewProcessObject ok! vaddr!
+
+	if (ok@)
+		bcb@ MmFree
+
+		return
+	end
+
+	vaddr@ bcb@ VcBuffer_WindowAddress + !
+
+	offset@ PAGEOFFSETMASK & vaddr +=
+end
+
+fn VcBufferDirty { bcb -- }
+	if (bcb@ VcBuffer_Type + @ VCBCBTYPE_LARGE ==)
+		bcb@ VcBuffer_Length + @ // length
+		bcb@ VcBuffer_WindowAddress + @ // vaddr
+		PsSystemProcess@ // processobject
+		MmFlushViewProcess drop
+
+		return
+	end
+
+	bcb@ MmBufferDirty
 end

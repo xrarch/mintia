@@ -38,6 +38,14 @@ extern VcCacheInfoBlockTruncate { newsize cacheblock -- }
 extern VcBufferIncrementMapCount { bcb -- oldcount }
 extern VcBufferDecrementMapCount { bcb -- oldcount }
 
+extern VcBufferDirty { bcb -- }
+
+extern VcBufferLargeMap { offset length fileobject -- vaddr bcb ok }
+
+extern VcBufferGet { offset fcb -- bcb ok }
+
+extern VcFileMap { offset length fileobject -- vaddr bcb ok }
+
 extern VcBufferReclaim { -- bcb vaddr }
 extern VcBufferFree { bcb -- }
 

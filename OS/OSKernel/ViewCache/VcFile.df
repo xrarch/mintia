@@ -28,7 +28,13 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn VcFileMap { offset length fcb -- bcb ok }
+fn VcFileMap { offset length fileobject -- vaddr bcb ok }
+	// expects FCB to be locked either shared or exclusive; truncation must be
+	// blocked out.
+
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
 
@@ -38,5 +44,37 @@ fn VcFileMap { offset length fcb -- bcb ok }
 		end
 	end
 
-	
+	auto large
+	0 large!
+
+	if (length@)
+		if (length@ FILEVIEWGRANULARITY >)
+			1 large!
+		end elseif (offset@ FILEVIEWNUMBERMASK &
+			offset@ length@ + 1 - FILEVIEWNUMBERMASK & ~=)
+			1 large!
+		end
+	end
+
+	if (large@)
+		// allocate a LARGE bcb and map it into POOLSPACE.
+
+		offset@ // offset
+		length@ // length
+		fileobject@ // fcb
+		VcBufferLargeMap ok! bcb! vaddr!
+	end else
+		// map a fixed sized window of the file.
+
+		offset@ FILEVIEWNUMBERMASK & // offset
+		fcb@ // fcb
+		VcBufferGet ok! bcb!
+
+		if (ok@)
+			return
+		end
+
+		bcb@ VcBuffer_WindowAddress + @ vaddr!
+		offset@ FILEVIEWOFFSETMASK & vaddr +=
+	end
 end

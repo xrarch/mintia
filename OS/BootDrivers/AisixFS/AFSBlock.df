@@ -27,6 +27,8 @@
 
 #include "<inc>/FSRTL.h"
 
+#include "<inc>/ViewCache.h"
+
 #include "AisixFS.h"
 
 fn AFSBlockBitmapReadFAT { mount -- ok }
@@ -44,12 +46,6 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 	auto usedblocks
 	0 usedblocks!
 
-	auto fatpfdbe
-	0 fatpfdbe!
-
-	auto blkno
-	0 blkno!
-
 	auto runlength
 	0 runlength!
 
@@ -59,35 +55,47 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 	auto runstart
 	0 runstart!
 
-	auto fatblkno
-	afsdata@ AFSData_FATStart + @ fatblkno!
+	auto blkno
+	0 blkno!
 
-	auto off
-	0 off!
+	auto fatbcb
+	0 fatbcb!
+
+	auto diskoff
+	0 diskoff!
+
+	auto mappedpage
+	-1 mappedpage!
+
+	auto volfile
+	mount@ FSVolumeGetFile volfile!
 
 	auto fatdata
 
 	while (blkno@ blocks@ <)
-		if (off@ AFSBLOCKOFFMASK & ~~)
+		afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << blkno@ 2 << + diskoff!
+
+		if (diskoff@ FILEVIEWNUMBERMASK & mappedpage@ FILEVIEWNUMBERMASK & ~=)
 			// must read in a new FAT block
 
-			if (fatpfdbe@)
-				fatpfdbe@ MmEvictablePageDereference drop
+			if (fatbcb@)
+				fatbcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // flags
-			0 // kflags
-			afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << off@ + // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+			diskoff@ // offset
+			0 // length
+			volfile@ // fileobject
+			VcFileMap ok! fatbcb! fatdata!
 
 			if (ok@)
 				return
 			end
+
+			diskoff@ mappedpage!
 		end
 
 		auto type
-		fatdata@ off@ AFSBLOCKOFFMASK & + @ type!
+		fatdata@@ type!
 
 		if (type@ ~~)
 			if (runtype@)
@@ -125,7 +133,7 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 			1 runlength +=
 		end
 
-		4 off +=
+		4 fatdata +=
 		1 blkno +=
 	end
 
@@ -153,8 +161,8 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 		end
 	end
 
-	if (fatpfdbe@)
-		fatpfdbe@ MmEvictablePageDereference drop
+	if (fatbcb@)
+		fatbcb@ VcBufferDecrementMapCount drop
 	end
 
 	if (AFSDEBUG 2 >=)
@@ -234,18 +242,19 @@ end
 fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 	startblkno@ blkno!
 
-	auto fatblkno
-	0 fatblkno!
+	auto fatbcb
+	0 fatbcb!
 
-	auto curfatblkno
-	-1 curfatblkno!
+	auto diskoff
+	0 diskoff!
 
-	auto fatpfdbe
-	0 fatpfdbe!
+	auto mappedpage
+	-1 mappedpage!
+
+	auto volfile
+	mount@ FSVolumeGetFile volfile!
 
 	0 ok!
-
-	auto off
 
 	auto fatdata
 
@@ -257,57 +266,56 @@ fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 			"AFSWalkFAT: blkno == 0xFFFFFFFF\n" KeCrash
 		end
 
-		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
-		blkno@ 2 << AFSBLOCKOFFMASK & off!
+		afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << blkno@ 2 << + diskoff!
 
-		if (fatblkno@ curfatblkno@ ~=)
+		if (diskoff@ FILEVIEWNUMBERMASK & mappedpage@ FILEVIEWNUMBERMASK & ~=)
 			// must read in a new FAT block
 
-			if (fatpfdbe@)
-				fatpfdbe@ MmEvictablePageDereference drop
+			if (fatbcb@)
+				fatbcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // flags
-			kflags@ // kflags
-			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+			diskoff@ FILEVIEWNUMBERMASK & // offset
+			0 // length
+			volfile@ // fileobject
+			VcFileMap ok! fatbcb! fatdata!
 
 			if (ok@)
 				return
 			end
 
-			fatblkno@ curfatblkno!
+			diskoff@ mappedpage!
 		end
 
-		fatdata@ off@ + @ blkno!
+		fatdata@ diskoff@ FILEVIEWOFFSETMASK & + @ blkno!
 
 		1 startcount -=
 	end
 
-	if (fatpfdbe@)
-		fatpfdbe@ MmEvictablePageDereference drop
+	if (fatbcb@)
+		fatbcb@ VcBufferDecrementMapCount drop
 	end
 end
 
 fn AFSBlockDeallocateChain { first blkno mount -- }
 	mount@ AFSBlockBitmapLockUnalertable
 
-	auto fatblkno
-	0 fatblkno!
+	auto fatbcb
+	0 fatbcb!
 
-	auto curfatblkno
-	-1 curfatblkno!
+	auto diskoff
+	0 diskoff!
 
-	auto fatpfdbe
-	0 fatpfdbe!
+	auto mappedpage
+	-1 mappedpage!
+
+	auto volfile
+	mount@ FSVolumeGetFile volfile!
 
 	auto blocks
 	0 blocks!
 
 	auto ok
-
-	auto off
 
 	auto fatdata
 
@@ -315,31 +323,27 @@ fn AFSBlockDeallocateChain { first blkno mount -- }
 	mount@ IOMountGetContext afsdata!
 
 	while (blkno@ 0xFFFFFFFF ~=)
-		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
-		blkno@ 2 << AFSBLOCKOFFMASK & off!
+		afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << blkno@ 2 << + diskoff!
 
-		if (fatblkno@ curfatblkno@ ~=)
+		if (diskoff@ FILEVIEWNUMBERMASK & mappedpage@ FILEVIEWNUMBERMASK & ~=)
 			// must read in a new FAT block
 
-			if (fatpfdbe@)
-				fatpfdbe@ // pfdbe
-				mount@ // mount
-				FSVolumeBlockWrite drop
+			if (fatbcb@)
+				fatbcb@ VcBufferDirty
 
-				fatpfdbe@ MmEvictablePageDereference drop
+				fatbcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // flags
-			IOKFLAG_URGENT // kflags
-			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+			diskoff@ FILEVIEWNUMBERMASK & // offset
+			0 // length
+			volfile@ // fileobject
+			VcFileMap ok! fatbcb! fatdata!
 
 			if (ok@)
 				ok@ "AFSBlockDeallocateChain: failed to read FAT block (%i)\n" KeCrash
 			end
 
-			fatblkno@ curfatblkno!
+			diskoff@ mappedpage!
 		end
 
 		if (first@ ~~)
@@ -351,22 +355,20 @@ fn AFSBlockDeallocateChain { first blkno mount -- }
 			ComBitmapClearBits
 		end
 
-		fatdata@ off@ + @ blkno!
+		fatdata@ diskoff@ FILEVIEWOFFSETMASK & + @ blkno!
 
 		if (first@)
-			0xFFFFFFFF fatdata@ off@ + !
+			0xFFFFFFFF fatdata@ diskoff@ FILEVIEWOFFSETMASK & + !
 			0 first!
 		end else
-			0 fatdata@ off@ + !
+			0 fatdata@ diskoff@ FILEVIEWOFFSETMASK & + !
 		end
 	end
 
-	if (fatpfdbe@)
-		fatpfdbe@ // pfdbe
-		mount@ // mount
-		FSVolumeBlockWrite drop
+	if (fatbcb@)
+		fatbcb@ VcBufferDirty
 
-		fatpfdbe@ MmEvictablePageDereference drop
+		fatbcb@ VcBufferDecrementMapCount drop
 	end
 
 	blocks@ afsdata@ AFSData_UsedBlocks + -=
@@ -412,14 +414,17 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 		0 run!
 	end
 
-	auto fatblkno
-	0 fatblkno!
+	auto fatbcb
+	0 fatbcb!
 
-	auto curfatblkno
-	-1 curfatblkno!
+	auto diskoff
+	0 diskoff!
 
-	auto fatpfdbe
-	0 fatpfdbe!
+	auto mappedpage
+	-1 mappedpage!
+
+	auto volfile
+	mount@ FSVolumeGetFile volfile!
 
 	auto first
 
@@ -430,22 +435,21 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 	if (lastblkno@ -1 ==)
 		0 first!
 	end else
-		lastblkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+		afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << lastblkno@ 2 << + diskoff!
 
-		0 // flags
-		IOKFLAG_URGENT // kflags
-		afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
-		mount@ // mount
-		FSVolumeBlockRead ok! fatpfdbe! fatdata!
+		diskoff@ FILEVIEWNUMBERMASK & // offset
+		0 // length
+		volfile@ // fileobject
+		VcFileMap ok! fatbcb! fatdata!
 
 		if (ok@)
 			ok@ "AFSBlockAllocateChain: failed to read FAT block (%i)\n" KeCrash
 		end
 
-		fatblkno@ curfatblkno!
+		diskoff@ mappedpage!
 
 		if (DEBUGCHECKS)
-			if (fatdata@ lastblkno@ 2 << AFSBLOCKOFFMASK & + @ 0xFFFFFFFF ~=)
+			if (fatdata@ diskoff@ FILEVIEWOFFSETMASK & + @ 0xFFFFFFFF ~=)
 				"AFSBlockAllocateChain: final block had a link\n" KeCrash
 			end
 		end
@@ -478,12 +482,10 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 
 				mount@ AFSBlockBitmapUnlock
 
-				if (fatpfdbe@)
-					fatpfdbe@ // pfdbe
-					mount@ // mount
-					FSVolumeBlockWrite drop
+				if (fatbcb@)
+					fatbcb@ VcBufferDirty
 
-					fatpfdbe@ MmEvictablePageDereference drop
+					fatbcb@ VcBufferDecrementMapCount drop
 				end
 
 				if (killstart@ -1 ~=)
@@ -513,8 +515,8 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 			4 pintable +=
 		end
 
-		if (fatpfdbe@)
-			blkno@ fatdata@ lastblkno@ 2 << AFSBLOCKOFFMASK & + !
+		if (fatbcb@)
+			blkno@ fatdata@ diskoff@ FILEVIEWOFFSETMASK & + !
 		end else
 			if (DEBUGCHECKS)
 				if (startblkno@ -1 ~=)
@@ -526,33 +528,30 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 			blkno@ startblkno!
 		end
 
-		blkno@ 2 << AFSBLOCKSHIFT >> fatblkno!
+		afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << blkno@ 2 << + diskoff!
 
-		if (fatblkno@ curfatblkno@ ~=)
+		if (diskoff@ FILEVIEWNUMBERMASK & mappedpage@ FILEVIEWNUMBERMASK & ~=)
 			// must read in a new FAT block
 
-			if (fatpfdbe@)
-				fatpfdbe@ // pfdbe
-				mount@ // mount
-				FSVolumeBlockWrite drop
+			if (fatbcb@)
+				fatbcb@ VcBufferDirty
 
-				fatpfdbe@ MmEvictablePageDereference drop
+				fatbcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // flags
-			IOKFLAG_URGENT // kflags
-			afsdata@ AFSData_FATStart + @ fatblkno@ + AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! fatpfdbe! fatdata!
+			diskoff@ FILEVIEWNUMBERMASK & // offset
+			0 // length
+			volfile@ // fileobject
+			VcFileMap ok! fatbcb! fatdata!
 
 			if (ok@)
 				ok@ "AFSBlockAllocateChain: failed to read FAT block (%i)\n" KeCrash
 			end
 
-			fatblkno@ curfatblkno!
+			diskoff@ mappedpage!
 		end
 
-		0xFFFFFFFF fatdata@ blkno@ 2 << AFSBLOCKOFFMASK & + !
+		0xFFFFFFFF fatdata@ diskoff@ FILEVIEWOFFSETMASK & + !
 		blkno@ lastblkno!
 
 		if (run@)
@@ -562,12 +561,10 @@ fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok
 		1 i +=
 	end
 
-	if (fatpfdbe@)
-		fatpfdbe@ // pfdbe
-		mount@ // mount
-		FSVolumeBlockWrite drop
+	if (fatbcb@)
+		fatbcb@ VcBufferDirty
 
-		fatpfdbe@ MmEvictablePageDereference drop
+		fatbcb@ VcBufferDecrementMapCount drop
 	end
 
 	if (run@ ~~)

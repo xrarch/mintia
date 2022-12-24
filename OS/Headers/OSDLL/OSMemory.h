@@ -46,7 +46,9 @@ struct OSMemoryInformation
 
 	4 ModifiedFilePageCount
 
-	48 Reserved
+	4 ViewCachePageCount
+
+	44 Reserved
 endstruct
 
 struct OSQuotaInformation

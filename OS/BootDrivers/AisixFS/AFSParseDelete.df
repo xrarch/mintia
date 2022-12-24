@@ -29,6 +29,8 @@
 
 #include "<inc>/FSRTL.h"
 
+#include "<inc>/ViewCache.h"
+
 #include "AisixFS.h"
 
 fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparsepath object ok }
@@ -194,12 +196,12 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				continue
 			end
 
-			auto pfdbe
+			auto bcb
 			auto dirent
 
 			pcomp@ // name
 			initialfcb@ // dirfcb
-			AFSDirectoryFindEntry ok! pfdbe! dirent!
+			AFSDirectoryFindEntry ok! bcb! dirent!
 
 			if (ok@)
 				if (ok@ STATUS_NOT_FOUND ==)
@@ -240,7 +242,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			initialfcb@ IOFileControlBlockGetMount // mount
 			AFSFCBRead ok! nextfcb!
 
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 
 			initialfcb@ IOFileControlBlockUnlock
 			initialfcb@ IOFileControlBlockDereference drop
@@ -401,13 +403,13 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 
 	// allocate inode
 
-	auto dirpfdbe
-	auto ipfdbe
+	auto dirbcb
+	auto ibcb
 
 	auto inode
 	auto inum
 
-	mount@ AFSINodeAllocate ok! ipfdbe! inode! inum!
+	mount@ AFSINodeAllocate ok! ibcb! inode! inum!
 	
 	if (ok@)
 		return
@@ -437,16 +439,13 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 
 	auto dirent
 	
-	dirfcb@ AFSDirectoryAllocateEntry ok! dirpfdbe! dirent!
+	dirfcb@ AFSDirectoryAllocateEntry ok! dirbcb! dirent!
 
 	if (ok@)
 		0 inode@ AFSINode_type + !
 
-		ipfdbe@ // pfdbe
-		mount@ // mount
-		FSVolumeBlockWrite drop
-
-		ipfdbe@ MmEvictablePageDereference drop
+		ibcb@ VcBufferDirty
+		ibcb@ VcBufferDecrementMapCount drop
 
 		return
 	end
@@ -473,12 +472,10 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 		0 inode@ AFSINode_type + !
 		0 dirent@ AFSDirEnt_INum + !
 
-		ipfdbe@ // pfdbe
-		mount@ // mount
-		FSVolumeBlockWrite drop
+		ibcb@ VcBufferDirty
+		ibcb@ VcBufferDecrementMapCount drop
 
-		ipfdbe@ MmEvictablePageDereference drop
-		dirpfdbe@ MmEvictablePageDereference drop
+		dirbcb@ VcBufferDecrementMapCount drop
 
 		return
 	end
@@ -499,16 +496,11 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 		fcb@ AFSFCBDelete
 	end
 
-	ipfdbe@ // pfdbe
-	mount@ // mount
-	FSVolumeBlockWrite drop
+	ibcb@ VcBufferDirty
+	ibcb@ VcBufferDecrementMapCount drop
 
-	dirpfdbe@ // pfdbe
-	KeProcessCurrent // process
-	MmEvictablePageModify
-
-	ipfdbe@ MmEvictablePageDereference drop
-	dirpfdbe@ MmEvictablePageDereference drop
+	dirbcb@ VcBufferDirty
+	dirbcb@ VcBufferDecrementMapCount drop
 
 	dirfcb@ AFSINodeUpdateModificationTime
 end

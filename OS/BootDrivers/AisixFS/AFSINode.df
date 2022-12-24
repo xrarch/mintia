@@ -23,9 +23,11 @@
 
 #include "<inc>/FSRTL.h"
 
+#include "<inc>/ViewCache.h"
+
 #include "AisixFS.h"
 
-fn AFSINodeRead { inum mount urgent -- ptr pfdbe ok }
+fn AFSINodeRead { inum mount urgent -- ptr bcb ok }
 	auto block
 	auto off
 
@@ -38,19 +40,12 @@ fn AFSINodeRead { inum mount urgent -- ptr pfdbe ok }
 
 	inum@ AFSINode_SIZEOF * off!
 
-	mount@ IOMountGetContext AFSData_IStart + @ off@ AFSBLOCKSHIFT >> + AFSBLOCKSHIFT << block!
+	mount@ IOMountGetContext AFSData_IStart + @ AFSBLOCKSHIFT << off@ + block!
 
-	OSACCESSFLAG_NOREADAHEAD // flags
-	0 // kflags
 	block@ // offset
-	mount@ // mount
-	FSVolumeBlockRead ok! pfdbe! ptr!
-
-	if (ok@)
-		return
-	end
-
-	off@ AFSBLOCKOFFMASK & ptr +=
+	0 // length
+	mount@ FSVolumeGetFile // fileobject
+	VcFileMap ok! bcb! ptr!
 end
 
 fn AFSINodeAllocationLock { mount -- ok }
@@ -70,7 +65,7 @@ end
 fn AFSINodeFree { inum mount -- }
 	auto ok
 
-	auto pfdbe
+	auto bcb
 	auto inode
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
@@ -78,7 +73,7 @@ fn AFSINodeFree { inum mount -- }
 	inum@ // inum
 	mount@ // mount
 	1 // urgent
-	AFSINodeRead ok! pfdbe! inode!
+	AFSINodeRead ok! bcb! inode!
 
 	if (ok@)
 		ok@ "AFSINodeFree: couldn't read inode (%i)\n" KeCrash
@@ -86,22 +81,13 @@ fn AFSINodeFree { inum mount -- }
 
 	0 inode@ AFSINode_type + !
 
-	pfdbe@ // pfdbe
-	mount@ // mount
-	FSVolumeBlockWrite ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "AFSINodeFree: couldn't dirty block (%i)\n" KeCrash
-		end
-	end
-
-	pfdbe@ MmEvictablePageDereference drop
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
-fn AFSINodeAllocate { mount -- inum inode pfdbe ok }
+fn AFSINodeAllocate { mount -- inum inode bcb ok }
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
 
@@ -117,11 +103,10 @@ fn AFSINodeAllocate { mount -- inum inode pfdbe ok }
 		return
 	end
 
-	0 // flags
-	0 // kflags
 	inoblk@ AFSBLOCKSHIFT << // offset
-	mount@ // mount
-	FSVolumeBlockRead ok! pfdbe! inode!
+	0 // length
+	mount@ FSVolumeGetFile // fileobject
+	VcFileMap ok! bcb! inode!
 
 	if (ok@)
 		mount@ AFSINodeAllocationUnlock
@@ -135,15 +120,14 @@ fn AFSINodeAllocate { mount -- inum inode pfdbe ok }
 
 	while (inum@ inodes@ <)
 		if (inum@ AFSINode_SIZEOF * AFSBLOCKOFFMASK & ~~)
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 
 			1 inoblk +=
 
-			0 // flags
-			0 // kflags
 			inoblk@ AFSBLOCKSHIFT << // offset
-			mount@ // mount
-			FSVolumeBlockRead ok! pfdbe! inode!
+			0 // length
+			mount@ FSVolumeGetFile // fileobject
+			VcFileMap ok! bcb! inode!
 
 			if (ok@)
 				mount@ AFSINodeAllocationUnlock
@@ -168,7 +152,7 @@ fn AFSINodeAllocate { mount -- inum inode pfdbe ok }
 
 	STATUS_END_OF_DISK ok!
 
-	pfdbe@ MmEvictablePageDereference drop
+	bcb@ VcBufferDecrementMapCount drop
 
 	mount@ AFSINodeAllocationUnlock
 end
@@ -257,7 +241,7 @@ fn AFSINodeUpdate { fcb -- }
 
 	auto ok
 
-	auto pfdbe
+	auto bcb
 	auto inode
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
@@ -265,14 +249,11 @@ fn AFSINodeUpdate { fcb -- }
 	inum@ // inum
 	mount@ // mount
 	1 // urgent
-	AFSINodeRead ok! pfdbe! inode!
+	AFSINodeRead ok! bcb! inode!
 
 	if (ok@)
 		ok@ "AFSINodeUpdate: couldn't read inode (%i)\n" KeCrash
 	end
-
-	auto rs
-	HALCPUInterruptDisable rs!
 
 	fcb@ IOFileControlBlockGetSize inode@ AFSINode_bytesize + !
 	fcbdata@ AFSFCBData_FirstFATLink + @ inode@ AFSINode_startblock + !
@@ -281,19 +262,8 @@ fn AFSINodeUpdate { fcb -- }
 	fcbdata@ AFSFCBData_UID + @ inode@ AFSINode_uid + !
 	fcb@ IOFileControlBlockGetModifyTime KeTime_SecPart + @ inode@ AFSINode_timestamp + !
 
-	rs@ HALCPUInterruptRestore
-
-	pfdbe@ // pfdbe
-	mount@ // mount
-	FSVolumeBlockWrite ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "AFSINodeUpdate: couldn't dirty block (%i)\n" KeCrash
-		end
-	end
-
-	pfdbe@ MmEvictablePageDereference drop
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
@@ -560,13 +530,13 @@ fn (IODispatchDeleteFunction) AFSDelete { fcb -- }
 	AFSFCBCacheUnlockBucket
 
 	auto ok
-	auto pfdbe
+	auto bcb
 	auto inode
 
 	fcbdata@ AFSFCBData_INum + @ // inum
 	mount@ // mount
 	1 // urgent
-	AFSINodeRead ok! pfdbe! inode!
+	AFSINodeRead ok! bcb! inode!
 
 	if (ok@)
 		ok@ "AFSDelete: couldn't read inode (%i)\n" KeCrash
@@ -576,17 +546,8 @@ fn (IODispatchDeleteFunction) AFSDelete { fcb -- }
 
 	0 inode@ AFSINode_type + !
 
-	pfdbe@ // pfdbe
-	mount@ // mount
-	FSVolumeBlockWrite ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "AFSDelete: couldn't dirty block (%i)\n" KeCrash
-		end
-	end
-
-	pfdbe@ MmEvictablePageDereference drop
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
 
 	fcbdata@ MmFree
 end
@@ -742,7 +703,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		fcb@ IOFileControlBlockGetContext AFSFCBData_NextFCB + @ fcb!
 	end
 
-	auto pfdbe
+	auto bcb
 	auto fcbdata
 	auto rs
 
@@ -753,7 +714,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		inum@ // inum
 		mount@ // mount
 		0 // urgent
-		AFSINodeRead ok! pfdbe! ptr!
+		AFSINodeRead ok! bcb! ptr!
 
 		if (ok@)
 			bucket@ // bucket
@@ -786,7 +747,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			mount@ // mount
 			AFSFCBCacheUnlockBucket
 
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 
 			return
 		end
@@ -807,7 +768,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			mount@ // mount
 			AFSFCBCacheUnlockBucket
 
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 
 			return
 		end
@@ -835,7 +796,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		time@ fcb@ IOFileControlBlockSetModifyTime
 		time@ fcb@ IOFileControlBlockSetChangeTime
 
-		pfdbe@ MmEvictablePageDereference drop
+		bcb@ VcBufferDecrementMapCount drop
 
 		fcb@ // fcb
 		buckethead@ // buckethead

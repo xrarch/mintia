@@ -99,7 +99,7 @@ extern AFSSetSecurity { uid gid permissions object -- ok }
 
 extern AFSINodeUpdateModificationTime { fcb -- }
 
-extern AFSINodeAllocate { mount -- inum inode pfdbe ok }
+extern AFSINodeAllocate { mount -- inum inode bcb ok }
 extern AFSINodeFree { inum mount -- }
 
 extern AFSFCBRemove { fcb buckethead -- }
@@ -135,10 +135,10 @@ extern AFSDeleteObject { object -- ok }
 extern AFSReadFile { timeout flags kflags offset mdl fcb -- ok }
 extern AFSWriteFile { flags kflags offset mdl fcb -- ok }
 
-extern AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
+extern AFSDirectoryAllocateEntry { fcb -- dirent bcb ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
-extern AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
+extern AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }
 
 extern AFSVerifyName { name -- ok }
 

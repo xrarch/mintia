@@ -45,6 +45,7 @@ extern VcBufferLargeMap { offset length fileobject -- vaddr bcb ok }
 extern VcBufferGet { offset fcb -- bcb ok }
 
 extern VcFileMap { offset length fileobject -- vaddr bcb ok }
+extern VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
 
 extern VcBufferReclaim { -- bcb vaddr }
 extern VcBufferFree { bcb -- }

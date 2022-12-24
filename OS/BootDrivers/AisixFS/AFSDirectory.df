@@ -23,9 +23,11 @@
 
 #include "<inc>/FSRTL.h"
 
+#include "<inc>/ViewCache.h"
+
 #include "AisixFS.h"
 
-fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
+fn AFSDirectoryAllocateEntry { fcb -- dirent bcb ok }
 	// FCB is locked by caller
 
 	if (DEBUGCHECKS)
@@ -54,35 +56,32 @@ fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 	fcb@ IOFileControlBlockGetSize bytesize!
 
 	auto pageno
-	byteoff@ PAGESHIFT >> pageno!
+	byteoff@ FILEVIEWSHIFT >> pageno!
 
 	auto curpageno
 	-1 curpageno!
 
 	auto found
 
-	0 pfdbe!
+	0 bcb!
 
 	while (byteoff@ bytesize@ <)
 		if (pageno@ curpageno@ ~=)
 			// must read in a new page
 
-			if (pfdbe@)
-				pfdbe@ MmEvictablePageDereference drop
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // localpteaddr
-			0 // flags
-			0 // kflags
-			byteoff@ PAGENUMBERMASK & // offset
+			byteoff@ FILEVIEWNUMBERMASK & // offset
 			fcb@ // fcb
-			IOCachePageRead ok! pfdbe! dirent!
+			VcFileControlBlockMap ok! bcb! dirent!
 
 			if (ok@)
 				return
 			end
 
-			byteoff@ PAGEOFFSETMASK & dirent +=
+			byteoff@ FILEVIEWOFFSETMASK & dirent +=
 
 			pageno@ curpageno!
 		end
@@ -95,11 +94,11 @@ fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 
 		AFSDirEnt_SIZEOF dirent +=
 		AFSDirEnt_SIZEOF byteoff +=
-		byteoff@ PAGESHIFT >> pageno!
+		byteoff@ FILEVIEWSHIFT >> pageno!
 	end
 
-	if (pfdbe@)
-		pfdbe@ MmEvictablePageDereference drop
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
 	end
 
 	// no existing free entries -- try to allocate a new one.
@@ -114,18 +113,15 @@ fn AFSDirectoryAllocateEntry { fcb -- dirent pfdbe ok }
 		return
 	end
 
-	0 // localpteaddr
-	0 // flags
-	0 // kflags
-	bytesize@ PAGENUMBERMASK & // offset
+	bytesize@ FILEVIEWNUMBERMASK & // offset
 	fcb@ // fcb
-	IOCachePageRead ok! pfdbe! dirent!
+	VcFileControlBlockMap ok! bcb! dirent!
 
 	if (ok@)
 		return
 	end
 
-	bytesize@ PAGEOFFSETMASK & dirent +=
+	bytesize@ FILEVIEWOFFSETMASK & dirent +=
 
 	if (DEBUGCHECKS)
 		if (dirent@ AFSDirEnt_INum + @)
@@ -163,13 +159,13 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 	fcb@ IOFileControlBlockGetSize bytesize!
 
 	auto pageno
-	byteoff@ PAGESHIFT >> pageno!
+	byteoff@ FILEVIEWSHIFT >> pageno!
 
 	auto curpageno
 	-1 curpageno!
 
-	auto pfdbe
-	0 pfdbe!
+	auto bcb
+	0 bcb!
 
 	auto data
 
@@ -177,22 +173,19 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 		if (pageno@ curpageno@ ~=)
 			// must read in a new page
 
-			if (pfdbe@)
-				pfdbe@ MmEvictablePageDereference drop
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // localpteaddr
-			0 // flags
-			0 // kflags
-			byteoff@ PAGENUMBERMASK & // offset
+			byteoff@ FILEVIEWNUMBERMASK & // offset
 			fcb@ // fcb
-			IOCachePageRead ok! pfdbe! data!
+			VcFileControlBlockMap ok! bcb! data!
 
 			if (ok@)
 				return
 			end
 
-			byteoff@ PAGEOFFSETMASK & data +=
+			byteoff@ FILEVIEWOFFSETMASK & data +=
 
 			pageno@ curpageno!
 		end
@@ -207,7 +200,7 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
 			data@ AFSDirEnt_INum + @ afsdirent@ AFSDirEnt_INum + !
 
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 
 			0 ok!
 
@@ -218,12 +211,12 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
 		AFSDirEnt_SIZEOF data +=
 		AFSDirEnt_SIZEOF byteoff +=
-		byteoff@ PAGESHIFT >> pageno!
+		byteoff@ FILEVIEWSHIFT >> pageno!
 		1 seek +=
 	end
 
-	if (pfdbe@)
-		pfdbe@ MmEvictablePageDereference drop
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
 	end
 
 	seek@ nextseek!
@@ -257,7 +250,7 @@ fn (IODispatchReadDirectoryFunction) AFSReadDirectory { seek dirent fcb -- nexts
 	strncpy
 end
 
-fn AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
+fn AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }
 	if (DEBUGCHECKS)
 		if (dirfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 			// should have been caught by the IO system code
@@ -284,33 +277,30 @@ fn AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 	dirfcb@ IOFileControlBlockGetSize bytesize!
 
 	auto pageno
-	byteoff@ PAGESHIFT >> pageno!
+	byteoff@ FILEVIEWSHIFT >> pageno!
 
 	auto curpageno
 	-1 curpageno!
 
-	0 pfdbe!
+	0 bcb!
 
 	while (byteoff@ bytesize@ <)
 		if (pageno@ curpageno@ ~=)
 			// must read in a new page
 
-			if (pfdbe@)
-				pfdbe@ MmEvictablePageDereference drop
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
 			end
 
-			0 // localpteaddr
-			0 // flags
-			0 // kflags
-			byteoff@ PAGENUMBERMASK & // offset
+			byteoff@ FILEVIEWNUMBERMASK & // offset
 			dirfcb@ // fcb
-			IOCachePageRead ok! pfdbe! dirent!
+			VcFileControlBlockMap ok! bcb! dirent!
 
 			if (ok@)
 				return
 			end
 
-			byteoff@ PAGEOFFSETMASK & dirent +=
+			byteoff@ FILEVIEWOFFSETMASK & dirent +=
 
 			pageno@ curpageno!
 		end
@@ -319,7 +309,7 @@ fn AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 			if (name@ -1 ==)
 				// just checking for any valid entry
 
-				pfdbe@ MmEvictablePageDereference drop
+				bcb@ VcBufferDecrementMapCount drop
 
 				0 ok!
 
@@ -337,11 +327,11 @@ fn AFSDirectoryFindEntry { name dirfcb -- dirent pfdbe ok }
 
 		AFSDirEnt_SIZEOF dirent +=
 		AFSDirEnt_SIZEOF byteoff +=
-		byteoff@ PAGESHIFT >> pageno!
+		byteoff@ FILEVIEWSHIFT >> pageno!
 	end
 
-	if (pfdbe@)
-		pfdbe@ MmEvictablePageDereference drop
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
 	end
 
 	STATUS_NOT_FOUND ok!
@@ -414,12 +404,12 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		return
 	end
 
-	auto pfdbe
+	auto bcb
 	auto dirent
 
 	name@ // name
 	dirfcb@ // dirfcb
-	AFSDirectoryFindEntry ok! pfdbe! dirent!
+	AFSDirectoryFindEntry ok! bcb! dirent!
 
 	if (ok@)
 		return
@@ -434,13 +424,13 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	AFSFCBRead ok! fcb!
 
 	if (ok@)
-		pfdbe@ MmEvictablePageDereference drop
+		bcb@ VcBufferDecrementMapCount drop
 
 		return
 	end
 
 	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
-		pfdbe@ MmEvictablePageDereference drop
+		bcb@ VcBufferDecrementMapCount drop
 		fcb@ IOFileControlBlockDereference drop
 
 		STATUS_FORBIDDEN_OPERATION ok!
@@ -453,7 +443,7 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 			// unlinking directories is forbidden if anyone could possibly
 			// add new entries to it afterwards.
 
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 			fcb@ IOFileControlBlockDereference drop
 
 			STATUS_TRY_AGAIN_LATER ok!
@@ -468,7 +458,7 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		AFSDirectoryFindEntry ok! drop drop
 
 		if (ok@ STATUS_NOT_FOUND ~=)
-			pfdbe@ MmEvictablePageDereference drop
+			bcb@ VcBufferDecrementMapCount drop
 			fcb@ IOFileControlBlockDereference drop
 
 			if (ok@ ~~)
@@ -482,11 +472,9 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	// free the directory entry
 	0 dirent@ AFSDirEnt_INum + !
 
-	pfdbe@ // pfdbe
-	KeProcessCurrent // process
-	MmEvictablePageModify
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
 
-	pfdbe@ MmEvictablePageDereference drop
 	fcb@ IOFileControlBlockDeleteLastReference
 	fcb@ IOFileControlBlockDereference drop
 
@@ -518,12 +506,12 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		return
 	end
 
-	auto srcpfdbe
+	auto srcbcb
 	auto srcdirent
 
 	srcname@ // name
 	srcfcb@ // dirfcb
-	AFSDirectoryFindEntry ok! srcpfdbe! srcdirent!
+	AFSDirectoryFindEntry ok! srcbcb! srcdirent!
 
 	if (ok@)
 		return
@@ -531,7 +519,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 
 	if (srcfcb@ destfcb@ ==)
 		if (srcname@ destname@ strcmp)
-			srcpfdbe@ MmEvictablePageDereference drop
+			srcbcb@ MmEvictablePageDereference drop
 
 			0 ok!
 
@@ -539,7 +527,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		end
 	end
 
-	auto destpfdbe
+	auto destbcb
 	auto destdirent
 
 	// check to make sure the desired name isn't present in the destination
@@ -547,13 +535,13 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 
 	destname@ // destname
 	destfcb@ // dirfcb
-	AFSDirectoryFindEntry ok! destpfdbe! destdirent!
+	AFSDirectoryFindEntry ok! destbcb! destdirent!
 
 	if (ok@ STATUS_NOT_FOUND ~=)
-		srcpfdbe@ MmEvictablePageDereference drop
+		srcbcb@ VcBufferDecrementMapCount drop
 
 		if (ok@ ~~)
-			destpfdbe@ MmEvictablePageDereference drop
+			destbcb@ VcBufferDecrementMapCount drop
 
 			STATUS_ALREADY_EXISTS ok!
 		end
@@ -567,7 +555,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 	AFSFCBRead ok! filefcb!
 
 	if (ok@)
-		srcpfdbe@ MmEvictablePageDereference drop
+		srcbcb@ VcBufferDecrementMapCount drop
 
 		return
 	end
@@ -588,7 +576,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 			mount@ AFSRenameLock ok!
 
 			if (ok@)
-				srcpfdbe@ MmEvictablePageDereference drop
+				srcbcb@ VcBufferDecrementMapCount drop
 				filefcb@ IOFileControlBlockDereference drop
 
 				return
@@ -602,7 +590,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 			if (ok@)
 				mount@ AFSRenameUnlock
 
-				srcpfdbe@ MmEvictablePageDereference drop
+				srcbcb@ VcBufferDecrementMapCount drop
 				filefcb@ IOFileControlBlockDereference drop
 
 				return
@@ -611,14 +599,14 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 			1 renamelocked!
 		end
 
-		destfcb@ AFSDirectoryAllocateEntry ok! destpfdbe! destdirent!
+		destfcb@ AFSDirectoryAllocateEntry ok! destbcb! destdirent!
 
 		if (ok@)
 			if (renamelocked@)
 				mount@ AFSRenameUnlock
 			end
 
-			srcpfdbe@ MmEvictablePageDereference drop
+			srcbcb@ VcBufferDecrementMapCount drop
 			filefcb@ IOFileControlBlockDereference drop
 
 			return
@@ -637,16 +625,11 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 	destname@ // src
 	strcpy
 
-	srcpfdbe@ // pfdbe
-	KeProcessCurrent // process
-	MmEvictablePageModify
+	srcbcb@ VcBufferDirty
 
 	if (srcfcb@ destfcb@ ~=)
-		destpfdbe@ // pfdbe
-		KeProcessCurrent // process
-		MmEvictablePageModify
-
-		destpfdbe@ MmEvictablePageDereference drop
+		destbcb@ VcBufferDirty
+		destbcb@ VcBufferDecrementMapCount drop
 	end
 
 	if (renamelocked@)
@@ -660,6 +643,6 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		mount@ AFSRenameUnlock
 	end
 
-	srcpfdbe@ MmEvictablePageDereference drop
+	srcbcb@ VcBufferDecrementMapCount drop
 	filefcb@ IOFileControlBlockDereference drop
 end

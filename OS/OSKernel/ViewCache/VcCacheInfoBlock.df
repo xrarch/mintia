@@ -1,0 +1,90 @@
+//
+// Implements view cache specific details of cacheblock management.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn VcCacheInfoBlockTruncate { newsize cacheblock -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"VcCacheInfoBlockTruncate: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// unmap and free all the BCBs in the cacheblock's splay tree that contain
+	// the offset at newsize.
+	// this does not remove "LARGE" BCBs since those are special-purpose and
+	// should have all been removed by now.
+
+	auto maxwin
+	newsize@ FILEVIEWNUMBERMASK & maxwin!
+
+	auto bcb
+	auto lbcb
+
+	newsize@ // value
+	cacheblock@ IOCacheInfoBlock_BCBTreeRoot + // rootptr
+	ExSplayTreeFindNodeByValue bcb! lbcb!
+
+	if (bcb@ ~~)
+		lbcb@ bcb!
+	end
+
+	while (bcb@)
+		VcBuffer_Parent bcb -=
+
+		if (DEBUGCHECKS)
+			if (bcb@ VcBuffer_PinCountI + gi)
+				"VcCacheInfoBlockTruncate: BCB was pinned\n" KeCrash
+			end
+		end
+
+		if (bcb@ VcBuffer_FileOffset + @ newsize@ >=)
+			auto nbcb
+			bcb@ VcBuffer_Parent + // node
+			ExSplayTreeNodeNext nbcb!
+
+			// eliminate the BCB
+
+			bcb@ VcBufferIncrementMapCount drop
+
+			bcb@ VcBufferFree
+
+			nbcb@ bcb!
+		end elseif (bcb@ VcBuffer_FileOffset + @ maxwin@ ==)
+			// truncate the BCB beyond the last page in the new size
+
+			newsize@ FILEVIEWOFFSETMASK & PAGENUMBERMASK & // offset
+			bcb@ // bcb
+			MmBufferTruncate
+
+			bcb@ VcBuffer_Parent + // node
+			ExSplayTreeNodeNext bcb!
+		end else
+			bcb@ VcBuffer_Parent + // node
+			ExSplayTreeNodeNext bcb!
+		end
+	end
+end

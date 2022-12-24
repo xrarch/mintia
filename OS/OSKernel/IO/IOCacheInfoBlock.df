@@ -41,7 +41,7 @@ public IOCacheInfoBlockDirtyListTail
 fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	fnsection "PAGE$text"
 
-	IOCacheInfoBlock_SIZEOF // bytes
+	IOCacheInfoBlock_SIZEOF VcBuffer_SIZEOF + // bytes
 	'Cach' // tag
 	CANBLOCK POOLALLOC | // flags
 	MmAllocWithTag ok! cacheblock!
@@ -67,6 +67,33 @@ fn IOCacheInfoBlockCreate { -- cacheblock ok }
 	
 	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
 	0 cacheblock@ IOCacheInfoBlock_BCBTreeRoot + !
+
+	"BCBTreeMutex" // name
+	KERNELMODE // mode
+	cacheblock@ IOCacheInfoBlock_BCBTreeMutex + // mutex
+	KeMutexInitialize
+
+	0 cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_WindowAddress + !
+	0 cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_FileControlBlock + !
+	VCBCBTYPE_PERMANENT cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_Type + !
+end
+
+fn IOCacheInfoBlockLockBCB { cacheblock -- }
+	fnsection "PAGE$text"
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	cacheblock@ IOCacheInfoBlock_BCBTreeMutex + // object
+	KeThreadWaitForObject drop
+end
+
+fn IOCacheInfoBlockUnlockBCB { cacheblock -- }
+	fnsection "PAGE$text"
+
+	0 // abandon
+	cacheblock@ IOCacheInfoBlock_BCBTreeMutex + // mutex
+	KeMutexRelease drop
 end
 
 fn IOCacheInfoBlockReference { cacheblock -- oldcount }
@@ -165,6 +192,7 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	if (pfdbe@ ~~)
 		// something happened to our first modified page since that hint was
 		// set, so use the next closest node.
+
 		first@ pfdbe!
 	end
 

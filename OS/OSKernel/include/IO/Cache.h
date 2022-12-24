@@ -14,6 +14,8 @@ struct IOCacheInfoBlock
 
 	4 SplayTreeRoot
 	4 BCBTreeRoot
+
+	KeMutex_SIZEOF BCBTreeMutex
 endstruct
 
 const IOCACHEBLOCKFLAG_TRUNCATING 1
@@ -36,6 +38,9 @@ extern IOFilesystemSyncWorker { context1 context2 -- }
 extern IOCacheDumpInfo { cacheblock -- }
 
 extern IOCacheInfoBlockCreate { -- cacheblock ok }
+
+extern IOCacheInfoBlockLockBCB { cacheblock -- }
+extern IOCacheInfoBlockUnlockBCB { cacheblock -- }
 
 extern IOCacheInfoBlockTryIncrementMap { cacheblock -- oldcount ok }
 extern IOCacheInfoBlockDecrementMap { cacheblock -- oldcount }

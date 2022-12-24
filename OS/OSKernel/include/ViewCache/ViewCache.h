@@ -3,6 +3,9 @@ extern VcInitPhase1 { -- }
 const FILEVIEWSHIFT 15
 const FILEVIEWGRANULARITY (1 FILEVIEWSHIFT <<)
 
+const FILEVIEWOFFSETMASK (FILEVIEWGRANULARITY 1 -)
+const FILEVIEWNUMBERMASK (FILEVIEWOFFSETMASK ~)
+
 const VCBCBTYPE_NORMAL    1 // allocated from nonpaged pool, mapped into VIEWSPACE
 const VCBCBTYPE_PERMANENT 2 // pre-allocated as part of a cacheblock
 const VCBCBTYPE_LARGE     3 // allocated from nonpaged pool, mapped into POOLSPACE
@@ -27,4 +30,16 @@ struct VcBuffer
 	2 PinCountI // when nonzero, the pages described by this BCB have a biased refcount
 endstruct
 
+extern VcWindowAllocate { -- bcb vaddr }
+extern VcWindowFree { vaddr -- }
+
 extern VcCacheInfoBlockTruncate { newsize cacheblock -- }
+
+extern VcBufferIncrementMapCount { bcb -- oldcount }
+extern VcBufferDecrementMapCount { bcb -- oldcount }
+
+extern VcBufferReclaim { -- bcb vaddr }
+extern VcBufferFree { bcb -- }
+
+externptr VcBufferReclaimListHead
+externptr VcBufferReclaimListTail

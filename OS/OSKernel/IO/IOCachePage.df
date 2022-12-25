@@ -32,7 +32,7 @@
 var IOCachePagesUsed 0
 public IOCachePagesUsed
 
-fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
+fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 	// if localpteaddr is set, we must enter and leave at IPLDPC.
 
 	if (DEBUGCHECKS)
@@ -100,8 +100,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
 		// ref it so it doesn't get evicted while caller is using it
 
 		pfdbe@ MmEvictablePageReference drop
-
-		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
 
 		while (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb
 			MMEVICTFLAG_VALID MMEVICTFLAG_IOINPROGRESS | & MMEVICTFLAG_IOINPROGRESS ==)
@@ -199,8 +197,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pageframe pfdbe ok }
 	end
 
 	// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
-
-	pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | pageframe!
 end
 
 fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
@@ -587,7 +583,7 @@ fn IOCachePageReadCluster { firstpfdbe fcb mdl -- pagecount }
 			IOKFLAG_CLUSTR // kflags
 			offset@ // offset
 			fcb@ // fcb
-			IOCachePageGet ok! pfdbe! drop
+			IOCachePageGet ok! pfdbe!
 
 			if (ok@)
 				ipl@ KeIPLLower
@@ -644,7 +640,7 @@ fn IOCachePageReadClusterComplete { firstpfdbe mdl -- }
 	end
 end
 
-fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok }
+fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 	// if localpteaddr is set, we must enter and leave at IPLDPC.
 
 	auto cacheblock
@@ -671,7 +667,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 	kflags@ // kflags
 	offset@ // offset
 	fcb@ // fcb
-	IOCachePageGet ok! pfdbe! pageframe!
+	IOCachePageGet ok! pfdbe!
 
 	if (ok@)
 		return
@@ -707,11 +703,14 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pageframe pfdbe ok 
 		if (localpteaddr@)
 			localpteaddr@@ capturedpte!
 
+			auto phyaddr
+			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
+
 			if (kflags@ IOKFLAG_SWAPIN &)
 				// this is a kernel mapping
-				pageframe@ IDENTITYSPACEMASK & PTE_TRANSITION | PTE_TLBHACK | transitionpte!
+				phyaddr@ PTE_TRANSITION | PTE_TLBHACK | transitionpte!
 			end else
-				pageframe@ IDENTITYSPACEMASK & PTE_TRANSITION | transitionpte!
+				phyaddr@ PTE_TRANSITION | transitionpte!
 			end
 
 			transitionpte@ localpteaddr@!

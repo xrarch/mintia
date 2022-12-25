@@ -310,24 +310,10 @@ fn DKSComplete { id -- }
 	ior@ DKSRequest_MDL + @ mdl!
 
 	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
-		if (mdl@)
-			// there's an MDL, try to copy directly thru identityspace with
-			// the pinned pages described in the MDL.
-
-			// holy crap new record for worst thing ever
-			mdl@ MmMDLHeader_SIZEOF + ior@ DKSRequest_Buffer + @ PAGESHIFT >> 2 << + @
-			MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
-			ior@ DKSRequest_Buffer + @ PAGEOFFSETMASK & + // dest
-
-			DKSBuffer@ id@ DKSBLOCKSHIFT << + // src
-			DKSBLOCKSIZE // len
-			memcpy
-		end else
-			ior@ DKSRequest_Buffer + @ // dest
-			DKSBuffer@ id@ DKSBLOCKSHIFT << + // src
-			DKSBLOCKSIZE // size
-			memcpy
-		end
+		ior@ DKSRequest_Buffer + @ // dest
+		DKSBuffer@ id@ DKSBLOCKSHIFT << + // src
+		DKSBLOCKSIZE // size
+		memcpy
 	end
 
 	1 ior@ DKSRequest_BlockCount + -=
@@ -392,21 +378,10 @@ fn DKSComplete { id -- }
 
 		return
 	end else
-		if (mdl@)
-			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-
-			mdl@ MmMDLHeader_SIZEOF + ior@ DKSRequest_Buffer + @ PAGESHIFT >> 2 << + @
-			MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
-			ior@ DKSRequest_Buffer + @ PAGEOFFSETMASK & + // src
-
-			DKSBLOCKSIZE // size
-			memcpy
-		end else
-			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-			ior@ DKSRequest_Buffer + @ // src
-			DKSBLOCKSIZE // size
-			memcpy
-		end
+		DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
+		ior@ DKSRequest_Buffer + @ // src
+		DKSBLOCKSIZE // size
+		memcpy
 
 		HALCPUInterruptDisable rs!
 
@@ -479,7 +454,7 @@ fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
 
 	if (mdl@)
 		mdl@ MmMDLHeader_DriverGoWild + ior!
-		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
 	end else
 		DKSRequest_SIZEOF // bytes
 		'DKSt' // tag
@@ -518,20 +493,10 @@ fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
 		if (kflags@ DKSKFLAG_READ & ~~)
 			rs@ HALCPUInterruptRestore
 
-			if (mdl@)
-				// there's an MDL, try to copy directly thru identityspace with
-				// the pinned pages.
-
-				DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-				mdl@ MmMDLHeader_SIZEOF + @ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE | buf@ + // src
-				DKSBLOCKSIZE // len
-				memcpy
-			end else
-				DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-				buf@ // src
-				DKSBLOCKSIZE // len
-				memcpy
-			end
+			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
+			buf@ // src
+			DKSBLOCKSIZE // len
+			memcpy
 
 			HALCPUInterruptDisable rs!
 		end
@@ -632,6 +597,12 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 		return
 	end
 
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		return
+	end
+
 	length@ mdl@ MmMDLHeader_Length + !
 
 	kflags@ DKSKFLAG_READ | // kflags
@@ -700,6 +671,12 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- ok 
 	0 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLMap ok!
 
 	if (ok@)
 		return

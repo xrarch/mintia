@@ -61,7 +61,7 @@ fn VcFileMap { offset length fileobject -- vaddr bcb ok }
 
 		offset@ // offset
 		length@ // length
-		fileobject@ // fcb
+		fileobject@ // fileobject
 		VcBufferLargeMap ok! bcb! vaddr!
 	end else
 		offset@ // offset
@@ -83,4 +83,233 @@ fn VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
 
 	bcb@ VcBuffer_WindowAddress + @ vaddr!
 	offset@ FILEVIEWOFFSETMASK & vaddr +=
+end
+
+fn VcFileWrite { flags length offset buf fcb lastmode -- byteswritten ok }
+	fnsection "PAGE$text"
+
+	0 byteswritten!
+
+	auto bcb
+	0 bcb!
+
+	auto curvpn
+	-1 curvpn!
+
+	auto data
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	auto truncfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
+
+	auto oldsize
+
+	if (truncfunc@ ~~)
+		// driver provides no way to grow this file
+
+		if (offset@ bytesize@ >=)
+			fcb@ IOFileControlBlockUnlock
+
+			STATUS_END_OF_DISK ok!
+
+			return
+		end
+
+		bytesize@ offset@ -
+		length@
+		min length!
+	end else
+		if (offset@ FILEVIEWNUMBERMASK >=)
+			fcb@ IOFileControlBlockUnlock
+
+			// prevent underflow
+			STATUS_END_OF_FILE ok!
+
+			return
+		end
+
+		FILEVIEWNUMBERMASK offset@ -
+		length@
+		min length!
+
+		if (offset@ length@ + bytesize@ >)
+			// ga grow tha file
+
+			fcb@ IOFileControlBlockUnlock
+
+			offset@ length@ + // newsize
+			1 // growing
+			1 // keeplocked
+			1 // zero
+			flags@ // flags
+			fcb@ // fcb
+			IOFileControlBlockTruncate ok! oldsize!
+
+			if (ok@)
+				// don't unlock FCB, IOFileControlBlockTruncate leaves it
+				// unlocked in case of error.
+
+				return
+			end
+		end
+	end
+
+	while (byteswritten@ length@ <)
+		if (offset@ FILEVIEWNUMBERMASK & curvpn@ ~=)
+			if (bcb@)
+				bcb@ VcBufferDirty
+				bcb@ VcBufferDecrementMapCount drop
+			end
+
+			offset@ FILEVIEWNUMBERMASK & // offset
+			fcb@ // fcb
+			VcBufferGet ok! bcb!
+
+			if (ok@)
+				0 bcb!
+				break
+			end
+
+			bcb@ VcBuffer_WindowAddress + @ offset@ FILEVIEWOFFSETMASK & + data!
+
+			offset@ FILEVIEWNUMBERMASK & curvpn!
+		end
+
+		auto m
+		length@ byteswritten@ -
+		PAGESIZE offset@ PAGEOFFSETMASK & -
+		min m!
+
+		if (m@ PAGESIZE ==)
+			// writing a full page -- no need to read something we're about to
+			// overwrite. if the PTE isn't already valid, add a zero page to
+			// the file at this offset.
+
+			if (data@ HALPlatformKernelPageDirectory@ MmVirtualAddressIsValid ~~)
+				auto pfdbe
+				0 // localpteaddr
+				0 // iointent
+				IOKFLAG_ZEROES // kflags
+				offset@ PAGENUMBERMASK & // offset
+				fcb@ // fcb
+				IOCachePageGet ok! pfdbe! drop
+
+				if (ok@ ~~)
+					pfdbe@ MmEvictablePageDereference drop
+				end
+			end
+		end
+
+		if (lastmode@ USERMODE ==)
+			data@ // dest
+			buf@ // src
+			m@ // size
+			KeSafeCopyIn ok!
+
+			if (ok@)
+				// zero the rest of the page
+
+				m@ byteswritten +=
+
+				break
+			end
+		end else
+			data@ // dest
+			buf@ // src
+			m@ // size
+			memcpy
+		end
+
+		m@ data +=
+		m@ buf +=
+		m@ byteswritten +=
+		m@ offset +=
+	end
+
+	fcb@ IOFileControlBlockUnlock
+
+	if (bcb@)
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapCount drop
+	end
+end
+
+fn VcFileRead { flags length offset buf fcb lastmode -- bytesread ok }
+	fnsection "PAGE$text"
+
+	0 bytesread!
+
+	auto bcb
+	0 bcb!
+
+	auto curvpn
+	-1 curvpn!
+
+	auto data
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	bytesize@ offset@ -
+	length@
+	min length!
+
+	while (bytesread@ length@ <)
+		if (offset@ FILEVIEWNUMBERMASK & curvpn@ ~=)
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
+			end
+
+			offset@ FILEVIEWNUMBERMASK & // offset
+			fcb@ // fcb
+			VcBufferGet ok! bcb!
+
+			if (ok@)
+				0 bcb!
+				break
+			end
+
+			bcb@ VcBuffer_WindowAddress + @ offset@ FILEVIEWOFFSETMASK & + data!
+
+			offset@ FILEVIEWNUMBERMASK & curvpn!
+		end
+
+		auto m
+		length@ bytesread@ -
+		PAGESIZE offset@ PAGEOFFSETMASK & -
+		min m!
+
+		if (lastmode@ USERMODE ==)
+			buf@ // dest
+			data@ // src
+			m@ // size
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				// zero the rest of the page
+
+				break
+			end
+		end else
+			buf@ // dest
+			data@ // src
+			m@ // size
+			memcpy
+		end
+
+		m@ data +=
+		m@ buf +=
+		m@ bytesread +=
+		m@ offset +=
+	end
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
 end

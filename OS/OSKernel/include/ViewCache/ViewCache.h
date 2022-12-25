@@ -47,6 +47,9 @@ extern VcBufferGet { offset fcb -- bcb ok }
 extern VcFileMap { offset length fileobject -- vaddr bcb ok }
 extern VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
 
+extern VcFileWrite { flags length offset buf fcb lastmode -- byteswritten ok }
+extern VcFileRead { flags length offset buf fcb lastmode -- bytesread ok }
+
 extern VcBufferReclaim { -- bcb vaddr }
 extern VcBufferFree { bcb -- }
 

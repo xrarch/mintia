@@ -93,6 +93,7 @@ externptr MmPageFreeListHead
 externptr MmPageZeroListHead
 externptr MmPageFreeCount
 externptr MmConstantZeroPage
+externptr MmZeroThreadPoolPage
 externptr MmInited
 externptr MmEventPageAvailable
 externptr MmEventMSPageAvailable

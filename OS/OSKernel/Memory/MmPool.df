@@ -122,7 +122,7 @@ fn MmPoolDump { tag -- usage }
 			// heap
 
 			tag@ // tag
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << IDENTITYSPACE |
+			pfdbe@ MmPageFrameEntryPool_VirtualAddress + @
 			MmHeapDumpPage usage +=
 		end
 
@@ -163,7 +163,7 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 			bytes@ // bytes
 			tag@ // tag
 			flags@ // flags
-			MmNonpagedPoolAllocPages ok! ptr!
+			MmNonpagedPoolAllocPages ok! ptr! drop
 		end
 
 		return
@@ -241,7 +241,9 @@ fn MmFree { ptr -- }
 
 				// nonpaged.
 
-				ptr@ MmNonpagedPoolFreePages
+				0 // noaccount
+				ptr@ // ptr
+				MmNonpagedPoolFreePages
 			end else
 				ipl@ KeIPLLower
 
@@ -362,7 +364,7 @@ fn MmPagedPoolAllocPages { bytes tag flags -- realva ok }
 	MmPoolSpacePagedEndBitmapHeader // header
 	ComBitmapSetBits
 
-	if (flags@ PAGEPOOLEXP & ~~)
+	if (flags@ POOLEXP & ~~)
 		pages@ PAGESHIFT << MmPagedPoolBytesUsed +=
 
 		if (MmPagedPoolBytesUsed@ MmPagedPoolBytesPeak@ >)
@@ -469,41 +471,11 @@ fn MmPagedPoolFreePages { noaccount vaddr -- }
 			MmVirtualtoPTEAddress pteaddr!
 		end
 
-		IPLDPC KeIPLRaise ipl!
-
-		auto pte
-		pteaddr@@ pte!
-
-		if (DEBUGCHECKS)
-			if (pte@ PTE_V &)
-				"MmPagedPoolFreePages: valid PTE found despite clearing working set\n" KeCrash
-			end
-		end
-
-		0 // phyaddr
-		0 // flags
-		vaddr@ // vaddr
+		0 // deletepte
 		pteaddr@ // pteaddr
-		0 // asid
-		MmPTEUpdate drop drop drop
-
-		if (pte@ PTE_INSWAP &)
-			// free private page in swap
-
-			ipl@ KeIPLLower
-
-			pte@ IOSwapPageFreePTE
-		end elseif (pte@ PTE_TRANSITION &)
-			// free private page
-
-			ipl@ // ipl
-			pte@ PAGENUMBERMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + // pfdbe
-			MmAnonymousPageDelete
-		end elseif (pte@ PTE_KERNEL_DEMANDZERO ==)
-			ipl@ KeIPLLower
-		end else
-			pte@ "MmPagedPoolFreePages: strange PTE %08x\n" KeCrash
-		end
+		vaddr@ // vaddr
+		PsSystemProcess@ // process
+		MmAnonymousPageDeleteByPTE
 
 		1 count -=
 		4 pteaddr +=
@@ -526,7 +498,7 @@ fn MmPagedPoolFreePages { noaccount vaddr -- }
 	end
 end
 
-fn MmNonpagedPoolAllocPages { bytes tag flags -- ptr ok }
+fn MmNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 	auto pagesneeded
 	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
 
@@ -564,7 +536,6 @@ fn MmNonpagedPoolAllocPages { bytes tag flags -- ptr ok }
 	auto i
 	0 i!
 
-	auto firstpfdbe
 	0 firstpfdbe!
 
 	while (i@ pagesneeded@ <)
@@ -636,25 +607,25 @@ fn MmNonpagedPoolAllocPages { bytes tag flags -- ptr ok }
 		1 i +=
 	end
 
-	HALCPUInterruptDisable rs!
+	if (flags@ POOLEXP & ~~)
+		HALCPUInterruptDisable rs!
 
-	pagesneeded@ PAGESHIFT << MmNonpagedPoolBytesUsed +=
+		pagesneeded@ PAGESHIFT << MmNonpagedPoolBytesUsed +=
 
-	if (MmNonpagedPoolBytesUsed@ MmNonpagedPoolBytesPeak@ >)
-		MmNonpagedPoolBytesUsed@ MmNonpagedPoolBytesPeak!
+		if (MmNonpagedPoolBytesUsed@ MmNonpagedPoolBytesPeak@ >)
+			MmNonpagedPoolBytesUsed@ MmNonpagedPoolBytesPeak!
+		end
+
+		rs@ HALCPUInterruptRestore
 	end
-
-	rs@ HALCPUInterruptRestore
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 	firstpfdbe@ MmPoolPageInsert
 	ipl@ KeIPLLower
-
-	firstpfdbe@ pfdbe!
 end
 
-fn MmNonpagedPoolFreePages { ptr -- }
+fn MmNonpagedPoolFreePages { noaccount ptr -- }
 	if (DEBUGCHECKS)
 		if (ptr@ POOLSPACE <)
 			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x < POOLSPACE\n" KeCrash
@@ -664,7 +635,7 @@ fn MmNonpagedPoolFreePages { ptr -- }
 			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x beyond pool space\n" KeCrash
 		end
 
-		if (ptr@ 3 &)
+		if (ptr@ PAGEOFFSETMASK &)
 			ptr@ "MmPoolPageAlignedFree: ptr 0x%08x not aligned\n" KeCrash
 		end
 	end
@@ -717,8 +688,13 @@ fn MmNonpagedPoolFreePages { ptr -- }
 
 	auto rs
 	HALCPUInterruptDisable rs!
-	pages@ PAGESHIFT << MmNonpagedPoolBytesUsed -=
+
+	if (noaccount@ ~~)
+		pages@ PAGESHIFT << MmNonpagedPoolBytesUsed -=
+	end
+
 	pages@ MmPhysicalCommitUsage -=
+
 	rs@ HALCPUInterruptRestore
 
 	pages@ // pages
@@ -893,4 +869,36 @@ fn MmPoolPageInsert { pfdbe -- }
 		pfdbe@ h@ MmPageFrameEntryPool_PoolListPrev + !
 		pfdbe@ MmPoolPageListHead!
 	end
+end
+
+fn MmMapQuickPage { phyaddr -- vaddr ok }
+	1 MmPoolSpaceReserve ok! vaddr!
+
+	if (ok@)
+		return
+	end
+
+	PAGESHIFT vaddr <<=
+	POOLSPACE vaddr +=
+
+	auto pteaddr
+	vaddr@ // vaddr
+	HALPlatformKernelPageDirectory@ // pagemap
+	MmVirtualtoPTEAddress pteaddr!
+
+	phyaddr@ // phyaddr
+	PTE_V PTE_W | // flags
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	0 // asid
+	MmPTEUpdate drop drop drop
+end
+
+fn MmUnmapQuickPage { vaddr -- }
+	POOLSPACE vaddr -=
+	PAGESHIFT vaddr >>=
+
+	1 // pages
+	vaddr@ // offset
+	MmPoolSpaceRelease
 end

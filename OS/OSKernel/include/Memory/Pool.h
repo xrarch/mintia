@@ -7,12 +7,18 @@ externptr MmPagedPoolBytesPeak
 extern MmPoolSpaceReserve { pagesneeded -- offset ok }
 extern MmPoolSpaceRelease { pages offset -- }
 
+extern MmMapQuickPage { phyaddr -- vaddr ok }
+extern MmUnmapQuickPage { vaddr -- }
+
 extern MmPoolPageRemove { pfdbe -- }
 extern MmPoolPageInsert { pfdbe -- }
 extern MmPoolDump { tag -- usage }
 
 extern MmPagedPoolAllocPages { bytes tag flags -- realva ok }
 extern MmPagedPoolFreePages { noaccount vaddr -- }
+
+extern MmNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
+extern MmNonpagedPoolFreePages { noaccount ptr -- }
 
 // heap stuff
 
@@ -46,7 +52,7 @@ const MMHEAPPAGED       3
 struct MmAllocatedHeapBlock
 	1 BucketIndex
 	1 LastBucketIndex
-	2 Magic // bottom 4 bits of magic are used to store heap level
+	2 Magic // least significant 4 bits of magic are used to store heap level
 	4 Tag
 endstruct
 

@@ -2,6 +2,7 @@
 
 HALCPUHalt:
 .global HALCPUHalt
+	halt
 	ret
 
 HALfox32Reset:

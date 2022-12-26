@@ -317,7 +317,7 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 	if (flags@ PAGED &)
 		PAGESIZE // bytes
 		'PgHp' // tag
-		flags@ PAGEPOOLEXP | // flags
+		flags@ POOLEXP | // flags
 		MmPagedPoolAllocPages ok! ptr!
 
 		if (ok@)
@@ -328,12 +328,10 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 			ipl@ KeIPLLower
 		end
 
-		FREEFIRST flags@ | // priority
-		MmPageAlloc ok! ptr! n!
-
-		if (ok@)
-			return
-		end
+		PAGESIZE // bytes
+		'NpHp' // tag
+		flags@ POOLEXP | // flags
+		MmNonpagedPoolAllocPages ok! ptr! n!
 
 		if (flags@ CANBLOCK &)
 			IPLDPC KeIPLRaise drop
@@ -342,9 +340,7 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 		// initialize the pfdbe
 		level@ n@ MmPageFrameEntryHeap_Level + !
 		0 n@ MmPageFrameEntryHeap_Permanent + !
-		n@ MmPoolPageInsert
-
-		ptr@ PAGESHIFT << IDENTITYSPACE | ptr!
+		//n@ MmPoolPageInsert
 	end
 
 	// set bucketindex in our block header
@@ -555,18 +551,14 @@ fn MmHeapFree { ptr -- }
 
 			return
 		end else
-			ptr@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + nb!
+			PAGESIZE MmNonpagedHeapBytesUsedExternally -=
 
-			if (nb@ MmPageFrameEntryHeap_Permanent + @ ~~)
-				nb@ MmPoolPageRemove
-				nb@ MmPageFreeByEntry
+			1 // noaccount
+			ptr@ // ptr
+			MmNonpagedPoolFreePages
 
-				PAGESIZE MmNonpagedHeapBytesUsedExternally -=
-				1 MmPhysicalCommitUsage -=
-
-				ipl@ KeIPLLower
-				return
-			end
+			ipl@ KeIPLLower
+			return
 		end
 	end
 

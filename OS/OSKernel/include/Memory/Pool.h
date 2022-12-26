@@ -7,7 +7,7 @@ externptr MmPagedPoolBytesPeak
 extern MmPoolSpaceReserve { pagesneeded -- offset ok }
 extern MmPoolSpaceRelease { pages offset -- }
 
-extern MmMapQuickPage { phyaddr -- vaddr ok }
+extern MmMapQuickPage { phyaddr -- vaddr }
 extern MmUnmapQuickPage { vaddr -- }
 
 extern MmPoolPageRemove { pfdbe -- }

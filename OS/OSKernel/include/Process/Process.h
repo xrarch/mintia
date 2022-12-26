@@ -92,6 +92,8 @@ struct PsThread
 
 	4 IPCBlock
 
+	4 PoolAddress
+
 	KeEvent_SIZEOF TerminationEvent
 
 	4 FileCreationPermissions

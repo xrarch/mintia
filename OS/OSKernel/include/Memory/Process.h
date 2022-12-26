@@ -9,6 +9,7 @@ extern MmProcessUnchargePageTables { process -- }
 
 extern MmThreadInitialize { thread -- ok }
 extern MmThreadUninitialize { thread -- ok }
+extern MmThreadGetPoolAddress { -- pooladdr }
 
 struct MmProcessHeader // contains things that only need to be accessed while process is swapped in
 	4 WorkingSetSize

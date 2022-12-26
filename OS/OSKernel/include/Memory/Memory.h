@@ -72,7 +72,7 @@ extern MmFree { ptr -- }
 extern MmChargeBytesGet { bytes -- charge }
 extern MmBlockChargeGet { block -- charge }
 
-extern MmKernelStackAlloc { -- kstack ok }
+extern MmKernelStackAlloc { -- pooladdr kstack ok }
 extern MmKernelStackFree { kstack -- }
 extern MmKernelStackSwapOut { thread -- }
 extern MmKernelStackSwapIn { thread -- }

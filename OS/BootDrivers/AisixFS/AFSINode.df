@@ -618,6 +618,13 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount mount -- actua
 		auto fcbdata
 		auto bucket
 
+		// get an FCB from the head of the reclaimable list. we can't try to
+		// reclaim it until we get the bucket mutex, so capture the bucket
+		// number and then lock that bucket, and see if the head of the
+		// reclaimable list is still a member of that bucket. if so, we can
+		// proceed with reclaiming it, otherwise we have to restart and try a
+		// new one.
+
 		auto rs
 		HALCPUInterruptDisable rs!
 
@@ -741,6 +748,17 @@ fn AFSFCBDelete { fcb -- }
 end
 
 fn AFSFCBZeroReferences { fcb -- tryagain }
+	// this is called when an FCB reaches zero references. the refcount is
+	// still biased by one and it is our responsibility to set it to zero.
+	// this gives us an opportunity to place the FCB on our reclamation
+	// structures. this requires locking the bucket mutex in order to maintain
+	// the proper synchronization.
+	//
+	// if we discover, between being called and locking the bucket mutex, that
+	// the FCB has once again reached >1 references, we return 1 in tryagain
+	// to the caller to indicate that he should try the deref operation again.
+	// it will be repeated until it succeeds.
+
 	0 tryagain!
 
 	auto fcbdata

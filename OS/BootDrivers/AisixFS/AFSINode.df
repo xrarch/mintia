@@ -268,20 +268,6 @@ fn AFSINodeUpdate { fcb -- }
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
-fn AFSFCBCacheTryLockBucket { bucket mount -- ok }
-	if (DEBUGCHECKS)
-		if (bucket@ AFSFCBBUCKETS >=)
-			"AFSFCBCacheTryLockBucket: bucket >= AFSFCBBUCKETS\n" KeCrash
-		end
-	end
-
-	KERNELMODE // waitmode
-	0 // alertable
-	0 // timeout
-	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * + // object
-	KeThreadWaitForObject ok!
-end
-
 fn AFSFCBCacheLockBucket { bucket mount -- ok }
 	if (DEBUGCHECKS)
 		if (bucket@ AFSFCBBUCKETS >=)
@@ -369,6 +355,65 @@ fn AFSFCBInsert { fcb buckethead -- }
 	fcb@ buckethead@!
 end
 
+fn AFSFCBInsertReclaimable { fcb afsdata -- }
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto t
+	afsdata@ AFSData_ReclaimableListTail + @ t!
+
+	if (t@ ~~)
+		0 fcbdata@ AFSFCBData_ReclaimNext + !
+		0 fcbdata@ AFSFCBData_ReclaimPrev + !
+
+		fcb@ afsdata@ AFSData_ReclaimableListHead + !
+		fcb@ afsdata@ AFSData_ReclaimableListTail + !
+	end else
+		0 fcbdata@ AFSFCBData_ReclaimNext + !
+
+		t@ fcbdata@ AFSFCBData_ReclaimPrev + !
+		fcb@ t@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
+		fcb@ afsdata@ AFSData_ReclaimableListTail + !
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	IOFileControlBlockIncrementReclaimable
+end
+
+fn AFSFCBRemoveReclaimable { fcb afsdata -- }
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto ls
+	fcbdata@ AFSFCBData_ReclaimPrev + @ ls!
+
+	auto ns
+	fcbdata@ AFSFCBData_ReclaimNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
+	end else
+		ns@ afsdata@ AFSData_ReclaimableListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ IOFileControlBlockGetContext AFSFCBData_ReclaimPrev + !
+	end else
+		ls@ afsdata@ AFSData_ReclaimableListTail + !
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	IOFileControlBlockDecrementReclaimable
+end
+
 fn AFSMountReference { mount -- oldcount }
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
@@ -441,6 +486,10 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 						"AFSFCBCacheFlush: destroy: fcb refcount > 0\n" KeCrash
 					end
 				end
+
+				fcb@ // fcb
+				afsdata@ // afsdata
+				AFSFCBRemoveReclaimable
 
 				fcb@ IOFileControlBlockReference drop
 
@@ -552,78 +601,111 @@ fn (IODispatchDeleteFunction) AFSDelete { fcb -- }
 	fcbdata@ MmFree
 end
 
-fn (IODispatchReclaimFCBFunction) AFSFCBReclaim { fcb -- reclaimed }
-	// called by the IO subsystem when it decides it wants to reuse an FCB
-	// that currently represents one of our (the AisixFS driver's) inodes.
-
-	// we have to clean up our internal structures relating to this FCB.
-	// duplicates some ideas with AFSDelete that are too annoying/too slow to
-	// generalize.
-
-	// entered at IPLDPC to give us a chance to sort out our synchronization
-	// affairs. must LEAVE at IPLDPC as well.
-
-	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount mount -- actualcount }
+	// called from the context of an IO worker thread to trim FCBs from our
+	// cache.
 
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
 
-	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	0 actualcount!
 
-	auto bucket
-	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+	auto lockedbucket
+	-1 lockedbucket!
 
-	auto buckethead
-	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
+	while (actualcount@ preferredcount@ <)
+		auto fcb
+		auto fcbdata
+		auto bucket
 
-	auto locked
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheTryLockBucket locked!
+		auto rs
+		HALCPUInterruptDisable rs!
 
-	if (locked@ ~~)
-		0 reclaimed!
-		return
+		afsdata@ AFSData_ReclaimableListHead + @ fcb!
+
+		if (fcb@ ~~)
+			rs@ HALCPUInterruptRestore
+
+			break
+		end
+
+		fcb@ IOFileControlBlockGetContext fcbdata!
+		fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+
+		rs@ HALCPUInterruptRestore
+
+		if (lockedbucket@ bucket@ ~=)
+			if (lockedbucket@ -1 ~=)
+				lockedbucket@ // bucket
+				mount@ // mount
+				AFSFCBCacheUnlockBucket
+			end
+
+			bucket@ // bucket
+			mount@ // mount
+			AFSFCBCacheLockBucket drop
+
+			bucket@ lockedbucket!
+
+			HALCPUInterruptDisable rs!
+
+			afsdata@ AFSData_ReclaimableListHead + @ fcb!
+
+			if (fcb@ ~~)
+				rs@ HALCPUInterruptRestore
+
+				break
+			end
+
+			fcb@ IOFileControlBlockGetContext fcbdata!
+			fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+
+			rs@ HALCPUInterruptRestore
+
+			if (bucket@ lockedbucket@ ~=)
+				// the list changed state, so try again.
+				continue
+			end
+		end
+
+		// we have selected an FCB and locked the appropriate cache bucket.
+
+		// first, remove it from the reclaimable list.
+
+		fcb@ // fcb
+		afsdata@ // afsdata
+		AFSFCBRemoveReclaimable
+
+		// next, remove it from the cache bucket.
+
+		fcb@ // fcb
+		afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + // buckethead
+		AFSFCBRemove
+
+		// next, free our metadata.
+
+		fcbdata@ MmFree
+
+		// next, delete the FCB (with writeout).
+
+		1 // writeout
+		fcb@ // fcb
+		IOFileControlBlockDelete drop
+
+		1 actualcount +=
 	end
 
-	IPLLOW KeIPLLower
-
-	// we must flush any dirty cache data while holding the cache bucket
-	// mutex.
-
-	auto ok
-	fcb@ IOFileControlBlockFlush ok!
-
-	if (ok@)
-		0 reclaimed!
-
-		IPLDPC KeIPLRaise drop
-
-		bucket@ // bucket
+	if (lockedbucket@ -1 ~=)
+		lockedbucket@ // bucket
 		mount@ // mount
 		AFSFCBCacheUnlockBucket
-
-		return
 	end
-
-	1 reclaimed!
-
-	fcb@ // fcb
-	buckethead@ // buckethead
-	AFSFCBRemove
-
-	fcbdata@ MmFree
-
-	IPLDPC KeIPLRaise drop
-
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheUnlockBucket
 end
 
 fn AFSFCBDelete { fcb -- }
+	// we already guaranteed that the refcount on this FCB can never be
+	// incremented again by removing its name from the directory tree.
+
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
 
@@ -656,7 +738,46 @@ fn AFSFCBDelete { fcb -- }
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
 	fcbdata@ MmFree
-	fcb@ MmFree
+end
+
+fn AFSFCBZeroReferences { fcb -- tryagain }
+	0 tryagain!
+
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	auto bucket
+	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+
+	bucket@ // bucket
+	mount@ // mount
+	AFSFCBCacheLockBucket drop
+
+	if (fcb@ IOFileControlBlockGetReferences 1 >)
+		bucket@ // bucket
+		mount@ // mount
+		AFSFCBCacheUnlockBucket
+
+		1 tryagain!
+
+		return
+	end
+
+	fcb@ // fcb
+	afsdata@ // afsdata
+	AFSFCBInsertReclaimable
+
+	fcb@ IOFileControlBlockZeroReference
+
+	bucket@ // bucket
+	mount@ // mount
+	AFSFCBCacheUnlockBucket
 end
 
 fn AFSFCBRead { inum mount -- fcb ok }
@@ -678,6 +799,11 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 	auto bucket
 	inum@ AFSFCBMASK & bucket!
+
+	// throttle before we take any locks so that we don't deadlock the cache
+	// trimmer.
+
+	IOFileControlBlockThrottle
 
 	bucket@ // bucket
 	mount@ // mount
@@ -740,7 +866,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		mount@ // devobj
 		filetype@ // filetype
 		0 // flags
-		IOFileControlBlockAllocate ok! fcb!
+		IOFileControlBlockCreate ok! fcb!
 
 		if (ok@)
 			bucket@ // bucket
@@ -775,6 +901,9 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 		0 fcbdata@ AFSFCBData_NextFCB + !
 		0 fcbdata@ AFSFCBData_PrevFCB + !
+
+		0 fcbdata@ AFSFCBData_ReclaimNext + !
+		0 fcbdata@ AFSFCBData_ReclaimPrev + !
 
 		inum@ fcbdata@ AFSFCBData_INum + !
 
@@ -820,12 +949,19 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			AFSFCBInsert
 		end
 
-		fcb@ IOFileControlBlockReference drop
+		auto oldcount
+		fcb@ IOFileControlBlockReference oldcount!
 
 		if (DEBUGCHECKS)
 			if (fcb@ IOFileControlBlockIsDoomed)
 				"AFSFCBRead: grabbed doomed inode\n" KeCrash
 			end
+		end
+
+		if (oldcount@ ~~)
+			fcb@ // fcb
+			afsdata@ // afsdata
+			AFSFCBRemoveReclaimable
 		end
 	end
 

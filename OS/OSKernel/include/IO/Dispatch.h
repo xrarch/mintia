@@ -16,7 +16,7 @@ fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
-fnptr IODispatchReclaimFCBFunction { fcb -- reclaimed }
+fnptr IODispatchZeroFCBReferencesFunction { fcb -- tryagain }
 fnptr IODispatchCancelFunction { mdl -- }
 
 struct IODispatchTable
@@ -39,8 +39,12 @@ struct IODispatchTable
 	4 ReadDirectory
 	4 GetPageAddress
 	4 DeleteDeviceObject
-	4 ReclaimFCB
+	4 ZeroFCBReferences
 	4 Cancel
 	4 Reserved6
 	4 Reserved7
 endstruct
+
+const IOZEROFCBREFERENCES_OK       0
+const IOZEROFCBREFERENCES_TRYAGAIN 1
+const IOZEROFCBREFERENCES_FREED    2

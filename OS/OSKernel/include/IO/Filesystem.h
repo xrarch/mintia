@@ -3,6 +3,7 @@ fnptr IOFilesystemUnmountFunction { mount -- ok }
 fnptr IOFilesystemFlushFunction { shutdown mount -- ok }
 fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags mount -- ok }
 fnptr IOFilesystemVolumeQueryFunction { query mount -- ok }
+fnptr IOFilesystemReclaimFunction { preferredcount mount -- actualcount }
 
 struct IOFilesystem
 	4 Next
@@ -17,6 +18,7 @@ struct IOFilesystem
 	4 UpdateFlagsFunction
 	4 Flags
 	4 VolumeQueryFunction
+	4 ReclaimFunction
 
 	4 Reserved1
 	4 Reserved2
@@ -40,6 +42,7 @@ struct IOMount
 	4 RealVolumeFile
 	4 VolumeCapturedFCB
 	4 RealVolumeCapturedFCB
+	4 ReclaimedFrom
 
 	4 Reserved1
 	4 Reserved2
@@ -74,6 +77,8 @@ extern IOMountSetContext { context mount -- }
 extern IOMountGetContext { mount -- context }
 extern IOMountSetRootFCB { fcb mount -- }
 extern IOMountGetRootFCB { mount -- fcb }
+
+extern IOFilesystemReclaimFCB { -- }
 
 extern IOFilesystemSyncAll { shutdown -- ok }
 

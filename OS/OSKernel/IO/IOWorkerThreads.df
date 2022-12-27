@@ -37,12 +37,16 @@ const IOSWAPFILECONTRACTINTERVAL 30000
 
 const IOSWAPFILECONTRACTTICKS (IOSWAPFILECONTRACTINTERVAL IOFSSYNCINTERVAL /)
 
-fn IOFilesystemSyncWorker { context1 context2 -- }
-	PRIORITY_LOWREALTIME // priority
-	KeThreadCurrent@ // thread
-	KeThreadPrioritySet
+fn IOFilesystemSyncWorkerLoop { -- }
+	fnsection "PAGE$text"
 
-	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+	auto waitblocktable
+	KeDispatchWaitBlock_SIZEOF 3 * alloc waitblocktable!
+
+	KeThreadCurrent@ // thread
+	3 // count
+	waitblocktable@ // waitblocktable
+	KeDispatchWaitBlockTableInitialize
 
 	"IOFilesystemSyncTimer" // name
 	0 // function
@@ -50,10 +54,11 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	KeTimerInitialize
 
 	auto objecttable
-	8 alloc objecttable!
+	12 alloc objecttable!
 
 	IOSwapFileExtendEvent objecttable@!
 	IOFilesystemSyncTimer objecttable@ 4 + !
+	IOFileControlBlockCacheTrimEvent objecttable@ 8 + !
 
 	0 // context1
 	0 // context2
@@ -69,16 +74,17 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	while (1)
 		// iterate all mounted filesystems every 5 seconds and ask them
 		// to flush any internal state. this kernel thread is also responsible
-		// for expanding and contracting the swapfiles.
+		// for expanding and contracting the swapfiles, and trimming the FCB
+		// cache.
 
 		auto reason
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAITANY // waittype
 		OSWAIT_TIMEOUTINFINITE // timeout
-		2 // objectcount
+		3 // objectcount
 		objecttable@ // objecttable
-		0 // waitblocktable
+		waitblocktable@ // waitblocktable
 		KeThreadWaitForMultipleObjects reason!
 
 		if (DEBUGCHECKS)
@@ -103,7 +109,9 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 			end
 		end
 
-		if (reason@ 1 ==)
+		if (reason@ 2 ==)
+			IOFilesystemReclaimFCB
+		end elseif (reason@ 1 ==)
 			0 IOFilesystemSyncAll drop
 
 			1 ticks +=
@@ -125,6 +133,16 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 			IOSwapFileExtend
 		end
 	end
+end
+
+fn IOFilesystemSyncWorker { context1 context2 -- }
+	PRIORITY_LOWREALTIME // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	IPLLOW KeIPLLower // kernel threads start in IPLDPC
+
+	IOFilesystemSyncWorkerLoop
 end
 
 fn (DPCFunction) IOWritebehindTimerDPCFunction { context1 context2 -- }

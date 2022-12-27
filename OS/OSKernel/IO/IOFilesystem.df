@@ -93,6 +93,8 @@ fn IOFilesystemMount { flags handle fsname -- mount ok }
 end
 
 fn IOMountObject { flags fileobject fsname -- mount ok }
+	fnsection "PAGE$text"
+
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
@@ -169,6 +171,7 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	0 mount@ IOMount_RealVolumeFile + !
 	0 mount@ IOMount_VolumeCapturedFCB + !
 	0 mount@ IOMount_RealVolumeCapturedFCB + !
+	0 mount@ IOMount_ReclaimedFrom + !
 
 	STATUS_BAD_FILESYSTEM ok!
 
@@ -283,6 +286,8 @@ fn IOFilesystemUnmount { handle -- ok }
 end
 
 fn IOUnmountObject { fileobject -- ok }
+	fnsection "PAGE$text"
+
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
@@ -406,6 +411,8 @@ fn IOMountUpdateFlags { newflags handle -- ok }
 end
 
 fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
+	fnsection "PAGE$text"
+
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
@@ -492,6 +499,8 @@ fn IOMountGetFilesystemName { buffer handle -- ok }
 end
 
 fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
+	fnsection "PAGE$text"
+
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
@@ -630,6 +639,115 @@ fn IOFilesystemSyncAll { shutdown -- ok }
 			shutdown@ // shutdown
 			mount@ // mount
 			flushfunc@ IOFilesystemFlushFunction drop
+		end
+
+		mount@ IOMount_Next + @ mount!
+	end
+
+	ObRootDirectoryUnlock
+end
+
+fn IOFilesystemReclaimFCB { -- }
+	fnsection "PAGE$text"
+
+	// iterate all of the mounted filesystems to find an FCB to reclaim.
+	// if the mount has been reclaimed from recently, skip it.
+
+	// NOTE: THIS MAY RECURSIVELY LOCK THE MOUNT LIST AND
+	// FILESYSTEM-SPECIFIC STRUCTURES.
+
+	auto count
+	IOFileControlBlockCount@ IOFileControlBlockPreferred@ - count!
+
+	if (count@ z<)
+		return
+	end
+
+	if (count@ ~~)
+		return
+	end
+
+	auto filesystem
+	auto reclaimfunc
+
+	auto trimmed
+
+	auto actual
+	0 actual!
+
+	auto skipped
+	0 skipped!
+
+	0 ObRootDirectoryLockShared drop
+
+	auto mount
+	IOMountListHead@ mount!
+
+	while (mount@)
+		if (mount@ IOMount_ReclaimedFrom + @ ~~)
+			mount@ IOMount_Filesystem + @ filesystem!
+
+			filesystem@ IOFilesystem_ReclaimFunction + @ reclaimfunc!
+
+			if (reclaimfunc@)
+				count@ actual@ - // preferredcount
+				mount@ // mount
+				reclaimfunc@ IOFilesystemReclaimFunction trimmed!
+
+				if (trimmed@)
+					1 mount@ IOMount_ReclaimedFrom + !
+				end
+
+				trimmed@ actual +=
+
+				if (actual@ count@ >=)
+					break
+				end
+			end
+		end else
+			1 skipped +=
+		end
+
+		mount@ IOMount_Next + @ mount!
+	end
+
+	if (actual@ count@ >=)
+		ObRootDirectoryUnlock
+
+		return
+	end
+
+	// we failed to reclaim enough.
+
+	if (skipped@ ~~)
+		// we didn't skip any mounts, so that can't be why.
+
+		ObRootDirectoryUnlock
+
+		return
+	end
+
+	// iterate all the mounts again, this time we don't care if the mount has
+	// already been reclaimed from. we continue to iterate even after finding
+	// an FCB so that we can reset all of their ReclaimedFrom fields.
+
+	IOMountListHead@ mount!
+
+	while (mount@)
+		0 mount@ IOMount_ReclaimedFrom + !
+
+		if (actual@ count@ <)
+			mount@ IOMount_Filesystem + @ filesystem!
+
+			filesystem@ IOFilesystem_ReclaimFunction + @ reclaimfunc!
+
+			if (reclaimfunc@)
+				count@ actual@ - // preferredcount
+				mount@ // mount
+				reclaimfunc@ IOFilesystemReclaimFunction trimmed!
+
+				trimmed@ actual +=
+			end
 		end
 
 		mount@ IOMount_Next + @ mount!

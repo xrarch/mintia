@@ -54,9 +54,6 @@ struct IOFileControlBlock
 	4 FSContext
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 
-	4 ReusableListNext
-	4 ReusableListPrev
-
 	ExRwLock_SIZEOF RwLock
 
 	4 AsyncIOCount
@@ -69,7 +66,6 @@ endstruct
 
 const IOFCBFLAG_DELETELASTREFERENCE 1
 const IOFCBFLAG_SYSTEMFILE          2
-const IOFCBFLAG_REUSABLEINSERTED    4
 
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
@@ -101,6 +97,7 @@ extern IOFileControlBlockGetSize { fcb -- size }
 extern IOFileControlBlockSetSize { size fcb -- }
 extern IOFileControlBlockGetCacheInfoBlock { fcb -- cacheblock }
 extern IOFileControlBlockIsPinned { fcb -- pinned }
+extern IOFileControlBlockZeroReference { fcb -- }
 
 extern IOFileControlBlockSetAccessTime { time fcb -- }
 extern IOFileControlBlockSetModifyTime { time fcb -- }
@@ -150,9 +147,20 @@ extern IOTriggerWritebehind { -- }
 
 extern IOThreadRundown { -- }
 
+extern IOFileControlBlockThrottle { -- }
+
+extern IOFileControlBlockIncrementReclaimable { -- }
+extern IOFileControlBlockDecrementReclaimable { -- }
+
 externptr IOBootDevice
 
 externptr IOFileControlBlockCacheSize
+externptr IOFileControlBlockCount
+externptr IOFileControlBlockMaximum
+externptr IOFileControlBlockPreferred
+externptr IOFileControlBlockThrottleCount
+
+externptr IOFileControlBlockCacheTrimEvent
 
 externptr IOWritebehindTimer
 externptr IOWritebehindEvent

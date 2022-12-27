@@ -25,9 +25,6 @@ const AFSFCBBUCKETS 32 // must be a power of two
 const AFSFCBSHIFT 5 // 1<<AFSFCBSHIFT must equal AFSFCBBUCKETS
 const AFSFCBMASK (AFSFCBBUCKETS 1 -)
 
-const AFSFATMUTEXES 16 // must be a power of two
-const AFSFATMUTEXMASK (AFSFATMUTEXES 1 -)
-
 struct AFSData
 	4 FATStart
 	4 FATSize
@@ -48,6 +45,9 @@ struct AFSData
 
 	4 FCBRefTotal
 
+	4 ReclaimableListHead
+	4 ReclaimableListTail
+
 	(AFSFCBBUCKETS KeMutex_SIZEOF *) FCBCacheMutexes
 	(AFSFCBBUCKETS 8 *) FCBBucketListHeads
 endstruct
@@ -55,6 +55,9 @@ endstruct
 struct AFSFCBData
 	4 NextFCB
 	4 PrevFCB
+
+	4 ReclaimNext
+	4 ReclaimPrev
 	
 	4 INum
 	4 FirstFATLink
@@ -91,6 +94,10 @@ const AFSSUPERBLOCKVERSION 0x6
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
+extern AFSINodeReclaim { preferredcount mount -- actualcount }
+
+extern AFSFCBZeroReferences { fcb -- tryagain }
+
 extern AFSFCBMetadataUnpin { fcb -- ok }
 extern AFSFCBMetadataPin { fcb -- ok }
 
@@ -106,7 +113,6 @@ extern AFSFCBRemove { fcb buckethead -- }
 extern AFSFCBInsert { fcb buckethead -- }
 
 extern AFSDelete { fcb -- }
-extern AFSFCBReclaim { fcb -- reclaimed }
 extern AFSFCBDelete { fcb -- }
 
 extern AFSFCBCacheLockBucket { bucket mount -- ok }

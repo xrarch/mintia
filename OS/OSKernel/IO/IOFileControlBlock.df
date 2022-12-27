@@ -26,14 +26,6 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-var IOFileControlBlockReusableListHead 0
-var IOFileControlBlockReusableListTail 0
-
-var IOFileControlBlockMaximum 0
-public IOFileControlBlockMaximum
-
-var IOFileControlBlockCount 0
-
 fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	fnsection "PAGE$text"
 
@@ -47,9 +39,6 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	dispatchtable@ fcb@ IOFileControlBlock_DispatchTable + !
 	0 fcb@ IOFileControlBlock_FSContext + !
 	0 fcb@ IOFileControlBlock_Mount + !
-
-	0 fcb@ IOFileControlBlock_ReusableListNext + !
-	0 fcb@ IOFileControlBlock_ReusableListPrev + !
 
 	0 fcb@ IOFileControlBlock_AsyncIOCount + !
 
@@ -79,80 +68,32 @@ fn IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	memset
 end
 
-fn IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
-	// like IOFileControlBlockCreate but will steal from the pool of reusable
-	// FCBs if the count is above the maximum.
+fn IOFileControlBlockIncrementReclaimable { -- }
+	1 IOFileControlBlockCount KeInterlockedIncrement drop
 
-	0 fcb!
-	0 ok!
-
-	if (IOFileControlBlockCount@ 1 + IOFileControlBlockMaximum@ >=)
-		// above the maximum, try to reclaim one.
-
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		IOFileControlBlockReusableListHead@ fcb!
-
-		while (fcb@)
-			auto reclaimfunc
-			fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @ reclaimfunc!
-
-			if (DEBUGCHECKS)
-				if (reclaimfunc@ ~~)
-					"IOFileControlBlockAllocate: no reclaimfunc\n" KeCrash
-				end
-			end
-
-			KeThreadCurrent@ KeThreadIgnoreKill drop
-
-			auto reclaimed
-			fcb@ // fcb
-			fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @
-			IODispatchReclaimFCBFunction reclaimed!
-
-			KeThreadCurrent@ KeThreadAcceptKill drop
-
-			if (reclaimed@)
-				fcb@ IOFileControlBlockRemove
-
-				ipl@ KeIPLLower
-
-				// don't write out because it is the fs driver's
-				// responsibility to flush.
-
-				0 // writeout
-				fcb@ // fcb
-				IOFileControlBlockReclaim drop
-
-				break
-			end
-
-			fcb@ IOFileControlBlock_ReusableListNext + @ fcb!
-		end
-
-		ipl@ KeIPLLower
+	if (IOFileControlBlockCount@ IOFileControlBlockMaximum@ >=)
+		0 // priboost
+		IOFileControlBlockCacheTrimEvent // event
+		KeEventSignal
 	end
+end
 
-	if (fcb@ ~~)
-		// didn't get an FCB by now, create it.
+fn IOFileControlBlockDecrementReclaimable { -- }
+	-1 IOFileControlBlockCount KeInterlockedIncrement drop
+end
 
-		dispatchtable@ // dispatchtable
-		devobj@ // devobj
-		filetype@ // filetype
-		flags@ // flags
-		IOFileControlBlockCreate ok! fcb!
+fn IOFileControlBlockThrottle { -- }
+	fnsection "PAGE$text"
 
-		if (ok@)
-			return
-		end
-	end else
-		dispatchtable@ // dispatchtable
-		devobj@ // devobj
-		filetype@ // filetype
-		flags@ // flags
-		fcb@ // fcb
-		IOFileControlBlockInitialize
+	if (IOFileControlBlockCount@ IOFileControlBlockThrottleCount@ >=)
+		0 // priboost
+		IOFileControlBlockCacheTrimEvent // event
+		KeEventSignal
+
+		100 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
 	end
 end
 
@@ -161,7 +102,7 @@ fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 
 	IOFileControlBlock_SIZEOF // bytes
 	'IOFC' // tag
-	CANBLOCK POOLALLOC | // flags
+	CANBLOCK // flags
 	MmAllocWithTag ok! fcb!
 
 	if (ok@)
@@ -174,11 +115,6 @@ fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 	flags@ // flags
 	fcb@ // fcb
 	IOFileControlBlockInitialize
-
-	if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
-		// only count it if its reclaimable.
-		1 IOFileControlBlockCount KeInterlockedIncrement drop
-	end
 end
 
 fn IOFileControlBlockFlush { fcb -- ok }
@@ -225,22 +161,12 @@ fn IOFileControlBlockDelete { writeout fcb -- ok }
 	// caller should be 100% sure this FCB won't be used again.
 	// it also should have removed it from the reusable list by now.
 
-	if (DEBUGCHECKS)
-		if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_REUSABLEINSERTED &)
-			"IOFileControlBlockDelete: FCB was reusable\n" KeCrash
-		end
-	end
-
 	writeout@ // writeout
 	fcb@ // fcb
 	IOFileControlBlockReclaim ok!
 
 	if (ok@)
 		return
-	end
-
-	if (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
-		-1 IOFileControlBlockCount KeInterlockedIncrement drop
 	end
 
 	fcb@ MmFree
@@ -315,144 +241,112 @@ end
 
 fn IOFileControlBlockReference { fcb -- oldcount }
 	// should be called by filesystem driver in its parse method.
+	// the circumstances in which this is called, and the interactions it has
+	// with the filesystem driver's reclamation structures, should be very
+	// well understood.
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	fcb@ IOFileControlBlock_References + @ oldcount!
-
 	oldcount@ 1 + fcb@ IOFileControlBlock_References + !
 
-	if (oldcount@ ~~)
-		if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_REUSABLEINSERTED &)
-			IOFCBFLAG_REUSABLEINSERTED ~ fcb@ IOFileControlBlock_Flags + &=
-			fcb@ IOFileControlBlockRemove
-		end
-	end
-
-	ipl@ KeIPLLower
+	rs@ HALCPUInterruptRestore
 end
 
 fn IOFileControlBlockDereference { fcb -- oldcount }
 	// should be called by filesystem driver in its delete method.
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	while (1)
+		auto rs
+		HALCPUInterruptDisable rs!
 
-	fcb@ IOFileControlBlock_References + @ oldcount!
+		fcb@ IOFileControlBlock_References + @ oldcount!
 
-	if (DEBUGCHECKS)
-		if (oldcount@ 0 ==)
-			"IOFileControlBlockDereference: refcount underflow\n" KeCrash
-		end
-	end
-
-	oldcount@ 1 - fcb@ IOFileControlBlock_References + !
-
-	if (oldcount@ 1 ==)
-		if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_DELETELASTREFERENCE &)
-			ipl@ KeIPLLower
-
-			KeThreadCurrent@ KeThreadIgnoreKill drop
-
-			auto cacheblock
-			fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-			if (cacheblock@)
-				0 // writeout
-				cacheblock@ // cacheblock
-				IOCacheInfoBlockDestroy drop
-
-				0 fcb@ IOFileControlBlock_CacheInfoBlock + !
+		if (DEBUGCHECKS)
+			if (oldcount@ 0 ==)
+				"IOFileControlBlockDereference: refcount underflow\n" KeCrash
 			end
+		end
 
-			fcb@ // fcb
-			fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Delete + @
-			IODispatchDeleteFunction
+		if (oldcount@ 1 ==)
+			if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_DELETELASTREFERENCE &)
+				rs@ HALCPUInterruptRestore
 
-			KeThreadCurrent@ KeThreadAcceptKill drop
-
-			0 // writeout
-			fcb@ // fcb
-			IOFileControlBlockDelete drop
-
-			return
-		end elseif (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @)
-			if (IOFileControlBlockCount@ IOFileControlBlockMaximum@ >=)
-				// above the maximum! attempt to free this FCB immediately.
+				// this FCB was marked for deferred deletion, so instead of
+				// reclaiming it or whatever else, we need to call the filesystem
+				// driver so that it can delete the file on disk.
+				//
+				// assumes that the filesystem already guaranteed that the
+				// refcount on this FCB can never be incremented again, by
+				// removing its name from the directory tree or through some other
+				// mechanism.
 
 				KeThreadCurrent@ KeThreadIgnoreKill drop
 
-				auto reclaimed
+				auto cacheblock
+				fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+				if (cacheblock@)
+					0 // writeout
+					cacheblock@ // cacheblock
+					IOCacheInfoBlockDestroy drop
+
+					0 fcb@ IOFileControlBlock_CacheInfoBlock + !
+				end
+
 				fcb@ // fcb
-				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ReclaimFCB + @
-				IODispatchReclaimFCBFunction reclaimed!
+				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Delete + @
+				IODispatchDeleteFunction
 
 				KeThreadCurrent@ KeThreadAcceptKill drop
 
-				if (reclaimed@)
-					ipl@ KeIPLLower
+				0 // writeout
+				fcb@ // fcb
+				IOFileControlBlockDelete drop
 
-					// don't write out because it is the fs driver's
-					// responsibility to flush.
+				return
+			end elseif (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ZeroFCBReferences + @)
+				rs@ HALCPUInterruptRestore
 
-					0 // writeout
-					fcb@ // fcb
-					IOFileControlBlockDelete drop
+				// the filesystem driver wants to know when an FCB reaches zero
+				// references, so instead of directly setting the refcount to
+				// 0, leave it biased and call into this function to do some
+				// work. if it asks us to try again, we loop back to the start
+				// of this function. it will do this if it fails to set the
+				// refcount to zero by itself for some reason, such as the
+				// refcount being incremented inbetween now and when it locks
+				// its own structures.
 
-					return
+				auto tryagain
+
+				KeThreadCurrent@ KeThreadIgnoreKill drop
+
+				fcb@ // fcb
+				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ZeroFCBReferences + @
+				IODispatchZeroFCBReferencesFunction tryagain!
+
+				KeThreadCurrent@ KeThreadAcceptKill drop
+
+				if (tryagain@)
+					continue
 				end
+
+				return
+			end else
+				oldcount@ 1 - fcb@ IOFileControlBlock_References + !
+
+				rs@ HALCPUInterruptRestore
+
+				return
 			end
+		end else
+			oldcount@ 1 - fcb@ IOFileControlBlock_References + !
 
-			IOFCBFLAG_REUSABLEINSERTED fcb@ IOFileControlBlock_Flags + |=
-			fcb@ IOFileControlBlockInsert
+			rs@ HALCPUInterruptRestore
+
+			return
 		end
-	end
-
-	ipl@ KeIPLLower
-end
-
-fn IOFileControlBlockRemove { fcb -- }
-	// assumes IPLDPC or equivalent
-
-	auto ls
-	fcb@ IOFileControlBlock_ReusableListPrev + @ ls!
-
-	auto ns
-	fcb@ IOFileControlBlock_ReusableListNext + @ ns!
-
-	if (ls@)
-		ns@ ls@ IOFileControlBlock_ReusableListNext + !
-	end else
-		ns@ IOFileControlBlockReusableListHead!
-	end
-
-	if (ns@)
-		ls@ ns@ IOFileControlBlock_ReusableListPrev + !
-	end else
-		ls@ IOFileControlBlockReusableListTail!
-	end
-end
-
-fn IOFileControlBlockInsert { fcb -- }
-	// assumes IPLDPC or equivalent
-
-	auto t
-
-	IOFileControlBlockReusableListTail@ t!
-
-	if (t@ ~~)
-		0 fcb@ IOFileControlBlock_ReusableListNext + !
-		0 fcb@ IOFileControlBlock_ReusableListPrev + !
-
-		fcb@ IOFileControlBlockReusableListHead!
-		fcb@ IOFileControlBlockReusableListTail!
-	end else
-		0 fcb@ IOFileControlBlock_ReusableListNext + !
-
-		t@ fcb@ IOFileControlBlock_ReusableListPrev + !
-		fcb@ t@ IOFileControlBlock_ReusableListNext + !
-		fcb@ IOFileControlBlockReusableListTail!
 	end
 end
 
@@ -624,6 +518,16 @@ end
 fn IOFileControlBlockSetChangeTime { time fcb -- }
 	time@ KeTime_SecPart + @ fcb@ IOFileControlBlock_ChangeTime + KeTime_SecPart + !
 	time@ KeTime_MsPart + @ fcb@ IOFileControlBlock_ChangeTime + KeTime_MsPart + !
+end
+
+fn IOFileControlBlockZeroReference { fcb -- }
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlock_References + @ 1 ~=)
+			"IOFileControlBlockZeroReference\n" KeCrash
+		end
+	end
+
+	0 fcb@ IOFileControlBlock_References + !
 end
 
 fn IOFileControlBlockGetAccessTime { fcb -- time }

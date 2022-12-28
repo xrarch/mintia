@@ -91,6 +91,17 @@ fn KeThreadEnqueue { front thread -- }
 
 		thread@ [pri@]KeThreadPriorityQueueTails!
 	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	if (current@)
+		if (thread@ KeThread_PriorityB + gb current@ KeThread_PriorityB + gb >)
+			// this thread's priority is greater than the current thread's
+
+			thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
+		end
+	end
 end
 
 fn KeThreadDequeue { thread -- }
@@ -135,51 +146,6 @@ fn KeThreadDequeue { thread -- }
 	0 thread@ KeThread_QueuePrev + !
 end
 
-// implements the thread transition state machine
-
-fn KeThreadTransition { status thread front -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadTransition: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	auto oldstatus
-	thread@ KeThread_StatusB + gb oldstatus!
-
-	if (status@ oldstatus@ ==)
-		// no change, return
-		return
-	end
-
-	if (oldstatus@ THREADSTATUS_READY ==)
-		// no longer ready, dequeue
-
-		thread@ KeThreadDequeue
-	end elseif (status@ THREADSTATUS_READY ==)
-		// now ready, enqueue
-
-		front@ thread@ KeThreadEnqueue
-
-		auto current
-		KeThreadCurrent@ current!
-
-		if (DEBUGCHECKS)
-			if (current@ ~~)
-				"KeThreadTransition: no current thread\n" KeCrash
-			end
-		end
-
-		if (thread@ KeThread_PriorityB + gb current@ KeThread_PriorityB + gb >)
-			// this thread's priority is greater than the current thread's
-
-			thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
-		end
-	end
-
-	status@ thread@ KeThread_StatusB + sb
-end
-
 externptr MmSwapEvent
 
 fn KeThreadReady { front thread -- }
@@ -205,7 +171,7 @@ fn KeThreadReady { front thread -- }
 			end
 		end
 
-		1 thread@ KeThread_PendingSwapInB + sb
+		THREADSTATUS_READY thread@ KeThread_StatusB + sb
 
 		process@ KeProcess_DeferredThreadListHead + @ thread@ KeThread_SwapListNext + !
 		thread@ process@ KeProcess_DeferredThreadListHead + !
@@ -236,7 +202,7 @@ fn KeThreadReady { front thread -- }
 			end
 		end
 
-		1 thread@ KeThread_PendingSwapInB + sb
+		THREADSTATUS_TRANSITION thread@ KeThread_StatusB + sb
 
 		KeThreadSwapInListHead@ thread@ KeThread_SwapListNext + !
 		thread@ KeThreadSwapInListHead!
@@ -253,10 +219,13 @@ fn KeThreadReady { front thread -- }
 		return
 	end
 
-	THREADSTATUS_READY // status
-	thread@ // thread
-	front@ // front
-	KeThreadTransition
+	THREADSTATUS_READY thread@ KeThread_StatusB + sb
+
+	if (thread@ KeThread_EnqueuedB + gb ~~)
+		front@ // front
+		thread@ // thread
+		KeThreadEnqueue
+	end
 
 	ipl@ KeIPLLower
 end
@@ -381,10 +350,11 @@ fn KeThreadSwitch { thread -- }
 	auto current
 	KeThreadCurrent@ current!
 
-	THREADSTATUS_RUNNING // status
-	thread@ // thread
-	QUEUEBACK // front
-	KeThreadTransition
+	THREADSTATUS_RUNNING thread@ KeThread_StatusB + sb
+
+	if (thread@ KeThread_EnqueuedB + gb)
+		thread@ KeThreadDequeue
+	end
 
 	if (thread@ current@ ==)
 		return
@@ -487,11 +457,9 @@ fn KeThreadPrioritySet { priority thread -- }
 
 			priority@ thread@ KeThread_PriorityB + sb
 
-			QUEUEBACK thread@ KeThreadEnqueue
-
-			if (priority@ KeThreadCurrent@ KeThread_PriorityB + gb >)
-				thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
-			end
+			QUEUEBACK // front
+			thread@ // thread
+			KeThreadEnqueue
 		end else
 			if (DEBUGCHECKS)
 				if (thread@ KeThread_EnqueuedB + gb)
@@ -515,7 +483,9 @@ fn KeThreadPrioritySet { priority thread -- }
 
 			priority@ thread@ KeThread_PriorityB + sb
 
-			QUEUEBACK thread@ KeThreadEnqueue
+			QUEUEBACK // front
+			thread@ // thread
+			KeThreadEnqueue
 		end elseif (status@ THREADSTATUS_RUNNING ==)
 			if (DEBUGCHECKS)
 				if (thread@ KeThreadCurrent@ ~=)
@@ -622,18 +592,28 @@ fn KeThreadNextSwitch { -- }
 
 	0 KeThreadNextReason!
 
+	THREADSTATUS_READY current@ KeThread_StatusB + sb
+
 	if (cause@ THREADYIELD_QUANTUMEND ==)
 		// the quantum ended, place it at the back
 
 		current@ KeThread_Process + @ KeProcess_BaseQuantumB + gb current@ KeThread_QuantumB + sb
 
-		THREADSTATUS_READY current@ QUEUEBACK KeThreadTransition
+		if (current@ KeThread_EnqueuedB + gb ~~)
+			QUEUEBACK // front
+			current@ // current
+			KeThreadEnqueue
+		end
 	end elseif (cause@ THREADYIELD_PREEMPTED ==)
 		// it was preempted, place it at the front
 
 		1 current@ KeThreadQuantumDecrement drop
 
-		THREADSTATUS_READY current@ QUEUEFRONT KeThreadTransition
+		if (current@ KeThread_EnqueuedB + gb ~~)
+			QUEUEFRONT // front
+			current@ // current
+			KeThreadEnqueue
+		end
 	end elseif (DEBUGCHECKS)
 		cause@ "KeThreadNextSwitch: weird cause (0x%x)\n" KeCrash
 	end
@@ -662,10 +642,15 @@ fn KeThreadYield { yieldstatus -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	yieldstatus@ // status
-	current@ // thread
-	QUEUEBACK // front
-	KeThreadTransition
+	yieldstatus@ current@ KeThread_StatusB + sb
+
+	if (yieldstatus@ THREADSTATUS_READY ==)
+		if (current@ KeThread_EnqueuedB + gb ~~)
+			QUEUEBACK // front
+			current@ // thread
+			KeThreadEnqueue
+		end
+	end
 
 	0 KeThreadNextReason!
 	0 KeThreadNext!

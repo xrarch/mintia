@@ -56,7 +56,7 @@ const THREADSTATUS_RUNNING            4
 const THREADSTATUS_WAITINGALERTABLE   5
 const THREADSTATUS_WAITINGUNALERTABLE 6
 const THREADSTATUS_TERMINATED         7
-const THREADSTATUS_BALSETREMOVED      8
+const THREADSTATUS_TRANSITION         8
 
 const QUEUEFRONT 1
 const QUEUEBACK  0
@@ -119,7 +119,7 @@ struct KeThread
 	4 APCDisableCount
 	4 IgnoreKill
 
-	1 PendingSwapInB
+	1 WaitModeB
 	1 KernelStackResidentB
 	1 KernelStackCanBeSwappedB
 	1 InstantDecayB
@@ -133,9 +133,6 @@ struct KeThread
 	1 APCInProgressB
 	1 StatusB
 	1 WaitIPLB
-
-	1 WaitModeB
-	3 Padding
 
 	2 WaitBlockCountI
 	2 WaitCountI

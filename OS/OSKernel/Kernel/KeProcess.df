@@ -129,3 +129,129 @@ fn KeProcessBasePrioritySet { priority process -- }
 
 	priority@ process@ KeProcess_BasePriorityB + sb
 end
+
+externptr MmSwapEvent
+externptr MmProcessSwapOutListHead
+
+fn KeProcessAttach { try process -- ipl ok }
+	// switch the current thread to the address space of the provided process.
+	// if the process is swapped out, then swap it back in, unless try is
+	// nonzero, in which case return with a nonzero status.
+
+	auto current
+	KeThreadCurrent@ current!
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC >=)
+			"KeProcessAttach: ipl >= IPLDPC\n" KeCrash
+		end
+
+		if (current@ KeThread_Process + @ current@ KeThread_ActualProcess + @ ~=)
+			"KeProcessAttach: nested attachment\n" KeCrash
+		end
+	end
+
+	0 ok!
+
+	if (process@ current@ KeThread_Process + @ ==)
+		return
+	end
+
+	IPLDPC KeIPLRaise ipl!
+
+	process@ current@ KeThread_Process + !
+
+	process@ KeProcess_ResidentStackCountI + gi 1 +
+	process@ KeProcess_ResidentStackCountI + si
+
+	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ==)
+		// immediately switch to new process.
+
+		process@ KeProcess_ASID + @ // asid
+		process@ KeProcess_PageDirectory + @ // addrinfo
+		HALCPUAddressSpaceSwitch
+	end elseif (try@ ~~)
+		// enqueue thread on process ready list and wake swap thread, then
+		// yield until it processes us.
+
+		THREADSTATUS_READY current@ KeThread_StatusB + sb
+
+		process@ KeProcess_DeferredThreadListHead + @ current@ KeThread_SwapListNext + !
+		current@ process@ KeProcess_DeferredThreadListHead + !
+
+		if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_OUTSWAPPED ==)
+			// enqueue process to be swapped in
+
+			PROCESSSTATE_TRANSITION process@ KeProcess_MemoryStateB + sb
+
+			KeProcessSwapInListHead@ process@ KeProcess_SwapListNext + !
+			process@ KeProcessSwapInListHead!
+		end
+
+		0 // priboost
+		MmSwapEvent // event
+		KeEventSignal
+
+		IPLAPC current@ KeThread_WaitIPLB + sb
+
+		0 KeThreadNextReason!
+		0 KeThreadNext!
+
+		KeThreadNextPick KeThreadSwitch
+	end else
+		// process isn't resident and this was a "try" request.
+
+		ipl@ KeIPLLower
+
+		-1 ok!
+
+		return
+	end
+
+	IPLAPC KeIPLLower
+end
+
+fn KeProcessDetach { ipl -- }
+	auto current
+	KeThreadCurrent@ current!
+
+	auto process
+	current@ KeThread_Process + @ process!
+
+	auto actualprocess
+	current@ KeThread_ActualProcess + @ actualprocess!
+
+	if (process@ actualprocess@ ==)
+		return
+	end
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLAPC ~=)
+			"KeProcessDetach: ipl != IPLAPC\n" KeCrash
+		end
+	end
+
+	IPLDPC KeIPLRaise drop
+
+	process@ KeProcess_ResidentStackCountI + gi 1 -
+	process@ KeProcess_ResidentStackCountI + si
+
+	if (process@ KeProcess_ResidentStackCountI + gi ~~)
+		PROCESSSTATE_TRANSITION process@ KeProcess_MemoryStateB + sb
+
+		MmProcessSwapOutListHead@ process@ KeProcess_SwapListNext + !
+		process@ MmProcessSwapOutListHead!
+
+		0 // priboost
+		MmSwapEvent // event
+		KeEventSignal
+	end
+
+	actualprocess@ current@ KeThread_Process + !
+
+	actualprocess@ KeProcess_ASID + @ // asid
+	actualprocess@ KeProcess_PageDirectory + @ // addrinfo
+	HALCPUAddressSpaceSwitch
+
+	ipl@ KeIPLLower
+end

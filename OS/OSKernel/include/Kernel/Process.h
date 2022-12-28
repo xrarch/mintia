@@ -75,6 +75,7 @@ struct KeThread
 
 	4 Context
 
+	4 ActualProcess
 	4 Process
 
 	4 ProcessNext
@@ -160,6 +161,9 @@ extern KeProcessInitialize { name asid parentprocess process -- }
 extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
 extern KeProcessBasePrioritySet { priority process -- }
+
+extern KeProcessAttach { try process -- ipl ok }
+extern KeProcessDetach { ipl -- }
 
 externptr KeProcessListHead
 externptr KeProcessIdleProcess

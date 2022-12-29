@@ -11,7 +11,9 @@ const OSDLLHEAD 0x7FE00000
 const USTACKS   0x7FD00000 // preferred, to keep them out of the way
 const USTACKSZ  (OSPAGESIZE 3 *)
 
-const HEAPSTART 0x70000000
+const HEAPSTART 0x7FC00000
+
+const USERMAP   0x00300000
 
 const PAGEACCESS_EXEC      1
 const PAGEACCESS_WRITE     2

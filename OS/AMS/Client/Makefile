@@ -4,7 +4,7 @@ OUTPUTFILE := $(SYSROOT)/ams.dll
 
 DYLIBS += OSDLL.dll:$(OSDLLBIN)
 
-MOVEEXPR := mintiadll text=0x7F000000,data=text+text_size+align,bss=data+data_size+align
+MOVEEXPR := mintiadll text=0x70000000,data=text+text_size+align,bss=data+data_size+align
 
 INCDIR := ../include/
 

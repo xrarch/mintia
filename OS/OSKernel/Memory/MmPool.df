@@ -200,7 +200,6 @@ fn MmFree { ptr -- }
 
 		auto pteaddr
 		ptr@ // vaddr
-		HALPlatformKernelPageDirectory@ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 
 		auto ipl
@@ -394,7 +393,6 @@ fn MmPagedPoolAllocPages { bytes tag flags -- realva ok }
 	while (pages@)
 		if (startva@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
 			startva@ // vaddr
-			HALPlatformKernelPageDirectory@ // pagemap
 			MmVirtualtoPTEAddress pteaddr!
 		end
 
@@ -467,7 +465,6 @@ fn MmPagedPoolFreePages { noaccount vaddr -- }
 	while (count@)
 		if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
 			vaddr@ // vaddr
-			HALPlatformKernelPageDirectory@ // pagemap
 			MmVirtualtoPTEAddress pteaddr!
 		end
 
@@ -478,7 +475,7 @@ fn MmPagedPoolFreePages { noaccount vaddr -- }
 		MmAnonymousPageDeleteByPTE
 
 		1 count -=
-		4 pteaddr +=
+		PTESIZE pteaddr +=
 		PAGESIZE vaddr +=
 	end
 
@@ -530,9 +527,6 @@ fn MmNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 
 	vaddr@ ptr!
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	auto i
 	0 i!
 
@@ -551,20 +545,10 @@ fn MmNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 				PAGESIZE vaddr -=
 				1 i -=
 
-				auto uok
-
 				0 // phyaddr
 				0 // flags
 				vaddr@ // vaddr
-				kdir@ // pagemap
-				0 // asid
-				MmPTEUpdateByVirtual uok! drop phyaddr!
-
-				if (DEBUGCHECKS)
-					if (uok@)
-						"MmPoolPageAlignedAlloc: failed to unmap\n" KeCrash
-					end
-				end
+				MmPTEUpdateByVirtual drop phyaddr!
 
 				phyaddr@ PAGESHIFT >> MmPageFree
 			end
@@ -587,15 +571,7 @@ fn MmNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 		phyaddr@ PAGESHIFT << // phyaddr
 		PTE_G PTE_K | PTE_W | PTE_V | // flags
 		vaddr@ // vaddr
-		kdir@ // pagemap
-		0 // asid
-		MmPTEUpdateByVirtual ok! drop drop
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"MmPoolPageAlignedAlloc: failed to map virtual address\n" KeCrash
-			end
-		end
+		MmPTEUpdateByVirtual drop drop
 
 		tag@ pfdbe@ MmPageFrameEntryPool_Tag + !
 		pagesneeded@ PAGESHIFT << pfdbe@ MmPageFrameEntryPool_ByteSize + !
@@ -654,9 +630,6 @@ fn MmNonpagedPoolFreePages { noaccount ptr -- }
 	auto pages
 	pfdbe@ MmPageFrameEntryPool_ByteSize + @ PAGEOFFSETMASK + PAGESHIFT >> pages!
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	auto i
 	0 i!
 
@@ -667,15 +640,7 @@ fn MmNonpagedPoolFreePages { noaccount ptr -- }
 		0 // phyaddr
 		0 // flags
 		ptr@ // vaddr
-		kdir@ // pagemap
-		0 // asid
-		MmPTEUpdateByVirtual ok! drop phyaddr!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"MmPoolPageAlignedFree: failed to unmap\n" KeCrash
-			end
-		end
+		MmPTEUpdateByVirtual drop phyaddr!
 
 		phyaddr@ PAGESHIFT >> MmPageFree
 
@@ -736,7 +701,6 @@ fn MmBlockChargeGet { block -- charge }
 
 		auto pteaddr
 		block@ // vaddr
-		HALPlatformKernelPageDirectory@ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 
 		auto ipl
@@ -814,7 +778,6 @@ fn MmPoolPageGetPhysical { ptr -- pfn pfdbe }
 	auto ok
 
 	ptr@ // vaddr
-	HALPlatformKernelPageDirectory@ // pagemap
 	MmVirtualtoPTEAddress pteaddr!
 
 	pteaddr@ // pteaddr
@@ -877,18 +840,14 @@ fn MmMapQuickPage { phyaddr -- vaddr }
 	phyaddr@ // phyaddr
 	PTE_V PTE_W | // flags
 	vaddr@ // vaddr
-	HALPlatformKernelPageDirectory@ // pagemap
-	0 // asid
-	MmPTEUpdateByVirtual drop drop drop
+	MmPTEUpdateByVirtual drop drop
 end
 
 fn MmUnmapQuickPage { vaddr -- }
 	0 // phyaddr
 	0 // flags
 	vaddr@ // vaddr
-	HALPlatformKernelPageDirectory@ // pagemap
-	0 // asid
-	MmPTEUpdateByVirtual drop drop drop
+	MmPTEUpdateByVirtual drop drop
 
 	POOLSPACE vaddr -=
 	PAGESHIFT vaddr >>=

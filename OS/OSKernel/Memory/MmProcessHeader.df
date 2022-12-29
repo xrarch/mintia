@@ -52,11 +52,34 @@ fn MmProcessHeaderCreate { process -- phdr pfdbe ok }
 		return
 	end
 
-	process@ PsProcess_MmHeader + // pte
+	auto offset
+	1 // pagesneeded
+	MmPoolSpaceReserve ok! offset!
+
+	if (ok@)
+		PAGESIZE // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargeVM
+
+		1 // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargeWS
+
+		return
+	end
+
+	auto vaddr
+	POOLSPACE offset@ PAGESHIFT << + vaddr!
+
+	process@ PsProcess_MmHeaderPTE + // pte
 	FREEFIRST // priority
 	MmAnonymousPageAlloc ok! phdr! pfdbe!
 
 	if (ok@)
+		1 // pages
+		offset@ // offset
+		MmPoolSpaceRelease
+
 		PAGESIZE // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUnchargeVM
@@ -72,17 +95,35 @@ fn MmProcessHeaderCreate { process -- phdr pfdbe ok }
 	0 // process
 	MmEvictablePageModify
 
-	phdr@ PAGESHIFT << IDENTITYSPACE | phdr!
+	phdr@ PAGESHIFT << phdr!
 
-	phdr@ process@ PsProcess_MmHeader + !
+	phdr@ process@ PsProcess_MmHeaderPTE + !
+	vaddr@ process@ PsProcess_MmHeader + !
+
+	phdr@ // phyaddr
+	PTE_V PTE_W | PTE_K | PTE_G | // flags
+	vaddr@ // vaddr
+	MmPTEUpdateByVirtual drop drop
 end
 
 fn MmProcessHeaderDestroy { process -- }
 	auto phdr
-	process@ PsProcess_MmHeader + @ phdr!
+	process@ PsProcess_MmHeaderPTE + @ phdr!
 
 	auto pfdbe
-	phdr@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+	phdr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+	auto vaddr
+	process@ PsProcess_MmHeader + @ vaddr!
+
+	0 // phyaddr
+	0 // flags
+	vaddr@ // vaddr
+	MmPTEUpdateByVirtual drop drop
+
+	1 // pages
+	vaddr@ POOLSPACE - PAGESHIFT >> // offset
+	MmPoolSpaceRelease
 
 	// MmAnonymousPageDelete wants to be entered at IPLDPC...
 
@@ -132,12 +173,12 @@ fn MmProcessHeaderReference { pri process -- ok }
 		return
 	end
 
-	if (process@ PsProcess_MmHeader + @ PTE_INSWAP &)
+	if (process@ PsProcess_MmHeaderPTE + @ PTE_INSWAP &)
 		auto pt
 
 		pri@ // priority
-		process@ PsProcess_MmHeader + // pte
-		process@ PsProcess_MmHeader + @ PAGESHIFT >> // pno
+		process@ PsProcess_MmHeaderPTE + // pte
+		process@ PsProcess_MmHeaderPTE + @ PAGESHIFT >> // pno
 		ipl@ // ipl
 		MmAnonymousSwapIn ok! pt! pfdbe!
 
@@ -145,9 +186,14 @@ fn MmProcessHeaderReference { pri process -- ok }
 			return
 		end
 
-		pt@ PAGESHIFT << IDENTITYSPACE | process@ PsProcess_MmHeader + !
+		pt@ PAGESHIFT << process@ PsProcess_MmHeaderPTE + !
+
+		pt@ PAGESHIFT << // phyaddr
+		PTE_V PTE_W | PTE_K | PTE_G | // flags
+		process@ PsProcess_MmHeader + @ // vaddr
+		MmPTEUpdateByVirtual drop drop
 	end else
-		process@ PsProcess_MmHeader + @ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		process@ PsProcess_MmHeaderPTE + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 		
 		pfdbe@ MmEvictablePageReference drop
 
@@ -162,6 +208,6 @@ fn MmProcessHeaderReference { pri process -- ok }
 end
 
 fn MmProcessHeaderDereference { process -- }
-	process@ PsProcess_MmHeader + @ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+	process@ PsProcess_MmHeaderPTE + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
 	MmEvictablePageDereference drop
 end

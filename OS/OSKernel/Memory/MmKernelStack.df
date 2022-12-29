@@ -46,9 +46,6 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 
 	// allocate all the page frames needed for our kernel stack.
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	auto stackpagestab
 	KETHREADSTACKSIZE PAGESHIFT >> 2 << alloc stackpagestab!
 
@@ -65,7 +62,6 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 		auto phyaddr
 
 		vaddr@ // vaddr
-		kdir@ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 
 		pteaddr@ // pte
@@ -112,7 +108,6 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 
 	// map the guard page at the bottom
 	POOLSPACE offset@ PAGESHIFT << + // vaddr
-	kdir@ // pagemap
 	MmVirtualtoPTEAddress pteaddr!
 
 	// set special guard page magic pte
@@ -132,15 +127,7 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 		ptr@@ PAGESHIFT << // phyaddr
 		PTE_V PTE_W | PTE_K | PTE_G | // flags
 		vaddr@ // vaddr
-		kdir@ // pagemap
-		0 // asid
-		MmPTEUpdateByVirtual ok! drop drop
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				ok@ "MmKernelStackAlloc: failed to map (%i)\n" KeCrash
-			end
-		end
+		MmPTEUpdateByVirtual drop drop
 
 		PAGESIZE vaddr +=
 		4 ptr +=
@@ -153,20 +140,16 @@ fn MmKernelStackFree { kstack -- }
 
 	PAGESIZE kstack -=
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	// unmap guard page
 
 	auto pteaddr
 
 	kstack@ // vaddr
-	kdir@ // pagemap
 	MmVirtualtoPTEAddress pteaddr!
 
 	if (DEBUGCHECKS)
 		if (pteaddr@@ MMGUARDPTE ~=)
-			ok@ "MmKernelStackFree: not a kernel stack\n" KeCrash
+			"MmKernelStackFree: not a kernel stack\n" KeCrash
 		end
 	end
 
@@ -185,21 +168,14 @@ fn MmKernelStackFree { kstack -- }
 
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
 		auto phyaddr
-		auto ok
 		auto flags
 
 		0 // phyaddr
 		0 // flags
 		kstack@ // vaddr
-		kdir@ // pagemap
-		0 // asid
-		MmPTEUpdateByVirtual ok! flags! phyaddr!
+		MmPTEUpdateByVirtual flags! phyaddr!
 
 		if (DEBUGCHECKS)
-			if (ok@)
-				"MmKernelStackFree: failed to unmap\n" KeCrash
-			end
-
 			if (flags@ PTE_V & ~~)
 				"MmKernelStackFree: invalid stack page\n" KeCrash
 			end
@@ -249,7 +225,6 @@ fn MmKernelStackSwapOut { thread -- }
 		auto pteaddr
 
 		vaddr@ // vaddr
-		kdir@ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 
 		auto phyaddr
@@ -270,9 +245,7 @@ fn MmKernelStackSwapOut { thread -- }
 		// unmap
 
 		phyaddr@ PTE_TRANSITION | PTE_KERNELSTACK | // pte
-		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		0 // asid
 		MmPTESet
 
 		pfdbe@ MmEvictablePageDereference drop
@@ -291,9 +264,6 @@ fn MmKernelStackSwapIn { thread -- }
 	auto vaddr
 	thread@ KeThread_KernelStackTop + @ KETHREADSTACKSIZE - vaddr!
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	auto i
 	0 i!
 
@@ -302,7 +272,6 @@ fn MmKernelStackSwapIn { thread -- }
 		auto pteaddr
 
 		vaddr@ // vaddr
-		kdir@ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 
 		auto ipl
@@ -363,10 +332,8 @@ fn MmKernelStackSwapIn { thread -- }
 
 		phyaddr@ // phyaddr
 		PTE_V PTE_W | PTE_K | PTE_G | // flags
-		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		0 // asid
-		MmPTEUpdate drop drop drop
+		MmPTEUpdate drop drop
 
 		PAGESIZE vaddr +=
 		1 i +=

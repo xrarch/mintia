@@ -1,17 +1,28 @@
-extern MmPTECreate { vaddr process -- pteaddr ok }
-extern MmPTEDelete { deref pteaddr vaddr process -- ok }
+extern MmPTECreate { vaddr -- pteaddr ok }
+extern MmPTEDelete { deref pteaddr -- }
 
-extern MmPTEReference { pri vaddr process -- pfdbe pteaddr ok }
-extern MmPTEDereference { pfdbe process -- }
-extern MmVirtualtoPTEAddressUser { vaddr pagemap -- pteaddr }
-extern MmVirtualtoPTEAddress { vaddr pagemap -- pteaddr }
-extern MmVirtualAddressIsValid { vaddr pagemap -- isvalid }
+extern MmPTEPin { vaddr -- ptpfdbe pteaddr }
+extern MmPTEUnpin { vaddr ptpfdbe -- }
+
+extern MmVirtualToPhysical { vaddr -- phyaddr }
+extern MmVirtualToPFDBE { vaddr -- pfdbe }
+extern MmVirtualtoPTEAddressUser { vaddr -- pteaddr }
+extern MmVirtualtoPTEAddress { vaddr -- pteaddr }
+
+extern MmVirtualAddressIsValid { vaddr -- isvalid }
 
 extern MmPTEInterpret { pteaddr -- phyaddr flags ok }
-extern MmPTEUpdateByVirtual { phyaddr flags vaddr pagemap asid -- oldphyaddr oldflags ok }
-extern MmPTEUpdate { phyaddr flags vaddr pteaddr asid -- oldphyaddr oldflags ok }
-extern MmPTESet { pte vaddr pteaddr asid -- }
+
+extern MmPTEUpdateByVirtual { phyaddr flags vaddr -- oldphyaddr oldflags }
+
 extern MmPTEIsZero { pte -- iszero }
+
+extern MmPTEUpdate { phyaddr flags pteaddr -- oldphyaddr oldflags }
+extern MmPTESet { pte pteaddr -- }
+
+extern MmPTEDemandZeroDelete { pfdbe ptpfdbe -- }
+
+extern MmPTEInitializePageTable { vaddr pfdbe process -- }
 
 struct MmPTECountTableHeader
 	4 Next

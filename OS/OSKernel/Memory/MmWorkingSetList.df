@@ -268,11 +268,9 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 
 					if (process@ PsSystemProcess@ ==)
 						wsle@ // vaddr
-						process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
 						MmVirtualtoPTEAddress pteaddr!
 					end else
 						wsle@ // vaddr
-						process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
 						MmVirtualtoPTEAddressUser pteaddr!
 					end
 
@@ -301,10 +299,8 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 
 					phyaddr@ // phyaddr
 					flags@ // flags
-					wsle@ // vaddr
 					pteaddr@ // pteaddr
-					process@ PsProcess_PCB + KeProcess_ASID + @ // asid
-					MmPTEUpdate drop drop drop
+					MmPTEUpdate drop drop
 				end
 			end
 		end
@@ -394,6 +390,33 @@ fn MmWorkingSetSwapOut { process -- }
 	if (maxi@ -1 ==)
 		return
 	end
+
+	while (wsli@ maxi@ <=)
+		if (phdr@ MmProcessHeader_WorkingSetSize + @ ~~)
+			return
+		end
+
+		wsleptr@@ wsle!
+
+		if (wsle@ MMWORKINGSETENTRY_VALID &)
+			wsle@ PAGENUMBERMASK & wsle!
+
+			if (wsle@ PAGETABLE < wsle@ SYSPAGETABLE >= ||)
+				// found one, remove it
+
+				wsli@ // wsli
+				wsleptr@ // wsleptr
+				process@ // process
+				MmWorkingSetTrimPage
+			end
+		end
+
+		4 wsleptr +=
+		1 wsli +=
+	end
+
+	0 wsli!
+	process@ PsProcess_MmHeader + @ MmProcessHeader_SIZEOF + wsleptr!
 
 	while (wsli@ maxi@ <=)
 		if (phdr@ MmProcessHeader_WorkingSetSize + @ ~~)
@@ -686,20 +709,12 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 					1 useit!
 				end
 
-				if (vaddr@ VIEWSPACE >= vaddr@ VIEWSPACEEND < &&)
+				if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
 					auto pfdbe
-
-					vaddr@ // vaddr
-					HALPlatformKernelPageDirectory@ // pagemap
-					MmVirtualtoPTEAddress pfdbe!
-
-					pfdbe@ // pteaddr
-					MmPTEInterpret drop drop pfdbe!
-
-					pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+					vaddr@ MmVirtualToPFDBE pfdbe!
 
 					if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi 1 >)
-						// this page is pinned by the view cache. can't use it
+						// this page is a pinned page table. can't use it.
 
 						0 useit!
 					end
@@ -723,6 +738,58 @@ fn MmWorkingSetEntryReplace { process -- wsli wsleptr ok }
 	end
 
 	-1 ok!
+end
+
+fn MmWorkingSetEntryForceOut { vaddr pfdbe process -- }
+	// force out the specified virtual address from the process's working set.
+	// works from any context but DOES NOT set the PTE.
+	// used in very specific circumstances.
+
+	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_OUTSWAPPED ==)
+		return
+	end
+
+	auto phdr
+	process@ PsProcess_MmHeader + @ phdr!
+
+	if (phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ -1 ==)
+		return
+	end
+
+	auto endindex
+	auto wsli
+	auto wsleptr
+	auto wsle
+
+	0 wsli!
+	phdr@ MmProcessHeader_WorkingSetMaximumIndex + @ 1 + endindex!
+	phdr@ MmProcessHeader_SIZEOF + wsleptr!
+
+	while (wsli@ endindex@ <)
+		wsleptr@@ wsle!
+
+		if (wsle@ MMWORKINGSETENTRY_VALID &)
+			if (vaddr@ wsle@ PAGENUMBERMASK & ==)
+				MMWORKINGSETENTRY_VALID ~ wsleptr@ &=
+
+				pfdbe@ MmEvictablePageDereference drop
+
+				auto oldcount
+				process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @ oldcount!
+
+				if (DEBUGCHECKS)
+					if (oldcount@ 0 ==)
+						"MmWorkingSetEntryForceOut: underflow\n" KeCrash
+					end
+				end
+
+				oldcount@ 1 - process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + !
+			end
+		end
+
+		4 wsleptr +=
+		1 wsli +=
+	end
 end
 
 fn MmWorkingSetEntryRemove { wsleptr process -- }
@@ -752,11 +819,12 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 
 	if (process@ PsSystemProcess@ ==)
 		vaddr@ // vaddr
-		process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
+		MmVirtualtoPTEAddress pteaddr!
+	end elseif (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+		vaddr@ // vaddr
 		MmVirtualtoPTEAddress pteaddr!
 	end else
 		vaddr@ // vaddr
-		process@ PsProcess_PCB + KeProcess_PageDirectory + @ // pagemap
 		MmVirtualtoPTEAddressUser pteaddr!
 	end
 
@@ -769,7 +837,7 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 
 	if (DEBUGCHECKS)
 		if (ok@)
-			pteaddr@@ "MmWorkingSetEntryRemove: invalid PTE %x\n" KeCrash
+			pteaddr@ pteaddr@@ "MmWorkingSetEntryRemove: invalid PTE %x (%x)\n" KeCrash
 		end
 	end
 
@@ -798,31 +866,23 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 
 		if (process@ PsSystemProcess@ ==)
 			phyaddr@ PTE_TRANSITION | PTE_TLBHACK | // pte
-			vaddr@ // vaddr
 			pteaddr@ // pteaddr
-			process@ PsProcess_PCB + KeProcess_ASID + @ // asid
 			MmPTESet
 		end else
 			phyaddr@ PTE_TRANSITION | // pte
-			vaddr@ // vaddr
 			pteaddr@ // pteaddr
-			process@ PsProcess_PCB + KeProcess_ASID + @ // asid
 			MmPTESet
 		end
 	end else
 		0 // phyaddr
 		0 // flags
-		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		process@ PsProcess_PCB + KeProcess_ASID + @ // asid
-		MmPTEUpdate drop drop drop
+		MmPTEUpdate drop drop
 
 		if (process@ PsSystemProcess@ ~=)
 			1 // deref
 			pteaddr@ // pteaddr
-			vaddr@ // vaddr
-			process@ // process
-			MmPTEDelete drop
+			MmPTEDelete
 		end else
 			// shared system pages are assumed to have been in the viewcache
 			1 MmViewCachePageCount -=

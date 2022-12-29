@@ -18,4 +18,6 @@ extern MmWorkingSetEntryFindByIndex { wsli process -- wsleptr ok }
 extern MmWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok }
 extern MmWorkingSetEntryFree { wsli wsleptr process -- }
 
+extern MmWorkingSetEntryForceOut { vaddr pfdbe process -- }
+
 extern MmManageWorkingSets { -- success }

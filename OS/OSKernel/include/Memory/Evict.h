@@ -30,9 +30,9 @@ struct MmPageFrameEntryPageTable
 	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
 	4 SwapPTE
 	4 PrototypePTE
-	4 PTECountTableEntry
-	4 HoldCount
-	4 PDENumber
+	4 PTECountTableEntry // overlaps Anonymous_Process but that's fine since these are both pointers and will therefore be unique with respect to eachother
+	4 HoldCount          // overlaps Anonymous_VirtualAddress but that's fine since we won't ever check that for page tables
+	4 PDEAddress
 endstruct
 
 struct MmPageFrameEntryWaitable
@@ -52,9 +52,6 @@ const MMEVICTFLAG_PRIVATE    16
 const MMEVICTFLAG_WORKINGSET 32 // indicates that a page is considered for
                                 // working set accounting.
 const MMEVICTFLAG_VALID      64 // file cache
-const MMEVICTFLAG_PAGETABLE  64 // page table (reused bit from filecache
-                                // because that bit will NEVER be on in an
-                                // anonymous page unless it is a pagetable.)
 const MMEVICTFLAG_IOINPROGRESS 128
 
 const MMEVICTTYPE_FILE       0

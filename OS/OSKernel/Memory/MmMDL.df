@@ -236,9 +236,6 @@ end
 fn MmMDLFill { mdl -- }
 	// fill up an MDL with system space.
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
@@ -255,7 +252,6 @@ fn MmMDLFill { mdl -- }
 	while (pages@)
 		auto pte
 		buffer@ // vaddr
-		kdir@ // pagemap
 		MmVirtualtoPTEAddress pte!
 
 		auto pfdbe
@@ -449,6 +445,8 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	auto ptpfdbe
 	0 ptpfdbe!
 
+	auto pinnedvaddr
+
 	while (pages@)
 		if (lockforwrite@)
 			// force any COWs and discover any read-only violations.
@@ -459,9 +457,9 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				process@ MmVADListUnlock
 
 				if (ptpfdbe@)
-					ptpfdbe@ // pfdbe
-					process@ // process
-					MmPTEDereference
+					pinnedvaddr@ // vaddr
+					ptpfdbe@ // ptpfdbe
+					MmPTEUnpin
 				end
 
 				mdl@ MmMDLUnpin
@@ -480,9 +478,9 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				process@ MmVADListUnlock
 
 				if (ptpfdbe@)
-					ptpfdbe@ // pfdbe
-					process@ // process
-					MmPTEDereference
+					pinnedvaddr@ // vaddr
+					ptpfdbe@ // ptpfdbe
+					MmPTEUnpin
 				end
 
 				mdl@ MmMDLUnpin
@@ -492,29 +490,18 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 			if (buffer@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
 				if (ptpfdbe@)
-					ptpfdbe@ // pfdbe
-					process@ // process
-					MmPTEDereference
+					pinnedvaddr@ // vaddr
+					ptpfdbe@ // ptpfdbe
+					MmPTEUnpin
 				end
 
-				0 // pri
-				buffer@ // vaddr
-				process@ // process
-				MmPTEReference ok! pte! ptpfdbe!
+				buffer@ MmPTEPin pte! ptpfdbe!
 
-				if (ok@)
-					if (ok@ -1 ~=)
-						process@ MmVADListUnlock
-
-						mdl@ MmMDLUnpin
-
-						return
-					end
-
-					0 ptpfdbe!
-
+				if (ptpfdbe@ ~~)
 					continue
 				end
+
+				buffer@ pinnedvaddr!
 			end
 
 			auto ipl
@@ -562,9 +549,9 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	end
 
 	if (ptpfdbe@)
-		ptpfdbe@ // pfdbe
-		process@ // process
-		MmPTEDereference
+		pinnedvaddr@ // vaddr
+		ptpfdbe@ // ptpfdbe
+		MmPTEUnpin
 	end
 
 	process@ MmVADListUnlock
@@ -656,9 +643,6 @@ fn MmMDLMap { mdl -- ok }
 
 	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & vaddr@ + mdl@ MmMDLHeader_MappedAddress + !
 
-	auto kdir
-	HALPlatformKernelPageDirectory@ kdir!
-
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
@@ -669,15 +653,7 @@ fn MmMDLMap { mdl -- ok }
 		phyaddr@ // phyaddr
 		PTE_G PTE_K | PTE_W | PTE_V | // flags
 		vaddr@ // vaddr
-		kdir@ // pagemap
-		0 // asid
-		MmPTEUpdateByVirtual ok! drop drop
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"MmMDLMap: failed to map virtual address\n" KeCrash
-			end
-		end
+		MmPTEUpdateByVirtual drop drop
 
 		PAGESIZE vaddr +=
 		4 mdlpos +=
@@ -717,15 +693,7 @@ fn MmMDLUnmap { mdl -- }
 		0 // phyaddr
 		0 // flags
 		vaddr@ // vaddr
-		kdir@ // pagemap
-		0 // asid
-		MmPTEUpdateByVirtual ok! drop drop
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				"MmMDLUnmap: failed to unmap virtual address\n" KeCrash
-			end
-		end
+		MmPTEUpdateByVirtual drop drop
 
 		PAGESIZE vaddr +=
 		4 mdlpos +=

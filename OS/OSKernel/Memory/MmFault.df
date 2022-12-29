@@ -59,8 +59,10 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 				OSSIGNAL_SEGV signal!
 			end
 		end elseif (badaddr@ MMLOWESTSYSTEMADDRESS >=)
-			PsSystemProcess@ process!
-			1 kernelmapping!
+			if (badaddr@ PAGETABLE < badaddr@ SYSPAGETABLE >= ||)
+				PsSystemProcess@ process!
+				1 kernelmapping!
+			end
 		end
 	end
 
@@ -204,25 +206,17 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 	auto process
 	auto rs
 
+	0 ok!
+
 	if (kernelmapping@ ~~)
 		KeProcessCurrent process!
 
 		MmThrottle
 
-		0 // pri
-		vaddr@ // vaddr
-		process@ // process
-		MmPTEReference ok! pteaddr! ptpfdbe!
+		vaddr@ MmPTEPin pteaddr! ptpfdbe!
 
-		if (ok@)
-			if (ok@ -1 ==)
-				// no page table
-				0 ptpfdbe!
-			end else
-				// something else happened
-				OSSIGNAL_KILL signal!
-				return
-			end
+		if (ptpfdbe@ ~~)
+			-1 ok!
 		end
 	end else
 		PsSystemProcess@ process!
@@ -230,10 +224,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 		0 ptpfdbe!
 
 		vaddr@ // vaddr
-		process@ KeProcess_PageDirectory + @ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
-
-		0 ok!
 	end
 
 	auto ipl
@@ -252,7 +243,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				// no work to do
 
 				if (ptpfdbe@)
-					ptpfdbe@ process@ MmPTEDereference
+					vaddr@ ptpfdbe@ MmPTEUnpin
 				end
 
 				return
@@ -263,7 +254,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				MmWriteFault signal!
 
 				if (ptpfdbe@)
-					ptpfdbe@ process@ MmPTEDereference
+					vaddr@ ptpfdbe@ MmPTEUnpin
 				end
 
 				return
@@ -271,7 +262,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				// no work to do
 
 				if (ptpfdbe@)
-					ptpfdbe@ process@ MmPTEDereference
+					vaddr@ ptpfdbe@ MmPTEUnpin
 				end
 
 				return
@@ -300,7 +291,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				if (ok@)
 					ipl@ KeIPLLower
 					if (ptpfdbe@)
-						ptpfdbe@ process@ MmPTEDereference
+						vaddr@ ptpfdbe@ MmPTEUnpin
 					end
 					OSSIGNAL_KILL signal!
 					return
@@ -309,7 +300,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				if (waited@)
 					ipl@ KeIPLLower
 					if (ptpfdbe@)
-						ptpfdbe@ process@ MmPTEDereference
+						vaddr@ ptpfdbe@ MmPTEUnpin
 					end
 					STATUS_REFAULT signal!
 					return
@@ -321,7 +312,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				if (ok@)
 					ipl@ KeIPLLower
 					if (ptpfdbe@)
-						ptpfdbe@ process@ MmPTEDereference
+						vaddr@ ptpfdbe@ MmPTEUnpin
 					end
 					OSSIGNAL_KILL signal!
 					return
@@ -364,7 +355,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				ipl@ KeIPLLower
 
 				if (ptpfdbe@)
-					ptpfdbe@ process@ MmPTEDereference
+					vaddr@ ptpfdbe@ MmPTEUnpin
 				end
 
 				if (ok@)
@@ -403,7 +394,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 			// it's not! oops!
 
 			if (ptpfdbe@)
-				ptpfdbe@ process@ MmPTEDereference
+				vaddr@ ptpfdbe@ MmPTEUnpin
 			end
 
 			process@ MmVADListUnlock
@@ -423,7 +414,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 	MmNormalFault signal!
 
 	if (ptpfdbe@)
-		ptpfdbe@ process@ MmPTEDereference
+		vaddr@ ptpfdbe@ MmPTEUnpin
 	end
 
 	if (kernelmapping@)
@@ -535,7 +526,6 @@ fn MmNormalFault { vaddr process -- signal }
 
 	if (kernelmapping@ ~~)
 		vaddr@ // vaddr
-		process@ // process
 		MmPTECreate ok! pteaddr!
 
 		if (ok@)
@@ -544,7 +534,6 @@ fn MmNormalFault { vaddr process -- signal }
 		end
 	end else
 		vaddr@ // vaddr
-		process@ KeProcess_PageDirectory + @ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 	end
 
@@ -571,9 +560,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			vaddr@ // vaddr
-			process@ // process
-			MmPTEDelete drop
+			MmPTEDelete
 		end
 
 		OSSIGNAL_KILL signal!
@@ -586,9 +573,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			vaddr@ // vaddr
-			process@ // process
-			MmPTEDelete drop
+			MmPTEDelete
 		end
 
 		STATUS_REFAULT signal!
@@ -604,9 +589,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			vaddr@ // vaddr
-			process@ // process
-			MmPTEDelete drop
+			MmPTEDelete
 		end
 
 		OSSIGNAL_KILL signal!
@@ -641,10 +624,8 @@ fn MmNormalFault { vaddr process -- signal }
 	end else
 		phyaddr@ // phyaddr
 		PTE_V // flags
-		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		asid@ // asid
-		MmPTEUpdate drop drop drop
+		MmPTEUpdate drop drop
 
 		vaddr@ PAGENUMBERMASK & // vaddr
 		wsleptr@ // wsleptr
@@ -658,9 +639,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			vaddr@ // vaddr
-			process@ // process
-			MmPTEDelete drop
+			MmPTEDelete
 		end
 
 		if (ok@ STATUS_REFAULT ==)
@@ -711,7 +690,6 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	if (process@ PsSystemProcess@ ~=)
 		auto pteaddr
 		vaddr@ // vaddr
-		process@ // process
 		MmPTECreate ok! pteaddr!
 
 		if (ok@)
@@ -719,16 +697,13 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 		end
 	end else
 		vaddr@ // vaddr
-		process@ KeProcess_PageDirectory + @ // pagemap
 		MmVirtualtoPTEAddress pteaddr!
 	end
 
 	phyaddr@ // phyaddr
 	flags@ // flags
-	vaddr@ // vaddr
 	pteaddr@ // pteaddr
-	process@ KeProcess_ASID + @ // asid
-	MmPTEUpdate drop drop drop
+	MmPTEUpdate drop drop
 end
 
 fn MmSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
@@ -963,6 +938,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
 			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
+			cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
+			cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+
 			process@ cowpfdbe@ MmPageFrameEntryAnonymous_Process + !
 			vaddr@ cowpfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
 
@@ -980,10 +958,8 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 			cowaddr@ // phyaddr
 			PTE_V PTE_W | // flags
-			vaddr@ // vaddr
 			pteaddr@ // pteaddr
-			process@ KeProcess_ASID + @ // asid
-			MmPTEUpdate drop drop drop
+			MmPTEUpdate drop drop
 
 			// we COW'd over top of the old page frame and no longer have it
 			// mapped, so dereference it
@@ -1009,10 +985,8 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 			phyaddr@ // phyaddr
 			PTE_V PTE_D | // flags
-			vaddr@ // vaddr
 			pteaddr@ // pteaddr
-			process@ KeProcess_ASID + @ // asid
-			MmPTEUpdate drop drop drop
+			MmPTEUpdate drop drop
 
 			break
 		end

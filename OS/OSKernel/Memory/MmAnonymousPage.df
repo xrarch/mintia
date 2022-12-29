@@ -43,24 +43,34 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 	// a private anonymous page. this may be zero if the page is a never-
 	// -written demand-zero page since we just discard those.
 
-	pte@ ppte@!
-
 	auto ptpfdbe
 
 	if (ef@ MMEVICTFLAG_PRIVATE &)
 		// this is a private page. these are tracked in real page tables, so
-		// we need to do some accounting with those. do not do this accounting
-		// with system pages because kernel page tables must never be swapped
-		// to disk or otherwise disappear, as they are shared by memcpy'ing
-		// the upper entries of the kernel page directory to that of new
-		// processes, and doing so would break that association (there is no
-		// guarantee the system page table would reappear at the same physical
-		// address).
+		// we need to do some accounting with those.
+
+		// private pages have physical prototype PTE pointers, so we
+		// have to map the page table in now since it may not belong to
+		// this process. note that this page table may actually be the
+		// page directory if this page is a page table itself.
+
+		auto qp
+		ppte@ MmMapQuickPage qp!
+
+		auto rppte
+		qp@ ppte@ PAGEOFFSETMASK & + rppte!
+
+		pte@ rppte@!
+
+		// dereference the page table. this may allow the page table to be
+		// swapped out as well.
+
+		qp@ MmUnmapQuickPage
 
 		if (pfdbe@ MmPageFrameEntryAnonymous_Process + @ PsSystemProcess@ ~=)
-			// dereference the page table.
+			ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
 
-			ppte@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
+			ptpfdbe@ MmEvictablePageDereference drop
 
 			if (pte@ SWAPPTE_DEMANDZERO ==)
 				// this was a demand-zero page, so it's just going to be
@@ -72,25 +82,13 @@ fn (MmEvictionFunction) MmAnonymousEvictionFunction { pfdbe -- }
 				// dereference the page table, which broke things later as the
 				// PTE would end up never being properly deleted.
 
-				1 // deref
-				ppte@ // pteaddr
-				pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + @ // vaddr
-				pfdbe@ MmPageFrameEntryAnonymous_Process + @ // process
-				MmPTEDelete drop
-			end else
-				// dereference the page table since the PTE contains some
-				// information about the location of this page in swap. this
-				// may allow the page table to be swapped out as well.
-
-				ptpfdbe@ MmEvictablePageDereference drop
+				pfdbe@ // pfdbe
+				ptpfdbe@ // ptpfdbe
+				MmPTEDemandZeroDelete
 			end
 		end
-	end elseif (ef@ MMEVICTFLAG_PAGETABLE &)
-		// this is a page table page, dereference the page directory that
-		// points to it so we might be able to swap that out.
-
-		ppte@ IDENTITYSPACEMASK & PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + ptpfdbe!
-		ptpfdbe@ MmEvictablePageDereference drop
+	end else
+		pte@ ppte@!
 	end
 
 	1 MmAnonymousPageCount -=
@@ -172,7 +170,7 @@ fn MmAnonymousSwapIn { pri pte pno ipl -- pfdbe pfn ok }
 	end
 
 	kflags@ // kflags
-	pfn@ PAGESHIFT << IDENTITYSPACE | // pageframe
+	pfdbe@ // pageframe
 	pte@@ // pte
 	IOSwapPageReadPTE ok!
 
@@ -216,10 +214,8 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 			if (process@)
 				0 // phyaddr
 				0 // flags
-				vaddr@ // vaddr
 				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate drop drop drop
+				MmPTEUpdate drop drop
 
 				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
 					ipl@ // ipl
@@ -237,10 +233,8 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 			if (process@)
 				0 // phyaddr
 				0 // flags
-				vaddr@ // vaddr
 				pteaddr@ // pteaddr
-				process@ KeProcess_ASID + @ // asid
-				MmPTEUpdate drop drop drop
+				MmPTEUpdate drop drop
 			end else
 				0 pteaddr@!
 			end
@@ -271,6 +265,8 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 						pfdbe@ // pfdbe
 						MmAnonymousPageDelete
 					end else
+						ipl@ KeIPLLower
+
 						0 deletepte!
 					end
 				end else
@@ -288,9 +284,7 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 
 			deref@ // deref
 			pteaddr@ // pteaddr
-			vaddr@ // vaddr
-			process@ // process
-			MmPTEDelete drop
+			MmPTEDelete
 		end
 	end else
 		ipl@ KeIPLLower
@@ -323,14 +317,6 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 	end
 
 	0 ok!
-
-	auto asid
-
-	if (process@)
-		process@ KeProcess_ASID + @ asid!
-	end else
-		-1 asid!
-	end
 
 	auto capturedpte
 	pteaddr@@ capturedpte!
@@ -374,6 +360,9 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (evictflag@ MMEVICTFLAG_PRIVATE &)
 			process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
 			vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+
+			pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
+			pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
 		end
 
 		if (refpfdbe@)
@@ -382,10 +371,8 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		phyaddr@ // phyaddr
 		PTE_V // flags
-		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		asid@ // asid
-		MmPTEUpdate drop drop drop
+		MmPTEUpdate drop drop
 	end elseif (capturedpte@ PTE_TRANSITION &)
 		// page is in transition.
 		// if IO is in progress, wait for that to finish.
@@ -420,12 +407,17 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 			STATUS_REFAULT ok!
 		end else
-			phyaddr@ // phyaddr
-			PTE_V // flags
-			vaddr@ // vaddr
-			pteaddr@ // pteaddr
-			asid@ // asid
-			MmPTEUpdate drop drop drop
+			if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+				phyaddr@ // phyaddr
+				PTE_V PTE_W | PTE_D | // flags
+				pteaddr@ // pteaddr
+				MmPTEUpdate drop drop
+			end else
+				phyaddr@ // phyaddr
+				PTE_V // flags
+				pteaddr@ // pteaddr
+				MmPTEUpdate drop drop
+			end
 		end
 	end elseif (capturedpte@ PTE_INSWAP &)
 		// page was written to swap and then evicted. we are responsible
@@ -451,11 +443,6 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		capturedpte@ pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
-
-		if (evictflag@ MMEVICTFLAG_PRIVATE &)
-			process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
-			vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-		end
 
 		if (refpfdbe@)
 			refpfdbe@ MmEvictablePageReference drop
@@ -484,6 +471,21 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 		IPLAPC KeIPLLower
 
+		if (evictflag@ MMEVICTFLAG_PRIVATE &)
+			if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+				vaddr@ // vaddr
+				pfdbe@ // pfdbe
+				process@ // process
+				MmPTEInitializePageTable
+			end else
+				process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+				vaddr@ pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+			end
+
+			pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
+			pfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+		end
+
 		if (lockprocess@)
 			lockprocess@ MmVADListUnlock
 		end
@@ -496,7 +498,7 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		end
 
 		kflags@ // kflags
-		phyaddr@ IDENTITYSPACE | // pageframe
+		pfdbe@ // pfdbe
 		capturedpte@ // pte
 		IOSwapPageReadPTE ok!
 
@@ -557,12 +559,17 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		1 MmHardPageFaultCount +=
 		1 MmPageInCount +=
 
-		phyaddr@ // phyaddr
-		PTE_V // flags
-		vaddr@ // vaddr
-		pteaddr@ // pteaddr
-		asid@ // asid
-		MmPTEUpdate drop drop drop
+		if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+			phyaddr@ // phyaddr
+			PTE_V PTE_W | PTE_D | // flags
+			pteaddr@ // pteaddr
+			MmPTEUpdate drop drop
+		end else
+			phyaddr@ // phyaddr
+			PTE_V // flags
+			pteaddr@ // pteaddr
+			MmPTEUpdate drop drop
+		end
 	end elseif (DEBUGCHECKS)
 		capturedpte@ "MmAnonymousPageReference: odd PTE %x\n" KeCrash
 	end

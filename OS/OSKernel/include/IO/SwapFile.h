@@ -5,7 +5,7 @@ extern IOSwapFileQuery { query id -- ok }
 
 extern IOSwapPageFree { pno swapfile -- }
 extern IOSwapPageFreePTE { pte -- }
-extern IOSwapPageReadPTE { kflags pageframe pte -- ok }
+extern IOSwapPageReadPTE { kflags pfdbe pte -- ok }
 
 extern IOSwapFileWriteMDL { pagecount offset mdl -- ok }
 

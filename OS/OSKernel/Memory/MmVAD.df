@@ -351,21 +351,6 @@ fn MmVADUnmap { vad processobject -- }
 
 	auto ok
 
-	if (kernelmapping@ ~~)
-		// discard IPL since it is known to be IPLLOW here.
-		// also discard the status since a non-try KeProcessAttach can't fail.
-
-		0 // try
-		processobject@ // process
-		KeProcessAttach drop drop
-	end
-
-	auto pdir
-	processobject@ PsProcess_PCB + KeProcess_PageDirectory + @ pdir!
-
-	auto asid
-	processobject@ PsProcess_PCB + KeProcess_ASID + @ asid!
-
 	auto vaddr
 	vad@ MmVAD_StartVA + @ vaddr!
 
@@ -411,6 +396,8 @@ fn MmVADUnmap { vad processobject -- }
 
 	auto pfdbe
 
+	auto pinnedvaddr
+
 	auto chargevmquota
 	vad@ MmVAD_ChargeVMQuota + @ chargevmquota!
 
@@ -429,27 +416,20 @@ fn MmVADUnmap { vad processobject -- }
 			if (kernelmapping@ ~~)
 				if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
 					if (ptpfdbe@)
-						ptpfdbe@ processobject@ MmPTEDereference
+						pinnedvaddr@ ptpfdbe@ MmPTEUnpin
 					end
 
-					TRYFOREVER // pri
-					vaddr@ // vaddr
-					processobject@ // process
-					MmPTEReference ok! pteaddr! ptpfdbe!
+					vaddr@ MmPTEPin pteaddr! ptpfdbe!
 
-					if (ok@)
-						if (ok@ -1 ~=)
-							ok@ "MmVADUnmap: failed to reference PTE (%i)\n" KeCrash
-						end
-
-						0 ptpfdbe!
+					if (ptpfdbe@ ~~)
 						PERPAGETABLE vaddr +=
 						continue
 					end
+
+					vaddr@ pinnedvaddr!
 				end
 			end elseif (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
 				vaddr@ // vaddr
-				pdir@ // pagemap
 				MmVirtualtoPTEAddress pteaddr!
 			end
 
@@ -468,16 +448,12 @@ fn MmVADUnmap { vad processobject -- }
 				if (pteaddr@@ MmPTEIsZero ~~)
 					0 // phyaddr
 					0 // flags
-					vaddr@ // vaddr
 					pteaddr@ // pteaddr
-					asid@ // asid
-					MmPTEUpdate drop drop drop
+					MmPTEUpdate drop drop
 
 					1 // deref
 					pteaddr@ // pteaddr
-					vaddr@ // vaddr
-					processobject@ // process
-					MmPTEDelete drop
+					MmPTEDelete
 				end
 			end
 
@@ -486,12 +462,8 @@ fn MmVADUnmap { vad processobject -- }
 		end
 
 		if (ptpfdbe@)
-			ptpfdbe@ processobject@ MmPTEDereference
+			pinnedvaddr@ ptpfdbe@ MmPTEUnpin
 		end
-	end
-
-	if (kernelmapping@ ~~)
-		IPLLOW KeProcessDetach
 	end
 
 	// remove from VAD tree

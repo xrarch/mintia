@@ -27,6 +27,10 @@ fn MmPageDirectoryDestroy { process -- }
 	auto pagemap
 	process@ KeProcess_PageDirectory + @ pagemap!
 
+	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
+		process@ KeProcess_MemoryStateB + gb "hm %d\n" KeCrash
+	end
+
 	auto pfdbe
 	pagemap@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
@@ -129,21 +133,28 @@ fn MmPageDirectoryAlloc { process -- pdir ok }
 		return
 	end
 
+	process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+
 	pfdbe@ // pfdbe
 	0 // process
 	MmEvictablePageModify
 
 	PAGESHIFT pdir <<=
 
-	pdir@ IDENTITYSPACE | 2048 + // dest
-	HALPlatformKernelPageDirectory@ IDENTITYSPACE | 2048 + // src
+	auto qp
+	pdir@ MmMapQuickPage qp!
+
+	qp@ 2048 + // dest
+	PAGEDIRECTORY 2048 + // src
 	2048 // size
 	memcpy
 
 	// create recursive mapping of page tables
 
 	pdir@ 12 >> 5 << PTE_V | PTE_W | PTE_K |
-	pdir@ PAGETABLE 22 >> 2 << + IDENTITYSPACE | !
+	qp@ PAGETABLE 22 >> 2 << + !
+
+	qp@ MmUnmapQuickPage
 end
 
 fn MmPageDirectoryReference { pri process -- ok }
@@ -183,6 +194,18 @@ fn MmPageDirectoryReference { pri process -- ok }
 		end
 
 		pt@ PAGESHIFT << process@ KeProcess_PageDirectory + !
+
+		auto qp
+		pt@ PAGESHIFT << MmMapQuickPage qp!
+
+		// create recursive mapping of page tables
+
+		pt@ 5 << PTE_V | PTE_W | PTE_K |
+		qp@ PAGETABLE 22 >> 2 << + !
+
+		process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+
+		qp@ MmUnmapQuickPage
 	end else
 		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 		

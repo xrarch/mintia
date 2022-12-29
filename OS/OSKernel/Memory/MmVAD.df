@@ -141,25 +141,26 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 	end
 end
 
+fn MmMapLock { processobject -- ok }
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	processobject@ PsProcess_MappingMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn MmMapUnlock { processobject -- }
+	0 // abandon
+	processobject@ PsProcess_MappingMutex + // mutex
+	KeMutexRelease drop
+end
+
 fn MmVADListLock { processobject -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
 	processobject@ PsProcess_VADListMutex + // object
 	KeThreadWaitForObject ok!
-end
-
-fn MmVADListTryLock { processobject -- ok }
-	KERNELMODE // waitmode
-	0 // alertable
-	0 // timeout
-	processobject@ PsProcess_VADListMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn MmVADListIsLocked { processobject -- locked }
-	processobject@ PsProcess_VADListMutex + // mutex
-	KeMutexIsLocked locked!
 end
 
 fn MmVADListUnlock { processobject -- }
@@ -216,9 +217,17 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	auto vad
 	0 vad!
 
+	processobject@ MmMapLock ok!
+
+	if (ok@)
+		return
+	end
+
 	processobject@ MmVADListLock ok!
 
 	if (ok@)
+		processobject@ MmMapUnlock
+
 		return
 	end
 
@@ -227,6 +236,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			if (startva@ PAGESIZE <)
 				if (fixedva@)
 					processobject@ MmVADListUnlock
+					processobject@ MmMapUnlock
 
 					STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -245,6 +255,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			if (vad@)
 				if (fixedva@)
 					processobject@ MmVADListUnlock
+					processobject@ MmMapUnlock
 
 					STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -280,6 +291,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			end
 		end elseif (fixedva@)
 			processobject@ MmVADListUnlock
+			processobject@ MmMapUnlock
 
 			STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -293,6 +305,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 
 			if (realva@ ~~)
 				processobject@ MmVADListUnlock
+				processobject@ MmMapUnlock
 
 				STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -316,6 +329,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	
 	if (ok@)
 		processobject@ MmVADListUnlock
+		processobject@ MmMapUnlock
 
 		return
 	end
@@ -330,6 +344,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	end
 
 	processobject@ MmVADListUnlock
+	processobject@ MmMapUnlock
 end
 
 fn MmVADUnmap { vad processobject -- }

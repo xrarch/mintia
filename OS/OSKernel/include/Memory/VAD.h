@@ -26,10 +26,12 @@ const MMVADFLAG_SECTION   2
 const MMVADFLAG_NOCOMMIT  4
 
 extern MmVADCreate { startva endva prot offset processobject mappedobject quotablock -- vad ok }
+
 extern MmVADListLock { processobject -- ok }
-extern MmVADListTryLock { processobject -- ok }
 extern MmVADListUnlock { processobject -- }
-extern MmVADListIsLocked { processobject -- locked }
+
+extern MmMapLock { processobject -- ok }
+extern MmMapUnlock { processobject -- }
 
 extern MmVADFind { vaddr length mustbestart processobject -- vad ok }
 extern MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset mappedobject processobject -- realva ok }

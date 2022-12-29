@@ -33,6 +33,7 @@ struct PsProcess // contains things that may need to be accessed at all times
 	// virtual memory information
 
 	KeMutex_SIZEOF VADListMutex
+	KeMutex_SIZEOF MappingMutex
 
 	4 PinnedPageCount
 

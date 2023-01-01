@@ -36,6 +36,9 @@ extern OSLastComponent { path -- lcomp }
 extern OSDirectoryName { path dirname bufsize -- ok }
 extern OSRealPath { path canon bufsize -- ok }
 
+extern OSCharacterIsAlphanumeric { char -- valid }
+extern OSStringIsAlphanumeric { str -- valid }
+
 extern OSGetCWD { cwd bufsize -- ok }
 extern OSChangeCWD { path -- ok }
 

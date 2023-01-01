@@ -86,5 +86,9 @@ const STATUS_PORT_QUEUE_FULL          -84
 const STATUS_IO_CANCEL_INCOMPLETE     -85
 const STATUS_DEAD_SYSTEM              -86
 const STATUS_NOT_MOUNTED              -87
+const STATUS_INVALID_USERNAME         -88
+const STATUS_INVALID_GROUPNAME        -89
+const STATUS_USER_EXISTS              -90
+const STATUS_GROUP_EXISTS             -91
 
 extern OSStatusGetName { status -- name }

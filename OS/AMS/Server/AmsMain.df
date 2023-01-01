@@ -5,6 +5,7 @@
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
+#include "<ll>/OSDLL/OSCrypt.h"
 
 #include "<inc>/AmsAPI.h"
 
@@ -423,6 +424,14 @@ fn (AmsDispatchFunction) AmsApiCreateUser { msg client -- ok }
 	AmsUserInformation_SIZEOF // sz
 	memcpy
 
+	kinfo@ AmsUserInfoFix ok!
+
+	if (ok@)
+		processhandle@ OSClose drop
+
+		return
+	end
+
 	auto uid
 	kpassword@ // password
 	kinfo@ // info
@@ -455,6 +464,14 @@ fn (AmsDispatchFunction) AmsApiCreateGroup { msg client -- ok }
 	AmsGroupInformation_SIZEOF // sz
 	memcpy
 
+	kinfo@ AmsGroupInfoFix ok!
+
+	if (ok@)
+		processhandle@ OSClose drop
+
+		return
+	end
+
 	auto gid
 	kinfo@ // info
 	processhandle@ // processhandle
@@ -478,14 +495,6 @@ fn (AmsDispatchFunction) AmsApiEditUser { msg client -- ok }
 		return
 	end
 
-	auto kinfo
-	AmsUserInformation_SIZEOF alloc kinfo!
-
-	kinfo@ // dest
-	client@ AmsClient_SectionBase + @ AmsMessageEditUser_Info + // src
-	AmsGroupInformation_SIZEOF // sz
-	memcpy
-
 	auto uid
 	client@ AmsClient_SectionBase + @ AmsMessageEditUser_UID + @ uid!
 
@@ -497,6 +506,22 @@ fn (AmsDispatchFunction) AmsApiEditUser { msg client -- ok }
 		processhandle@ // processhandle
 		AmsUserDelete ok!
 	end else
+		auto kinfo
+		AmsUserInformation_SIZEOF alloc kinfo!
+
+		kinfo@ // dest
+		client@ AmsClient_SectionBase + @ AmsMessageEditUser_Info + // src
+		AmsGroupInformation_SIZEOF // sz
+		memcpy
+
+		kinfo@ AmsUserInfoFix ok!
+
+		if (ok@)
+			processhandle@ OSClose drop
+
+			return
+		end
+	
 		kinfo@ // info
 		uid@ // uid
 		processhandle@ // processhandle
@@ -517,14 +542,6 @@ fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
 		return
 	end
 
-	auto kinfo
-	AmsGroupInformation_SIZEOF alloc kinfo!
-
-	kinfo@ // dest
-	client@ AmsClient_SectionBase + @ AmsMessageEditGroup_Info + // src
-	AmsGroupInformation_SIZEOF // sz
-	memcpy
-
 	auto gid
 	client@ AmsClient_SectionBase + @ AmsMessageEditGroup_GID + @ gid!
 
@@ -536,6 +553,22 @@ fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
 		processhandle@ // processhandle
 		AmsGroupDelete ok!
 	end else
+		auto kinfo
+		AmsGroupInformation_SIZEOF alloc kinfo!
+
+		kinfo@ // dest
+		client@ AmsClient_SectionBase + @ AmsMessageEditGroup_Info + // src
+		AmsGroupInformation_SIZEOF // sz
+		memcpy
+
+		kinfo@ AmsGroupInfoFix ok!
+
+		if (ok@)
+			processhandle@ OSClose drop
+
+			return
+		end
+
 		kinfo@ // info
 		gid@ // gid
 		processhandle@ // processhandle
@@ -543,4 +576,63 @@ fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
 	end
 
 	processhandle@ OSClose drop
+end
+
+fn AmsUserInfoFix { info -- ok }
+	0 ok!
+
+	// make sure the info fields aren't nasty before we pass them on.
+	
+	// ensure the string fields are null terminated at their maximum length.
+
+	0 info@ AmsUserInformation_UserName + AMSNAMEMAX + 1 - sb
+
+	0 info@ AmsUserInformation_Home + OSFILEPATHMAX + 1 - sb
+	0 info@ AmsUserInformation_Shell + OSFILEPATHMAX + 1 - sb
+
+	// ensure the string fields are alphanumeric.
+
+	if (info@ AmsUserInformation_UserName + "" strcmp)
+		STATUS_INVALID_USERNAME ok!
+
+		return
+	end
+
+	auto isalpha
+
+	info@ AmsUserInformation_UserName + OSStringIsAlphanumeric isalpha!
+
+	if (isalpha@ ~~)
+		STATUS_INVALID_USERNAME ok!
+
+		return
+	end
+end
+
+fn AmsGroupInfoFix { info -- ok }
+	0 ok!
+
+	// make sure the info fields aren't nasty before we pass them on.
+
+	// ensure the string fields are null terminated at their maximum length.
+
+	0 info@ AmsGroupInformation_GroupName + AMSNAMEMAX + 1 - sb
+
+	// ensure the string fields are alphanumeric.
+
+	if (info@ AmsGroupInformation_GroupName + "" strcmp)
+		STATUS_INVALID_GROUPNAME ok!
+
+		return
+	end
+
+	auto isalpha
+
+	info@ AmsGroupInformation_GroupName + OSStringIsAlphanumeric isalpha!
+
+	if (isalpha@ ~~)
+		STATUS_INVALID_GROUPNAME ok!
+
+		return
+	end
 end

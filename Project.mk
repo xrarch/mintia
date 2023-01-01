@@ -1,5 +1,6 @@
 INCLUDES := $(subst :, ,$(INCDIR))
 INCLUDEFILES := $(foreach incdir,$(INCLUDES),$(shell find $(incdir) -type f -name "*.h"))
+INCLUDEFILES += $(wildcard *.h)
 
 SFILES := $(foreach component,$(COMPONENTS),$(wildcard $(component)/$(ARCHITECTURE)/*.s))
 

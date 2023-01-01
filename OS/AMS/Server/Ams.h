@@ -13,6 +13,10 @@ extern AmsClientInitialize { cid client -- }
 extern AmsInternalLogon { flags password uid processhandle -- ok }
 extern AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 
+const AMSPASSWORDHASHLENGTH OSSIMPLECRYPT_HASHLENGTH
+
+extern AmsGeneratePasswordHash { userpass hash -- }
+
 extern AmsInternalEmumerateUsers { context max buf -- nextcontext count ok }
 extern AmsInternalEmumerateGroups { context max buf -- nextcontext count ok }
 
@@ -27,13 +31,21 @@ extern AmsDbClose { -- }
 extern AmsDbUserWrite { -- ok }
 extern AmsDbGroupWrite { -- ok }
 
+extern AmsDbUserCreate { username -- uid userptr ok }
+extern AmsDbUserDelete { userptr -- }
+
 extern AmsDbUserGetByName { username -- userptr ok }
 extern AmsDbUserGetByUID { uid -- userptr ok }
 extern AmsDbUserGetName { userptr -- username }
 extern AmsDbUserGetProperty { property userptr -- value ok }
 extern AmsDbUserSetProperty { value property userptr -- ok }
+extern AmsDbUserGetPropertyNumeric { property userptr -- value ok }
+extern AmsDbUserSetPropertyNumeric { value property userptr -- ok }
 extern AmsDbUserGetIterator { -- iterator ok }
 extern AmsDbUserNext { iterator -- userptr nextiterator ok }
+
+extern AmsDbGroupCreate { groupname -- gid groupptr ok }
+extern AmsDbGroupDelete { groupptr -- }
 
 extern AmsDbGroupGetByName { groupname -- groupptr ok }
 extern AmsDbGroupGetByGID { gid -- groupptr ok }

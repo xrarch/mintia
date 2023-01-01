@@ -20,6 +20,12 @@ extern AmsRunForEachGroupEnumeration { context func enumeration -- ok }
 extern AmsIndexUserEnumeration { index enumeration -- enum ok }
 extern AmsIndexGroupEnumeration { index enumeration -- enum ok }
 
+extern AmsCreateUser { password info -- uid ok }
+extern AmsCreateGroup { info -- gid ok }
+
+extern AmsDeleteUser { uid -- ok }
+extern AmsDeleteGroup { gid -- ok }
+
 const AMSPASSWORDMAX 32
 const AMSNAMEMAX     32
 

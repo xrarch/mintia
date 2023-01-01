@@ -51,6 +51,9 @@ struct OSMemoryInformation
 	44 Reserved
 endstruct
 
+const OSQUOTAINFINITE -1
+const OSQUOTADEFAULT  -2
+
 struct OSQuotaInformation
 	4 PoolUsed
 	4 PoolMaximum

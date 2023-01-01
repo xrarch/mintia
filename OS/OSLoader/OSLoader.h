@@ -123,4 +123,4 @@ extern LdrPlatformBootDriversLoadAll { -- }
 extern LdrPlatformStartSystem { -- }
 
 #include "../Common/Common.h"
-#include "<inc>/OSLoaderGlobal.h"
+#include "OSLoaderGlobal.h"

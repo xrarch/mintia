@@ -27,3 +27,12 @@ extern ExSplayTreeFindNodeByValueRange { value rootptr -- node }
 extern ExSplayTreeFindFirstContainingNode { value endvalue root -- node }
 
 extern ExSplayTreeFindEmptyRange { size root -- prevnode value }
+
+#ifdef DEBUGCHECKS
+
+externptr ExSplayTreeLookupCount
+externptr ExSplayTreeModifyCount
+externptr ExSplayTreeDepthCount
+externptr ExSplayTreeSplayCount
+
+#endif

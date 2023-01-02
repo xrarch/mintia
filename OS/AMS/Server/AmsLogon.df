@@ -28,7 +28,7 @@ fn AmsCheckPassword { password userpass -- ok }
 	0 ok!
 end
 
-fn AmsInternalLogon { flags password uid processhandle -- ok }
+fn AmsInternalLogon { flags password uid processhandle -- obdirhandle ok }
 	// only the system can validate a logon since anyone else can be snooped
 	// on or malicious.
 
@@ -42,6 +42,15 @@ fn AmsInternalLogon { flags password uid processhandle -- ok }
 
 	auto userptr
 	uid@ AmsDbUserGetByUID ok! userptr!
+
+	if (ok@)
+		return
+	end
+
+	auto gid
+	"gid" // property
+	userptr@ // userptr
+	AmsDbUserGetPropertyNumeric ok! gid!
 
 	if (ok@)
 		return
@@ -64,6 +73,64 @@ fn AmsInternalLogon { flags password uid processhandle -- ok }
 	password@ // password
 	userpass@ // userpass
 	AmsCheckPassword ok!
+
+	if (ok@)
+		return
+	end
+
+	// open or create the user's object directory.
+
+	auto stringbuf
+	64 alloc stringbuf!
+
+	stringbuf@ // dest
+	"//:/Users/" // src
+	strcpy
+
+	uid@ // n
+	stringbuf@ stringbuf@ strlen + // str
+	itoa
+
+	0 // flags
+	ACCESS_ALL // access
+	stringbuf@ // path
+	OSOpen ok! obdirhandle!
+
+	if (ok@ ~~)
+		return
+	end
+
+	uid@ // n
+	stringbuf@ // str
+	itoa
+
+	ACCESS_OWNER_ALL // permissions
+	stringbuf@ // name
+	OSObjectDirectoryCreate ok! obdirhandle!
+
+	if (ok@)
+		return
+	end
+
+	obdirhandle@ // objecthandle
+	AmsUsersDirectory@ // directoryhandle
+	OSObjectDirectoryInsert ok!
+
+	if (ok@)
+		obdirhandle@ OSClose drop
+
+		return
+	end
+
+	uid@ // uid
+	gid@ // gid
+	-1 // permissions
+	obdirhandle@ // handle
+	OSSetSecurity ok!
+
+	if (ok@)
+		obdirhandle@ OSClose drop
+	end
 end
 
 fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }

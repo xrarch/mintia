@@ -19,6 +19,7 @@ struct AmsMessageLogon
 	4 UID
 	4 Flags
 	AMSPASSWORDMAX Password
+	4 UserObDirHandle
 endstruct
 
 struct AmsMessageChangePassword

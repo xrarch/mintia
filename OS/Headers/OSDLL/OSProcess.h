@@ -78,7 +78,10 @@ struct OSCreationParams
 	// base priority for the new process
 	4 BasePriority
 
-	40 Reserved
+	// object directory for the new process
+	4 UserObjectDirectory
+
+	36 Reserved
 endstruct
 
 const PRIORITY_IDLE           0

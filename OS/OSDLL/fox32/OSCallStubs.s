@@ -419,8 +419,8 @@ OSObjectDirectoryQueryAll:
 
 	ret
 
-OSObjectDirectoryObjectCreate:
-.global OSObjectDirectoryObjectCreate
+OSObjectDirectoryCreate:
+.global OSObjectDirectoryCreate
 	mov  t1, a0
 	mov  t2, a1
 

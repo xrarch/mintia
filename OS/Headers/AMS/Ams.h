@@ -8,7 +8,7 @@ extern AmsQueryUIDByName { name -- uid ok }
 extern AmsQueryGIDByName { name -- gid ok }
 extern AmsQueryByUID { info uid -- ok }
 extern AmsQueryByGID { info gid -- ok }
-extern AmsLogon { flags password uid -- ok }
+extern AmsLogon { flags password uid -- obdirhandle ok }
 extern AmsChangePassword { oldpassword newpassword uid -- ok }
 
 extern AmsEmumerateUsers { -- enumeration ok }

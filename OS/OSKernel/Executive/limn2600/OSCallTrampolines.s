@@ -36,7 +36,7 @@
 .extern OSHandleDuplicate
 .extern OSObjectDirectoryCountQuery
 .extern OSObjectDirectoryQueryAll
-.extern OSObjectDirectoryObjectCreate
+.extern OSObjectDirectoryCreate
 .extern OSObjectDirectoryInsert
 .extern OSObjectDirectoryRemove
 .extern OSSetSecurity
@@ -150,7 +150,7 @@ OSCallTable:
 	.dl OSTOSHandleDuplicate                             ;32
 	.dl OSTOSObjectDirectoryCountQuery                   ;33
 	.dl OSTOSObjectDirectoryQueryAll                     ;34
-	.dl OSTOSObjectDirectoryObjectCreate                 ;35
+	.dl OSTOSObjectDirectoryCreate                       ;35
 	.dl OSTOSObjectDirectoryInsert                       ;36
 	.dl OSTOSObjectDirectoryRemove                       ;37
 	.dl OSTOSSetSecurity                                 ;38
@@ -708,13 +708,13 @@ OSTOSObjectDirectoryQueryAll:
 	addi sp, sp, 4
 	ret
 
-OSTOSObjectDirectoryObjectCreate:
+OSTOSObjectDirectoryCreate:
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
 
-	jal  OSObjectDirectoryObjectCreate
+	jal  OSObjectDirectoryCreate
 
 	mov  long [s17 + 4], a0 ;t1
 	mov  long [s17 + 8], a1 ;t2

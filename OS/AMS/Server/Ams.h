@@ -10,7 +10,7 @@ extern AmsClientCreate { cid -- client ok }
 extern AmsClientDelete { client -- }
 extern AmsClientInitialize { cid client -- }
 
-extern AmsInternalLogon { flags password uid processhandle -- ok }
+extern AmsInternalLogon { flags password uid processhandle -- obdirhandle ok }
 extern AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 
 const AMSPASSWORDHASHLENGTH OSSIMPLECRYPT_HASHLENGTH
@@ -66,3 +66,4 @@ extern AmsGroupEdit { info gid processhandle -- ok }
 extern AmsUserEdit { info uid processhandle -- ok }
 
 externptr AmsMemoryInformation
+externptr AmsUsersDirectory

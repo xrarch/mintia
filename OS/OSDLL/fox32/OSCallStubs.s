@@ -1266,22 +1266,12 @@ OSConsoleSignal:
 
 	ret
 
-OSAmIAdmin:
-.global OSAmIAdmin
-
-	mov  t0, 100
-	int  0x30
-
-	mov  a0, t1
-
-	ret
-
 OSCheckPermission:
 .global OSCheckPermission
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 101
+	mov  t0, 100
 	int  0x30
 
 	mov  a0, t1
@@ -1295,7 +1285,7 @@ OSPortCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 102
+	mov  t0, 101
 	int  0x30
 
 	mov  a1, t2
@@ -1310,7 +1300,7 @@ OSPortConnect:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 103
+	mov  t0, 102
 	int  0x30
 
 	mov  a1, t2
@@ -1325,7 +1315,7 @@ OSPortAccept:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 104
+	mov  t0, 103
 	int  0x30
 
 	mov  a0, t1
@@ -1339,7 +1329,7 @@ OSPortSendAndWaitReceive:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 105
+	mov  t0, 104
 	int  0x30
 
 	mov  a0, t1
@@ -1353,7 +1343,7 @@ OSPortSendAndWaitReply:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 106
+	mov  t0, 105
 	int  0x30
 
 	mov  a0, t1
@@ -1366,7 +1356,7 @@ OSPortOpenProcessByClientID:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 107
+	mov  t0, 106
 	int  0x30
 
 	mov  a1, t2

@@ -148,7 +148,6 @@ extern OSSetSystemConsole { filehandle -- ok }
 extern OSConsoleSignal { signal filehandle -- ok }
 
 // Se
-extern OSAmIAdmin { -- ok }
 extern OSCheckPermission { permission processhandle -- ok }
 
 // IPC

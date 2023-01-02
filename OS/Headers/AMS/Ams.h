@@ -1,6 +1,8 @@
 extern AmsInit { -- ok }
 extern AmsFree { -- }
 extern AmsClearCache { -- }
+extern AmsUserInfoInitialize { info -- }
+extern AmsGroupInfoInitialize { info -- }
 
 extern AmsQueryUIDByName { name -- uid ok }
 extern AmsQueryGIDByName { name -- gid ok }
@@ -25,6 +27,9 @@ extern AmsCreateGroup { info -- gid ok }
 
 extern AmsDeleteUser { uid -- ok }
 extern AmsDeleteGroup { gid -- ok }
+
+extern AmsEditUser { info uid -- ok }
+extern AmsEditGroup { info gid -- ok }
 
 const AMSPASSWORDMAX 32
 const AMSNAMEMAX     32

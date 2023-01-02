@@ -43,6 +43,7 @@ extern AmsDbUserGetPropertyNumeric { property userptr -- value ok }
 extern AmsDbUserSetPropertyNumeric { value property userptr -- ok }
 extern AmsDbUserGetIterator { -- iterator ok }
 extern AmsDbUserNext { iterator -- userptr nextiterator ok }
+extern AmsDbUserSetName { name userptr -- }
 
 extern AmsDbGroupCreate { groupname -- gid groupptr ok }
 extern AmsDbGroupDelete { groupptr -- }
@@ -53,6 +54,7 @@ extern AmsDbGroupGetName { groupptr -- groupname }
 extern AmsDbGroupGetProperty { property groupptr -- value ok }
 extern AmsDbGroupGetIterator { -- iterator ok }
 extern AmsDbGroupNext { iterator -- groupptr nextiterator ok }
+extern AmsDbGroupSetName { name groupptr -- }
 
 extern AmsGroupDelete { gid processhandle -- ok }
 extern AmsUserDelete { uid processhandle -- ok }

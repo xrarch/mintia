@@ -11,6 +11,7 @@ extern OSConfigDeleteKey { key -- }
 
 extern OSConfigGetSection { sectionname config -- section ok }
 extern OSConfigGetSectionName { section -- name }
+extern OSConfigSetSectionName { name section -- }
 extern OSConfigCreateSection { sectionname config -- section ok }
 extern OSConfigDeleteSection { section -- }
 

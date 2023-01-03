@@ -9,7 +9,7 @@ end
 
 fnptr CommandF { argcn argvt -- ok }
 
-const CMDCOUNT 4
+const CMDCOUNT 5
 
 table Commands
 	"list"
@@ -23,6 +23,9 @@ table Commands
 
 	"delete"
 	pointerof Delete
+
+	"set"
+	pointerof Edit
 endtable
 
 fn Main { ... -- ret }
@@ -346,8 +349,10 @@ fn (CommandF) Delete { argcn argvt -- ok }
 		return
 	end
 
+	info@ AmsUserInformation_UserName + username!
+
 	uid@
-	info@ AmsUserInformation_UserName +
+	username@
 	"Are you sure you want to delete %s (uid=%d)?\n" Printf
 	"This cannot be undone.\n" Printf
 
@@ -375,6 +380,27 @@ fn (CommandF) Delete { argcn argvt -- ok }
 	end
 
 	"Deleted the user.\n" Printf
+
+	auto pathbuf
+	OSFILEPATHMAX alloc pathbuf!
+
+	pathbuf@ // dest
+	"/home/" // src
+	strcpy
+
+	pathbuf@ pathbuf@ strlen + // dest
+	username@ // src
+	strcpy
+
+	if (info@ AmsUserInformation_Home + pathbuf@ strcmp ~~)
+		"Home directory was non-default. Manual review and deletion is required.\n" Printf
+
+		info@ AmsUserInformation_Home +
+		"  %s\n" Printf
+
+		return
+	end
+
 	"Do you want to delete the user's home directory at\n" Printf
 
 	info@ AmsUserInformation_Home +
@@ -402,8 +428,123 @@ fn (CommandF) Delete { argcn argvt -- ok }
 
 	info@ AmsUserInformation_Home +
 	"-rf"
-	"rm"
+	"rm" // progname
 	OSExecute drop
 
 	"The home directory has been deleted.\n" Printf
+end
+
+fn (CommandF) Edit { argcn argvt -- ok }
+	if (argcn@ 3 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	0 ok!
+
+	auto username
+	argvt@@ username!
+
+	auto property
+	argvt@ 4 + @ property!
+
+	auto value
+	argvt@ 8 + @ value!
+
+	auto uid
+
+	if (username@ gb '0' >= username@ gb '9' <= &&)
+		username@ atoi uid!
+	end else
+		username@ // name
+		AmsQueryUIDByName ok! uid!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto ptr
+	0 ptr!
+
+	auto info
+	AmsUserInformation_SIZEOF alloc info!
+
+	info@ AmsUserInfoInitialize
+
+	if (property@ "group" strcmp)
+		auto gid
+
+		if (value@ gb '0' >= value@ gb '9' <= &&)
+			value@ atoi gid!
+		end else
+			value@ // name
+			AmsQueryGIDByName ok! gid!
+
+			if (ok@)
+				return
+			end
+		end
+
+		gid@ info@ AmsUserInformation_GID + !
+	end elseif (property@ "username" strcmp)
+		if (value@ strlen AMSNAMEMAX >=)
+			STATUS_NAME_TOO_LONG ok!
+			return
+		end
+
+		info@ AmsUserInformation_UserName + // dest
+		value@ // src
+		strcpy
+	end elseif (property@ "home" strcmp)
+		if (value@ strlen OSFILEPATHMAX >=)
+			STATUS_NAME_TOO_LONG ok!
+			return
+		end
+
+		info@ AmsUserInformation_Home + // dest
+		value@ // src
+		strcpy
+	end elseif (property@ "shell" strcmp)
+		if (value@ strlen OSFILEPATHMAX >=)
+			STATUS_NAME_TOO_LONG ok!
+			return
+		end
+
+		info@ AmsUserInformation_Shell + // dest
+		value@ // src
+		strcpy
+	end elseif (property@ "poolquota" strcmp)
+		info@ AmsUserInformation_PoolQuota + ptr!
+	end elseif (property@ "pgpoolquota" strcmp)
+		info@ AmsUserInformation_PagedPoolQuota + ptr!
+	end elseif (property@ "vmquota" strcmp)
+		info@ AmsUserInformation_VirtualMemoryQuota + ptr!
+	end elseif (property@ "wsquota" strcmp)
+		info@ AmsUserInformation_WorkingSetQuota + ptr!
+	end else
+		property@
+		"users: unknown property %s\n" OSGetStdErr FPrintf
+		-1 ok!
+		return
+	end
+
+	if (ptr@)
+		// one of the quotases
+
+		if (value@ "infinite" strcmp)
+			-1 value!
+		end elseif (value@ "default" strcmp)
+			-2 value!
+		end else
+			value@ atoi value!
+		end
+
+		value@ ptr@!
+	end
+
+	info@ // info
+	uid@ // uid
+	AmsEditUser ok!
 end

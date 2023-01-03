@@ -17,6 +17,9 @@ extern OSSpawn { ... path creationflags creationparams permissions name -- threa
 extern OSSpawnByNameV { argcn argvt progname creationflags creationparams permissions name -- threadhandle processhandle ok }
 extern OSSpawnByName { ... progname creationflags creationparams permissions name -- threadhandle processhandle ok }
 
+extern OSExecuteV { argcn argvt progname -- ok }
+extern OSExecute { ... progname -- ok }
+
 extern OSExit { status -- }
 
 struct OSProcessInformation

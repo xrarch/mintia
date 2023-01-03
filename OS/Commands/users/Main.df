@@ -1,0 +1,409 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+#include "<ll>/AMS/Ams.h"
+
+fn Usage { -- }
+	"usage: users command [args ...]\n" OSGetStdErr FPrintf
+end
+
+fnptr CommandF { argcn argvt -- ok }
+
+const CMDCOUNT 4
+
+table Commands
+	"list"
+	pointerof List
+
+	"info"
+	pointerof Info
+
+	"add"
+	pointerof Add
+
+	"delete"
+	pointerof Delete
+endtable
+
+fn Main { ... -- ret }
+	if (argc@ 2 <)
+		Usage
+		-1 OSExit
+	end
+
+	AmsInit ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "users: couldn't connect to AMS: %s\n" OSError
+	end
+
+	auto cmdname
+	[1]argv@ cmdname!
+
+	auto cmd
+	Commands cmd!
+
+	auto count
+	CMDCOUNT count!
+
+	while (count@)
+		if (cmd@@ cmdname@ strcmp)
+			argc@ 2 - // argcn
+			argv 8 + // argvt
+			cmd@ 4 + @ CommandF ret!
+
+			if (ret@)
+				if (ret@ -1 ~=)
+					ret@ OSStatusGetName
+					cmdname@
+					"users: %s: %s\n" OSError
+				end
+			end
+
+			return
+		end
+
+		8 cmd +=
+		1 count -=
+	end
+
+	cmdname@ "users: no such command %s\n" OSError
+end
+
+fn (CommandF) List { argcn argvt -- ok }
+	"USERNAME"
+	"UID"
+	"%5s %s\n" Printf
+
+	auto enumeration
+	AmsEmumerateUsers ok! enumeration!
+
+	if (ok@)
+		return
+	end
+
+	0 // context
+	pointerof ListEnumFunc // func
+	enumeration@ // enumeration
+	AmsRunForEachUserEnumeration ok!
+
+	enumeration@ AmsFreeEnumeration
+end
+
+fn (AmsEnumerationFunction) ListEnumFunc { context enum index -- ok }
+	0 ok!
+
+	enum@ AmsUserEnumeration_Info + AmsUserInformation_UserName +
+	enum@ AmsUserEnumeration_UID + @
+	"%5d %s\n" Printf
+end
+
+fn (CommandF) Info { argcn argvt -- ok }
+	0 ok!
+
+	if (argcn@ 1 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	auto username
+	argvt@@ username!
+
+	auto uid
+
+	if (username@ gb '0' >= username@ gb '9' <= &&)
+		username@ atoi uid!
+	end else
+		username@ // name
+		AmsQueryUIDByName ok! uid!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto info
+	AmsUserInformation_SIZEOF alloc info!
+
+	info@ // info
+	uid@ // uid
+	AmsQueryByUID ok!
+
+	if (ok@)
+		return
+	end
+
+	auto groupname
+
+	auto ginfo
+	AmsGroupInformation_SIZEOF alloc ginfo!
+
+	ginfo@ // info
+	info@ AmsUserInformation_GID + @ // gid
+	AmsQueryByGID ok!
+
+	if (ok@ ~~)
+		ginfo@ AmsGroupInformation_GroupName + groupname!
+	end else
+		"????" groupname!
+		0 ok!
+	end
+
+	info@ AmsUserInformation_UserName + "%s:\n" Printf
+
+	uid@
+	"   UID: %d\n" Printf
+
+	info@ AmsUserInformation_GID + @
+	groupname@
+	" Group: %s (gid=%d)\n" Printf
+
+	info@ AmsUserInformation_Home +
+	"  Home: %s\n" Printf
+
+	info@ AmsUserInformation_Shell +
+	" Shell: %s\n" Printf
+
+	"\nQuotas:\n" Printf
+
+	auto quo
+
+	info@ AmsUserInformation_PoolQuota + @ quo!
+
+	if (quo@ -1 ==)
+		"          Pool: INFINITE\n" Printf
+	end else
+		quo@
+		"          Pool: %d bytes\n" Printf
+	end
+
+	info@ AmsUserInformation_PagedPoolQuota + @ quo!
+
+	if (quo@ -1 ==)
+		"     PagedPool: INFINITE\n" Printf
+	end else
+		quo@
+		"     PagedPool: %d bytes\n" Printf
+	end
+
+	info@ AmsUserInformation_VirtualMemoryQuota + @ quo!
+
+	if (quo@ -1 ==)
+		" VirtualMemory: INFINITE\n" Printf
+	end else
+		quo@
+		" VirtualMemory: %d bytes\n" Printf
+	end
+
+	info@ AmsUserInformation_WorkingSetQuota + @ quo!
+
+	if (quo@ -1 ==)
+		"    WorkingSet: INFINITE\n" Printf
+	end else
+		quo@
+		"    WorkingSet: %d pages\n" Printf
+	end
+end
+
+fn (CommandF) Add { argcn argvt -- ok }
+	0 ok!
+
+	if (argcn@ 3 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	auto username
+	argvt@@ username!
+
+	auto password
+	argvt@ 4 + @ password!
+
+	auto groupname
+	argvt@ 8 + @ groupname!
+
+	if (username@ strlen AMSNAMEMAX >=)
+		STATUS_NAME_TOO_LONG ok!
+		return
+	end
+
+	auto gid
+	groupname@ // name
+	AmsQueryGIDByName ok! gid!
+
+	if (ok@)
+		return
+	end
+
+	auto info
+	AmsUserInformation_SIZEOF alloc info!
+
+	info@ AmsUserInfoInitialize
+
+	auto pathbuf
+	OSFILEPATHMAX alloc pathbuf!
+
+	pathbuf@ // dest
+	"/home/" // src
+	strcpy
+
+	pathbuf@ pathbuf@ strlen + // dest
+	username@ // src
+	strcpy
+
+	pathbuf@
+	"mkdir" // progname
+	OSExecute ok!
+
+	if (ok@)
+		return
+	end
+
+	gid@ info@ AmsUserInformation_GID + !
+
+	-2 info@ AmsUserInformation_PoolQuota + !
+	-2 info@ AmsUserInformation_PagedPoolQuota + !
+	-2 info@ AmsUserInformation_VirtualMemoryQuota + !
+	-2 info@ AmsUserInformation_WorkingSetQuota + !
+
+	info@ AmsUserInformation_UserName + // dest
+	username@ // src
+	strcpy
+
+	info@ AmsUserInformation_Home + // dest
+	pathbuf@ // src
+	strcpy
+
+	info@ AmsUserInformation_Shell + // dest
+	"/mintia/bin/cmd.exe" // src
+	strcpy
+
+	auto uid
+	password@ // password
+	info@ // info
+	AmsCreateUser ok! uid!
+
+	if (ok@)
+		pathbuf@ // dest
+		"rm" // progname
+		OSExecute drop
+
+		return
+	end
+
+	auto uidb
+	16 alloc uidb!
+
+	uid@ // n
+	uidb@ // str
+	itoa
+
+	pathbuf@
+	uidb@
+	"chown" // progname
+	OSExecute drop
+
+	uid@
+	username@
+	"created user %s (uid=%d)\n" Printf
+end
+
+fn (CommandF) Delete { argcn argvt -- ok }
+	0 ok!
+
+	if (argcn@ 1 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	auto username
+	argvt@@ username!
+
+	auto uid
+
+	if (username@ gb '0' >= username@ gb '9' <= &&)
+		username@ atoi uid!
+	end else
+		username@ // name
+		AmsQueryUIDByName ok! uid!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto info
+	AmsUserInformation_SIZEOF alloc info!
+
+	info@ // info
+	uid@ // uid
+	AmsQueryByUID ok!
+
+	if (ok@)
+		return
+	end
+
+	uid@
+	info@ AmsUserInformation_UserName +
+	"Are you sure you want to delete %s (uid=%d)?\n" Printf
+	"This cannot be undone.\n" Printf
+
+	"[n]? " Printf
+	OSFlushLine
+
+	auto response
+	16 alloc response!
+
+	response@ // s
+	15 // max
+	Gets
+
+	if (response@ "y" strcmp ~~)
+		"Cancelled.\n" Printf
+		-1 ok!
+		return
+	end
+
+	uid@ // uid
+	AmsDeleteUser ok!
+
+	if (ok@)
+		return
+	end
+
+	"Deleted the user.\n" Printf
+	"Do you want to delete the user's home directory at\n" Printf
+
+	info@ AmsUserInformation_Home +
+	"  %s\n" Printf
+
+	"[y]? " Printf
+	OSFlushLine
+
+	response@ // s
+	15 // max
+	Gets
+
+	if (response@ "" strcmp
+		response@ "y" strcmp || ~~)
+
+		info@ AmsUserInformation_Home +
+		"0"
+		"chown" // progname
+		OSExecute drop
+
+		"The home directory has been preserved.\n" Printf
+
+		return
+	end
+
+	info@ AmsUserInformation_Home +
+	"-rf"
+	"rm"
+	OSExecute drop
+
+	"The home directory has been deleted.\n" Printf
+end

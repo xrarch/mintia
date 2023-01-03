@@ -1,0 +1,312 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+#include "<ll>/AMS/Ams.h"
+
+fn Usage { -- }
+	"usage: groups command [args ...]\n" OSGetStdErr FPrintf
+end
+
+fnptr CommandF { argcn argvt -- ok }
+
+const CMDCOUNT 5
+
+table Commands
+	"list"
+	pointerof List
+
+	"info"
+	pointerof Info
+
+	"add"
+	pointerof Add
+
+	"delete"
+	pointerof Delete
+
+	"set"
+	pointerof Edit
+endtable
+
+fn Main { ... -- ret }
+	if (argc@ 2 <)
+		Usage
+		-1 OSExit
+	end
+
+	AmsInit ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "groups: couldn't connect to AMS: %s\n" OSError
+	end
+
+	auto cmdname
+	[1]argv@ cmdname!
+
+	auto cmd
+	Commands cmd!
+
+	auto count
+	CMDCOUNT count!
+
+	while (count@)
+		if (cmd@@ cmdname@ strcmp)
+			argc@ 2 - // argcn
+			argv 8 + // argvt
+			cmd@ 4 + @ CommandF ret!
+
+			if (ret@)
+				if (ret@ -1 ~=)
+					ret@ OSStatusGetName
+					cmdname@
+					"groups: %s: %s\n" OSError
+				end
+			end
+
+			return
+		end
+
+		8 cmd +=
+		1 count -=
+	end
+
+	cmdname@ "groups: no such command %s\n" OSError
+end
+
+fn (CommandF) List { argcn argvt -- ok }
+	"GROUPNAME"
+	"GID"
+	"%5s %s\n" Printf
+
+	auto enumeration
+	AmsEmumerateGroups ok! enumeration!
+
+	if (ok@)
+		return
+	end
+
+	0 // context
+	pointerof ListEnumFunc // func
+	enumeration@ // enumeration
+	AmsRunForEachGroupEnumeration ok!
+
+	enumeration@ AmsFreeEnumeration
+end
+
+fn (AmsEnumerationFunction) ListEnumFunc { context enum index -- ok }
+	0 ok!
+
+	enum@ AmsGroupEnumeration_Info + AmsGroupInformation_GroupName +
+	enum@ AmsGroupEnumeration_GID + @
+	"%5d %s\n" Printf
+end
+
+fn (CommandF) Info { argcn argvt -- ok }
+	0 ok!
+
+	if (argcn@ 1 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	auto groupname
+	argvt@@ groupname!
+
+	auto gid
+
+	if (groupname@ gb '0' >= groupname@ gb '9' <= &&)
+		groupname@ atoi gid!
+	end else
+		groupname@ // name
+		AmsQueryGIDByName ok! gid!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto info
+	AmsGroupInformation_SIZEOF alloc info!
+
+	info@ // info
+	gid@ // gid
+	AmsQueryByGID ok!
+
+	if (ok@)
+		return
+	end
+
+	info@ AmsGroupInformation_GroupName + "%s:\n" Printf
+
+	gid@
+	"   GID: %d\n" Printf
+end
+
+fn (CommandF) Add { argcn argvt -- ok }
+	0 ok!
+
+	if (argcn@ 1 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	auto groupname
+	argvt@@ groupname!
+
+	if (groupname@ strlen AMSNAMEMAX >=)
+		STATUS_NAME_TOO_LONG ok!
+		return
+	end
+
+	auto info
+	AmsGroupInformation_SIZEOF alloc info!
+
+	info@ AmsGroupInfoInitialize
+
+	info@ AmsGroupInformation_GroupName + // dest
+	groupname@ // src
+	strcpy
+
+	auto gid
+	info@ // info
+	AmsCreateGroup ok! gid!
+
+	if (ok@)
+		return
+	end
+
+	gid@
+	groupname@
+	"created group %s (gid=%d)\n" Printf
+end
+
+fn (CommandF) Delete { argcn argvt -- ok }
+	0 ok!
+
+	if (argcn@ 1 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	auto groupname
+	argvt@@ groupname!
+
+	auto gid
+
+	if (groupname@ gb '0' >= groupname@ gb '9' <= &&)
+		groupname@ atoi gid!
+	end else
+		groupname@ // name
+		AmsQueryGIDByName ok! gid!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto info
+	AmsGroupInformation_SIZEOF alloc info!
+
+	info@ // info
+	gid@ // gid
+	AmsQueryByGID ok!
+
+	if (ok@)
+		return
+	end
+
+	info@ AmsGroupInformation_GroupName + groupname!
+
+	gid@
+	groupname@
+	"Are you sure you want to delete %s (gid=%d)?\n" Printf
+	"This cannot be undone.\n" Printf
+
+	"[n]? " Printf
+	OSFlushLine
+
+	auto response
+	16 alloc response!
+
+	response@ // s
+	15 // max
+	Gets
+
+	if (response@ "y" strcmp ~~)
+		"Cancelled.\n" Printf
+		-1 ok!
+		return
+	end
+
+	gid@ // gid
+	AmsDeleteGroup ok!
+
+	if (ok@)
+		return
+	end
+
+	"Deleted the group.\n" Printf
+end
+
+fn (CommandF) Edit { argcn argvt -- ok }
+	if (argcn@ 3 ~=)
+		-1 ok!
+		Usage
+		return
+	end
+
+	0 ok!
+
+	auto username
+	argvt@@ username!
+
+	auto property
+	argvt@ 4 + @ property!
+
+	auto value
+	argvt@ 8 + @ value!
+
+	auto groupname
+	argvt@@ groupname!
+
+	auto gid
+
+	if (groupname@ gb '0' >= groupname@ gb '9' <= &&)
+		groupname@ atoi gid!
+	end else
+		groupname@ // name
+		AmsQueryGIDByName ok! gid!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto info
+	AmsGroupInformation_SIZEOF alloc info!
+
+	info@ AmsGroupInfoInitialize
+
+	if (property@ "groupname" strcmp)
+		if (value@ strlen AMSNAMEMAX >=)
+			STATUS_NAME_TOO_LONG ok!
+			return
+		end
+
+		info@ AmsGroupInformation_GroupName + // dest
+		value@ // src
+		strcpy
+	end else
+		property@
+		"groups: unknown property %s\n" OSGetStdErr FPrintf
+		-1 ok!
+		return
+	end
+
+	info@ // info
+	gid@ // gid
+	AmsEditGroup ok!
+end

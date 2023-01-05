@@ -18,7 +18,7 @@ CISC fantasy computer and planned future ports to other architectures as well.
 
 ## Supported Architectures
 
-<a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-xr17032.png" width="256"></a>
+<a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-17032.png" width="256"></a>
 <a href="https://github.com/fox32-arch/fox32"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-fox32.png" width="256"></a>
 
 ## Building

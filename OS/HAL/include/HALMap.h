@@ -8,7 +8,7 @@ const VIEWPAGES (VIEWSIZE PAGESHIFT >>)
 
 
 
-#ifdef LIMN2600
+#ifdef XR17032
 
 #define DIRTY_BIT_CAUSES_FAULT 1
 

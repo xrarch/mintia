@@ -9,7 +9,7 @@ ifndef SDK
 endif
 
 ifndef PLATFORM
-	PLATFORM := LIMNstation
+	PLATFORM := XRstation
 endif
 
 ifndef DEBUGCHECKS

@@ -34,7 +34,7 @@ const MMPTECOUNTSPERTABLE (MMPTECOUNTTABLESIZE 2 /)
 
 extern MmProcessPTECountGet { pri vaddr process -- ptect ok }
 
-#ifdef LIMN2600
+#ifdef XR17032
 
 // hardware PTE fields
 

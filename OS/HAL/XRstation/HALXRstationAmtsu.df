@@ -1,0 +1,116 @@
+//
+// Implements access routines for the amtsu peripheral bus.
+//
+
+#include "<ll>/rta3x/a3x.h"
+#include "<df>/dragonfruit.h"
+#include "../../OSLoader/OSLoaderGlobal.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALXRstationCitron.h"
+#include "<inc>/HALXRstationAmtsu.h"
+
+#include "<inc>/HALIPL.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALCrash.h"
+
+const AMTSUPORTDEV 0x30
+const AMTSUPORTMID 0x31
+const AMTSUPORTCMD 0x32
+const AMTSUPORTA   0x33
+const AMTSUPORTB   0x34
+
+const AMTSUDEVICES 16
+
+// disabling and restoring interrupts is up to the user of these functions
+
+fn HALXRstationAmtsuCheckMID { num -- mid }
+	num@ HALXRstationAmtsuSelect HALXRstationAmtsuReadMID mid!
+end
+
+fn HALXRstationAmtsuSelect { num -- }
+	num@ AMTSUPORTDEV HALXRstationCitronOutb
+end
+
+fn HALXRstationAmtsuReadMID { -- mid }
+	AMTSUPORTMID HALXRstationCitronInl mid!
+end
+
+fn HALXRstationAmtsuCommand { cmd -- }
+	cmd@ AMTSUPORTCMD HALXRstationCitronOutl
+
+	while (AMTSUPORTCMD HALXRstationCitronInl 0 ~=) end
+end
+
+fn HALXRstationAmtsuCommandAsync { cmd -- }
+	cmd@ AMTSUPORTCMD HALXRstationCitronOutl
+end
+
+fn HALXRstationAmtsuWriteA { long -- }
+	long@ AMTSUPORTA HALXRstationCitronOutl
+end
+
+fn HALXRstationAmtsuWriteB { long -- }
+	long@ AMTSUPORTB HALXRstationCitronOutl
+end
+
+fn HALXRstationAmtsuReadA { -- long }
+	AMTSUPORTA HALXRstationCitronInl long!
+end
+
+fn HALXRstationAmtsuReadB { -- long }
+	AMTSUPORTB HALXRstationCitronInl long!
+end
+
+fn HALXRstationAmtsuSetInterrupt { dev -- }
+	0 dev@ 1 HALXRstationAmtsuSpecialCMD
+end
+
+fn HALXRstationAmtsuClearInterrupt { dev -- }
+	0 dev@ 3 HALXRstationAmtsuSpecialCMD
+end
+
+fn HALXRstationAmtsuSpecialCMD { a b cmd -- }
+	0 HALXRstationAmtsuSelect
+	a@ HALXRstationAmtsuWriteA
+	b@ HALXRstationAmtsuWriteB
+
+	cmd@ HALXRstationAmtsuCommand
+end
+
+fn HALXRstationAmtsuReset { -- }
+	0 0 2 HALXRstationAmtsuSpecialCMD
+end
+
+fn HALXRstationAmtsuInit { ldrinfo -- }
+	fnsection "INIT$text"
+
+	HALXRstationAmtsuReset
+end
+
+fn HALXRstationAmtsuEnumerate { func mid -- count }
+	auto id
+	1 id!
+
+	0 count!
+
+	while (id@ AMTSUDEVICES <)
+		if (id@ HALXRstationAmtsuCheckMID mid@ ==)
+			1 count +=
+
+			id@ // id
+			func@ HALXRstationAmtsuCallbackF
+		end
+
+		1 id +=
+	end
+end
+
+fn HALXRstationAmtsuIDToIrq { id -- irq }
+	id@ 48 + irq!
+end
+
+fn HALXRstationAmtsuIrqToID { irq -- id }
+	irq@ 48 - id!
+end

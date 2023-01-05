@@ -40,7 +40,7 @@ struct LdrInfo
 
 	4 TotalRAM
 
-#ifdef LIMNSTATION
+#ifdef XRSTATION
 	4 CitronBase
 	4 LSICBase
 #endif

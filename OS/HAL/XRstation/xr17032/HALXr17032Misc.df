@@ -1,0 +1,370 @@
+#include "<df>/dragonfruit.h"
+#include "<inc>/HALCrash.h"
+
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALInterrupt.h"
+
+#include "<inc>/HALDebug.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+// was once HALXr17032Exception.df until that stuff was moved into the kernel
+
+asm "
+
+; -- sp
+HALCPUGetSP:
+.global HALCPUGetSP
+	mov  a0, sp
+	ret
+
+; -- rs
+HALCPUInterruptDisable:
+.global HALCPUInterruptDisable
+	mfcr a0, rs
+	subi t1, zero, 3
+	and  t1, a0, t1 ; disable interrupts
+	mtcr rs, t1
+	ret
+
+; rs --
+HALCPUInterruptRestore:
+.global HALCPUInterruptRestore
+	mtcr rs, a0
+	ret
+
+; --
+HALCPUInterruptEnable:
+.global HALCPUInterruptEnable
+	mfcr t0, rs
+	ori  t0, t0, XR17032_RS_INT
+	mtcr rs, t0
+	ret
+
+; old new -- 
+HALCPUContextSwitch:
+.global HALCPUContextSwitch
+	subi sp, sp, OSContext_SIZEOF
+
+	mov  long [sp + OSContext_lr],  lr
+	mov  long [sp + OSContext_s0],  s0
+	mov  long [sp + OSContext_s1],  s1
+	mov  long [sp + OSContext_s2],  s2
+	mov  long [sp + OSContext_s3],  s3
+	mov  long [sp + OSContext_s4],  s4
+	mov  long [sp + OSContext_s5],  s5
+	mov  long [sp + OSContext_s6],  s6
+	mov  long [sp + OSContext_s7],  s7
+	mov  long [sp + OSContext_s8],  s8
+	mov  long [sp + OSContext_s9],  s9
+	mov  long [sp + OSContext_s10], s10
+	mov  long [sp + OSContext_s11], s11
+	mov  long [sp + OSContext_s12], s12
+	mov  long [sp + OSContext_s13], s13
+	mov  long [sp + OSContext_s14], s14
+	mov  long [sp + OSContext_s15], s15
+	mov  long [sp + OSContext_s16], s16
+	mov  long [sp + OSContext_s17], s17
+	mov  long [sp + OSContext_s18], tp
+
+	mov  long [a1], sp
+	mov  sp, a0
+
+	mov  s0,  long [sp + OSContext_s0]
+	mov  s1,  long [sp + OSContext_s1]
+	mov  s2,  long [sp + OSContext_s2]
+	mov  s3,  long [sp + OSContext_s3]
+	mov  s4,  long [sp + OSContext_s4]
+	mov  s5,  long [sp + OSContext_s5]
+	mov  s6,  long [sp + OSContext_s6]
+	mov  s7,  long [sp + OSContext_s7]
+	mov  s8,  long [sp + OSContext_s8]
+	mov  s9,  long [sp + OSContext_s9]
+	mov  s10, long [sp + OSContext_s10]
+	mov  s11, long [sp + OSContext_s11]
+	mov  s12, long [sp + OSContext_s12]
+	mov  s13, long [sp + OSContext_s13]
+	mov  s14, long [sp + OSContext_s14]
+	mov  s15, long [sp + OSContext_s15]
+	mov  s16, long [sp + OSContext_s16]
+	mov  s17, long [sp + OSContext_s17]
+	mov  tp,  long [sp + OSContext_s18]
+	mov  lr,  long [sp + OSContext_lr]
+
+	addi sp, sp, OSContext_SIZEOF
+
+	ret
+
+; int handler stack --
+HALCPURunInContext:
+.global HALCPURunInContext
+	mov  t0, sp
+	mov  sp, a0
+
+	subi sp, sp, 12
+	mov  long [sp + 8], lr
+	mov  long [sp + 4], t0
+	mov  long [sp], zero
+
+	mfcr t0, rs
+	ori  t0, t0, XR17032_RS_INT
+	mtcr rs, t0
+
+	mov  a0, a2
+
+	jalr lr, a1, 0
+
+	mfcr t0, rs
+	subi t1, zero, 3
+	and  t1, t0, t1 ; disable interrupts
+	mtcr rs, t1
+
+	mov  lr, long [sp + 8]
+	mov  sp, long [sp + 4]
+
+	ret
+
+; handler stack arg1 arg0 -- ret0 ret1
+HALCPURunInContextNoInterrupts:
+.global HALCPURunInContextNoInterrupts
+	mov  t0, sp
+	mov  sp, a2
+
+	subi sp, sp, 12
+	mov  long [sp + 8], lr
+	mov  long [sp + 4], t0
+	mov  long [sp], zero
+
+	jalr lr, a3, 0
+
+	mov  lr, long [sp + 8]
+	mov  sp, long [sp + 4]
+
+	ret
+
+; MUST BE CALLED WITH INTERRUPTS DISABLED
+; asid pgtb --
+HALCPUMapSwitch:
+.global HALCPUMapSwitch
+	mtcr pgtb, a0
+	lshi a1, a1, 20
+	mtcr tbhi, a1
+
+	ret
+
+;sp+4 - teb
+;a3 - exit function
+;a2 - context
+;a1 - ustack
+;a0 - usermode entry function
+HALCPUEnterUserMode:
+.global HALCPUEnterUserMode
+	mov  tp, long [sp + 4]
+
+	;disable interrupts
+	mfcr t0, rs
+	subi t1, zero, 3
+	and  t0, t0, t1 ; disable interrupts
+	ori  t0, t0, XR17032_ERS_UTHREAD
+	mtcr rs, t0
+
+	mov  sp, a1
+
+	;drop to usermode
+	mtcr epc, a0
+	mov  a0, a2
+	mov  lr, a3
+	rfe
+
+;a0 - asid
+;a1 - vpn
+;a2 - pte
+HALXr17032TLBFill:
+.global HALXr17032TLBFill
+	mfcr t0, rs
+	subi t1, zero, 3
+	and  t1, t1, t0
+	mtcr rs, t1
+
+	mfcr t2, tbhi
+
+	lshi t1, a0, 20
+	or   t1, t1, a1
+	mtcr tbhi, t1
+	mtcr tblo, a2
+	tbfn
+
+	mfcr t1, tbindex
+	blt  t1, .none
+
+	tbwr
+
+.none:
+	mtcr tbhi, t2
+	mtcr rs, t0
+	ret
+
+HALXr17032TLBFlushASID:
+.global HALXr17032TLBFlushASID
+	mfcr t0, rs
+	subi t1, zero, 3
+	and  t1, t1, t0
+	mtcr rs, t1
+
+	mfcr t1, tbhi
+
+	mtcr tblo, zero
+
+	li   t2, 64
+
+.loop:
+	subi t2, t2, 1	
+
+	mtcr tbindex, t2
+	tbrd
+	mfcr t3, tbhi
+
+	rshi t3, t3, 20
+	sub  t3, t3, a0
+	bne  t3, .noflush
+
+	mtcr tbhi, zero
+	tbwr
+
+.noflush:
+	bne  t2, .loop
+
+	mtcr tbhi, t1
+	mtcr rs, t0
+	ret
+
+HALXr17032TLBFlushAll:
+.global HALXr17032TLBFlushAll
+	mfcr t0, rs
+	subi t1, zero, 3
+	and  t1, t1, t0
+	mtcr rs, t1
+
+	mfcr t1, tbhi
+
+	mtcr tblo, zero
+	mtcr tbhi, zero
+
+	li   t2, 64
+
+.loop:
+	subi t2, t2, 1	
+
+	mtcr tbindex, t2
+	tbwr
+
+	bne  t2, .loop
+
+	mtcr tbhi, t1
+	mtcr rs, t0
+	ret
+
+HALXr17032TLBFlush:
+.global HALXr17032TLBFlush
+	mfcr t0, rs
+	subi t1, zero, 3
+	and  t1, t1, t0
+	mtcr rs, t1
+
+	mfcr t2, tbhi
+
+	lshi t1, a1, 20
+	or   t1, t1, a0
+	mtcr tbhi, t1
+	mtcr tblo, zero
+
+	tbfn
+
+	mfcr t1, tbindex
+	blt  t1, .none
+
+	tbwr
+
+.none:
+	mtcr tbhi, t2
+	mtcr rs, t0
+	ret
+
+HALDcacheExpunge:
+.global HALDcacheExpunge
+	cachei 6
+	ret
+
+HALIcacheSynchronize:
+.global HALIcacheSynchronize
+	cachei 3
+	ret
+
+HALCPUFence:
+.global HALCPUFence
+	cachei 0
+	ret
+
+"
+
+extern HALXr17032TLBFlush { vpn asid -- }
+extern HALXr17032TLBFlushASID { asid -- }
+extern HALXr17032TLBFlushAll { -- }
+
+extern LoadInitialContext { -- }
+
+table HALXr17032UsedASIDs[257]
+
+fn HALCPUASIDRegister { asid -- }
+	if (asid@ 0 ==)
+		// kernel process, dont care
+
+		return
+	end
+
+	asid@ 255 & 1 + asid!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	1 [asid@]HALXr17032UsedASIDs +=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn HALCPUASIDUnregister { asid -- }
+	if (asid@ 0 ==)
+		"HALCPUASIDUnregister: asid==0\n" HALCrash
+	end
+
+	asid@ 255 & 1 + asid!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	1 [asid@]HALXr17032UsedASIDs -=
+
+	asid@ HALXr17032TLBFlushASID
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn HALCPUAddressSpaceSwitch { asid pdir -- }
+	if (asid@)
+		asid@ 255 & 1 + asid!
+	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (asid@)
+		if ([asid@]HALXr17032UsedASIDs@ 1 >)
+			asid@ HALXr17032TLBFlushASID
+		end
+	end
+
+	asid@ pdir@ HALCPUMapSwitch
+
+	rs@ HALCPUInterruptRestore
+end

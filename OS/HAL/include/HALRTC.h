@@ -16,7 +16,7 @@ externptr HALUptimeQueryFunction
 const HALRTCINTERVAL 15
 
 #else
-#ifdef LIMNSTATION
+#ifdef XRSTATION
 
 const HALRTCINTERVAL 10
 

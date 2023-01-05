@@ -1,0 +1,222 @@
+//
+// Implements KDebug stack tracing.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/rta3x/a3x.h"
+
+#include "../../OSLoader/OSLoaderGlobal.h"
+
+#include "<inc>/HALConsole.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/DebugTrace.h"
+#include "<inc>/DebugSymbols.h"
+
+#include "<inc>/Kernel.h"
+#include "<inc>/Memory.h"
+
+externptr HALLoaderInfo
+
+var DebugLink 0
+
+asm "
+
+GetLink:
+	mov  long [DebugLink], sp, tmp=t0
+	ret
+
+"
+
+extern GetLink { -- }
+
+fn DebugDump { rows cols -- }
+	GetLink
+
+	auto link
+	DebugLink@ link!
+
+	pointerof DebugDump link@ rows@ cols@ DebugTrace
+end
+
+buffer TraceNameBuffer 128
+
+fn DebugTrace { pc link rows cols -- }
+	"\n" Printf
+
+	1 rows -=
+
+	auto infostr
+	"InstrPtr Name                                     " infostr!
+
+	auto infocols
+	cols@ infostr@ strlen / infocols!
+
+	1 infocols!
+
+	auto i
+	infocols@ i!
+
+	while (i@)
+		infostr@ Printf
+		1 i -=
+	end
+
+	"\n" Printf
+
+	1 rows -=
+
+	auto links
+	0 links!
+
+	if (link@ 0 ==)
+		"zero link!\n" Printf
+		return
+	end
+
+	if (link@ 3 &)
+		" unaligned!\n" Printf
+		return
+	end
+
+	if (pc@ 3 &)
+		" unaligned pc!\n" Printf
+	end
+
+	auto lr
+	0 lr!
+
+	auto leaf
+	0 leaf!
+
+	while (pc@ rows@ &&)
+		infocols@ i!
+
+		while (pc@ i@ &&)
+			if (links@ 128 >=)
+				" maxtrace!\n" Printf
+				return
+			end
+
+			auto symname
+			auto symbase
+			auto dll
+
+			auto ok
+			pc@ DebugGetSymDLL ok! drop symname! symbase! dll!
+
+			if (ok@)
+				TraceNameBuffer "UNKNOWN" strcpy
+				"UNKNOWN" symname!
+			end else
+				if (symname@ ~~)
+					"NAMELESS" symname!
+				end
+
+				TraceNameBuffer	dll@ ComDLL_Name + @ strcpy
+				TraceNameBuffer TraceNameBuffer strlen + "!" strcpy
+				TraceNameBuffer TraceNameBuffer strlen + symname@ strcpy
+			end
+
+			TraceNameBuffer
+			pc@
+			"%08x %41s" Printf
+
+			if (symname@ "KeXr17032ExceptionVector" strcmp)
+				if (link@ MmVirtualAddressIsValid ~~)
+					" #\n" Printf
+					return
+				end
+
+				if (link@ 4 + MmVirtualAddressIsValid ~~)
+					" #\n" Printf
+					return
+				end
+
+				if (link@ 8 + MmVirtualAddressIsValid ~~)
+					" #\n" Printf
+					return
+				end
+
+				auto nlink
+				link@@ nlink!
+
+				link@ 8 + @ lr!
+
+				if (nlink@)
+					link@ 4 + @ pc!
+				end else
+					return
+				end
+
+				nlink@ link!
+
+				1 leaf!
+			end else
+				auto offset
+				0 offset!
+
+				while (pc@ symbase@ >=)
+					if (pc@ MmVirtualAddressIsValid ~~)
+						" #\n" Printf
+						return
+					end
+
+					if (pc@@ 0xFFFF & 0xF7B4 ==)
+						// found the "subi sp, sp, X" instruction that created the
+						// stack frame. extract the X to find out how big the stack
+						// frame is, so we can offset to the next one.
+						pc@@ 16 >> offset!
+						break
+					end elseif (pc@@ 0xFFFF & 0xFFAA ==)
+						// found a "mov long [sp + X], lr" instruction. that means
+						// this is NOT a leaf function.
+						0 leaf!
+					end
+
+					4 pc -=
+				end
+
+				if (pc@ ~~)
+					break
+				end
+
+				if (leaf@)
+					lr@ pc!
+				end else
+					if (link@ MmVirtualAddressIsValid ~~)
+						" #\n" Printf
+						return
+					end
+
+					link@@ pc!
+				end
+
+				0 leaf!
+
+				link@ offset@ + link!
+			end
+
+			if (pc@ 3 &)
+				" unaligned pc!\n" Printf
+				return
+			end
+
+			if (link@ 3 &)
+				" unaligned link!\n" Printf
+				return
+			end
+
+			if (ok@)
+				return
+			end
+
+			1 i -=
+			1 links +=
+		end
+
+		"\n" Printf
+
+		1 rows -=
+	end
+end

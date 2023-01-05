@@ -1,0 +1,435 @@
+//
+// Implements the amtsu mouse driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+#include "<ll>/OSDLL/OSMouseControl.h"
+
+#include "<inc>/HALMap.h"
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALXRstationAmtsu.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALConsole.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+const MOUSEMID 0x4D4F5553
+
+const MOUSECMDREAD  1
+const MOUSECMDRESET 2
+
+const PACKETBUFFERSIZE (OSMousePacket_SIZEOF 4 *)
+
+struct Mouse
+	4 ID
+
+	PACKETBUFFERSIZE PacketBuffer
+
+	4 ReadIndex
+	4 WriteIndex
+	4 Remaining
+
+	KeDPC_SIZEOF DPC
+
+	4 RequestListHead
+	4 RequestListTail
+endstruct
+
+struct MouseRequest
+	4 Next
+	4 Prev
+
+	4 Mouse
+	4 MDL
+	4 Buffer
+	4 Length
+endstruct
+
+table DriverMouseDispatch
+	0                                    // open
+	0                                    // close
+	0                                    // iocontrol
+	pointerof DriverMouseRead            // read
+	0                                    // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	0                                    // readblock
+	0                                    // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reclaim fcb
+	pointerof DriverMouseCancel          // cancel request
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverMouse
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"mouse"                              // name
+	OSFILETYPE_CHARDEVICE                // type
+	pointerof DriverMouseDispatch        // dispatch table
+	Mouse_SIZEOF                         // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table MouseTable[16]
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	fnsection "INIT$text"
+
+	if (stage@ STAGE_THREAD ==)
+		pointerof DriverMouseEnumerate // func
+		MOUSEMID // mid
+		HALXRstationAmtsuEnumerate drop
+	end
+
+	0 ok!
+end
+
+rosection "INIT$text"
+
+fn (HALXRstationAmtsuCallbackF) DriverMouseEnumerate { id -- }
+	fnsection "INIT$text"
+
+	auto name
+	OBNAMEMAX alloc name!
+
+	name@ // dest
+	"mouse" // src
+	strcpy
+
+	id@ // n
+	name@ 5 + // str
+	itoa
+
+	auto dev
+	auto ok
+	name@ // name
+	0 // sizeinbytes
+	DriverMouse // driver
+	ACCESS_OWNER_READ ACCESS_GROUP_READ | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ name@ "DriverMouseEnumerate: failed to create %s (%i)\n" KeCrash
+	end
+
+	auto mouse
+	dev@ IODeviceGetExtension mouse!
+
+	0 mouse@ Mouse_RequestListHead + !
+	0 mouse@ Mouse_RequestListTail + !
+
+	0 mouse@ Mouse_ReadIndex + !
+	0 mouse@ Mouse_WriteIndex + !
+	PACKETBUFFERSIZE mouse@ Mouse_Remaining + !
+
+	pointerof DriverMouseDPCFunction // function
+	mouse@ Mouse_DPC + // dpc
+	KeDPCInitialize
+
+	id@ mouse@ Mouse_ID + !
+
+	mouse@ [id@]MouseTable!
+
+	auto irq
+	id@ HALXRstationAmtsuIDToIrq irq!
+
+	pointerof DriverMouseInterrupt // handler
+	irq@ // int
+	IPLINTERACTIVE // ipl
+	HALInterruptRegister
+
+	id@ HALXRstationAmtsuSetInterrupt
+end
+
+rosection "text"
+
+fn (IODispatchCancelFunction) DriverMouseCancel { mdl -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ KeIPLLower
+		return
+	end
+
+	auto mouse
+	ior@ MouseRequest_Mouse + @ mouse!
+
+	auto ls
+	auto ns
+
+	ior@ MouseRequest_Prev + @ ls!
+	ior@ MouseRequest_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ MouseRequest_Next + !
+	end else
+		ns@ mouse@ Mouse_RequestListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ MouseRequest_Prev + !
+	end else
+		ls@ mouse@ Mouse_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+
+	STATUS_IO_CANCELLED // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn (IODispatchReadFunction) DriverMouseRead { timeout flags kflags offset mdl fcb -- ok }
+	0 ok!
+
+	if (mdl@ MmMDLHeader_Length + @ OSMousePacket_SIZEOF %)
+		STATUS_UNALIGNED ok!
+		return
+	end
+
+	auto mouse
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension mouse!
+
+	if (mdl@ MmMDLHeader_Length + @ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLHeader_MappedAddress + @ buf!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto rp
+	mouse@ Mouse_ReadIndex + @ rp!
+
+	auto bytecnt
+	mouse@ Mouse_WriteIndex + @ rp@ - bytecnt!
+
+	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+		mdl@ MmMDLHeader_Length + @ bytecnt!
+	end
+
+	if (bytecnt@)
+		auto endp
+		rp@ bytecnt@ + endp!
+
+		if (rp@ PACKETBUFFERSIZE 1 - ~ & endp@ PACKETBUFFERSIZE 1 - ~ & ==)
+			// doesn't cross the boundary, do a single copy
+
+			buf@ // dest
+			mouse@ Mouse_PacketBuffer + rp@ PACKETBUFFERSIZE 1 - & + // src
+			bytecnt@ // sz
+			memcpy
+		end else
+			// crosses the boundary, do two copies
+
+			buf@ // dest
+			mouse@ Mouse_PacketBuffer + rp@ PACKETBUFFERSIZE 1 - & + // src
+			PACKETBUFFERSIZE rp@ PACKETBUFFERSIZE 1 - & - // sz
+			memcpy
+
+			buf@ PACKETBUFFERSIZE rp@ PACKETBUFFERSIZE 1 - & - + // dest
+			mouse@ Mouse_PacketBuffer + // src
+			endp@ PACKETBUFFERSIZE 1 - & // sz
+			memcpy
+		end
+
+		endp@ mouse@ Mouse_ReadIndex + !
+		bytecnt@ mouse@ Mouse_Remaining + +=
+	end
+
+	if (bytecnt@ mdl@ MmMDLHeader_Length + @ ~=)
+		if (timeout@)
+			// enqueue
+
+			STATUS_OTHER_CONDITION ok!
+
+			auto ior
+			mdl@ MmMDLHeader_DriverGoWild + ior!
+
+			mouse@ ior@ MouseRequest_Mouse + !
+			mdl@ ior@ MouseRequest_MDL + !
+			buf@ bytecnt@ + ior@ MouseRequest_Buffer + !
+			mdl@ MmMDLHeader_Length + @ bytecnt@ - ior@ MouseRequest_Length + !
+
+			0 ior@ MouseRequest_Next + !
+
+			auto t
+			mouse@ Mouse_RequestListTail + @ t!
+
+			t@ ior@ MouseRequest_Prev + !
+
+			if (t@ ~~)
+				ior@ mouse@ Mouse_RequestListHead + !
+				ior@ mouse@ Mouse_RequestListTail + !
+			end else
+				ior@ t@ MouseRequest_Next + !
+			end
+		end else
+			bytecnt@ mdl@ MmMDLHeader_Length + !
+		end
+	end
+
+	ipl@ KeIPLLower
+
+	if (ok@ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end elseif (ok@ STATUS_OTHER_CONDITION ==)
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
+end
+
+fn (DPCFunction) DriverMouseDPCFunction { context1 context2 -- }
+	auto eventbuf
+	context1@ Mouse_PacketBuffer + eventbuf!
+
+	auto eventtype
+	auto info
+
+	while (1)
+		context1@ MouseRead info! eventtype!
+
+		if (eventtype@ ~~)
+			break
+		end
+
+		auto req
+		context1@ Mouse_RequestListHead + @ req!
+
+		if (req@)
+			info@ req@ MouseRequest_Buffer + @ OSMousePacket_Info + !
+			eventtype@ req@ MouseRequest_Buffer + @ OSMousePacket_EventType + !
+
+			OSMousePacket_SIZEOF req@ MouseRequest_Buffer + +=
+			OSMousePacket_SIZEOF req@ MouseRequest_Length + -=
+
+			if (req@ MouseRequest_Length + @ ~~)
+				// complete the client MDL.
+
+				0 // status
+				0 // priboost
+				req@ MouseRequest_MDL + @ // mdl
+				MmMDLComplete
+
+				// unlink the client request.
+
+				req@ MouseRequest_Next + @ req!
+
+				req@ context1@ Mouse_RequestListHead + !
+
+				if (req@)
+					0 req@ MouseRequest_Prev + !
+				end else
+					0 context1@ Mouse_RequestListTail + !
+				end
+			end
+		end elseif (context1@ Mouse_Remaining + @)
+			// insert into the buffer
+
+			info@ eventbuf@ context1@ Mouse_WriteIndex + @ PACKETBUFFERSIZE 1 - & + OSMousePacket_Info + !
+			eventtype@ eventbuf@ context1@ Mouse_WriteIndex + @ PACKETBUFFERSIZE 1 - & + OSMousePacket_EventType + !
+
+			OSMousePacket_SIZEOF context1@ Mouse_Remaining + -=
+			OSMousePacket_SIZEOF context1@ Mouse_WriteIndex + +=
+		end
+	end
+end
+
+fn (HALInterruptHandler) DriverMouseInterrupt { trapframe int -- }
+	auto mouse
+
+	auto id
+	int@ HALXRstationAmtsuIrqToID id!
+
+	[id@]MouseTable@ mouse!
+
+	auto dpc
+	mouse@ Mouse_DPC + dpc!
+
+	// defer waking up any blocked readers til later,
+	// otherwise we will BSOD since we're at IPLINTERACTIVE
+
+	mouse@ // context1
+	0 // context2
+	DPCLOWIMPORTANCE // importance
+	dpc@ // dpc
+	KeDPCEnqueue drop
+end
+
+fn MouseRead { mouse -- eventtype info }
+	auto id
+	mouse@ Mouse_ID + @ id!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	id@ HALXRstationAmtsuSelect
+	MOUSECMDREAD HALXRstationAmtsuCommand
+	HALXRstationAmtsuReadA eventtype!
+	HALXRstationAmtsuReadB info!
+
+	rs@ HALCPUInterruptRestore
+end

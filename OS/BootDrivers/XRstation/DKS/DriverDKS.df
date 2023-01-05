@@ -1,0 +1,802 @@
+//
+// Implements the DKS disk driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALXRstationCitron.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+const DKSBLOCKSHIFT 9
+const DKSBLOCKSIZE (1 DKSBLOCKSHIFT <<)
+const DKSBLOCKOFFMASK (DKSBLOCKSIZE 1 -)
+
+const DKS_REALDISK  1
+const DKS_PARTITION 2
+
+const DKSBUFFERPHYS 0xF8020000
+
+var DKSBuffer 0
+
+var DKSCompletedBitmap 0
+
+struct Disk
+	4 Type
+	4 DKSID
+	4 BlockOffset
+	4 Blocks
+	4 RequestListHead
+	4 RequestListTail
+endstruct
+
+const DKSKFLAG_READ 0x80000000
+
+// must be <=32 bytes to fit in the MDL DriverGoWild area
+struct DKSRequest
+	4 Next
+
+	4 KFlags
+	4 MDL
+	4 WakeEvent
+	4 Buffer
+	4 BlockNumber
+	4 BlockCount
+endstruct
+
+const DKSMAXDISKID 7
+
+table DKSRealDisks[(DKSMAXDISKID 1 +)]
+
+const DKSPORTCMD 0x19
+const DKSPORTA   0x1A
+const DKSPORTB   0x1B
+
+const DKSCMDSELECT  0x1
+const DKSCMDREAD    0x2
+const DKSCMDWRITE   0x3
+const DKSCMDINFO    0x4
+const DKSCMDPOLL    0x5
+const DKSCMDINTR    0x6
+const DKSCMDINTROFF 0x7
+
+const DKSINTERRUPT  0x3
+
+const DKSBLOCKTRANSFER 0x0
+
+table DriverDKSDispatch
+	0                                    // open
+	0                                    // close
+	pointerof DriverDKSIOControl         // iocontrol
+	pointerof DriverDKSRead              // read
+	pointerof DriverDKSWrite             // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	pointerof DriverDKSReadBlock         // readblock
+	pointerof DriverDKSWriteBlock        // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverDKS
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"dks"                                // name
+	OSFILETYPE_BLOCKDEVICE               // type
+	pointerof DriverDKSDispatch          // dispatch table
+	Disk_SIZEOF                          // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+buffer DKSDPC KeDPC_SIZEOF
+
+rosection "INIT$text"
+
+fn private CreateDisk { name blocks type id offset -- dev }
+	fnsection "INIT$text"
+
+	auto sizeinbytes
+	blocks@ 512 * sizeinbytes!
+
+	auto ok
+	name@ // name
+	sizeinbytes@ // sizeinbytes
+	DriverDKS // driver
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_GROUP_READ | ACCESS_GROUP_WRITE | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
+	end
+
+	9 dev@ IODeviceSetBlockLog // 1<<9 = 512
+
+	auto disk
+	dev@ IODeviceGetExtension disk!
+
+	type@ disk@ Disk_Type + !
+	id@ disk@ Disk_DKSID + !
+	offset@ disk@ Disk_BlockOffset + !
+	blocks@ disk@ Disk_Blocks + !
+	0 disk@ Disk_RequestListHead + !
+	0 disk@ Disk_RequestListTail + !
+
+	if (type@ DKS_REALDISK ==)
+		disk@ [id@]DKSRealDisks!
+	end
+end
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	fnsection "INIT$text"
+
+	if (stage@ STAGE_THREAD ==)
+		MMIO_NOCACHE // cached
+		512 8 * // length
+		DKSBUFFERPHYS // phyaddr
+		MmIORegionMap ok! DKSBuffer!
+
+		if (ok@)
+			"DKSDriverInit: failed to map buffer (%i)\n" KeCrash
+		end
+
+		pointerof DriverDKSDPCFunction // function
+		DKSDPC // dpc
+		KeDPCInitialize
+
+		// detect and register disks
+
+		auto diskid
+		0 diskid!
+
+		auto namebuf
+		64 alloc namebuf!
+
+		namebuf@ // dest
+		"dks" // src
+		strcpy
+
+		// clear completion bitmap
+		DKSCMDINFO DKSPORTCMD HALXRstationCitronCommand
+
+		pointerof DriverDKSInterrupt // function
+		DKSINTERRUPT // interrupt number
+		IPLDISK // interrupt priority level
+		HALInterruptRegister
+
+		DKSCMDINTR DKSPORTCMD HALXRstationCitronCommand
+
+		auto dev
+
+		while (diskid@ DKSMAXDISKID <=)
+			auto present
+			auto blocks
+
+			diskid@ DKSPORTA HALXRstationCitronOutl
+
+			DKSCMDPOLL DKSPORTCMD HALXRstationCitronCommand
+
+			DKSPORTA HALXRstationCitronInl present!
+			DKSPORTB HALXRstationCitronInl blocks!
+
+			if (present@ 1 & ~~)
+				1 diskid +=
+				continue
+			end
+
+			if (blocks@ 8388608 >=)
+				namebuf@
+				"%s: disk is >=4GB; this is not supported! skipping.\n" "DKSDriverInit" HALLog
+
+				1 diskid +=
+				continue
+			end
+
+			// we have a disk at this ID
+
+			diskid@ // n
+			namebuf@ 3 + // buf
+			itoa
+
+			blocks@ namebuf@ diskid@ "ID %d: NAME=%s BLOCKSZ=512 BLOCKS=%d\n" "DKSDriverInit" HALLog
+
+			auto sizeinbytes
+			blocks@ 512 * sizeinbytes!
+
+			namebuf@ // name
+			blocks@ // blocks
+			DKS_REALDISK // type
+			diskid@ // id
+			0 // offset
+			CreateDisk dev!
+
+			auto partitiontable
+			dev@ IOPartitionTableRead ok! partitiontable!
+
+			if (ok@ 0 ==)
+				auto pcount
+				partitiontable@ IOPartitionTable_PartitionCount + @ pcount!
+
+				auto pte
+				partitiontable@ IOPartitionTable_SIZEOF + pte!
+
+				namebuf@ 4 + // dest
+				"s" // src
+				strcpy
+
+				while (pcount@)
+					pte@ IOPartitionEntry_ID + @ // n
+					namebuf@ 5 + // buf
+					itoa
+
+					pte@ IOPartitionEntry_SizeInBlocks + @ blocks!
+
+					namebuf@ // name
+					blocks@ // blocks
+					DKS_PARTITION // type
+					diskid@ // id
+					pte@ IOPartitionEntry_BlockOffset + @ // offset
+					CreateDisk dev!
+
+					IOPartitionEntry_SIZEOF pte +=
+					1 pcount -=
+				end
+
+				partitiontable@ MmFree
+			end
+
+			1 diskid +=
+		end
+	end
+
+	0 ok!
+end
+
+rosection "text"
+
+fn DKSComplete { id -- }
+	auto disk
+	[id@]DKSRealDisks@ disk!
+
+	if (DEBUGCHECKS)
+		if (disk@ ~~)
+			"DriverDKSDPCFunction: no disk\n" KeCrash
+		end
+	end
+
+	auto ior
+	disk@ Disk_RequestListHead + @ ior!
+
+	if (DEBUGCHECKS)
+		if (ior@ ~~)
+			"DriverDKSDPCFunction: no request\n" KeCrash
+		end
+	end
+
+	auto mdl
+	ior@ DKSRequest_MDL + @ mdl!
+
+	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
+		ior@ DKSRequest_Buffer + @ // dest
+		DKSBuffer@ id@ DKSBLOCKSHIFT << + // src
+		DKSBLOCKSIZE // size
+		memcpy
+	end
+
+	1 ior@ DKSRequest_BlockCount + -=
+	1 ior@ DKSRequest_BlockNumber + +=
+	DKSBLOCKSIZE ior@ DKSRequest_Buffer + +=
+
+	if (ior@ DKSRequest_BlockCount + @ ~~)
+		// complete, start next one
+
+		if (ior@ DKSRequest_WakeEvent + @)
+			IOBOOSTDISK // priboost
+			ior@ DKSRequest_WakeEvent + @ // event
+			KeEventSignal
+		end
+
+		auto nior
+		ior@ DKSRequest_Next + @ nior!
+
+		if (mdl@)
+			if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
+				ior@ DKSRequest_KFlags + @ // kflags
+				0 // write
+				0 // dma
+				mdl@ // mdl
+				MmMDLFlush
+			end
+
+			0 // status
+			IOBOOSTDISK // priboost
+			mdl@ // mdl
+			MmMDLComplete
+		end else
+			ior@ MmFree
+		end
+
+		nior@ ior!
+
+		ior@ disk@ Disk_RequestListHead + !
+
+		if (ior@ ~~)
+			0 disk@ Disk_RequestListTail + !
+			return
+		end
+
+		ior@ DKSRequest_MDL + @ mdl!
+	end
+
+	auto rs
+
+	// start next one
+
+	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
+		HALCPUInterruptDisable rs!
+
+		id@ DKSPORTA HALXRstationCitronOutl
+		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+		ior@ DKSRequest_BlockNumber + @ DKSPORTA HALXRstationCitronOutl
+		DKSCMDREAD DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end else
+		DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
+		ior@ DKSRequest_Buffer + @ // src
+		DKSBLOCKSIZE // size
+		memcpy
+
+		HALCPUInterruptDisable rs!
+
+		id@ DKSPORTA HALXRstationCitronOutl
+		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+		ior@ DKSRequest_BlockNumber + @ DKSPORTA HALXRstationCitronOutl
+		DKSCMDWRITE DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+end
+
+fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
+	// fulfill pending requests
+
+	auto completed
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	DKSCompletedBitmap@ completed!
+	0 DKSCompletedBitmap!
+
+	rs@ HALCPUInterruptRestore
+
+	auto id
+	0 id!
+
+	while (id@ DKSMAXDISKID <=)
+		if (completed@ 1 id@ << &)
+			id@ DKSComplete
+		end
+
+		1 id +=
+	end
+end
+
+fn (HALInterruptHandler) DriverDKSInterrupt { trapframe int -- }
+	auto event
+	auto details
+
+	DKSCMDINFO DKSPORTCMD HALXRstationCitronCommandASyncIdle
+	DKSPORTA HALXRstationCitronInl event!
+	DKSPORTB HALXRstationCitronInl details!
+
+	if (event@ DKSBLOCKTRANSFER ==)
+		auto dpc
+		DKSDPC dpc!
+
+		details@ DKSCompletedBitmap |=
+
+		// defer doing fun work til later,
+		// otherwise we will BSOD since we're at IPLDISK
+
+		0 // context1
+		0 // context2
+		DPCLOWIMPORTANCE // importance
+		dpc@ // dpc
+		KeDPCEnqueue drop
+	end
+end
+
+fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
+	0 ok!
+
+	auto ior
+
+	if (mdl@)
+		mdl@ MmMDLHeader_DriverGoWild + ior!
+		mdl@ MmMDLHeader_MappedAddress + @ buf!
+	end else
+		DKSRequest_SIZEOF // bytes
+		'DKSt' // tag
+		kflags@ MmKflagToPriority CANBLOCK | // flags
+		MmAllocWithTag ok! ior!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto id
+	disk@ Disk_DKSID + @ id!
+
+	auto realdisk
+	[id@]DKSRealDisks@ realdisk!
+
+	kflags@ ior@ DKSRequest_KFlags + !
+	buf@ ior@ DKSRequest_Buffer + !
+	mdl@ ior@ DKSRequest_MDL + !
+	blockno@ disk@ Disk_BlockOffset + @ + ior@ DKSRequest_BlockNumber + !
+	blocks@ ior@ DKSRequest_BlockCount + !
+	0 ior@ DKSRequest_Next + !
+	event@ ior@ DKSRequest_WakeEvent + !
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto t
+	realdisk@ Disk_RequestListTail + @ t!
+
+	if (t@ ~~)
+		ior@ realdisk@ Disk_RequestListTail + !
+		ior@ realdisk@ Disk_RequestListHead + !
+
+		if (kflags@ DKSKFLAG_READ & ~~)
+			rs@ HALCPUInterruptRestore
+
+			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
+			buf@ // src
+			DKSBLOCKSIZE // len
+			memcpy
+
+			HALCPUInterruptDisable rs!
+		end
+
+		// no pending requests, start the disk
+
+		id@ DKSPORTA HALXRstationCitronOutl
+		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+		ior@ DKSRequest_BlockNumber + @ DKSPORTA HALXRstationCitronOutl
+
+		if (kflags@ DKSKFLAG_READ &)
+			DKSCMDREAD DKSPORTCMD HALXRstationCitronCommandASyncIdle
+		end else
+			DKSCMDWRITE DKSPORTCMD HALXRstationCitronCommandASyncIdle
+		end
+	end else
+		ior@ t@ DKSRequest_Next + !
+		ior@ realdisk@ Disk_RequestListTail + !
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn (IODispatchIOControlFunction) DriverDKSIOControl { arg2 arg1 access fcb lastmode -- ret ok }
+	0 ok!
+end
+
+// routines for I/O by byte offset.
+// these are called when the device object is opened directly, either cached
+// (in which case the caller is the page cache) or uncached.
+
+// if caller isn't careful these can lead to some redundant reads and writes.
+// which are slow.
+
+fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb -- ok }
+	auto devobj
+	fcb@ IOFileControlBlockGetDeviceObject devobj!
+
+	auto disk
+	devobj@ IODeviceGetExtension disk!
+
+	0 ok!
+
+	auto size
+	fcb@ IOFileControlBlockGetSize size!
+
+	if (offset@ size@ >=)
+		0 mdl@ MmMDLHeader_Length + !
+	
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	if (offset@ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	if (mdl@ MmMDLHeader_VirtualAddress + @ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	auto length
+	size@ offset@ -
+	mdl@ MmMDLHeader_Length + @
+	min length!
+
+	if (length@ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	if (length@ ~~)
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		return
+	end
+
+	length@ mdl@ MmMDLHeader_Length + !
+
+	kflags@ DKSKFLAG_READ | // kflags
+	0 // buf
+	mdl@ // mdl
+	length@ DKSBLOCKSHIFT >> // blocks
+	offset@ DKSBLOCKSHIFT >> // blockno
+	disk@ // disk
+	0 // event
+	DKSBlockTransferCommand ok!
+
+	if (ok@)
+		return
+	end
+end
+
+fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- ok }
+	auto disk
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
+
+	0 ok!
+
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
+
+	if (offset@ bytesize@ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	if (offset@ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	if (mdl@ MmMDLHeader_VirtualAddress + @ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	auto length
+	bytesize@ offset@ -
+	mdl@ MmMDLHeader_Length + @
+	min length!
+
+	if (length@ DKSBLOCKOFFMASK &)
+		STATUS_UNALIGNED ok!
+
+		return
+	end
+
+	if (length@ ~~)
+		0 mdl@ MmMDLHeader_Length + !
+
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		return
+	end
+
+	length@ mdl@ MmMDLHeader_Length + !
+
+	kflags@ // kflags
+	1 // write
+	0 // dma
+	mdl@ // mdl
+	MmMDLFlush
+
+	kflags@ // kflags
+	0 // buf
+	mdl@ // mdl
+	length@ DKSBLOCKSHIFT >> // blocks
+	offset@ DKSBLOCKSHIFT >> // blockno
+	disk@ // disk
+	0 // event
+	DKSBlockTransferCommand ok!
+
+	if (ok@)
+		return
+	end
+end
+
+// routines for I/O by block offset, by device object. rarely called.
+// used in some boot situations where acquiring an FCB would be irritating.
+
+fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject -- ok }
+	// write by block
+
+	auto disk
+	devobject@ IODeviceGetExtension disk!
+
+	if (blockno@ disk@ Disk_Blocks + @ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"DKSWriteBlockEvent" // name
+	event@ // event
+	KeEventInitialize
+
+	0 // kflags
+	buffer@ // buf
+	0 // mdl
+	1 // blocks
+	blockno@ // blockno
+	disk@ // disk
+	event@ // event
+	DKSBlockTransferCommand ok!
+
+	if (ok@)
+		return
+	end
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "DriverDKSWriteBlock: couldn't wait on event (%i)\n" KeCrash
+		end
+	end
+end
+
+fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -- ok }
+	// read by block
+
+	auto disk
+	devobject@ IODeviceGetExtension disk!
+
+	if (blockno@ disk@ Disk_Blocks + @ >=)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	"DKSReadBlockEvent" // name
+	event@ // event
+	KeEventInitialize
+
+	DKSKFLAG_READ // kflags
+	buffer@ // buf
+	0 // mdl
+	1 // blocks
+	blockno@ // blockno
+	disk@ // disk
+	event@ // event
+	DKSBlockTransferCommand ok!
+
+	if (ok@)
+		return
+	end
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject ok!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			ok@ "DriverDKSReadBlock: couldn't wait on event (%i)\n" KeCrash
+		end
+	end
+end

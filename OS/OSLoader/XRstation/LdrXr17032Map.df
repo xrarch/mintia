@@ -1,0 +1,352 @@
+//
+// Implements virtual address space management for xr17032.
+//
+
+#include "<df>/dragonfruit.h"
+#include "<ll>/rta3x/a3x.h"
+
+#include "../OSLoader.h"
+
+var LdrPlatformKernelPageDirectory 0
+public LdrPlatformKernelPageDirectory
+
+const TLBSIZE 64
+
+extern LdrXr17032MapEnablePaging { missroutine -- }
+
+fn LdrXr17032MapInit { -- }
+	// create page directory
+
+	auto ok
+	auto desc
+
+	1 // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrXr17032MapInit: failed to allocate page directory (%i)\n" LdrCrash
+	end
+
+	auto addr
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << addr!
+
+	addr@ // ptr
+	2048 // size
+	0 // word
+	memset
+
+	addr@ 2048 + // ptr
+	2048 // size
+	PTE_INVALID_KPAGE // word
+	memset
+
+	addr@ LdrPlatformKernelPageDirectory!
+
+	// identity map each memory descriptor at 0 and at IDENTITYSPACE
+
+	LdrMemoryDescriptorListHead@ desc!
+
+	while (desc@)
+		if (desc@ LdrMemoryDescriptor_OriginalDescriptor + @)
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // vaddr
+			desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // phyaddr
+			desc@ LdrMemoryDescriptor_OriginalExtent + @ // pages
+			0 // noncached
+			1 // reclaimablept
+			LdrPlatformMapRange
+		end
+
+		desc@ LdrMemoryDescriptor_Next + @ desc!
+	end
+
+	auto pdi
+	auto i
+	auto pfn
+
+	POOLSPACE 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	POOLSIZE 22 >> // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrXr17032MapInit: failed to allocate POOLSPACE page tables (%i)\n" LdrCrash
+	end
+
+	0 i!
+
+	desc@ LdrMemoryDescriptor_StartPFN + @ pfn!
+
+	while (i@ POOLSIZE 22 >> <)
+		pfn@ 5 << PTE_V | PTE_W | PTE_G | PTE_K | pdi@!
+
+		pfn@ PAGESHIFT << // ptr
+		PAGESIZE // size
+		PTE_INVALID_KPAGE // word
+		memset
+
+		1 pfn +=
+		4 pdi +=
+		1 i +=
+	end
+
+	VIEWSPACE 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	VIEWSIZE 22 >> // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrXr17032MapInit: failed to allocate VIEWSPACE page tables (%i)\n" LdrCrash
+	end
+
+	0 i!
+
+	desc@ LdrMemoryDescriptor_StartPFN + @ pfn!
+
+	while (i@ VIEWSIZE 22 >> <)
+		pfn@ 5 << PTE_V | PTE_W | PTE_G | PTE_K | pdi@!
+
+		pfn@ PAGESHIFT << // ptr
+		PAGESIZE // size
+		PTE_INVALID_KPAGE // word
+		memset
+
+		1 pfn +=
+		4 pdi +=
+		1 i +=
+	end
+
+	// recursively map the page table by inserting the page directory into one
+	// of its own PDEs.
+
+	PAGETABLE 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	LdrPlatformKernelPageDirectory@ PAGESHIFT >> 5 << PTE_V | PTE_W | PTE_K | pdi@!
+
+	// allocate physical page for the TLB miss routine and copy it there
+
+	1 // pages
+	OSLOADERMEM_USED // type
+	LdrMemoryAllocatePhysicalRange ok! desc!
+
+	if (ok@)
+		ok@ "LdrXr17032MapInit: failed to allocate TLBMISS page (%i)\n" LdrCrash
+	end
+
+	auto missroutine
+	pointerof LdrXr17032MapTLBMissRoutine missroutine!
+
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // dest
+	missroutine@ // src
+	pointerof LdrXr17032MapTLBMissRoutineEnd missroutine@ - // sz
+	memcpy
+
+	// enable paging
+
+	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << LdrXr17032MapEnablePaging
+end
+
+const RS_MMU 4
+
+asm "
+
+LdrXr17032MapTLBMissRoutine:
+	mtcr tbscratch, t0
+	mfcr t0, pgtb      ;load the helper address
+	mov  t0, long [t0] ;load the PDE
+	tbld t0, t0        ;conditionally load the PTE
+	mtcr tblo, t0
+	tbwr               ;write the TLB entry
+	mfcr t0, tbscratch ;restore t0 and return
+	rfe
+LdrXr17032MapTLBMissRoutineEnd:
+
+
+LdrXr17032MapFlushTLBAll:
+.global LdrXr17032MapFlushTLBAll
+	mfcr t1, tbhi
+
+	mtcr tblo, zero
+	mtcr tbhi, zero
+
+	li   t2, TLBSIZE
+
+.loop:
+	subi t2, t2, 1	
+
+	mtcr tbindex, t2
+	tbwr
+
+	bne  t2, .loop
+
+	mtcr tbhi, t1
+	ret
+
+LdrXr17032MapExit:
+.global LdrXr17032MapExit
+	mtcr rs, zero
+	ret
+
+LdrXr17032MapEnablePaging:
+	cachei 3 ;invalidate icache, writeback dcache
+
+	mtcr rs, zero
+	mtcr tbvec, a0
+
+	mtcr k0, lr ;lazy and stupid way to save link register since we're in kernel mode right now
+	jal  LdrXr17032MapFlushTLBAll
+	mfcr lr, k0
+
+	mov  t0, long [LdrPlatformKernelPageDirectory]
+	mtcr pgtb, t0
+	li   t0, RS_MMU
+	mtcr rs, t0
+	ret
+
+SavedSP:
+	.dl 0
+
+LdrXr17032StartSystem:
+.global LdrXr17032StartSystem
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	mov  t2, sp
+
+	mov  long [SavedSP], t2, tmp=t0
+
+	mov  sp, long [LdrInterruptStackTop]
+
+	subi sp, sp, 8
+	mov  long [sp], 0
+	mov  long [sp + 4], 0
+
+	la   t0, LdrSystemEntryPoint
+	mov  t0, long [LdrSystemEntryPoint]
+
+	mov  a1, long [a3xMyDevice]
+
+	mov  a2, long [a3xCIPtr]
+
+	la   a3, LdrInfoBlock
+	mov  long [a3 + LdrInfo_ReturnSP], t2
+
+	cachei 3 ;invalidate icache, writeback dcache
+
+	jalr lr, t0, 0
+
+	mov  sp, long [SavedSP]
+
+	mov  lr, long [sp]
+	ret
+
+"
+
+fn LdrPlatformMapRange { vaddr phyaddr pages noncached reclaimablept -- }
+	while (pages@)
+		vaddr@ // vaddr
+		phyaddr@ // phyaddr
+		noncached@ // noncached
+		reclaimablept@ // reclaimablept
+		LdrPlatformMapPage
+
+		PAGESIZE vaddr +=
+		PAGESIZE phyaddr +=
+		1 pages -=
+	end
+end
+
+const PTE_V  1
+const PTE_W  2
+const PTE_K  4
+const PTE_NC 8
+const PTE_G  16
+
+const PTE_KPAGE (PTE_V PTE_W | PTE_K |)
+const PTE_INVALID_KPAGE PTE_G
+
+fn LdrPlatformMapPage { vaddr phyaddr noncached reclaimablept -- }
+	auto pdi
+	vaddr@ 22 >> 2 << LdrPlatformKernelPageDirectory@ + pdi!
+
+	auto pt
+	pdi@@ 5 >> PAGESHIFT << pt!
+
+	if (pt@ 0 ==)
+		// allocate a page table
+
+		auto desc
+		auto ok
+
+		if (reclaimablept@)
+			1 // pages
+			OSLOADERMEM_RECLAIMABLE // type
+			LdrMemoryAllocatePhysicalRange ok! desc!
+		end else		
+			1 // pages
+			OSLOADERMEM_USED // type
+			LdrMemoryAllocatePhysicalRange ok! desc!
+		end
+
+		if (ok@)
+			ok@ "LdrPlatformMapPage: failed to allocate page table (%i)\n" LdrCrash
+		end
+
+		desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << pt!
+
+		pt@ // ptr
+		PAGESIZE // size
+		PTE_INVALID_KPAGE // word
+		memset
+
+		pt@ PAGESHIFT >> 5 << PTE_V | PTE_W | PTE_G | PTE_K | pdi@!
+	end
+
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + pdi!
+
+	if (pdi@@ PTE_V &)
+		vaddr@ PAGESHIFT >> "LdrPlatformMapPage: vpn %x is already mapped!\n" LdrCrash
+	end
+
+	auto flags
+	PTE_KPAGE flags!
+
+	if (vaddr@ KERNELSPACE &)
+		PTE_G flags |=
+	end
+
+	if (noncached@ LDRMEM_NONCACHED ==)
+		PTE_NC flags |=
+	end
+
+	phyaddr@ PAGESHIFT >> 5 << flags@ | pdi@!
+end
+
+fn LdrPlatformVirtualToPhysical { vaddr -- phyaddr ok }
+	0 ok!
+
+	auto ent
+	vaddr@ 22 >> 2 << LdrPlatformKernelPageDirectory@ + ent!
+
+	auto pt
+	ent@@ 5 >> PAGESHIFT << pt!
+
+	auto pfdbe
+
+	if (pt@ 0 ==)
+		// no such PTE.
+		-1 ok!
+		return
+	end
+
+	auto pte
+	vaddr@ PAGESHIFT >> 1023 & 2 << pt@ + @ pte!
+
+	if (pte@ 1 & ~~)
+		-1 ok!
+	end
+
+	pte@ 5 >> PAGESHIFT << phyaddr!
+end

@@ -1,0 +1,612 @@
+//
+// Implements the amtsu keyboard driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALMap.h"
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALXRstationAmtsu.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALConsole.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+const KEYBDMID 0x8FC48FC4
+
+const KEYBDCMDREAD 1
+
+const KEYBD_SHIFT 1
+const KEYBD_CTRL  2
+const KEYBD_CAPS  4
+const KEYBD_ARROW 8
+
+const SCANCODEBUFFERSIZE 32 // must be power of two
+
+struct Keyboard
+	4 ID
+
+	SCANCODEBUFFERSIZE ScanCodeBuffer
+
+	4 ReadIndex
+	4 WriteIndex
+	4 Remaining
+
+	4 States
+	4 PendingArrowKey
+	KeDPC_SIZEOF DPC
+
+	4 RequestListHead
+	4 RequestListTail
+endstruct
+
+struct KeyboardRequest
+	4 Next
+	4 Prev
+
+	4 Keyboard
+	4 MDL
+	4 Buffer
+	4 Length
+endstruct
+
+table DriverKeyboardDispatch
+	0                                    // open
+	0                                    // close
+	0                                    // iocontrol
+	pointerof DriverKeyboardRead         // read
+	0                                    // write
+	0                                    // system control
+	0                                    // parse
+	0                                    // create
+	0                                    // flush
+	pointerof IODeviceDeleteFileObject   // delete object
+	0                                    // set information
+	0                                    // get information
+	0                                    // rename
+	0                                    // readblock
+	0                                    // writeblock
+	0                                    // truncate
+	0                                    // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reclaim fcb
+	pointerof DriverKeyboardCancel       // cancel request
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverKeyboard
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"keyboard"                           // name
+	OSFILETYPE_CHARDEVICE                // type
+	pointerof DriverKeyboardDispatch     // dispatch table
+	Keyboard_SIZEOF                      // extension size
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table KeyboardTable[16]
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	fnsection "INIT$text"
+
+	if (stage@ STAGE_THREAD ==)
+		pointerof DriverKeyboardEnumerate // func
+		KEYBDMID // mid
+		HALXRstationAmtsuEnumerate drop
+	end
+
+	0 ok!
+end
+
+rosection "INIT$text"
+
+fn (HALXRstationAmtsuCallbackF) DriverKeyboardEnumerate { id -- }
+	fnsection "INIT$text"
+
+	auto name
+	OBNAMEMAX alloc name!
+
+	name@ // dest
+	"kbd" // src
+	strcpy
+
+	id@ // n
+	name@ 3 + // str
+	itoa
+
+	auto dev
+	auto ok
+	name@ // name
+	0 // sizeinbytes
+	DriverKeyboard // driver
+	ACCESS_OWNER_READ ACCESS_GROUP_READ | // permissions
+	IODeviceCreate ok! dev!
+
+	if (ok@)
+		ok@ name@ "DriverKeyboardEnumerate: failed to create %s (%i)\n" KeCrash
+	end
+
+	auto keyboard
+	dev@ IODeviceGetExtension keyboard!
+
+	pointerof DriverKeyboardDPCFunction // function
+	keyboard@ Keyboard_DPC + // dpc
+	KeDPCInitialize
+
+	id@ keyboard@ Keyboard_ID + !
+
+	0 keyboard@ Keyboard_States + !
+	0 keyboard@ Keyboard_PendingArrowKey + !
+
+	0 keyboard@ Keyboard_RequestListHead + !
+	0 keyboard@ Keyboard_RequestListTail + !
+
+	0 keyboard@ Keyboard_ReadIndex + !
+	0 keyboard@ Keyboard_WriteIndex + !
+	SCANCODEBUFFERSIZE keyboard@ Keyboard_Remaining + !
+
+	if (CoVideoConsoleInputDevice@ ~~)
+		// no device specified as video console input buffer, make that us
+		keyboard@ CoVideoConsoleInputDevice!
+	end
+
+	keyboard@ [id@]KeyboardTable!
+
+	auto irq
+	id@ HALXRstationAmtsuIDToIrq irq!
+
+	pointerof DriverKeyboardInterrupt // handler
+	irq@ // int
+	IPLINTERACTIVE // ipl
+	HALInterruptRegister
+
+	id@ HALXRstationAmtsuSetInterrupt
+end
+
+rosection "text"
+
+fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl fcb -- ok }
+	0 ok!
+
+	auto keyboard
+	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension keyboard!
+
+	if (mdl@ MmMDLHeader_Length + @ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+
+		return
+	end
+
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		return
+	end
+
+	mdl@ MmMDLHeader_MappedAddress + @ buf!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto rp
+	keyboard@ Keyboard_ReadIndex + @ rp!
+
+	auto bytecnt
+	keyboard@ Keyboard_WriteIndex + @ rp@ - bytecnt!
+
+	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
+		mdl@ MmMDLHeader_Length + @ bytecnt!
+	end
+
+	if (bytecnt@)
+		auto endp
+		rp@ bytecnt@ + endp!
+
+		if (rp@ SCANCODEBUFFERSIZE 1 - ~ & endp@ SCANCODEBUFFERSIZE 1 - ~ & ==)
+			// doesn't cross the boundary, do a single copy
+
+			buf@ // dest
+			keyboard@ Keyboard_ScanCodeBuffer + rp@ SCANCODEBUFFERSIZE 1 - & + // src
+			bytecnt@ // sz
+			memcpy
+		end else
+			// crosses the boundary, do two copies
+
+			buf@ // dest
+			keyboard@ Keyboard_ScanCodeBuffer + rp@ SCANCODEBUFFERSIZE 1 - & + // src
+			SCANCODEBUFFERSIZE rp@ SCANCODEBUFFERSIZE 1 - & - // sz
+			memcpy
+
+			buf@ SCANCODEBUFFERSIZE rp@ SCANCODEBUFFERSIZE 1 - & - + // dest
+			keyboard@ Keyboard_ScanCodeBuffer + // src
+			endp@ SCANCODEBUFFERSIZE 1 - & // sz
+			memcpy
+		end
+
+		endp@ keyboard@ Keyboard_ReadIndex + !
+		bytecnt@ keyboard@ Keyboard_Remaining + +=
+	end
+
+	if (bytecnt@ mdl@ MmMDLHeader_Length + @ ~=)
+		if (timeout@)
+			// enqueue
+
+			STATUS_OTHER_CONDITION ok!
+
+			auto ior
+			mdl@ MmMDLHeader_DriverGoWild + ior!
+
+			keyboard@ ior@ KeyboardRequest_Keyboard + !
+			mdl@ ior@ KeyboardRequest_MDL + !
+			buf@ bytecnt@ + ior@ KeyboardRequest_Buffer + !
+			mdl@ MmMDLHeader_Length + @ bytecnt@ - ior@ KeyboardRequest_Length + !
+
+			0 ior@ KeyboardRequest_Next + !
+
+			auto t
+			keyboard@ Keyboard_RequestListTail + @ t!
+
+			t@ ior@ KeyboardRequest_Prev + !
+
+			if (t@ ~~)
+				ior@ keyboard@ Keyboard_RequestListHead + !
+				ior@ keyboard@ Keyboard_RequestListTail + !
+			end else
+				ior@ t@ KeyboardRequest_Next + !
+			end
+		end else
+			bytecnt@ mdl@ MmMDLHeader_Length + !
+		end
+	end
+
+	ipl@ KeIPLLower
+
+	if (ok@ ~~)
+		0 // status
+		0 // priboost
+		mdl@ // mdl
+		MmMDLComplete
+	end elseif (ok@ STATUS_OTHER_CONDITION ==)
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
+end
+
+fn (IODispatchCancelFunction) DriverKeyboardCancel { mdl -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto ior
+	mdl@ MmMDLHeader_DriverGoWild + ior!
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ KeIPLLower
+		return
+	end
+
+	auto keyboard
+	ior@ KeyboardRequest_Keyboard + @ keyboard!
+
+	auto ls
+	auto ns
+
+	ior@ KeyboardRequest_Prev + @ ls!
+	ior@ KeyboardRequest_Next + @ ns!
+
+	if (ls@)
+		ns@ ls@ KeyboardRequest_Next + !
+	end else
+		ns@ keyboard@ Keyboard_RequestListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ KeyboardRequest_Prev + !
+	end else
+		ls@ keyboard@ Keyboard_RequestListTail + !
+	end
+
+	ipl@ KeIPLLower
+
+	STATUS_IO_CANCELLED // status
+	0 // priboost
+	mdl@ // mdl
+	MmMDLComplete
+end
+
+fn (DPCFunction) DriverKeyboardDPCFunction { context1 context2 -- }
+	auto scanbuf
+	context1@ Keyboard_ScanCodeBuffer + scanbuf!
+
+	auto c
+	auto scan
+
+	while (1)
+		context1@ KeyboardRead c! scan!
+
+		if (scan@ -1 ==)
+			break
+		end
+
+		if (scan@ -2 ~=)
+			if (scan@ 0x8000 &)
+				scan@ 0xFF & 0x80 | scan!
+			end
+
+			auto req
+			context1@ Keyboard_RequestListHead + @ req!
+
+			if (req@)
+				scan@ req@ KeyboardRequest_Buffer + @ sb
+				1 req@ KeyboardRequest_Buffer + +=
+				1 req@ KeyboardRequest_Length + -=
+
+				if (req@ KeyboardRequest_Length + @ ~~)
+					// complete the client MDL.
+
+					0 // status
+					0 // priboost
+					req@ KeyboardRequest_MDL + @ // mdl
+					MmMDLComplete
+
+					// unlink the client request.
+
+					req@ KeyboardRequest_Next + @ req!
+
+					req@ context1@ Keyboard_RequestListHead + !
+
+					if (req@)
+						0 req@ KeyboardRequest_Prev + !
+					end else
+						0 context1@ Keyboard_RequestListTail + !
+					end
+				end
+			end elseif (context1@ Keyboard_Remaining + @)
+				// insert into the buffer
+
+				scan@
+				scanbuf@ context1@ Keyboard_WriteIndex + @ SCANCODEBUFFERSIZE 1 - & + sb
+
+				1 context1@ Keyboard_Remaining + -=
+				1 context1@ Keyboard_WriteIndex + +=
+			end
+		end
+
+		if (CoVideoConsoleInputDevice@ context1@ ==)
+			if (CoVideoConsole@)
+				if (c@ -1 ~=)
+					c@ CoVideoConsoleInputCharacter
+				end
+			end
+		end
+	end
+end
+
+fn (HALInterruptHandler) DriverKeyboardInterrupt { trapframe int -- }
+	auto keyboard
+
+	auto id
+	int@ HALXRstationAmtsuIrqToID id!
+
+	[id@]KeyboardTable@ keyboard!
+
+	auto dpc
+	keyboard@ Keyboard_DPC + dpc!
+
+	// defer waking up any blocked readers til later,
+	// otherwise we will BSOD since we're at IPLINTERACTIVE
+
+	keyboard@ // context1
+	0 // context2
+	DPCLOWIMPORTANCE // importance
+	dpc@ // dpc
+	KeDPCEnqueue drop
+end
+
+fn KeyboardRead { keyboard -- scan c }
+	if (keyboard@ Keyboard_States + @ KEYBD_ARROW &)
+		KEYBD_ARROW ~ keyboard@ Keyboard_States + &=
+		-2 scan!
+		'[' c!
+		return
+	end elseif (keyboard@ Keyboard_PendingArrowKey + @)
+		-2 scan!
+		keyboard@ Keyboard_PendingArrowKey + @ c!
+		0 keyboard@ Keyboard_PendingArrowKey + !
+		return
+	end
+
+	auto id
+	keyboard@ Keyboard_ID + @ id!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	id@ HALXRstationAmtsuSelect
+	KEYBDCMDREAD HALXRstationAmtsuCommand
+	HALXRstationAmtsuReadA scan!
+
+	rs@ HALCPUInterruptRestore
+
+	-1 c!
+
+	if (scan@ 0xFFFF ==)
+		-1 scan!
+		return
+	end
+
+	if (scan@ 80 ==)
+		KEYBD_CTRL keyboard@ Keyboard_States + |=
+	end elseif (scan@ 82 ==)
+		KEYBD_SHIFT keyboard@ Keyboard_States + |=
+	end elseif (scan@ 32848 ==)
+		KEYBD_CTRL ~ keyboard@ Keyboard_States + &=
+	end elseif (scan@ 32850 ==)
+		KEYBD_SHIFT ~ keyboard@ Keyboard_States + &=
+	end elseif (scan@ 32820 ==)
+		if (keyboard@ Keyboard_States + @ KEYBD_CAPS &)
+			KEYBD_CAPS ~ keyboard@ Keyboard_States + &=
+		end else
+			KEYBD_CAPS keyboard@ Keyboard_States + |=
+		end
+	end
+
+	if (scan@ 80 >=)
+		return
+	end
+
+	if (scan@ 50 >=)
+		if (scan@ 50 ==)
+			'\r' c!
+		end elseif (scan@ 51 ==)
+			'\b' c!
+		end elseif (scan@ 54 >= scan@ 57 <= &&)
+			0x1B c!
+			KEYBD_ARROW keyboard@ Keyboard_States + |=
+			3 scan@ 54 - - 'A' + keyboard@ Keyboard_PendingArrowKey + !
+		end else
+			-1 c!
+		end
+
+		return
+	end
+
+	if (keyboard@ Keyboard_States + @ KEYBD_SHIFT &)
+		[scan@]KeyboardLayoutShift@ c!
+	end elseif (keyboard@ Keyboard_States + @ KEYBD_CTRL &)
+		[scan@]KeyboardLayoutCtrl@ c!
+	end elseif (keyboard@ Keyboard_States + @ KEYBD_CAPS & scan@ 26 < &&)
+		[scan@]KeyboardLayoutShift@ c!
+	end else
+		[scan@]KeyboardLayout@ c!
+	end
+end
+
+table KeyboardLayout
+	'a'
+	'b' 'c' 'd'
+	'e' 'f' 'g'
+	'h' 'i' 'j'
+	'k' 'l' 'm'
+	'n' 'o' 'p'
+	'q' 'r' 's'
+	't' 'u' 'v'
+	'w' 'x' 'y'
+	'z'
+	'0' '1' '2'
+	'3' '4' '5'
+	'6' '7' '8'
+	'9'
+	';'
+	' '
+	' '
+	'-'
+	'='
+	'['
+	']'
+	'\\'
+	0
+	'/'
+	'.'
+	'\''
+	','
+	'`'
+endtable
+
+table KeyboardLayoutCtrl
+	1
+	2 3 4
+	5 6 7
+	8 9 10
+	11 12 13
+	14 15 16
+	17 18 19
+	20 21 22
+	23 24 25
+	26
+	-1 -1 0
+	-1 -1 -1
+	30 -1 -1
+	-1
+	-1
+	-1
+	-1
+	31
+	-1
+	27
+	29
+	28
+	-1
+	-1
+	-1
+	-1
+	-1
+	-1
+endtable
+
+table KeyboardLayoutShift
+	'A'
+	'B' 'C' 'D'
+	'E' 'F' 'G'
+	'H' 'I' 'J'
+	'K' 'L' 'M'
+	'N' 'O' 'P'
+	'Q' 'R' 'S'
+	'T' 'U' 'V'
+	'W' 'X' 'Y'
+	'Z'
+	')' '!' '@'
+	'#' '$' '%'
+	'^' '&' '*'
+	'('
+	':'
+	' '
+	' '
+	'_'
+	'+'
+	'{'
+	'}'
+	'|'
+	0
+	'?'
+	'>'
+	'"'
+	'<'
+	'~'
+endtable

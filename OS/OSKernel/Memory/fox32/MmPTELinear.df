@@ -456,64 +456,6 @@ fn MmPTESet { pte pteaddr -- }
 	HALfox32TLBFlush
 end
 
-fn MmPTEDemandZeroDelete { pfdbe ptpfdbe -- }
-	// delete a PTE for a demand-zero page that has been reclaimed.
-	// the page table has already been dereferenced.
-
-	auto ptecount
-	ptpfdbe@ MmPageFrameEntryPageTable_PTECountTableEntry + @ ptecount!
-
-	auto oldcount
-	ptecount@ gi oldcount!
-
-	if (DEBUGCHECKS)
-		if (oldcount@ ~~)
-			"MmPTEDemandZeroDelete: underflow\n" KeCrash
-		end
-	end
-
-	oldcount@ 1 - ptecount@ si
-
-	if (oldcount@ 1 ==)
-		// last PTE. free the page table.
-
-		if (ptpfdbe@ MmPageFrameEntryPageTable_HoldCount + @ ~~)
-			auto ppte
-			ptpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ ppte!
-
-			auto pdpfdbe
-			ppte@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pdpfdbe!
-
-			// force the page table out from the process working set.
-
-			pfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + @ 22 >> PAGESHIFT << PAGETABLE + // vaddr
-			ptpfdbe@ // pfdbe
-			pdpfdbe@ MmPageFrameEntryAnonymous_Process + @ // process
-			MmWorkingSetEntryForceOut
-
-			// map in the page directory.
-
-			auto qp
-			ppte@ MmMapQuickPage qp!
-
-			// zero out the pde for the page table.
-			0 qp@ ppte@ PAGEOFFSETMASK & + !
-
-			qp@ MmUnmapQuickPage
-
-			// delete the page table.
-
-			IPLDPC // ipl
-			ptpfdbe@ // pfdbe
-			MmAnonymousPageDelete
-
-			// dereference the page directory.
-
-			pdpfdbe@ MmEvictablePageDereference drop
-		end
-	end
-end
-
 fn MmPTEInitializePageTable { vaddr pfdbe process -- }
 	auto ptecount
 

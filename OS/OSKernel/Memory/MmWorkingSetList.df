@@ -373,6 +373,10 @@ fn MmWorkingSetTrimRange { startva endva process -- }
 end
 
 fn MmWorkingSetSwapOut { process -- }
+	// does two passes. the first removes normal pages, and the second removes
+	// page tables. it must be done like this otherwise there's a chicken and
+	// egg problem with removing the page tables.
+
 	auto wsli
 	0 wsli!
 
@@ -742,12 +746,8 @@ end
 
 fn MmWorkingSetEntryForceOut { vaddr pfdbe process -- }
 	// force out the specified virtual address from the process's working set.
-	// works from any context but DOES NOT set the PTE.
+	// DOES NOT set the PTE.
 	// used in very specific circumstances.
-
-	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_OUTSWAPPED ==)
-		return
-	end
 
 	auto phdr
 	process@ PsProcess_MmHeader + @ phdr!
@@ -837,7 +837,10 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 
 	if (DEBUGCHECKS)
 		if (ok@)
-			pteaddr@ pteaddr@@ "MmWorkingSetEntryRemove: invalid PTE %x (%x)\n" KeCrash
+			vaddr@
+			pteaddr@
+			pteaddr@@
+			"MmWorkingSetEntryRemove: invalid PTE %x (%x,%x)\n" KeCrash
 		end
 	end
 
@@ -861,17 +864,37 @@ fn MmWorkingSetEntryRemove { wsleptr process -- }
 	end
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
-		// private page. create transition PTE so we can soft-fault it back in
-		// later.
+		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~
+			pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ SWAPPTE_DEMANDZERO == &&)
+			// unmodified demand zero page. just free it now.
 
-		if (process@ PsSystemProcess@ ==)
-			phyaddr@ PTE_TRANSITION | PTE_TLBHACK | // pte
+			0 // phyaddr
+			0 // flags
 			pteaddr@ // pteaddr
-			MmPTESet
+			MmPTEUpdate drop drop
+
+			if (process@ PsSystemProcess@ ~=)
+				1 // deref
+				pteaddr@ // pteaddr
+				MmPTEDelete
+			end
+
+			IPLDPC // ipl
+			pfdbe@ // pfdbe
+			MmAnonymousPageDelete
 		end else
-			phyaddr@ PTE_TRANSITION | // pte
-			pteaddr@ // pteaddr
-			MmPTESet
+			// private page. create transition PTE so we can soft-fault it back in
+			// later.
+
+			if (process@ PsSystemProcess@ ==)
+				phyaddr@ PTE_TRANSITION | PTE_TLBHACK | // pte
+				pteaddr@ // pteaddr
+				MmPTESet
+			end else
+				phyaddr@ PTE_TRANSITION | // pte
+				pteaddr@ // pteaddr
+				MmPTESet
+			end
 		end
 	end else
 		0 // phyaddr

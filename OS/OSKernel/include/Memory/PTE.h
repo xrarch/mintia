@@ -19,6 +19,7 @@ extern MmPTEIsZero { pte -- iszero }
 
 extern MmPTEUpdate { phyaddr flags pteaddr -- oldphyaddr oldflags }
 extern MmPTESet { pte pteaddr -- }
+extern MmPTESetDirty { pteaddr -- }
 
 extern MmPTEDemandZeroDelete { pfdbe ptpfdbe -- }
 

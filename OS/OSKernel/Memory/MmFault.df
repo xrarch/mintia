@@ -1067,38 +1067,28 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 	0 signal!
 
-	auto phyaddr
-
-	auto cowpfdbe
-	auto cowaddr
-	0 cowaddr!
-
 	auto vad
 	0 vad!
 
 	auto pageprot
 	0 pageprot!
 
-	auto cache
-	0 cache!
-
 	// Determine the characteristics of this address.
 
 	if (process@ PsSystemProcess@ ==)
 		// This is a kernel fault, so determine if it's in the viewcache.
 
-		if (vaddr@ VIEWSPACE < vaddr@ VIEWSPACEEND >= ||)
-			// It's not. We have to lock the VAD list now then, since we're
-			// going to be looking it up in a second.
-
-			process@ MmVADListLock drop
-		end else
+		if (vaddr@ VIEWSPACE >= vaddr@ VIEWSPACEEND < &&)
 			// It is the viewcache. We already know the properties of the page
 			// so we don't need to look up the VAD list or lock that mutex.
+			// Guaranteed not to be mapped COW; since that makes no sense,
+			// so this must be a dirty fault.
 
-			-1 vad!
-			1 cache!
-			PAGEACCESS_READ PAGEACCESS_WRITE | pageprot!
+			0 // checked
+			pteaddr@ // pteaddr
+			MmDirtyFault signal!
+
+			return
 		end
 	end
 
@@ -1108,6 +1098,9 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	auto phyaddr
+	auto ok
 
 	pteaddr@ // pteaddr
 	MmPTEInterpret ok! drop phyaddr!
@@ -1119,9 +1112,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		ipl@ KeIPLLower
 
 		if (process@ PsSystemProcess@ ==)
-			if (cache@ ~~)
-				process@ MmVADListUnlock
-			end
+			process@ MmVADListUnlock
 		end
 
 		STATUS_REFAULT signal!
@@ -1129,50 +1120,112 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		return
 	end
 
+	auto pfdbe
 	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
 	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
-		-1 vad!
-		PAGEACCESS_READ PAGEACCESS_WRITE | pageprot!
+		// Must be a dirty fault on a private page.
+		// Pass the PFDBE since we captured that already and call it at
+		// elevated IPL to stop the PTE from becoming invalid.
+
+		1 // checked
+		pteaddr@ // pteaddr
+		MmDirtyFault signal!
+
+		ipl@ KeIPLLower
+
+		return
 	end
 
 	ipl@ KeIPLLower
 
+	if (process@ PsSystemProcess@ ==)
+		process@ MmVADListLock drop
+	end
+
 	// We have to look up the VAD at lower IPL since they're allocated from
 	// paged pool.
 
-	if (vad@ ~~)
-		vaddr@ // vaddr
-		process@ // process
-		MmFaultParameters ok! vad! section! drop
+	vaddr@ // vaddr
+	process@ // process
+	MmFaultParameters ok! vad! drop drop
 
-		if (DEBUGCHECKS)
-			if (ok@)
-				ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
-			end
+	if (DEBUGCHECKS)
+		if (ok@)
+			// shouldn't be possible since PTE was valid before and we've had
+			// the VAD list locked.
 
-			if (vad@ MmVAD_PageProtection + @ ~~)
-				"MmWriteFault: VAD was guard region\n" KeCrash
-			end
+			ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
 		end
 
-		vad@ MmVAD_PageProtection + @ pageprot!
+		if (vad@ MmVAD_PageProtection + @ ~~)
+			"MmWriteFault: VAD was guard region\n" KeCrash
+		end
 	end
 
-	while (1)
-		IPLDPC KeIPLRaise ipl!
+	vad@ MmVAD_PageProtection + @ pageprot!
 
+	if (pageprot@ PAGEACCESS_WRITECOPY &)
+		// copy on write fault
+
+		vad@ // vad
+		pteaddr@ // pteaddr
+		vaddr@ // vaddr
+		process@ // process
+		MmCopyOnWriteFault signal!
+
+		if (process@ PsSystemProcess@ ==)
+			process@ MmVADListUnlock
+		end
+
+		return
+	end elseif (pageprot@ PAGEACCESS_WRITE & ~~)
+		// access violation
+
+		if (process@ PsSystemProcess@ ==)
+			process@ MmVADListUnlock
+		end
+
+		OSSIGNAL_SEGV signal!
+
+		return
+	end else
+		// dirty fault
+
+		if (process@ PsSystemProcess@ ==)
+			process@ MmVADListUnlock
+		end
+
+		0 // checked
+		pteaddr@ // pteaddr
+		MmDirtyFault signal!
+
+		return
+	end
+
+	// UNREACHABLE
+end
+
+fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
+	auto ok
+	auto pfdbe
+
+	auto cowpfdbe
+	auto cowaddr
+	0 cowaddr!
+
+	0 signal!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	while (1)
 		// Re-check the PTE with raised IPL, since it may have
 		// been trimmed since we decided it was valid. We know that it's the same
 		// PTE if it's still valid, and hasn't been switched out with something
 		// else, because the VAD list mutex is held during all such events.
 
-		auto section
-		auto ok
-		auto pfdbe
-		auto wsli
-		auto wsleptr
-
+		auto phyaddr
 		pteaddr@ // pteaddr
 		MmPTEInterpret ok! drop phyaddr!
 
@@ -1186,126 +1239,94 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
 
-		if (pageprot@ PAGEACCESS_WRITECOPY &)
-			// COW, allocate a page frame and copy the old page frame into it.
+		// COW, allocate a page frame and copy the old page frame into it.
 
-			if (cowaddr@ ~~)
-				auto waited
+		if (cowaddr@ ~~)
+			auto waited
 
-				if (process@ PsSystemProcess@ ==)
-					process@ // process
-					TRYFOREVER CANBLOCK | // priority
-					MmPageWait ok! waited!
-				end else
-					process@ // process
-					CANBLOCK // priority
-					MmPageWait ok! waited!
-				end
-
-				if (waited@)
-					STATUS_REFAULT signal!
-					break
-				end
-
-				pteaddr@ // pte
-				FREEFIRST // pri
-				MmAnonymousPageGet ok! cowaddr! cowpfdbe!
-
-				ipl@ KeIPLLower
-
-				if (ok@)
-					if (process@ PsSystemProcess@ ==)
-						if (cache@ ~~)
-							process@ MmVADListUnlock
-						end
-					end
-
-					OSSIGNAL_KILL signal!
-
-					return
-				end
-
-				if (process@ PsSystemProcess@ ==)
-					SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
-				end
-
-				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-				cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-
-				// We lowered IPL so we have to recheck everything...
-
-				continue
+			if (process@ PsSystemProcess@ ==)
+				process@ // process
+				TRYFOREVER CANBLOCK | // priority
+				MmPageWait ok! waited!
+			end else
+				process@ // process
+				CANBLOCK // priority
+				MmPageWait ok! waited!
 			end
 
-			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+			if (waited@)
+				STATUS_REFAULT signal!
 
-			cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
-			cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+				break
+			end
 
-			process@ cowpfdbe@ MmPageFrameEntryAnonymous_Process + !
-			vaddr@ cowpfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
-
-			PAGESHIFT cowaddr <<=
-
-			// Map the COW page into the thread's quickpage so we can perform
-			// the copy.
-
-			auto copyaddr
-			cowaddr@ MmMapQuickPage copyaddr!
-
-			copyaddr@ // dest
-			vaddr@ PAGENUMBERMASK & // src
-			PAGESIZE // size
-			KeSafeCopyIn drop
-
-			copyaddr@ MmUnmapQuickPage
-
-			// Update the PTE to point to the new COW page.
-
-			cowaddr@ // phyaddr
-			PTE_V PTE_W | // flags
-			pteaddr@ // pteaddr
-			MmPTEUpdate drop drop
-
-			// We COW'd over top of the old page frame and no longer have it
-			// mapped, so dereference it.
-
-			pfdbe@ MmEvictablePageDereference drop
+			pteaddr@ // pte
+			FREEFIRST // pri
+			MmAnonymousPageGet ok! cowaddr! cowpfdbe!
 
 			ipl@ KeIPLLower
 
-			if (process@ PsSystemProcess@ ==)
-				if (cache@ ~~)
-					1 vad@ MmVAD_COWCount + +=
+			if (ok@)
+				OSSIGNAL_KILL signal!
 
-					process@ MmVADListUnlock
-				end
-			end else
-				1 vad@ MmVAD_COWCount + +=
+				return
 			end
 
-			return
-		end elseif (pageprot@ PAGEACCESS_WRITE & ~~)
-			// Access violation.
+			if (process@ PsSystemProcess@ ==)
+				SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
+			end
 
-			OSSIGNAL_SEGV signal!
+			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-			break
-		end else
-			// Dirty fault. Set the architecture's dirty bit into the PTE.
+			// We lowered IPL so we have to recheck everything...
 
-			phyaddr@ // phyaddr
-			PTE_V PTE_D | // flags
-			pteaddr@ // pteaddr
-			MmPTEUpdate drop drop
+			IPLDPC KeIPLRaise ipl!
 
-			break
+			continue
 		end
 
-		if (DEBUGCHECKS)
-			"MmWriteFault: unreachable\n" KeCrash
-		end
+		cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
+		cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+
+		cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
+		cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+
+		process@ cowpfdbe@ MmPageFrameEntryAnonymous_Process + !
+		vaddr@ cowpfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+
+		PAGESHIFT cowaddr <<=
+
+		// Map the COW page into the thread's quickpage so we can perform
+		// the copy.
+
+		auto copyaddr
+		cowaddr@ MmMapQuickPage copyaddr!
+
+		copyaddr@ // dest
+		vaddr@ PAGENUMBERMASK & // src
+		PAGESIZE // size
+		KeSafeCopyIn drop
+
+		copyaddr@ MmUnmapQuickPage
+
+		// Update the PTE to point to the new COW page.
+
+		cowaddr@ // phyaddr
+		PTE_V PTE_W | // flags
+		pteaddr@ // pteaddr
+		MmPTEUpdate drop drop
+
+		// We COW'd over top of the old page frame and no longer have it
+		// mapped, so dereference it.
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		ipl@ KeIPLLower
+
+		1 vad@ MmVAD_COWCount + +=
+
+		return
 	end
 
 	if (cowaddr@)
@@ -1320,10 +1341,34 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	end else
 		ipl@ KeIPLLower
 	end
+end
 
-	if (process@ PsSystemProcess@ ==)
-		if (cache@ ~~)
-			process@ MmVADListUnlock
+fn MmDirtyFault { checked pteaddr -- signal }
+	auto ipl
+
+	if (checked@ ~~)
+		IPLDPC KeIPLRaise ipl!
+
+		auto ok
+		pteaddr@ // pteaddr
+		MmPTEInterpret ok! drop drop
+
+		if (ok@)
+			// The PTE became invalid again, so REFAULT.
+
+			ipl@ KeIPLLower
+
+			STATUS_REFAULT signal!
+
+			return
 		end
 	end
+
+	pteaddr@ MmPTESetDirty
+
+	if (checked@ ~~)
+		ipl@ KeIPLLower
+	end
+
+	0 signal!
 end

@@ -54,7 +54,7 @@ KERNELMODULES := BootDrivers/AisixFS \
 
 COMMANDS := $(wildcard OS/Commands/*)
 
-PLATFORMS := LIMNstation fox32
+PLATFORMS := XRstation fox32
 
 include $(PLATFORM).mk
 

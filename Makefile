@@ -44,8 +44,7 @@ PROJECTS := HAL/$(PLATFORM) \
 			SystemInit \
 			AMS/Server
 
-ULIBRARIES := AMS/Client \
-			MCL
+ULIBRARIES := AMS/Client
 
 LIBRARIES := OSDLL $(ULIBRARIES)
 

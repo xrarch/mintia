@@ -160,13 +160,9 @@ fn MmAnonymousSwapIn { pri pte pno ipl -- pfdbe pfn ok }
 	IOSwapPageReadPTE ok!
 
 	if (ok@)
-		IPLDPC KeIPLRaise ipl!
+		pfdbe@ MmAnonymousPageDelete
 
 		pfdbe@ MmEvictablePageDereference drop
-
-		ipl@ // ipl
-		pfdbe@ // pfdbe
-		MmAnonymousPageDelete
 
 		return
 	end
@@ -203,16 +199,24 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 				MmPTEUpdate drop drop
 
 				if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE & ~~)
-					ipl@ // ipl
-					pfdbe@ // pfdbe
-					MmAnonymousPageDelete
+					pfdbe@ MmEvictablePageReference drop
+
+					ipl@ KeIPLLower
+
+					pfdbe@ MmAnonymousPageDelete
+
+					pfdbe@ MmEvictablePageDereference drop
 				end
 			end else
 				0 pteaddr@!
 
-				ipl@ // ipl
-				pfdbe@ // pfdbe
-				MmAnonymousPageDelete
+				pfdbe@ MmEvictablePageReference drop
+
+				ipl@ KeIPLLower
+
+				pfdbe@ MmAnonymousPageDelete
+
+				pfdbe@ MmEvictablePageDereference drop
 			end
 		end else
 			if (process@)
@@ -246,18 +250,26 @@ fn MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 					// was unmapped while it was blocked.
 
 					if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
-						ipl@ // ipl
-						pfdbe@ // pfdbe
-						MmAnonymousPageDelete
+						pfdbe@ MmEvictablePageReference drop
+
+						ipl@ KeIPLLower
+
+						pfdbe@ MmAnonymousPageDelete
+
+						pfdbe@ MmEvictablePageDereference drop
 					end else
 						ipl@ KeIPLLower
 
 						0 deletepte!
 					end
 				end else
-					ipl@ // ipl
-					pfdbe@ // pfdbe
-					MmAnonymousPageDelete
+					pfdbe@ MmEvictablePageReference drop
+
+					ipl@ KeIPLLower
+
+					pfdbe@ MmAnonymousPageDelete
+
+					pfdbe@ MmEvictablePageDereference drop
 				end
 			end elseif (DEBUGCHECKS)
 				capturedpte@ "MmAnonymousPageDeleteByPTE: strange PTE %08x\n" KeCrash
@@ -526,9 +538,7 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			// restore the old PTE.
 			capturedpte@ pteaddr@!
 
-			IPLDPC // ipl
-			pfdbe@ // pfdbe
-			MmAnonymousPageDelete
+			pfdbe@ MmAnonymousPageDelete
 		end
 
 		if (ok@)
@@ -566,18 +576,13 @@ fn MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 	end
 end
 
-fn MmAnonymousPageDelete { ipl pfdbe -- }
-	pfdbe@ MmEvictablePageReference drop
+fn MmAnonymousPageDelete { pfdbe -- }
 	pfdbe@ MmEvictablePageDelete
 
-	1 MmAnonymousPageCount -=
-
-	ipl@ KeIPLLower
+	-1 MmAnonymousPageCount KeInterlockedIncrement drop
 
 	if (pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
 		// free in swap
 		pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ IOSwapPageFreePTE
 	end
-
-	pfdbe@ MmEvictablePageDereference drop
 end

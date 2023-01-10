@@ -1,0 +1,3 @@
+struct MclMachine
+	OSFastMutex_SIZEOF Mutex
+endstruct

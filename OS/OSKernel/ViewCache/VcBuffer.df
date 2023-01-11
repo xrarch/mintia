@@ -167,13 +167,17 @@ fn VcBufferGet { offset fcb -- bcb ok }
 		end
 	end
 
-	// lock the BCB tree mutex. this guards against two threads attempting to
+	0 ok!
+
+	// lock the BCB tree. this guards against two threads attempting to
 	// create this BCB at the same time, but does not guard against an
 	// existing BCB being reclaimed, so we still need IPL synch for that.
 
-	0 ok!
-
-	cacheblock@ IOCacheInfoBlockLockBCB
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	cacheblock@ IOCacheInfoBlock_BCBTreeEvent + // object
+	KeThreadWaitForObject drop
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -189,7 +193,9 @@ fn VcBufferGet { offset fcb -- bcb ok }
 
 		ipl@ KeIPLLower
 
-		cacheblock@ IOCacheInfoBlockUnlockBCB
+		0 // priboost
+		cacheblock@ IOCacheInfoBlock_BCBTreeEvent + // event
+		KeEventSignal
 
 		return
 	end
@@ -205,7 +211,9 @@ fn VcBufferGet { offset fcb -- bcb ok }
 		if (ok@)
 			vaddr@ VcWindowFree
 
-			cacheblock@ IOCacheInfoBlockUnlockBCB
+			0 // priboost
+			cacheblock@ IOCacheInfoBlock_BCBTreeEvent + // event
+			KeEventSignal
 
 			return
 		end
@@ -244,7 +252,9 @@ fn VcBufferGet { offset fcb -- bcb ok }
 
 	ipl@ KeIPLLower
 
-	cacheblock@ IOCacheInfoBlockUnlockBCB
+	0 // priboost
+	cacheblock@ IOCacheInfoBlock_BCBTreeEvent + // event
+	KeEventSignal
 end
 
 fn VcBufferIncrementMapCount { bcb -- oldcount }

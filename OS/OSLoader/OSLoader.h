@@ -2,6 +2,8 @@
 
 #include "../HAL/include/HALMap.h"
 
+const MANAGEDKERNELSPACESIZE (256 1024 * 1024 *)
+
 extern LdrMain { -- ret }
 extern LdrCrash { ... fmt -- }
 extern LdrExit { ret -- }
@@ -76,8 +78,8 @@ externptr LdrPlatformHALName
 
 externptr LdrBootDeviceName
 externptr LdrBootDevice
-externptr LdrCommonBlockBuffer
 externptr LdrInfoBlock
+externptr LdrKernelSpaceBitmap
 
 extern LdrIOInit { -- }
 extern LdrPlatformIOInit { bootdevname -- }

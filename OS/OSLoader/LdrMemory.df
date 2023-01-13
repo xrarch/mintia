@@ -6,9 +6,12 @@
 
 #include "OSLoader.h"
 
-buffer LdrKernelSpaceBitmap 32768
-
 buffer LdrKernelSpaceBitmapHeader ComBitmapHeader_SIZEOF
+
+var LdrKernelSpaceBitmap 0
+public LdrKernelSpaceBitmap
+
+var LdrKernelStructureBump KERNELSTRUCTURES
 
 var LdrMemoryDescriptorListHead 0
 public LdrMemoryDescriptorListHead
@@ -29,17 +32,10 @@ fn LdrMemoryInit { -- }
 
 	LdrPlatformMemoryInit
 
-	1 1024 * 1024 * 1024 * PAGESHIFT >> // sizeinbits
-	LdrKernelSpaceBitmap // data
+	MANAGEDKERNELSPACESIZE PAGESHIFT >> // sizeinbits
+	LdrKernelSpaceBitmap@ // data
 	LdrKernelSpaceBitmapHeader // header
 	ComBitmapInitialize
-
-	// mark POOLSPACE virtual range as allocated
-
-	POOLSIZE PAGESHIFT >> // runlength
-	POOLSPACE KERNELSPACE - PAGESHIFT >> // index
-	LdrKernelSpaceBitmapHeader // header
-	ComBitmapSetBits
 
 	LdrMemoryPFDBInit
 
@@ -322,6 +318,22 @@ fn LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
 		KERNELSPACE prefva!
 	end
 
+	if (prefva@ KERNELSTRUCTURES ==)
+		if (fixed@)
+			LDRSTATUS_ADDRESS_NOT_AVAILABLE ok!
+
+			return
+		end
+
+		0 ok!
+
+		LdrKernelStructureBump@ realva!
+
+		pages@ PAGESHIFT << LdrKernelStructureBump +=
+
+		return
+	end
+
 	auto isclear
 
 	pages@ // runlength
@@ -387,6 +399,10 @@ fn LdrKernelSpaceAllocate { pages prefva fixed -- realva ok }
 end
 
 fn LdrKernelSpaceFree { pages vaddr -- }
+	if (vaddr@ KERNELSPACE MANAGEDKERNELSPACESIZE + >=)
+		return
+	end
+
 	pages@ // runlength
 	vaddr@ KERNELSPACE - PAGESHIFT >> // index
 	LdrKernelSpaceBitmapHeader // header

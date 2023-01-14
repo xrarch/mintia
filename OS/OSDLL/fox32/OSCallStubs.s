@@ -649,8 +649,8 @@ OSDirectoryRead:
 
 	ret
 
-OSSwapFileCreate:
-.global OSSwapFileCreate
+OSPageFileCreate:
+.global OSPageFileCreate
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
@@ -663,8 +663,8 @@ OSSwapFileCreate:
 
 	ret
 
-OSSwapFileQuery:
-.global OSSwapFileQuery
+OSPageFileQuery:
+.global OSPageFileQuery
 	mov  t1, a0
 	mov  t2, a1
 

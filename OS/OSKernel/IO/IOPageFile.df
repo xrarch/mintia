@@ -1,5 +1,5 @@
 //
-// Implements swapfile management.
+// Implements pagefile management.
 //
 
 #include "<df>/dragonfruit.h"
@@ -46,7 +46,7 @@ public IOSwapPagesWritten
 var IOSwapPagesRead 0
 public IOSwapPagesRead
 
-struct IOSwapFile
+struct IOPageFile
 	4 MinimumSize
 	4 MaximumSize
 	4 FileObject
@@ -60,96 +60,96 @@ struct IOSwapFile
 	4 Next
 endstruct
 
-buffer IOSwapFileCreationMutex KeMutex_SIZEOF
+buffer IOPageFileCreationMutex KeMutex_SIZEOF
 
-buffer IOSwapFileExtendEvent KeEvent_SIZEOF
-public IOSwapFileExtendEvent
+buffer IOPageFileExtendEvent KeEvent_SIZEOF
+public IOPageFileExtendEvent
 
-table IOSwapFiles[IOSWAPFILEMAX]
+table IOPageFiles[IOPAGEFILEMAX]
 
-table IOSwapFilePriorityListHeads[IOSWAPFILEMAXPRI]
-table IOSwapFilePriorityListTails[IOSWAPFILEMAXPRI]
+table IOPageFilePriorityListHeads[IOPAGEFILEMAXPRI]
+table IOPageFilePriorityListTails[IOPAGEFILEMAXPRI]
 
-var IOSwapFileExtensionIndex 0
+var IOPageFileExtensionIndex 0
 
-var IOSwapFileCount 0
-public IOSwapFileCount
+var IOPageFileCount 0
+public IOPageFileCount
 
-fn IOSwapFileInsert { pri fcb swapfile -- }
+fn IOPageFileInsert { pri fcb pagefile -- }
 	// set system file flag
 	auto rs
 	HALCPUInterruptDisable rs!
 	IOFCBFLAG_SYSTEMFILE fcb@ IOFileControlBlock_Flags + |=
 
-	swapfile@ [IOSwapFileCount@]IOSwapFiles!
-	swapfile@ IOSwapFile_MinimumSize + @ IOSwapPagesCount +=
+	pagefile@ [IOPageFileCount@]IOPageFiles!
+	pagefile@ IOPageFile_MinimumSize + @ IOSwapPagesCount +=
 
 	auto h
-	[pri@]IOSwapFilePriorityListHeads@ h!
+	[pri@]IOPageFilePriorityListHeads@ h!
 
-	h@ swapfile@ IOSwapFile_Next + !
-	swapfile@ [pri@]IOSwapFilePriorityListHeads!
+	h@ pagefile@ IOPageFile_Next + !
+	pagefile@ [pri@]IOPageFilePriorityListHeads!
 
 	if (h@ ~~)
-		swapfile@ [pri@]IOSwapFilePriorityListTails!
+		pagefile@ [pri@]IOPageFilePriorityListTails!
 	end
 
 	2 MmAnonTransfersAvailable +=
 
 	rs@ HALCPUInterruptRestore
 
-	if (IOSwapFileCount@ 0 ==)
-		// this is the first swapfile created.
+	if (IOPageFileCount@ 0 ==)
+		// this is the first pagefile created.
 		// set the commit limit to its size and signal the creation event.
 
-		swapfile@ IOSwapFile_MinimumSize + @ MmCommitLimit!
-		swapfile@ IOSwapFile_MaximumSize + @ MmTheoreticalCommitLimit!
+		pagefile@ IOPageFile_MinimumSize + @ MmCommitLimit!
+		pagefile@ IOPageFile_MaximumSize + @ MmTheoreticalCommitLimit!
 	end else
 		HALCPUInterruptDisable rs!
-		swapfile@ IOSwapFile_MinimumSize + @ MmCommitLimit +=
-		swapfile@ IOSwapFile_MaximumSize + @ MmTheoreticalCommitLimit +=
+		pagefile@ IOPageFile_MinimumSize + @ MmCommitLimit +=
+		pagefile@ IOPageFile_MaximumSize + @ MmTheoreticalCommitLimit +=
 		rs@ HALCPUInterruptRestore
 	end
 
-	1 IOSwapFileCount +=
+	1 IOPageFileCount +=
 end
 
-fn IOSwapFileGetPriority { swapfile -- pri }
-	swapfile@ IOSwapFile_Priority + @ pri!
+fn IOPageFileGetPriority { pagefile -- pri }
+	pagefile@ IOPageFile_Priority + @ pri!
 end
 
-fn IOSwapFileGetFree { swapfile -- free }
-	swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - free!
+fn IOPageFileGetFree { pagefile -- free }
+	pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_UsedCount + @ - free!
 end
 
-fn IOSwapFileInit { -- }
+fn IOPageFileInit { -- }
 	fnsection "INIT$text"
 
-	"IOSwapFileCreationMutex" // name
+	"IOPageFileCreationMutex" // name
 	KERNELMODE // mode
-	IOSwapFileCreationMutex // mutex
+	IOPageFileCreationMutex // mutex
 	KeMutexInitialize
 end
 
-fn IOSwapFileCreateLock { -- }
+fn IOPageFileCreateLock { -- }
 	fnsection "PAGE$text"
 
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	IOSwapFileCreationMutex // object
+	IOPageFileCreationMutex // object
 	KeThreadWaitForObject drop
 end
 
-fn IOSwapFileCreateUnlock { -- }
+fn IOPageFileCreateUnlock { -- }
 	fnsection "PAGE$text"
 
 	0 // abandon
-	IOSwapFileCreationMutex // mutex
+	IOPageFileCreationMutex // mutex
 	KeMutexRelease drop
 end
 
-fn IOSwapFileCreate { minpages maxpages pri path -- ok }
+fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	fnsection "PAGE$text"
 
 	SeAmIAdmin ok!
@@ -160,7 +160,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
-	if (pri@ IOSWAPFILEMAXPRI >=)
+	if (pri@ IOPAGEFILEMAXPRI >=)
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
@@ -172,12 +172,12 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
-	IOSwapFileCreateLock
+	IOPageFileCreateLock
 
-	if (IOSwapFileCount@ IOSWAPFILEMAX >=)
-		IOSwapFileCreateUnlock
+	if (IOPageFileCount@ IOPAGEFILEMAX >=)
+		IOPageFileCreateUnlock
 
-		STATUS_TOO_MANY_SWAPFILES ok!
+		STATUS_TOO_MANY_PAGEFILES ok!
 
 		return
 	end
@@ -185,14 +185,14 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	416 KeThreadCurrent@ PsThread_FileCreationPermissions + !
 
 	auto handle
-	OSFILEFLAG_CREATE OSFILEFLAG_SWAPFILE | // flags
+	OSFILEFLAG_CREATE OSFILEFLAG_PAGEFILE | // flags
 	ACCESS_READ ACCESS_WRITE | // access
 	OSNONE // initialobjecthandle
 	path@ // path
 	ObObjectOpenByPath ok! handle!
 
 	if (ok@)
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		return
 	end
@@ -206,7 +206,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	handle@ ObObjectClose drop
 
 	if (ok@)
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		return
 	end
@@ -214,7 +214,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	access@ ACCESS_WRITE ACCESS_READ | SeCheckAccess ok!
 
 	if (ok@)
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -225,7 +225,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
 	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -250,7 +250,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		IOFileControlBlockTruncate ok! drop
 
 		if (ok@)
-			IOSwapFileCreateUnlock
+			IOPageFileCreateUnlock
 
 			fileobject@ ObObjectDereferenceByPointer drop
 
@@ -259,7 +259,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	end else
 		// bad
 
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -271,7 +271,7 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	if (minpages@ 128 <)
 		// needs to be at least 128 pages (512KB with 4KB pages)
 
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -280,19 +280,19 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
-	// do an inline allocation of the swapfile, two transfer structures, and
+	// do an inline allocation of the pagefile, two transfer structures, and
 	// the bitmap.
 
-	auto swapfile
-	IOSwapFile_SIZEOF
+	auto pagefile
+	IOPageFile_SIZEOF
 	IOTransfer_SIZEOF 2 * +
 	maxpages@ 7 + 3 >> + // bytes
 	'SwFi' // tag
 	CANBLOCK // flags
-	MmAllocWithTag ok! swapfile!
+	MmAllocWithTag ok! pagefile!
 
 	if (ok@)
-		IOSwapFileCreateUnlock
+		IOPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -300,16 +300,16 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	end
 
 	auto transfer1
-	swapfile@ IOSwapFile_SIZEOF + transfer1!
+	pagefile@ IOPageFile_SIZEOF + transfer1!
 
-	swapfile@ // swapfile
+	pagefile@ // pagefile
 	transfer1@ // transfer
 	MmMPWAnonTransferInitialize
 
 	auto transfer2
 	transfer1@ IOTransfer_SIZEOF + transfer2!
 
-	swapfile@ // swapfile
+	pagefile@ // pagefile
 	transfer2@ // transfer
 	MmMPWAnonTransferInitialize
 
@@ -319,51 +319,51 @@ fn IOSwapFileCreate { minpages maxpages pri path -- ok }
 	// initialize the bitmap
 	maxpages@ // sizeinbits
 	bitmap@ // data
-	swapfile@ IOSwapFile_BitmapHeader + // header
+	pagefile@ IOPageFile_BitmapHeader + // header
 	ComBitmapInitialize
 
 	// clear the minimum size
 	minpages@ // runlength
 	0 // index
-	swapfile@ IOSwapFile_BitmapHeader + // header
+	pagefile@ IOPageFile_BitmapHeader + // header
 	ComBitmapClearBits
 
 	// set beyond the minimum size
 	maxpages@ minpages@ - // runlength
 	minpages@ // index
-	swapfile@ IOSwapFile_BitmapHeader + // header
+	pagefile@ IOPageFile_BitmapHeader + // header
 	ComBitmapSetBits
 
-	// initialize swapfile structures
-	minpages@ swapfile@ IOSwapFile_MinimumSize + !
-	maxpages@ swapfile@ IOSwapFile_MaximumSize + !
-	fileobject@ swapfile@ IOSwapFile_FileObject + !
-	fileobject@ IOFile_FileControlBlock + @ swapfile@ IOSwapFile_CapturedFCB + !
-	0 swapfile@ IOSwapFile_Hint + !
-	minpages@ swapfile@ IOSwapFile_CurrentSize + !
-	0 swapfile@ IOSwapFile_UsedCount + !
-	pri@ swapfile@ IOSwapFile_Priority + !
-	IOSwapFileCount@ swapfile@ IOSwapFile_Number + !
+	// initialize pagefile structures
+	minpages@ pagefile@ IOPageFile_MinimumSize + !
+	maxpages@ pagefile@ IOPageFile_MaximumSize + !
+	fileobject@ pagefile@ IOPageFile_FileObject + !
+	fileobject@ IOFile_FileControlBlock + @ pagefile@ IOPageFile_CapturedFCB + !
+	0 pagefile@ IOPageFile_Hint + !
+	minpages@ pagefile@ IOPageFile_CurrentSize + !
+	0 pagefile@ IOPageFile_UsedCount + !
+	pri@ pagefile@ IOPageFile_Priority + !
+	IOPageFileCount@ pagefile@ IOPageFile_Number + !
 
 	pri@ // pri
 	fcb@ // fcb
-	swapfile@ // swapfile
-	IOSwapFileInsert
+	pagefile@ // pagefile
+	IOPageFileInsert
 
 	transfer1@ IOTransferComplete
 	transfer2@ IOTransferComplete
 
-	IOSwapFileCreateUnlock
+	IOPageFileCreateUnlock
 
 	// leave fileobject refcount biased
 
 	0 ok!
 end
 
-fn IOSwapFileQuery { query id -- ok }
+fn IOPageFileQuery { query id -- ok }
 	fnsection "PAGE$text"
 
-	if (id@ IOSwapFileCount@ >=)
+	if (id@ IOPageFileCount@ >=)
 		STATUS_INVALID_ARGUMENT ok!
 
 		return
@@ -371,34 +371,34 @@ fn IOSwapFileQuery { query id -- ok }
 
 	0 ok!
 
-	auto swapfile
-	[id@]IOSwapFiles@ swapfile!
+	auto pagefile
+	[id@]IOPageFiles@ pagefile!
 
-	if (swapfile@ IOSwapFile_FileObject + @ IOFile_OpenedPath + @)
-		query@ OSSwapFileInformation_Name + // dest
-		swapfile@ IOSwapFile_FileObject + @ IOFile_OpenedPath + @ // src
+	if (pagefile@ IOPageFile_FileObject + @ IOFile_OpenedPath + @)
+		query@ OSPageFileInformation_Name + // dest
+		pagefile@ IOPageFile_FileObject + @ IOFile_OpenedPath + @ // src
 		strcpy
 	end else
-		query@ OSSwapFileInformation_Name + // dest
+		query@ OSPageFileInformation_Name + // dest
 		"unknown" // src
 		strcpy
 	end
 
-	swapfile@ IOSwapFile_MinimumSize + @ query@ OSSwapFileInformation_MinimumSize + !
-	swapfile@ IOSwapFile_MaximumSize + @ query@ OSSwapFileInformation_MaximumSize + !
-	swapfile@ IOSwapFile_CurrentSize + @ query@ OSSwapFileInformation_CurrentSize + !
-	swapfile@ IOSwapFile_UsedCount + @ query@ OSSwapFileInformation_UsedCount + !
-	swapfile@ IOSwapFile_Priority + @ query@ OSSwapFileInformation_Priority + !
+	pagefile@ IOPageFile_MinimumSize + @ query@ OSPageFileInformation_MinimumSize + !
+	pagefile@ IOPageFile_MaximumSize + @ query@ OSPageFileInformation_MaximumSize + !
+	pagefile@ IOPageFile_CurrentSize + @ query@ OSPageFileInformation_CurrentSize + !
+	pagefile@ IOPageFile_UsedCount + @ query@ OSPageFileInformation_UsedCount + !
+	pagefile@ IOPageFile_Priority + @ query@ OSPageFileInformation_Priority + !
 end
 
-fn IOSwapFileReserve { pagesneeded swapfile -- offset ok }
+fn IOPageFileReserve { pagesneeded pagefile -- offset ok }
 	auto bmpheader
-	swapfile@ IOSwapFile_BitmapHeader + bmpheader!
+	pagefile@ IOPageFile_BitmapHeader + bmpheader!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - pagesneeded@ <)
+	if (pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_UsedCount + @ - pagesneeded@ <)
 		ipl@ KeIPLLower
 
 		STATUS_NO_SWAP ok!
@@ -406,7 +406,7 @@ fn IOSwapFileReserve { pagesneeded swapfile -- offset ok }
 		return
 	end
 
-	swapfile@ IOSwapFile_Hint + @ // hint
+	pagefile@ IOPageFile_Hint + @ // hint
 	pagesneeded@ // runlength
 	bmpheader@ // header
 	ComBitmapFindRun ok! offset!
@@ -425,7 +425,7 @@ fn IOSwapFileReserve { pagesneeded swapfile -- offset ok }
 		IOSwapPagesUsed@ IOSwapPagesUsedPeak!
 	end
 
-	pagesneeded@ swapfile@ IOSwapFile_UsedCount + +=
+	pagesneeded@ pagefile@ IOPageFile_UsedCount + +=
 
 	pagesneeded@ // runlength
 	offset@ // index
@@ -434,10 +434,10 @@ fn IOSwapFileReserve { pagesneeded swapfile -- offset ok }
 
 	ipl@ KeIPLLower
 
-	offset@ swapfile@ IOSwapFile_Hint + !
+	offset@ pagefile@ IOPageFile_Hint + !
 end
 
-fn IOSwapFileRelease { pages offset swapfile -- }
+fn IOPageFileRelease { pages offset pagefile -- }
 	if (pages@ ~~)
 		return
 	end
@@ -446,22 +446,22 @@ fn IOSwapFileRelease { pages offset swapfile -- }
 	IPLDPC KeIPLRaise ipl!
 
 	pages@ IOSwapPagesUsed -=
-	pages@ swapfile@ IOSwapFile_UsedCount + -=
+	pages@ pagefile@ IOPageFile_UsedCount + -=
 
 	pages@ // runlength
 	offset@ // index
-	swapfile@ IOSwapFile_BitmapHeader + // header
+	pagefile@ IOPageFile_BitmapHeader + // header
 	ComBitmapClearBits
 
 	if (MmAnonTransfersAvailable@ ~~
-		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - IOSWAPFILEFREELOW >= ||)
-		swapfile@ IOSwapFile_SIZEOF + MmMPWAssessTransfers
+		pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_UsedCount + @ - IOPAGEFILEFREELOW >= ||)
+		pagefile@ IOPageFile_SIZEOF + MmMPWAssessTransfers
 	end
 
 	ipl@ KeIPLLower
 end
 
-fn IOSwapPageFree { pno swapfile -- }
+fn IOSwapPageFree { pno pagefile -- }
 	// frees a page in swap
 
 	auto ipl
@@ -469,11 +469,11 @@ fn IOSwapPageFree { pno swapfile -- }
 
 	1 // runlength
 	pno@ // index
-	swapfile@ IOSwapFile_BitmapHeader + // header
+	pagefile@ IOPageFile_BitmapHeader + // header
 	ComBitmapClearBits
 
 	1 IOSwapPagesUsed -=
-	1 swapfile@ IOSwapFile_UsedCount + -=
+	1 pagefile@ IOPageFile_UsedCount + -=
 
 	if (DEBUGCHECKS)
 		if (IOSwapPagesUsed@ z<)
@@ -482,8 +482,8 @@ fn IOSwapPageFree { pno swapfile -- }
 	end
 
 	if (MmAnonTransfersAvailable@ ~~
-		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - IOSWAPFILEFREELOW >= ||)
-		swapfile@ IOSwapFile_SIZEOF + MmMPWAssessTransfers
+		pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_UsedCount + @ - IOPAGEFILEFREELOW >= ||)
+		pagefile@ IOPageFile_SIZEOF + MmMPWAssessTransfers
 	end
 
 	ipl@ KeIPLLower
@@ -497,7 +497,7 @@ fn IOSwapPageFreePTE { pte -- }
 	end
 
 	pte@ PAGESHIFT >> // pno
-	[pte@ PTE_SWAPFILE_SHIFT >> PTE_SWAPFILE_MASK &]IOSwapFiles@ // swapfile
+	[pte@ PTE_PAGEFILE_SHIFT >> PTE_PAGEFILE_MASK &]IOPageFiles@ // pagefile
 	IOSwapPageFree
 end
 
@@ -510,11 +510,11 @@ fn IOSwapPageReadPTE { kflags pfdbe pte -- ok }
 		end
 	end
 
-	auto swapfile
-	[pte@ PTE_SWAPFILE_SHIFT >> PTE_SWAPFILE_MASK &]IOSwapFiles@ swapfile!
+	auto pagefile
+	[pte@ PTE_PAGEFILE_SHIFT >> PTE_PAGEFILE_MASK &]IOPageFiles@ pagefile!
 
 	auto fcb
-	swapfile@ IOSwapFile_CapturedFCB + @ fcb!
+	pagefile@ IOPageFile_CapturedFCB + @ fcb!
 
 	auto readfunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
@@ -588,7 +588,7 @@ fn IOSwapPageReadPTE { kflags pfdbe pte -- ok }
 	rs@ HALCPUInterruptRestore
 end
 
-fn IOSwapFileWriteMDL { pagecount offset mdl -- ok }
+fn IOPageFileWriteMDL { pagecount offset mdl -- ok }
 	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length
 	0 // vaddr
@@ -599,11 +599,11 @@ fn IOSwapFileWriteMDL { pagecount offset mdl -- ok }
 	pointerof IOSwapPageWriteMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
 	offset@ mdl@ MmMDLHeader_Context + !
 
-	auto swapfile
-	mdl@ IOTransfer_SwapFile + @ swapfile!
+	auto pagefile
+	mdl@ IOTransfer_PageFile + @ pagefile!
 
 	auto fcb
-	swapfile@ IOSwapFile_CapturedFCB + @ fcb!
+	pagefile@ IOPageFile_CapturedFCB + @ fcb!
 
 	auto writefunc
 	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
@@ -636,8 +636,8 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	auto pagecount
 	mdl@ MmMDLHeader_Pages + @ pagecount!
 
-	auto swapfile
-	mdl@ IOTransfer_SwapFile + @ swapfile!
+	auto pagefile
+	mdl@ IOTransfer_PageFile + @ pagefile!
 
 	auto offset
 	mdl@ MmMDLHeader_Context + @ offset!
@@ -646,7 +646,7 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	auto number
-	swapfile@ IOSwapFile_Number + @ number!
+	pagefile@ IOPageFile_Number + @ number!
 
 	while (pagecount@)
 		auto pfdbe
@@ -655,7 +655,7 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 		if (status@)
 			// IO error, don't save the swap page
 
-			offset@ swapfile@ IOSwapPageFree
+			offset@ pagefile@ IOSwapPageFree
 
 			auto rs
 			HALCPUInterruptDisable rs!
@@ -667,12 +667,12 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 				MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
 				// modified or deleted, free the swap page :(
 
-				offset@ swapfile@ IOSwapPageFree
+				offset@ pagefile@ IOSwapPageFree
 			end else
 				auto swappte
 				pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ swappte!
 
-				offset@ PAGESHIFT << number@ PTE_SWAPFILE_SHIFT << | PTE_INSWAP |
+				offset@ PAGESHIFT << number@ PTE_PAGEFILE_SHIFT << | PTE_INSWAP |
 				swappte@ PTE_TLBHACK & |
 #ifdef DEBUGCHECKS
 				swappte@ PTE_KERNELSTACK & |
@@ -701,17 +701,17 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	mdl@ IOTransferComplete
 end
 
-var IOSwapFileExtensionListHead 0
-var IOSwapFileExtensionListTail 0
+var IOPageFileExtensionListHead 0
+var IOPageFileExtensionListTail 0
 
-struct IOSwapFileExtension
+struct IOPageFileExtension
 	4 Next
 	4 Pages
 	KeEvent_SIZEOF Event
 	4 Success
 endstruct
 
-fn IOSwapFileRequestExpansion { pages -- ok }
+fn IOPageFileRequestExpansion { pages -- ok }
 	// entered and left at IPLDPC.
 
 	// quick check to make sure this can feasibly work before we go to the
@@ -723,11 +723,11 @@ fn IOSwapFileRequestExpansion { pages -- ok }
 	auto avail
 	0 avail!
 
-	while (i@ IOSwapFileCount@ <)
-		auto swapfile
-		[i@]IOSwapFiles@ swapfile!
+	while (i@ IOPageFileCount@ <)
+		auto pagefile
+		[i@]IOPageFiles@ pagefile!
 
-		swapfile@ IOSwapFile_MaximumSize + @ swapfile@ IOSwapFile_CurrentSize + @ - avail +=
+		pagefile@ IOPageFile_MaximumSize + @ pagefile@ IOPageFile_CurrentSize + @ - avail +=
 
 		if (avail@ pages@ >=)
 			break
@@ -745,75 +745,75 @@ fn IOSwapFileRequestExpansion { pages -- ok }
 	IPLLOW KeIPLLower
 
 	auto extension
-	IOSwapFileExtension_SIZEOF alloc extension!
+	IOPageFileExtension_SIZEOF alloc extension!
 
-	0 extension@ IOSwapFileExtension_Next + !
-	pages@ extension@ IOSwapFileExtension_Pages + !
-	-1 extension@ IOSwapFileExtension_Success + !
+	0 extension@ IOPageFileExtension_Next + !
+	pages@ extension@ IOPageFileExtension_Pages + !
+	-1 extension@ IOPageFileExtension_Success + !
 
 	0 // signaled
 	OSEVENT_SYNCH // type
-	"IOSwapFileRequestExpansionEvent" // name
-	extension@ IOSwapFileExtension_Event + // event
+	"IOPageFileRequestExpansionEvent" // name
+	extension@ IOPageFileExtension_Event + // event
 	KeEventInitialize
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
 	auto t
-	IOSwapFileExtensionListTail@ t!
+	IOPageFileExtensionListTail@ t!
 
 	if (t@ ~~)
-		extension@ IOSwapFileExtensionListHead!
+		extension@ IOPageFileExtensionListHead!
 	end else
-		extension@ t@ IOSwapFileExtension_Next + !
+		extension@ t@ IOPageFileExtension_Next + !
 	end
 
-	extension@ IOSwapFileExtensionListTail!
+	extension@ IOPageFileExtensionListTail!
 
 	rs@ HALCPUInterruptRestore
 
 	0 // priboost
-	IOSwapFileExtendEvent // event
+	IOPageFileExtendEvent // event
 	KeEventSignal
 
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	extension@ IOSwapFileExtension_Event + // object
+	extension@ IOPageFileExtension_Event + // object
 	KeThreadWaitForObject drop
 
-	extension@ IOSwapFileExtension_Success + @ ok!
+	extension@ IOPageFileExtension_Success + @ ok!
 
 	IPLDPC KeIPLRaise drop
 end
 
-fn IOSwapFileExtend { -- }
+fn IOPageFileExtend { -- }
 	// called by worker thread.
 	// pops extension requests off the listhead and tries to satisfy them.
 	// satisfying a request is done by extending the pagefile & signaling the
 	// event to wake up the waiting thread.
 
-	while (IOSwapFileExtensionListHead@)
+	while (IOPageFileExtensionListHead@)
 		auto extension
 
 		auto rs
 		HALCPUInterruptDisable rs!
 
-		IOSwapFileExtensionListHead@ extension!
-		extension@ IOSwapFileExtension_Next + @ IOSwapFileExtensionListHead!
+		IOPageFileExtensionListHead@ extension!
+		extension@ IOPageFileExtension_Next + @ IOPageFileExtensionListHead!
 
-		if (IOSwapFileExtensionListHead@ ~~)
-			0 IOSwapFileExtensionListTail!
+		if (IOPageFileExtensionListHead@ ~~)
+			0 IOPageFileExtensionListTail!
 		end
 
 		rs@ HALCPUInterruptRestore
 
-		extension@ IOSwapFileSatisfyExtension
+		extension@ IOPageFileSatisfyExtension
 	end
 end
 
-fn IOSwapFileSatisfyExtension { extension -- }
+fn IOPageFileSatisfyExtension { extension -- }
 	auto i
 	0 i!
 
@@ -823,26 +823,26 @@ fn IOSwapFileSatisfyExtension { extension -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (extension@ IOSwapFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ <=)
+	if (extension@ IOPageFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ <=)
 		// immediately succeed
 		ipl@ KeIPLLower
 
-		0 extension@ IOSwapFileExtension_Success + !
+		0 extension@ IOPageFileExtension_Success + !
 
 		0 // priboost
-		extension@ IOSwapFileExtension_Event + // event
+		extension@ IOPageFileExtension_Event + // event
 		KeEventSignal
 
 		return
 	end
 
-	while (i@ IOSwapFileCount@ <)
-		auto swapfile
-		[i@]IOSwapFiles@ swapfile!
+	while (i@ IOPageFileCount@ <)
+		auto pagefile
+		[i@]IOPageFiles@ pagefile!
 
-		swapfile@ IOSwapFile_MaximumSize + @ swapfile@ IOSwapFile_CurrentSize + @ - avail +=
+		pagefile@ IOPageFile_MaximumSize + @ pagefile@ IOPageFile_CurrentSize + @ - avail +=
 
-		if (avail@ extension@ IOSwapFileExtension_Pages + @ >=)
+		if (avail@ extension@ IOPageFileExtension_Pages + @ >=)
 			break
 		end
 
@@ -850,16 +850,16 @@ fn IOSwapFileSatisfyExtension { extension -- }
 	end
 
 	auto requiredextension
-	extension@ IOSwapFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ - requiredextension!
+	extension@ IOPageFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ - requiredextension!
 
 	if (avail@ requiredextension@ <)
 		// immediately fail
 		ipl@ KeIPLLower
 
-		STATUS_COMMIT_EXCEEDED extension@ IOSwapFileExtension_Success + !
+		STATUS_COMMIT_EXCEEDED extension@ IOPageFileExtension_Success + !
 
 		0 // priboost
-		extension@ IOSwapFileExtension_Event + // event
+		extension@ IOPageFileExtension_Event + // event
 		KeEventSignal
 
 		return
@@ -867,18 +867,18 @@ fn IOSwapFileSatisfyExtension { extension -- }
 
 	ipl@ KeIPLLower
 
-	requiredextension@ IOSwapFileTryExtendAll extension@ IOSwapFileExtension_Success + !
+	requiredextension@ IOPageFileTryExtendAll extension@ IOPageFileExtension_Success + !
 
 	0 // priboost
-	extension@ IOSwapFileExtension_Event + // event
+	extension@ IOPageFileExtension_Event + // event
 	KeEventSignal
 end
 
-fn IOSwapFileTryExtendAll { extension -- ok }
+fn IOPageFileTryExtendAll { extension -- ok }
 	fnsection "PAGE$text"
 
-	if (IOSwapFileExtensionIndex@ IOSwapFileCount@ >=)
-		0 IOSwapFileExtensionIndex!
+	if (IOPageFileExtensionIndex@ IOPageFileCount@ >=)
+		0 IOPageFileExtensionIndex!
 	end
 
 	0 ok!
@@ -891,18 +891,18 @@ fn IOSwapFileTryExtendAll { extension -- ok }
 		auto j
 
 		if (i@ 0 ==)
-			IOSwapFileCount@ max!
-			IOSwapFileExtensionIndex@ j!
+			IOPageFileCount@ max!
+			IOPageFileExtensionIndex@ j!
 		end else
-			IOSwapFileExtensionIndex@ max!
+			IOPageFileExtensionIndex@ max!
 			0 j!
 		end
 
 		while (j@ max@ <)
 			auto realextension
 			extension@ // extension
-			[j@]IOSwapFiles@ // swapfile
-			IOSwapFileTryExtend realextension!
+			[j@]IOPageFiles@ // pagefile
+			IOPageFileTryExtend realextension!
 
 			if (realextension@ extension@ >)
 				0 extension!
@@ -918,7 +918,7 @@ fn IOSwapFileTryExtendAll { extension -- ok }
 		end
 
 		if (extension@ ~~)
-			j@ 1 + IOSwapFileExtensionIndex!
+			j@ 1 + IOPageFileExtensionIndex!
 			break
 		end
 
@@ -930,11 +930,11 @@ fn IOSwapFileTryExtendAll { extension -- ok }
 	end
 end
 
-const IOSWAPFILEMINIMUMEXTENSION 128
+const IOPAGEFILEMINIMUMEXTENSION 128
 
-fn IOSwapFileTryExtend { extension swapfile -- realextension }
+fn IOPageFileTryExtend { extension pagefile -- realextension }
 	auto maxextend
-	swapfile@ IOSwapFile_MaximumSize + @ swapfile@ IOSwapFile_CurrentSize + @ - maxextend!
+	pagefile@ IOPageFile_MaximumSize + @ pagefile@ IOPageFile_CurrentSize + @ - maxextend!
 
 	auto i
 	0 i!
@@ -942,8 +942,8 @@ fn IOSwapFileTryExtend { extension swapfile -- realextension }
 	auto tryextension
 	extension@ tryextension!
 
-	if (tryextension@ IOSWAPFILEMINIMUMEXTENSION <)
-		IOSWAPFILEMINIMUMEXTENSION tryextension!
+	if (tryextension@ IOPAGEFILEMINIMUMEXTENSION <)
+		IOPAGEFILEMINIMUMEXTENSION tryextension!
 	end
 
 	if (maxextend@ tryextension@ <)
@@ -956,12 +956,12 @@ fn IOSwapFileTryExtend { extension swapfile -- realextension }
 
 	while (i@ 2 <)
 		auto ok
-		swapfile@ IOSwapFile_CurrentSize + @ tryextension@ + PAGESHIFT << // newsize
+		pagefile@ IOPageFile_CurrentSize + @ tryextension@ + PAGESHIFT << // newsize
 		1 // growing
 		0 // keeplocked
 		0 // zero
 		OSFILEFLAG_NOCACHE // flags
-		swapfile@ IOSwapFile_CapturedFCB + @ // fcb
+		pagefile@ IOPageFile_CapturedFCB + @ // fcb
 		IOFileControlBlockTruncate ok! drop
 
 		if (ok@ ~~)
@@ -985,44 +985,44 @@ fn IOSwapFileTryExtend { extension swapfile -- realextension }
 
 	tryextension@ realextension!
 
-	// growing the swapfile succeeded. update the structures.
+	// growing the pagefile succeeded. update the structures.
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
 	realextension@ // runlength
-	swapfile@ IOSwapFile_CurrentSize + @ // index
-	swapfile@ IOSwapFile_BitmapHeader + // header
+	pagefile@ IOPageFile_CurrentSize + @ // index
+	pagefile@ IOPageFile_BitmapHeader + // header
 	ComBitmapClearBits
 
-	realextension@ swapfile@ IOSwapFile_CurrentSize + +=
+	realextension@ pagefile@ IOPageFile_CurrentSize + +=
 	realextension@ IOSwapPagesCount +=
 	realextension@ MmCommitLimit +=
 
-	0 swapfile@ IOSwapFile_Hint + !
+	0 pagefile@ IOPageFile_Hint + !
 
-	swapfile@ IOSwapFile_SIZEOF + MmMPWAssessTransfers
+	pagefile@ IOPageFile_SIZEOF + MmMPWAssessTransfers
 
 	ipl@ KeIPLLower
 end
 
-fn IOSwapFileContract { -- }
+fn IOPageFileContract { -- }
 	fnsection "PAGE$text"
 
-	// called by the worker thread every 5 seconds to scan the swapfiles and
+	// called by the worker thread every 5 seconds to scan the pagefiles and
 	// determine if any of them should be shrunk.
 
 	if (MmEventLowMemory KeDispatchIsSignaled)
-		// don't shrink swapfiles while pages are being dumped to disk
+		// don't shrink pagefiles while pages are being dumped to disk
 		return
 	end
 
 	auto potentialcontraction
 	MmCommitLimit@ MmCommitUsage@ - potentialcontraction!
 
-	if (potentialcontraction@ IOSWAPFILEMINIMUMEXTENSION 2 * <)
+	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION 2 * <)
 		// if commit usage is within 2 megabytes of the commit limit then it
-		// probably isn't worth it to bother scanning the swapfiles.
+		// probably isn't worth it to bother scanning the pagefiles.
 
 		return
 	end
@@ -1032,18 +1032,18 @@ fn IOSwapFileContract { -- }
 
 	0 potentialcontraction!
 
-	while (i@ IOSwapFileCount@ <)
-		auto swapfile
-		[i@]IOSwapFiles@ swapfile!
+	while (i@ IOPageFileCount@ <)
+		auto pagefile
+		[i@]IOPageFiles@ pagefile!
 
 		auto free
-		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_UsedCount + @ - free!
+		pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_UsedCount + @ - free!
 
 		auto excess
-		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - excess!
+		pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_MinimumSize + @ - excess!
 
-		if (excess@ IOSWAPFILEMINIMUMEXTENSION >=)
-			if (free@ IOSWAPFILEMINIMUMEXTENSION >=)
+		if (excess@ IOPAGEFILEMINIMUMEXTENSION >=)
+			if (free@ IOPAGEFILEMINIMUMEXTENSION >=)
 				excess@ free@ min potentialcontraction +=
 			end
 		end
@@ -1051,18 +1051,18 @@ fn IOSwapFileContract { -- }
 		1 i +=
 	end
 
-	if (potentialcontraction@ IOSWAPFILEMINIMUMEXTENSION 2 * <)
+	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION 2 * <)
 		return
 	end
 
-	potentialcontraction@ IOSwapFileTryContractAll
+	potentialcontraction@ IOPageFileTryContractAll
 end
 
-fn IOSwapFileTryContractAll { contraction -- }
+fn IOPageFileTryContractAll { contraction -- }
 	fnsection "PAGE$text"
 
-	if (IOSwapFileExtensionIndex@ IOSwapFileCount@ >=)
-		0 IOSwapFileExtensionIndex!
+	if (IOPageFileExtensionIndex@ IOPageFileCount@ >=)
+		0 IOPageFileExtensionIndex!
 	end
 
 	auto i
@@ -1073,18 +1073,18 @@ fn IOSwapFileTryContractAll { contraction -- }
 		auto j
 
 		if (i@ 0 ==)
-			IOSwapFileCount@ max!
-			IOSwapFileExtensionIndex@ j!
+			IOPageFileCount@ max!
+			IOPageFileExtensionIndex@ j!
 		end else
-			IOSwapFileExtensionIndex@ max!
+			IOPageFileExtensionIndex@ max!
 			0 j!
 		end
 
 		while (j@ max@ <)
 			auto contractedby
 			contraction@ // contraction
-			[j@]IOSwapFiles@ // swapfile
-			IOSwapFileTryContract contractedby!
+			[j@]IOPageFiles@ // pagefile
+			IOPageFileTryContract contractedby!
 
 			if (contractedby@ contraction@ >=)
 				0 contraction!
@@ -1097,7 +1097,7 @@ fn IOSwapFileTryContractAll { contraction -- }
 		end
 
 		if (contraction@ ~~)
-			j@ 1 + IOSwapFileExtensionIndex!
+			j@ 1 + IOPageFileExtensionIndex!
 			break
 		end
 
@@ -1105,22 +1105,22 @@ fn IOSwapFileTryContractAll { contraction -- }
 	end
 end
 
-fn IOSwapFileTryContract { contraction swapfile -- contractedby }
+fn IOPageFileTryContract { contraction pagefile -- contractedby }
 	0 contractedby!
 
-	if (contraction@ IOSWAPFILEMINIMUMEXTENSION <)
-		IOSWAPFILEMINIMUMEXTENSION contraction!
+	if (contraction@ IOPAGEFILEMINIMUMEXTENSION <)
+		IOPAGEFILEMINIMUMEXTENSION contraction!
 	end
 
-	if (contraction@ swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - >)
-		swapfile@ IOSwapFile_CurrentSize + @ swapfile@ IOSwapFile_MinimumSize + @ - contraction!
+	if (contraction@ pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_MinimumSize + @ - >)
+		pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_MinimumSize + @ - contraction!
 	end
 
-	if (contraction@ IOSWAPFILEMINIMUMEXTENSION <)
+	if (contraction@ IOPAGEFILEMINIMUMEXTENSION <)
 		return
 	end
 
-	while (contraction@ IOSWAPFILEMINIMUMEXTENSION >=)
+	while (contraction@ IOPAGEFILEMINIMUMEXTENSION >=)
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
@@ -1130,7 +1130,7 @@ fn IOSwapFileTryContract { contraction swapfile -- contractedby }
 			break
 		end
 
-		if (MmCommitLimit@ contraction@ - MmCommitUsage@ IOSWAPFILEMINIMUMEXTENSION 2 * + <)
+		if (MmCommitLimit@ contraction@ - MmCommitUsage@ IOPAGEFILEMINIMUMEXTENSION 2 * + <)
 			ipl@ KeIPLLower
 
 			break
@@ -1138,32 +1138,32 @@ fn IOSwapFileTryContract { contraction swapfile -- contractedby }
 
 		auto clear
 		contraction@ // runlength
-		swapfile@ IOSwapFile_CurrentSize + @ contraction@ - // index
-		swapfile@ IOSwapFile_BitmapHeader + // header
+		pagefile@ IOPageFile_CurrentSize + @ contraction@ - // index
+		pagefile@ IOPageFile_BitmapHeader + // header
 		ComBitmapCheckClearBits clear!
 
 		if (clear@)
 			// chop!
 
 			contraction@ // runlength
-			swapfile@ IOSwapFile_CurrentSize + @ contraction@ - // index
-			swapfile@ IOSwapFile_BitmapHeader + // header
+			pagefile@ IOPageFile_CurrentSize + @ contraction@ - // index
+			pagefile@ IOPageFile_BitmapHeader + // header
 			ComBitmapSetBits
 
-			contraction@ swapfile@ IOSwapFile_CurrentSize + -=
+			contraction@ pagefile@ IOPageFile_CurrentSize + -=
 			contraction@ IOSwapPagesCount -=
 			contraction@ MmCommitLimit -=
 
-			0 swapfile@ IOSwapFile_Hint + !
+			0 pagefile@ IOPageFile_Hint + !
 
 			ipl@ KeIPLLower
 
-			swapfile@ IOSwapFile_CurrentSize + @ PAGESHIFT << // newsize
+			pagefile@ IOPageFile_CurrentSize + @ PAGESHIFT << // newsize
 			0 // growing
 			0 // keeplocked
 			0 // zero
 			OSFILEFLAG_NOCACHE // flags
-			swapfile@ IOSwapFile_CapturedFCB + @ // fcb
+			pagefile@ IOPageFile_CapturedFCB + @ // fcb
 			IOFileControlBlockTruncate drop drop
 
 			return

@@ -79,9 +79,9 @@ struct OSQuota
 	48 Reserved
 endstruct
 
-const OSSWAPFILEMAX 16
+const OSPAGEFILEMAX 16
 
-struct OSSwapFileInformation
+struct OSPageFileInformation
 	OSFILEPATHMAX Name
 
 	4 MinimumSize
@@ -92,4 +92,4 @@ struct OSSwapFileInformation
 endstruct
 
 extern OSMemoryInformationDump { query -- }
-extern OSSwapFileInformationDump { -- }
+extern OSPageFileInformationDump { -- }

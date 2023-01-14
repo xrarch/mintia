@@ -1,6 +1,6 @@
-extern SiSetSwapFiles { -- }
+extern SiSetPageFiles { -- }
 extern SiSystemManagementLoop { -- ok }
 
 externptr SiConfigFile
 externptr SiBootFlags
-externptr SiSwapFileCount
+externptr SiPageFileCount

@@ -52,8 +52,8 @@
 .extern OSDirectoryRename
 .extern OSDirectoryUnlink
 .extern OSDirectoryRead
-.extern OSSwapFileCreate
-.extern OSSwapFileQuery
+.extern OSPageFileCreate
+.extern OSPageFileQuery
 .extern OSIOControl
 .extern OSGetBootDevicePath
 .extern OSFilesystemMount
@@ -166,8 +166,8 @@ OSCallTable:
 	.dl OSTOSDirectoryRename                             ;48
 	.dl OSTOSDirectoryUnlink                             ;49
 	.dl OSTOSDirectoryRead                               ;50
-	.dl OSTOSSwapFileCreate                              ;51
-	.dl OSTOSSwapFileQuery                               ;52
+	.dl OSTOSPageFileCreate                              ;51
+	.dl OSTOSPageFileQuery                               ;52
 	.dl OSTOSIOControl                                   ;53
 	.dl OSTOSGetBootDevicePath                           ;54
 	.dl OSTOSFilesystemMount                             ;55
@@ -971,7 +971,7 @@ OSTOSDirectoryRead:
 	addi sp, sp, 4
 	ret
 
-OSTOSSwapFileCreate:
+OSTOSPageFileCreate:
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
@@ -979,7 +979,7 @@ OSTOSSwapFileCreate:
 	mov  a2, long [s17 + 12] ;t3
 	mov  a3, long [s17 + 16] ;t4
 
-	jal  OSSwapFileCreate
+	jal  OSPageFileCreate
 
 	mov  long [s17 + 4], a0 ;t1
 
@@ -987,13 +987,13 @@ OSTOSSwapFileCreate:
 	addi sp, sp, 4
 	ret
 
-OSTOSSwapFileQuery:
+OSTOSPageFileQuery:
 	subi sp, sp, 4
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
 
-	jal  OSSwapFileQuery
+	jal  OSPageFileQuery
 
 	mov  long [s17 + 4], a0 ;t1
 

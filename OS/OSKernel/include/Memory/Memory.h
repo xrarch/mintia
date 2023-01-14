@@ -81,7 +81,7 @@ extern MmModifiedPageWriter { context1 context2 -- }
 extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 
-extern MmMPWAnonTransferInitialize { swapfile transfer -- }
+extern MmMPWAnonTransferInitialize { pagefile transfer -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }
 
@@ -113,7 +113,7 @@ externptr MmSoftPageFaultCount // transition/demandzero faults
 externptr MmHardPageFaultCount // pageins due to page fault
 externptr MmPageInCount        // pageins in general
 
-externptr MmTheoreticalCommitLimit // virtual memory available if all swapfiles extend to maximum
+externptr MmTheoreticalCommitLimit // virtual memory available if all pagefiles extend to maximum
 externptr MmCommitLimit            // virtual memory available right now
 externptr MmCommitUsage            // virtual memory promised
 
@@ -131,11 +131,11 @@ externptr MmAnonTransfersAvailable
 // (other than by quota and physical commit limit) down to MMMUSTSUCCEEDTHRESH
 // which represents what the system MUST HAVE AVAILABLE in order not to crash,
 // to fulfill page-out activity such as file writeback and anonymous page
-// cleaning to swapfile.
+// cleaning to pagefile.
 //
 // MUSTSUCCEED should not be taken as a get-out-of-deadlock-free card, as the
 // issues related to page-out are very complex and can vary depending on the
-// mechanics of the filesystem on which the swapfiles reside.
+// mechanics of the filesystem on which the pagefiles reside.
 
 const MMNORMALTHRESH        16 // normal allocations           (blocking user allocations)
 const MMPOOLTHRESH          12 // nonblocking pool allocations (nonblocking non-fatal allocations)

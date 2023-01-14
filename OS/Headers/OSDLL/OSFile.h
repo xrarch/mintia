@@ -9,10 +9,10 @@ const OSFILEFLAG_MUSTBEFILE  4
 const OSFILEFLAG_CREATEDIR   8
 const OSFILEFLAG_MUSTCREATE  16
 const OSFILEFLAG_EXCLUSIVE   32
-const OSFILEFLAG_SWAPFILE    64
+const OSFILEFLAG_PAGEFILE    64
 
 // set of flags that are reserved for system usage
-const OSFILEFLAG_KERNELSET   OSFILEFLAG_SWAPFILE
+const OSFILEFLAG_KERNELSET   OSFILEFLAG_PAGEFILE
 
 // only block if theres nothing available, otherwise return whatever is there
 const OSACCESSFLAG_RETURNANY   1

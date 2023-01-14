@@ -76,8 +76,8 @@ extern OSDirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 extern OSDirectoryUnlink { name filehandle -- ok }
 extern OSDirectoryRead { dirent filehandle -- ok }
 
-extern OSSwapFileCreate { minpages maxpages pri path -- ok }
-extern OSSwapFileQuery { query id -- ok }
+extern OSPageFileCreate { minpages maxpages pri path -- ok }
+extern OSPageFileQuery { query id -- ok }
 
 extern OSIOControl { arg2 arg1 filehandle -- ret ok }
 

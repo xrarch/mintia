@@ -32,7 +32,7 @@ const MPWFILETRANSFERS 8
 
 struct IOAnonTransferTable
 	KeEvent_SIZEOF Event
-	(IOSWAPFILEMAXPRI 4 *) FreeListHeads
+	(IOPAGEFILEMAXPRI 4 *) FreeListHeads
 endstruct
 
 struct IOFileTransferTable
@@ -59,12 +59,12 @@ fn IOTransferComplete { transfer -- }
 
 	auto rs
 
-	if (transfer@ IOTransfer_SwapFile + @)
+	if (transfer@ IOTransfer_PageFile + @)
 		// anon transfer, place on priority list
 
 		auto pri
 
-		if (transfer@ IOTransfer_SwapFile + @ IOSwapFileGetFree IOSWAPFILEFREELOW <)
+		if (transfer@ IOTransfer_PageFile + @ IOPageFileGetFree IOPAGEFILEFREELOW <)
 			// place on low space list
 
 			HALCPUInterruptDisable rs!
@@ -92,7 +92,7 @@ fn IOTransferComplete { transfer -- }
 			end
 
 			// there aren't any more transfers so try to grab off the list
-			// each transfer whose swapfile has at least one page free.
+			// each transfer whose pagefile has at least one page free.
 
 			auto acquired
 			0 acquired!
@@ -106,7 +106,7 @@ fn IOTransferComplete { transfer -- }
 				auto n
 				transfer@ IOTransfer_Next + @ n!
 
-				if (transfer@ IOTransfer_SwapFile + @ IOSwapFileGetFree)
+				if (transfer@ IOTransfer_PageFile + @ IOPageFileGetFree)
 					// found one
 
 					IOTRANSFER_ACTIVE transfer@ IOTransfer_State + !
@@ -130,7 +130,7 @@ fn IOTransferComplete { transfer -- }
 
 					// insert in priority queue
 
-					transfer@ IOTransfer_SwapFile + @ IOSwapFileGetPriority pri!
+					transfer@ IOTransfer_PageFile + @ IOPageFileGetPriority pri!
 
 					MmMPWAnonTransfers IOAnonTransferTable_FreeListHeads + pri@ 2 << + @ transfer@ IOTransfer_Next + !
 					transfer@ MmMPWAnonTransfers IOAnonTransferTable_FreeListHeads + pri@ 2 << + !
@@ -152,7 +152,7 @@ fn IOTransferComplete { transfer -- }
 			return
 		end
 
-		transfer@ IOTransfer_SwapFile + @ IOSwapFileGetPriority pri!
+		transfer@ IOTransfer_PageFile + @ IOPageFileGetPriority pri!
 
 		HALCPUInterruptDisable rs!
 
@@ -178,8 +178,8 @@ fn IOTransferComplete { transfer -- }
 	end
 end
 
-fn MmMPWAnonTransferInitialize { swapfile transfer -- }
-	swapfile@ transfer@ IOTransfer_SwapFile + !
+fn MmMPWAnonTransferInitialize { pagefile transfer -- }
+	pagefile@ transfer@ IOTransfer_PageFile + !
 	0 transfer@ IOTransfer_Next + !
 	IOTRANSFER_ACTIVE transfer@ IOTransfer_State + !
 end
@@ -193,7 +193,7 @@ fn MmMPWGetAnonTransfer { wait ipl -- transfer }
 
 	0 transfer!
 
-	while (p@ IOSWAPFILEMAXPRI <)
+	while (p@ IOPAGEFILEMAXPRI <)
 		if (h@@)
 			h@@ transfer!
 			transfer@ IOTransfer_Next + @ h@!
@@ -235,14 +235,14 @@ fn MmMPWGetFileTransfer { wait ipl -- transfer }
 end
 
 fn MmMPWAssessTransfers { transfer1 -- }
-	// assess a swapfile's transfer structures and see if they should be moved
+	// assess a pagefile's transfer structures and see if they should be moved
 	// to the priority queue.
 
-	auto swapfile
-	transfer1@ IOTransfer_SwapFile + @ swapfile!
+	auto pagefile
+	transfer1@ IOTransfer_PageFile + @ pagefile!
 
 	auto free
-	swapfile@ IOSwapFileGetFree free!
+	pagefile@ IOPageFileGetFree free!
 
 	if (free@ ~~)
 		return
@@ -253,7 +253,7 @@ fn MmMPWAssessTransfers { transfer1 -- }
 
 	if (MmAnonTransfersAvailable@ ~~)
 		1 move!
-	end elseif (free@ IOSWAPFILEFREELOW >=)
+	end elseif (free@ IOPAGEFILEFREELOW >=)
 		1 move!
 	end
 
@@ -262,7 +262,7 @@ fn MmMPWAssessTransfers { transfer1 -- }
 	end
 
 	auto pri
-	swapfile@ IOSwapFileGetPriority pri!
+	pagefile@ IOPageFileGetPriority pri!
 
 	auto count
 	2 count!
@@ -293,7 +293,7 @@ fn MmMPWAssessTransfers { transfer1 -- }
 
 			// insert in priority queue
 
-			transfer1@ IOTransfer_SwapFile + @ IOSwapFileGetPriority pri!
+			transfer1@ IOTransfer_PageFile + @ IOPageFileGetPriority pri!
 
 			MmMPWAnonTransfers IOAnonTransferTable_FreeListHeads + pri@ 2 << + @ transfer1@ IOTransfer_Next + !
 			transfer1@ MmMPWAnonTransfers IOAnonTransferTable_FreeListHeads + pri@ 2 << + !
@@ -338,7 +338,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 	MmMPWFileTransfers IOFileTransferTable_SIZEOF + transfer!
 
 	while (i@ MPWFILETRANSFERS <)
-		0 transfer@ IOTransfer_SwapFile + !
+		0 transfer@ IOTransfer_PageFile + !
 
 		MmMPWFileTransfers IOFileTransferTable_FreeListHead + @ transfer@ IOTransfer_Next + !
 		transfer@ MmMPWFileTransfers IOFileTransferTable_FreeListHead + !
@@ -490,7 +490,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 end
 
 fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
-	// try to allocate a contiguous cluster from the swapfile.
+	// try to allocate a contiguous cluster from the pagefile.
 
 	auto clustermax
 	IOCLUSTERMAX PAGESHIFT >> clustermax!
@@ -501,8 +501,8 @@ fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
 
 	while (clustermax@)
 		clustermax@ // pagesneeded
-		transfer@ IOTransfer_SwapFile + @ // swapfile
-		IOSwapFileReserve ok! offset!
+		transfer@ IOTransfer_PageFile + @ // pagefile
+		IOPageFileReserve ok! offset!
 
 		if (ok@ ~~)
 			break
@@ -512,7 +512,7 @@ fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
 	end
 
 	if (clustermax@ ~~)
-		// there are no pages free in the swapfile so put this transfer on the
+		// there are no pages free in the pagefile so put this transfer on the
 		// bad boy list and return.
 
 		transfer@ IOTransferComplete
@@ -567,18 +567,18 @@ fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
 	if (clustermax@ pagecount@ ~=)
 		clustermax@ pagecount@ - // pages
 		offset@ pagecount@ + // offset
-		transfer@ IOTransfer_SwapFile + @ // swapfile
-		IOSwapFileRelease
+		transfer@ IOTransfer_PageFile + @ // pagefile
+		IOPageFileRelease
 	end
 
-	// dispatch write to swapfile
+	// dispatch write to pagefile
 
 	IPLLOW KeIPLLower
 
 	pagecount@ // pagecount
 	offset@ // offset
 	transfer@ // mdl
-	IOSwapFileWriteMDL drop
+	IOPageFileWriteMDL drop
 
 	IPLDPC KeIPLRaise drop
 end

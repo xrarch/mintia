@@ -69,7 +69,7 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 - [x] File page cache.
 - [x] Memory mapped files.
 - [x] Demand paging.
-- [x] Up to 16 swapfiles that can dynamically grow and shrink with the needs of the system.
+- [x] Up to 16 pagefiles that can dynamically grow and shrink with the needs of the system.
 - [x] Dynamic working set management.
 - [x] Extensive swapping: all user pages, along with kernel stacks, page tables, and 50% of the kernel itself, can be swapped to disk to free memory.
 

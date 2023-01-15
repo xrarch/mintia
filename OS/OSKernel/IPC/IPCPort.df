@@ -142,9 +142,9 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 		pointerof IPCPortHandleDestroyFunction // func
 		clienttable@ // handletable
 		ExHandleTableDelete
-
-		object@ IPCPort_OwningProcess + @ ObObjectDereferenceByPointer drop
 	end
+
+	object@ IPCPort_OwningProcess + @ ObObjectDereferenceByPointer drop
 
 	HELPER_ORPHAN object@ IPCPortObjectDeleteHelper
 
@@ -351,10 +351,10 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 			return
 		end
 
-		owningprocess@ ObObjectReferenceByPointer drop
-
 		clienttable@ portobject@ IPCPort_ClientTableHeader + !
 	end
+
+	owningprocess@ ObObjectReferenceByPointer drop
 
 	maxlen@ portobject@ IPCPort_MaximumMessageBody + !
 end
@@ -387,6 +387,8 @@ fn IPCPortCreate { flags maxlen permissions name -- porthandle ok }
 end
 
 fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
+	fnsection "PAGE$text"
+
 	auto clienttable
 	portobject@ IPCPort_ClientTableHeader + @ clienttable!
 
@@ -396,37 +398,13 @@ fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
 		return
 	end
 
-	auto entryptr
+	auto otherport
 	clientid@ // handle
 	clienttable@ // handletable
 	1 // locked
-	ExHandleLookup ok! entryptr!
+	ExHandleTableLookupAndReferenceObject ok! otherport!
 
 	if (ok@)
-		clienttable@ ExHandleTableUnlock
-
-		if (ok@ STATUS_INVALID_HANDLE ==)
-			STATUS_NO_SUCH_CLIENT ok!
-		end
-
-		return
-	end
-
-	auto otherport
-	entryptr@@ otherport!
-
-	auto npheader
-	otherport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
-		// see function ObObjectDereferenceByPointer for an explanation on
-		// this check.
-
-		ipl@ KeIPLLower
-
 		clienttable@ ExHandleTableUnlock
 
 		STATUS_NO_SUCH_CLIENT ok!
@@ -435,9 +413,9 @@ fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
 	end
 
 	if (otherport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
-		ipl@ KeIPLLower
-
 		clienttable@ ExHandleTableUnlock
+
+		otherport@ ObObjectDereferenceByPointer drop
 
 		STATUS_NO_SUCH_CLIENT ok!
 
@@ -445,27 +423,11 @@ fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
 	end
 
 	otherport@ IPCPort_OwningProcess + @ processobject!
-
-	processobject@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
-	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
-		// see function ObObjectDereferenceByPointer for an explanation on
-		// this check.
-
-		ipl@ KeIPLLower
-
-		clienttable@ ExHandleTableUnlock
-
-		STATUS_PROCESS_IS_TERMINATED ok!
-
-		return
-	end
-
 	processobject@ ObObjectReferenceByPointer drop
 
-	ipl@ KeIPLLower
-
 	clienttable@ ExHandleTableUnlock
+
+	otherport@ ObObjectDereferenceByPointer drop
 end
 
 fn IPCPortOpenProcessByClientID { access clientid porthandle -- processhandle ok }
@@ -891,7 +853,26 @@ fn IPCThreadBlockCreate { -- ok }
 	// create an IPCThreadBlock for the current thread
 
 	if (KeThreadCurrent@ PsThread_IPCBlock + @)
+		// fast path that avoids raising IPL.
+
 		0 ok!
+
+		return
+	end
+
+	// raise IPL in case an APC is received that also attempts to create an
+	// IPC block for this thread.
+
+	auto ipl
+	IPLAPC KeIPLRaise ipl!
+
+	// check again since an APC may have arrived since the last check.
+
+	if (KeThreadCurrent@ PsThread_IPCBlock + @)
+		ipl@ KeIPLLower
+
+		0 ok!
+
 		return
 	end
 
@@ -900,6 +881,8 @@ fn IPCThreadBlockCreate { -- ok }
 	MmQuotaBlockCharge ok!
 
 	if (ok@)
+		ipl@ KeIPLLower
+
 		return
 	end
 
@@ -910,6 +893,8 @@ fn IPCThreadBlockCreate { -- ok }
 	MmAllocWithTag ok! ipcblock!
 
 	if (ok@)
+		ipl@ KeIPLLower
+
 		IPCThreadBlock_SIZEOF MmChargeBytesGet // charge
 		KeThreadCurrent@ KeThread_Process + @ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
 		MmQuotaBlockUncharge
@@ -932,4 +917,6 @@ fn IPCThreadBlockCreate { -- ok }
 	KeEventInitialize
 
 	ipcblock@ KeThreadCurrent@ PsThread_IPCBlock + !
+
+	ipl@ KeIPLLower
 end

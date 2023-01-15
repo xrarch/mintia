@@ -14,6 +14,8 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Object.h"
+
 #include "<inc>/Process.h"
 
 #include "<ll>/OSDLL/OS.h"
@@ -506,4 +508,62 @@ fn ExHandleLookup { handle handletable locked -- entryptr ok }
 	if (locked@ ~~)
 		handletable@ ExHandleTableUnlock
 	end
+end
+
+fn ExHandleTableLookupAndReferenceObject { handle handletable locked -- object ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableLockShared ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto entryptr
+	handle@ // handle
+	handletable@ // handletable
+	1 // locked
+	ExHandleLookup ok! entryptr!
+
+	if (ok@)
+		if (locked@ ~~)
+			handletable@ ExHandleTableUnlock
+		end
+
+		return
+	end
+
+	entryptr@@ object!
+
+	object@ ConditionallyReferenceObject ok!
+
+	if (locked@ ~~)
+		handletable@ ExHandleTableUnlock
+	end
+end
+
+fn private ConditionallyReferenceObject { object -- ok }
+	auto npheader
+	object@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
+		rs@ HALCPUInterruptRestore
+
+		STATUS_INVALID_HANDLE ok!
+
+		return
+	end
+
+	npheader@ ObObjectReferenceByPointerCapturedHeader drop
+
+	rs@ HALCPUInterruptRestore
+
+	0 ok!
 end

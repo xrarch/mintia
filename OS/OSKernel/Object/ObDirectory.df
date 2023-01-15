@@ -534,56 +534,10 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 	auto pcomp
 	OBNAMEMAX alloc pcomp!
 
-	if (initialobject@ ~~)
-		if (path@ gb ~~)
-			STATUS_NOT_FOUND ok!
-			return
-		end
-
-		if (path@ gb ':' ==)
-			1 path +=
-			IODevicesDirectoryObject@ object!
-
-			// validate the device name -- escape into the object namespace
-			// shouldn't be allowed.
-
-			if (path@ gb ~~)
-				STATUS_NOT_FOUND ok!
-				return
-			end
-
-			if (path@ gb '.' ==)
-				STATUS_NOT_FOUND ok!
-				return
-			end
-
-			if (path@ gb '/' ==)
-				STATUS_NOT_FOUND ok!
-				return
-			end
-		end elseif (path@ "//:/" 4 strncmp)
-			if (flags@ OSFILEFLAG_MUSTBEFILE &)
-				STATUS_NOT_FOUND ok!
-				return
-			end
-
-			4 path +=
-			ObRootDirectoryObject@ object!
-		end else
-			IOBootDevice@ object!
-
-			if (DEBUGCHECKS)
-				if (object@ ~~)
-					"ObObjectReferenceByPath: no boot device\n" KeCrash
-				end
-			end
-		end
-	end else
-		initialobject@ object!
-	end
-
 	auto heapcookie
 	0 heapcookie!
+
+	initialobject@ object!
 
 	1 ObRootDirectoryLockShared ok!
 
@@ -592,13 +546,82 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 	end
 
 	while (1)
+		if (object@ ~~)
+			if (path@ gb ~~)
+				STATUS_NOT_FOUND ok!
+
+				if (heapcookie@)
+					heapcookie@ MmFree
+				end
+
+				return
+			end
+
+			if (path@ gb ':' ==)
+				1 path +=
+				IODevicesDirectoryObject@ object!
+
+				// validate the device name -- escape into the object namespace
+				// shouldn't be allowed.
+
+				if (path@ gb ~~)
+					STATUS_NOT_FOUND ok!
+
+					if (heapcookie@)
+						heapcookie@ MmFree
+					end
+
+					return
+				end
+
+				if (path@ gb '.' ==)
+					STATUS_NOT_FOUND ok!
+
+					if (heapcookie@)
+						heapcookie@ MmFree
+					end
+
+					return
+				end
+
+				if (path@ gb '/' ==)
+					STATUS_NOT_FOUND ok!
+
+					if (heapcookie@)
+						heapcookie@ MmFree
+					end
+
+					return
+				end
+			end elseif (path@ "//:/" 4 strncmp)
+				if (flags@ OSFILEFLAG_MUSTBEFILE &)
+					STATUS_NOT_FOUND ok!
+
+					if (heapcookie@)
+						heapcookie@ MmFree
+					end
+
+					return
+				end
+
+				4 path +=
+				ObRootDirectoryObject@ object!
+			end else
+				IOBootDevice@ object!
+
+				if (DEBUGCHECKS)
+					if (object@ ~~)
+						"ObObjectReferenceByPath: no boot device\n" KeCrash
+					end
+				end
+			end
+		end
+
 		auto typeobj
 		object@ ObObjectType typeobj!
 
 		if (typeobj@ ObTypeDirectoryType@ ~=)
 			object@ ObObjectReferenceByPointer drop
-
-			ObRootDirectoryUnlock
 
 			// not a directory. call the parse method for this object and
 			// return whatever it gives. if this is a device object, this is
@@ -613,6 +636,8 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 			end
 
 			if (parsefunc@ ~~)
+				ObRootDirectoryUnlock
+
 				if (path@ gb)
 					// there's more path left but no parse method
 
@@ -627,7 +652,6 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 				if (heapcookie@)
 					heapcookie@ MmFree
-					0 heapcookie!
 				end
 
 				return
@@ -643,6 +667,16 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 			object@ ObObjectDereferenceByPointer drop
 
+			ObRootDirectoryUnlock
+
+			if (ok@)
+				if (heapcookie@)
+					heapcookie@ MmFree
+				end
+
+				return
+			end
+
 			initialobject@ object!
 
 			if (reparsepath@)
@@ -657,16 +691,21 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 				reparsepath@ heapcookie!
 				reparsepath@ path!
 
-				0 ObRootDirectoryLockShared drop
+				1 ObRootDirectoryLockShared ok!
 
-				ObRootDirectoryObject@ object!
+				if (ok@)
+					reparsepath@ MmFree
+
+					return
+				end
+
+				0 object!
 
 				continue
 			end
 
 			if (heapcookie@)
 				heapcookie@ MmFree
-				0 heapcookie!
 			end
 
 			return
@@ -684,7 +723,6 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 				if (heapcookie@)
 					heapcookie@ MmFree
-					0 heapcookie!
 				end
 
 				return
@@ -707,7 +745,6 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 				if (heapcookie@)
 					heapcookie@ MmFree
-					0 heapcookie!
 				end
 
 				return
@@ -730,7 +767,6 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 					if (heapcookie@)
 						heapcookie@ MmFree
-						0 heapcookie!
 					end
 
 					STATUS_NAME_TOO_LONG ok!
@@ -788,7 +824,6 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 				if (heapcookie@)
 					heapcookie@ MmFree
-					0 heapcookie!
 				end
 
 				STATUS_NOT_FOUND ok!
@@ -802,7 +837,6 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 	if (heapcookie@)
 		heapcookie@ MmFree
-		0 heapcookie!
 	end
 end
 
@@ -869,4 +903,23 @@ fn ObObjectOpenByPath { flags access initialobjecthandle path -- handle ok }
 	if (initialobject@)
 		initialobject@ ObObjectDereferenceByPointer drop
 	end
+end
+
+fn ObIsPathRelative { path -- isrelative }
+	if (path@ gb '.' ==)
+		1 isrelative!
+		return
+	end
+
+	if (path@ gb ':' ==)
+		0 isrelative!
+		return
+	end
+
+	if (path@ gb '/' ==)
+		0 isrelative!
+		return
+	end
+
+	1 isrelative!
 end

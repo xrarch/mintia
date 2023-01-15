@@ -16,3 +16,5 @@ extern ObDirectoryDumpTree { directory spaces -- }
 extern ObObjectReferenceByPath { flags path initialobject process -- object ok }
 extern ObObjectOpenByPath { flags access initialobjecthandle path -- handle ok }
 extern ObObjectOpenByPathProcess { flags access initialobject path process -- handle ok }
+
+extern ObIsPathRelative { path -- isrelative }

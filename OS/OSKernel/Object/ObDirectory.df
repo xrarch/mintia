@@ -528,11 +528,16 @@ fn ObDirectoryRemoveByPointer { locked object -- ok }
 	end
 end
 
+const REPARSEMAX 100
+
 fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 	fnsection "PAGE$text"
 
 	auto pcomp
 	OBNAMEMAX alloc pcomp!
+
+	auto reparsecount
+	0 reparsecount!
 
 	auto heapcookie
 	0 heapcookie!
@@ -657,8 +662,14 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 				return
 			end
 
-			auto reparsepath
+			// note that the root directory rwlock is still held shared here.
+			// this is relied upon by certain clients of the object manager,
+			// i.e. the IO system, for synchronization issues pertaining to
+			// things such as mounting and unmounting volumes. If we ever
+			// decide to unlock that rwlock here, we need to review those
+			// places.
 
+			auto reparsepath
 			flags@ // flags
 			path@ // path
 			object@ // initialobject
@@ -687,6 +698,14 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 					0 heapcookie!
 				end
 
+				if (reparsecount@ REPARSEMAX >=)
+					reparsepath@ MmFree
+
+					STATUS_REPARSE_MAXIMUM ok!
+
+					return
+				end
+
 				// the reparsepath will always be on the heap
 				reparsepath@ heapcookie!
 				reparsepath@ path!
@@ -698,6 +717,8 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 
 					return
 				end
+
+				1 reparsecount +=
 
 				0 object!
 

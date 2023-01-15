@@ -90,5 +90,6 @@ const STATUS_INVALID_USERNAME         -88
 const STATUS_INVALID_GROUPNAME        -89
 const STATUS_USER_EXISTS              -90
 const STATUS_GROUP_EXISTS             -91
+const STATUS_REPARSE_MAXIMUM          -92
 
 extern OSStatusGetName { status -- name }

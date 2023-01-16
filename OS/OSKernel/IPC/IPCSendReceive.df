@@ -28,7 +28,16 @@
 #include "<inc>/IPC.h"
 
 fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
+	fnsection "PAGE$text"
+
 	IPCThreadBlockCreate ok!
+
+	if (ok@)
+		return
+	end
+
+	auto ipl
+	1 IPCGlobalLock ok! ipl!
 
 	if (ok@)
 		return
@@ -37,8 +46,6 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 	auto otherport
 
 	auto clientid
-
-	auto ipl
 
 	if (txmsg@)
 		0 // allowhandle
@@ -49,22 +56,22 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 		IPCMessageAllocate ok! txmsg! clientid!
 
 		if (ok@)
+			ipl@ IPCGlobalUnlock
+
 			return
 		end
 
 		if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
 			// we are a client port sending to the server
 
-			IPLDPC KeIPLRaise ipl!
-
 			portobject@ IPCPort_ServerPort + @ otherport!
 
 			if (otherport@ ~~)
 				// disconnected
 
-				ipl@ KeIPLLower
-
 				txmsg@ IPCMessageFree
+
+				ipl@ IPCGlobalUnlock
 
 				STATUS_PORT_DISCONNECTED ok!
 
@@ -81,19 +88,22 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 			if (ok@)
 				txmsg@ IPCMessageFree
 
+				ipl@ IPCGlobalUnlock
+
 				return
 			end
 
-			auto entryptr
 			clientid@ // handle
 			clienttable@ // handletable
 			1 // locked
-			ExHandleLookup ok! entryptr!
+			ExHandleTableLookupAndReferenceObject ok! otherport!
 
 			if (ok@)
 				clienttable@ ExHandleTableUnlock
 
 				txmsg@ IPCMessageFree
+
+				ipl@ IPCGlobalUnlock
 
 				if (ok@ STATUS_INVALID_HANDLE ==)
 					STATUS_NO_SUCH_CLIENT ok!
@@ -102,43 +112,25 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 				return
 			end
 
-			entryptr@@ otherport!
-
-			auto npheader
-			otherport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
-			IPLDPC KeIPLRaise ipl!
-
-			if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
-				// see function ObObjectDereferenceByPointer for an explanation
-				// on this check.
-
-				ipl@ KeIPLLower
-
-				clienttable@ ExHandleTableUnlock
-
-				txmsg@ IPCMessageFree
-
-				STATUS_NO_SUCH_CLIENT ok!
-
-				return
-			end
-
 			if (otherport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
 				// connection not yet accepted
 
-				ipl@ KeIPLLower
-
 				clienttable@ ExHandleTableUnlock
 
 				txmsg@ IPCMessageFree
+
+				ipl@ IPCGlobalUnlock
+
+				otherport@ ObObjectDereferenceByPointer drop
 
 				STATUS_INVALID_ARGUMENT ok!
 
 				return
 			end
 
-			clienttable@ ExHandleTableUnlock // WE ARE STILL AT IPLDPC THROUGHOUT UNLOCKING THIS
+			clienttable@ ExHandleTableUnlock
+
+			otherport@ ObObjectDereferenceByPointer drop
 		end
 
 		txmsg@ // msg
@@ -146,18 +138,16 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 		IPCPortSendMessage ok!
 
 		if (ok@)
-			ipl@ KeIPLLower
+			ipl@ IPCGlobalUnlock
 
 			return
 		end
 	end else
-		IPLDPC KeIPLRaise ipl!
-
 		if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
 			portobject@ IPCPort_ServerPort + @ otherport!
 
 			if (otherport@ ~~)
-				ipl@ KeIPLLower
+				ipl@ IPCGlobalUnlock
 
 				STATUS_PORT_DISCONNECTED ok!
 
@@ -169,6 +159,7 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 	if (rxmsg@)
 		// receive
 
+		ipl@ // ipl
 		rxmsg@ // umsg
 		mode@ // mode
 		0 // clientid
@@ -176,9 +167,9 @@ fn IPCPortSendAndWaitReceiveObject { mode rxmsg txmsg timeout portobject -- ok }
 		timeout@ // timeout
 		portobject@ // portobject
 		IPCPortReceiveMessage ok!
-	end else
-		ipl@ KeIPLLower
 	end
+
+	ipl@ IPCGlobalUnlock
 end
 
 fn IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
@@ -212,7 +203,16 @@ fn IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
 end
 
 fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
+	fnsection "PAGE$text"
+
 	IPCThreadBlockCreate ok!
+
+	if (ok@)
+		return
+	end
+
+	auto ipl
+	1 IPCGlobalLock ok! ipl!
 
 	if (ok@)
 		return
@@ -223,8 +223,6 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 	auto clientid
 	auto conid
 
-	auto ipl
-
 	1 // allowhandle
 	txmsg@ // umsg
 	mode@ // mode
@@ -233,6 +231,8 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 	IPCMessageAllocate ok! txmsg! clientid!
 
 	if (ok@)
+		ipl@ IPCGlobalUnlock
+
 		return
 	end
 
@@ -246,16 +246,14 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 
 		0 clientid!
 
-		IPLDPC KeIPLRaise ipl!
-
 		portobject@ IPCPort_ServerPort + @ otherport!
 
 		if (otherport@ ~~)
 			// disconnected
 
-			ipl@ KeIPLLower
-
 			txmsg@ IPCMessageFree
+
+			ipl@ IPCGlobalUnlock
 
 			STATUS_PORT_DISCONNECTED ok!
 
@@ -272,19 +270,22 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 		if (ok@)
 			txmsg@ IPCMessageFree
 
+			ipl@ IPCGlobalUnlock
+
 			return
 		end
 
-		auto entryptr
 		clientid@ // handle
 		clienttable@ // handletable
 		1 // locked
-		ExHandleLookup ok! entryptr!
+		ExHandleTableLookupAndReferenceObject ok! otherport!
 
 		if (ok@)
 			clienttable@ ExHandleTableUnlock
 
 			txmsg@ IPCMessageFree
+
+			ipl@ IPCGlobalUnlock
 
 			if (ok@ STATUS_INVALID_HANDLE ==)
 				STATUS_NO_SUCH_CLIENT ok!
@@ -293,43 +294,25 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 			return
 		end
 
-		entryptr@@ otherport!
-
-		auto npheader
-		otherport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
-		IPLDPC KeIPLRaise ipl!
-
-		if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
-			// see function ObObjectDereferenceByPointer for an explanation on
-			// this check.
-
-			ipl@ KeIPLLower
-
-			clienttable@ ExHandleTableUnlock
-
-			txmsg@ IPCMessageFree
-
-			STATUS_NO_SUCH_CLIENT ok!
-
-			return
-		end
-
 		if (otherport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
 			// connection not yet accepted
 
-			ipl@ KeIPLLower
-
 			clienttable@ ExHandleTableUnlock
 
 			txmsg@ IPCMessageFree
+
+			ipl@ IPCGlobalUnlock
+
+			otherport@ ObObjectDereferenceByPointer drop
 
 			STATUS_INVALID_ARGUMENT ok!
 
 			return
 		end
 
-		clienttable@ ExHandleTableUnlock // WE ARE STILL AT IPLDPC THROUGHOUT UNLOCKING THIS
+		clienttable@ ExHandleTableUnlock
+
+		otherport@ ObObjectDereferenceByPointer drop
 	end
 
 	txmsg@ // msg
@@ -337,13 +320,14 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 	IPCPortSendMessage ok!
 
 	if (ok@)
-		ipl@ KeIPLLower
+		ipl@ IPCGlobalUnlock
 
 		return
 	end
 
 	// receive
 
+	ipl@ // ipl
 	rxmsg@ // umsg
 	mode@ // mode
 	clientid@ // clientid
@@ -353,27 +337,27 @@ fn IPCPortSendAndWaitReplyObject { mode rxmsg txmsg timeout portobject -- ok }
 	IPCPortReceiveMessage ok!
 
 	if (object@)
-		IPLDPC KeIPLRaise ipl!
-
 		if (txmsg@ IPCKernelMessage_Object + @)
 			// the object wasn't consumed, clear the pointer so it never is
 			// since we're about to dereference it.
 
 			0 txmsg@ IPCKernelMessage_Object + !
 
-			ipl@ KeIPLLower
+			ipl@ IPCGlobalUnlock
 		end else
 			// the object was consumed; the message was left around so we
 			// could check whether it was or not, so free the message now.
 
-			ipl@ KeIPLLower
-
 			txmsg@ IPCMessageFree
+
+			ipl@ IPCGlobalUnlock
 		end
 
 		// return our reference to the passed object.
 
 		object@ ObObjectDereferenceByPointer drop
+	end else
+		ipl@ IPCGlobalUnlock
 	end
 end
 

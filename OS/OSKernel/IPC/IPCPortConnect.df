@@ -28,7 +28,16 @@
 #include "<inc>/IPC.h"
 
 fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
+	fnsection "PAGE$text"
+
 	IPCThreadBlockCreate ok!
+
+	if (ok@)
+		return
+	end
+
+	auto ipl
+	1 IPCGlobalLock ok! ipl!
 
 	if (ok@)
 		return
@@ -46,6 +55,8 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	IPCPortCreateObject ok! clientport!
 
 	if (ok@)
+		ipl@ IPCGlobalUnlock
+
 		portobject@ ObObjectDereferenceByPointer drop
 
 		return
@@ -60,6 +71,8 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	IPCMessageAllocate ok! ktxmsg! drop
 
 	if (ok@)
+		ipl@ IPCGlobalUnlock
+
 		clientport@ ObObjectDereferenceByPointer drop
 		portobject@ ObObjectDereferenceByPointer drop
 
@@ -68,35 +81,25 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 
 	OSPORT_MESSAGE_CONNECTION ktxmsg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
 
-	// dereference the server port so it can be closed by host properly.
-
-	portobject@ ObObjectDereferenceByPointer drop
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (clientport@ IPCPort_ServerPort + @ ~~)
-		ipl@ KeIPLLower
-
-		clientport@ ObObjectDereferenceByPointer drop
-
-		STATUS_CONNECTION_FAILED ok!
-
-		return
-	end
+	// send the connection message.
 
 	ktxmsg@ // msg
 	portobject@ // portobject
 	IPCPortSendMessage ok!
 
+	// dereference the server port so it can be closed by host properly.
+
+	portobject@ ObObjectDereferenceByPointer drop
+
 	if (ok@)
-		ipl@ KeIPLLower
+		ipl@ IPCGlobalUnlock
 
 		clientport@ ObObjectDereferenceByPointer drop
 
 		return
 	end
 
+	ipl@ // ipl
 	rxmsg@ // umsg
 	mode@ // mode
 	0 // clientid
@@ -106,6 +109,8 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	IPCPortReceiveMessage ok!
 
 	if (ok@)
+		ipl@ IPCGlobalUnlock
+
 		clientport@ ObObjectDereferenceByPointer drop
 
 		return
@@ -114,12 +119,16 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	if (clientport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
 		// failed to connect.
 
+		ipl@ IPCGlobalUnlock
+
 		clientport@ ObObjectDereferenceByPointer drop
 
 		STATUS_CONNECTION_FAILED ok!
 
 		return
 	end
+
+	ipl@ IPCGlobalUnlock
 end
 
 fn IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
@@ -190,6 +199,15 @@ fn IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
 end
 
 fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
+	fnsection "PAGE$text"
+
+	auto ipl
+	1 IPCGlobalLock ok! ipl!
+
+	if (ok@)
+		return
+	end
+
 	auto clientid
 	auto ktxmsg
 	0 // allowhandle
@@ -200,6 +218,8 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 	IPCMessageAllocate ok! ktxmsg! clientid!
 
 	if (ok@)
+		ipl@ IPCGlobalUnlock
+
 		return
 	end
 
@@ -213,19 +233,23 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 	if (ok@)
 		ktxmsg@ IPCMessageFree
 
+		ipl@ IPCGlobalUnlock
+
 		return
 	end
 
-	auto entryptr
+	auto clientport
 	clientid@ // handle
 	clienttable@ // handletable
 	1 // locked
-	ExHandleLookup ok! entryptr!
+	ExHandleTableLookupAndReferenceObject ok! clientport!
 
 	if (ok@)
 		clienttable@ ExHandleTableUnlock
 
 		ktxmsg@ IPCMessageFree
+
+		ipl@ IPCGlobalUnlock
 
 		if (ok@ STATUS_INVALID_HANDLE ==)
 			STATUS_NO_SUCH_CLIENT ok!
@@ -234,38 +258,16 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 		return
 	end
 
-	auto clientport
-	entryptr@@ clientport!
-
-	auto npheader
-	clientport@ ObCommonHeader_SIZEOF - ObCommonHeader_NonpagedHeader + @ npheader!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (npheader@ ObNonpagedHeader_PointerCount + @ ~~)
-		// see function ObObjectDereferenceByPointer for an explanation on
-		// this check.
-
-		ipl@ KeIPLLower
-
-		clienttable@ ExHandleTableUnlock
-
-		ktxmsg@ IPCMessageFree
-
-		STATUS_NO_SUCH_CLIENT ok!
-
-		return
-	end
-
 	if (clientport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
 		// connection already accepted?
 
-		ipl@ KeIPLLower
-
 		clienttable@ ExHandleTableUnlock
 
 		ktxmsg@ IPCMessageFree
+
+		ipl@ IPCGlobalUnlock
+
+		clientport@ ObObjectDereferenceByPointer drop
 
 		STATUS_INVALID_ARGUMENT ok!
 
@@ -285,9 +287,11 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 		context@ clientport@ IPCPort_ServerContextForClient + !
 	end
 
-	ipl@ KeIPLLower
-
 	clienttable@ ExHandleTableUnlock
+
+	ipl@ IPCGlobalUnlock
+
+	clientport@ ObObjectDereferenceByPointer drop
 end
 
 fn IPCPortAccept { mode context txmsg reject porthandle -- ok }

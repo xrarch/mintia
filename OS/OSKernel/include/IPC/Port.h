@@ -55,7 +55,6 @@ struct IPCKernelMessage
 	4 OriginatingPort
 	4 RundownPointer
 	4 Object
-	4 ObjectCapturedHeader
 	4 EnqueuedTo
 
 // user-visible part
@@ -94,7 +93,7 @@ extern IPCMessageDequeueRundown { msg -- }
 extern IPCMessageDequeue { msg -- }
 
 extern IPCPortSendMessage { msg portobject -- ok }
-extern IPCPortReceiveMessage { umsg mode clientid conid timeout portobject -- ok }
+extern IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok }
 
 extern IPCPortSendAndWaitReceive { mode rxmsg txmsg timeout porthandle -- ok }
 extern IPCPortSendAndWaitReply { mode rxmsg txmsg timeout porthandle -- ok }
@@ -105,5 +104,5 @@ extern IPCThreadBlockCreate { -- ok }
 
 externptr IPCPortObjectType
 
-extern IPCGlobalLock { -- ok }
-extern IPCGlobalUnlock { -- }
+extern IPCGlobalLock { alertable -- ipl ok }
+extern IPCGlobalUnlock { ipl -- }

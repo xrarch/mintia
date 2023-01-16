@@ -28,15 +28,10 @@
 #include "<inc>/IPC.h"
 
 fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg ok }
-	// allocating from a zone is so fast we should just disable interrupts.
-
-	auto rs
-	HALCPUInterruptDisable rs!
+	fnsection "PAGE$text"
 
 	portobject@ IPCPort_ZoneHeader + // zoneheader
 	MmZoneAllocate ok! msg!
-
-	rs@ HALCPUInterruptRestore
 
 	if (ok@)
 		if (DEBUGCHECKS)
@@ -75,13 +70,9 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		KeSafeCopyIn ok!
 
 		if (ok@)
-			HALCPUInterruptDisable rs!
-
 			msg@ // ptr
 			portobject@ IPCPort_ZoneHeader + // zoneheader
 			MmZoneFree
-
-			rs@ HALCPUInterruptRestore
 
 			return
 		end
@@ -98,13 +89,9 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		portobject@ IPCPort_MaximumMessageBody + @ >)
 		STATUS_MESSAGE_TOO_LONG ok!
 
-		HALCPUInterruptDisable rs!
-
 		msg@ // ptr
 		portobject@ IPCPort_ZoneHeader + // zoneheader
 		MmZoneFree
-
-		rs@ HALCPUInterruptRestore
 
 		return
 	end
@@ -117,13 +104,9 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 			KeSafeCopyIn ok!
 
 			if (ok@)
-				HALCPUInterruptDisable rs!
-
 				msg@ // ptr
 				portobject@ IPCPort_ZoneHeader + // zoneheader
 				MmZoneFree
-
-				rs@ HALCPUInterruptRestore
 
 				return
 			end
@@ -143,13 +126,9 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		end
 
 		if (allowhandle@ ~~)
-			HALCPUInterruptDisable rs!
-
 			msg@ // ptr
 			portobject@ IPCPort_ZoneHeader + // zoneheader
 			MmZoneFree
-
-			rs@ HALCPUInterruptRestore
 
 			STATUS_INVALID_ARGUMENT ok!
 
@@ -164,25 +143,17 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		ObObjectReferenceByHandle ok! passedobject! access!
 
 		if (ok@)
-			HALCPUInterruptDisable rs!
-
 			msg@ // ptr
 			portobject@ IPCPort_ZoneHeader + // zoneheader
 			MmZoneFree
-
-			rs@ HALCPUInterruptRestore
 
 			return
 		end
 
 		if (access@ ACCESS_NOINHERIT &)
-			HALCPUInterruptDisable rs!
-
 			msg@ // ptr
 			portobject@ IPCPort_ZoneHeader + // zoneheader
 			MmZoneFree
-
-			rs@ HALCPUInterruptRestore
 
 			passedobject@ ObObjectDereferenceByPointer drop
 
@@ -196,13 +167,9 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		if (access@ msg@ IPCKernelMessage_Header + OSMessageHeader_Access + @ | access@ ~=)
 			// not a subset
 
-			HALCPUInterruptDisable rs!
-
 			msg@ // ptr
 			portobject@ IPCPort_ZoneHeader + // zoneheader
 			MmZoneFree
-
-			rs@ HALCPUInterruptRestore
 
 			passedobject@ ObObjectDereferenceByPointer drop
 
@@ -212,7 +179,6 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		end
 
 		passedobject@ msg@ IPCKernelMessage_Object + !
-		passedobject@ ObObjectNonpagedHeader msg@ IPCKernelMessage_ObjectCapturedHeader + !
 
 		// no other message type allowed when passing a handle.
 		OSPORT_MESSAGE_REQUEST msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
@@ -232,8 +198,6 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 	end
 
 	if (conid@ OSPORT_CONID_NEW ==)
-		HALCPUInterruptDisable rs!
-
 		portobject@ IPCPort_NextConversationID + @ conid!
 
 		conid@ msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + !
@@ -244,31 +208,26 @@ fn IPCMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg o
 		end else
 			conid@ 1 + portobject@ IPCPort_NextConversationID + !
 		end
-
-		rs@ HALCPUInterruptRestore
 	end else
 		conid@ msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + !
 	end
 end
 
 fn IPCMessageFree { msg -- }
-	// freeing to a zone is so fast we should just disable interrupts.
+	fnsection "PAGE$text"
 
 	if (msg@ IPCKernelMessage_Object + @)
 		msg@ IPCKernelMessage_Object + @ ObObjectDereferenceByPointer drop
 	end
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
 	msg@ // ptr
 	msg@ IPCKernelMessage_OriginatingPort + @ IPCPort_ZoneHeader + // zoneheader
 	MmZoneFree
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn IPCMessageZoneExtend { portobject -- msg ok }
+	fnsection "PAGE$text"
+
 	auto msgzonesize
 	IPCKernelMessage_SIZEOF portobject@ IPCPort_MaximumMessageBody + @ +
 	IPCMESSAGEEXTENSION *
@@ -284,7 +243,7 @@ fn IPCMessageZoneExtend { portobject -- msg ok }
 
 	charge@ // charge
 	quotablock@ // quotablock
-	MmQuotaBlockCharge ok!
+	MmQuotaBlockChargePaged ok!
 
 	if (ok@)
 		return
@@ -295,19 +254,16 @@ fn IPCMessageZoneExtend { portobject -- msg ok }
 	auto chunk
 	msgzonesize@ // bytes
 	'PoZx' // tag
-	CANBLOCK // flags
+	PAGED // flags
 	MmAllocWithTag ok! chunk!
 
 	if (ok@)
 		charge@ // charge
 		quotablock@ // quotablock
-		MmQuotaBlockUncharge
+		MmQuotaBlockUnchargePaged
 
 		return
 	end
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
 
 	msgzonesize@ // bytes
 	chunk@ // chunk
@@ -319,8 +275,6 @@ fn IPCMessageZoneExtend { portobject -- msg ok }
 	portobject@ IPCPort_ZoneHeader + // zoneheader
 	MmZoneAllocate ok! msg!
 
-	ipl@ KeIPLLower
-
 	if (DEBUGCHECKS)
 		if (ok@)
 			"IPCMessageZoneExtend: failed to allocate even though just extended\n" KeCrash
@@ -329,6 +283,8 @@ fn IPCMessageZoneExtend { portobject -- msg ok }
 end
 
 fn IPCMessageEnqueueRundown { msg -- }
+	fnsection "PAGE$text"
+
 	// add message to port rundown list
 
 	auto msgport
@@ -349,6 +305,8 @@ fn IPCMessageEnqueueRundown { msg -- }
 end
 
 fn IPCMessageDequeueRundown { msg -- }
+	fnsection "PAGE$text"
+
 	// remove message from port rundown list
 
 	auto msgport
@@ -374,6 +332,8 @@ fn IPCMessageDequeueRundown { msg -- }
 end
 
 fn IPCMessageDequeue { msg -- }
+	fnsection "PAGE$text"
+
 	// remove message from queue
 
 	auto portobject

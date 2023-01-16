@@ -1,12 +1,12 @@
 # MINTIA Boot Process
 
-The boot process starts when the [LIMNstation BIOS](https://github.com/limnarch/a3x) grabs block 1 of the selected boot partition and jumps to it. This small boot program will load [OSLoader](https://github.com/limnarch/mintia/tree/main/OS/OSLoader). True to its name, OSLoader will locate and load essential MINTIA components.
+The boot process starts when the [XR/station BIOS](https://github.com/xrarch/a3x) grabs block 1 of the selected boot partition and jumps to it. This small boot program will load [OSLoader](https://github.com/xrarch/mintia/tree/main/OS/OSLoader). True to its name, OSLoader will locate and load essential MINTIA components.
 
 | Component                   | Typical Path                   | Description                                                                                                                            |
 |-----------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | OSLoader                    | /OSLoader.a3x | The bootloader.                                                                      |
 | MINTIA Kernel               | /mintia/OSKernel.exe | The main body of kernel code, the center of the operating system.                                                                      |
-| Hardware Abstraction Layer  | /mintia/HALLIMNstation.dll  | Anything and everything platform-specific in the kernel is put in the HAL, which forms the very lowest layer of the operating system.  |
+| Hardware Abstraction Layer  | /mintia/HALXRstation.dll  | Anything and everything platform-specific in the kernel is put in the HAL, which forms the very lowest layer of the operating system.  |
 | Dragonfruit Runtime Library | /mintia/Dragonfruit.dll     | The dragonfruit library.                                                                    |
 | Drivers                     | /mintia/BootDrivers/        | Any drivers that Loader determines are necessary to operate the machine.                                                               |
 | Binary Resources            | /mintia/BootResources/      | Large reclaimable resources like fonts and logos.                                                                                      |

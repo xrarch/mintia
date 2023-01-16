@@ -67,7 +67,7 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 ### Memory Management
 
 - [x] File page cache.
-- [x] Memory mapped files.
+- [x] Memory mapped files: supporting both fully shared and private (via copy-on-write), writable, and read-only mappings.
 - [x] Demand paging.
 - [x] Up to 16 pagefiles that can dynamically grow and shrink with the needs of the system.
 - [x] Dynamic working set management.

@@ -46,6 +46,15 @@ struct MclpType
 	MclpTypeOperations_SIZEOF Ops
 endstruct
 
+struct MclpParseContext
+	4 LexFlags
+	4 ParseFlags
+	4 FileHandle
+endstruct
+
+const LEX_INTERACTIVE 1
+const PARSE_ROOTBLOCK 1
+
 extern MclpMachineLock { machine -- }
 extern MclpMachineUnlock { machine -- }
 

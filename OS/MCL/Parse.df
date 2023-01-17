@@ -5,6 +5,7 @@
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
+#include "<ll>/MCL/Mcl.h"
 
 #include "Mcl.h"
 
@@ -15,31 +16,62 @@ fn MclpParseContextInitialize { ctx -- }
 	memset
 end
 
-fn MclpParseFile { filehandle machine -- ok }
+fn MclpParseFile { interactive streamhandle machine -- rootblock ok }
 	auto ctx
 	MclpParseContext_SIZEOF alloc ctx!
 
 	ctx@ MclpParseContextInitialize
 
-	if (filehandle@ OSGetStdIn ==)
+	if (interactive@)
 		LEX_INTERACTIVE ctx@ MclpParseContext_LexFlags + |=
 	end
 
 	PARSE_ROOTBLOCK ctx@ MclpParseContext_ParseFlags + |=
 
-	filehandle@ ctx@ MclpParseContext_FileHandle + !
+	streamhandle@ ctx@ MclpParseContext_StreamHandle + !
+
+	auto lexbuf
+	LEXBUFFERSIZE OSHeapAllocate ok! lexbuf!
+
+	if (ok@)
+		return
+	end
+
+	lexbuf@ ctx@ MclpParseContext_LexBuffer + !
+
+	machine@ ctx@ MclpParseContext_Machine + !
 
 	0 // endtoken
 	ctx@ // ctx
-	machine@ // machine
-	MclpParseBlock ok!
+	MclpParseBlock ok! rootblock!
 end
 
-fn MclpParseBlock { endtoken ctx machine -- ok }
+fn MclpParseBlock { endtoken ctx -- block ok }
 	auto isrootblock
 	ctx@ MclpParseContext_ParseFlags + @ PARSE_ROOTBLOCK & isrootblock!
 
 	PARSE_ROOTBLOCK ~ ctx@ MclpParseContext_ParseFlags + &=
+
+	while (1)
+		auto eof
+		auto count
+		ctx@ MclpParseContext_LexBuffer + @ // buf
+		LEXBUFFERSIZE 1 - // max
+		ctx@ // ctx
+		MclpInteractiveReadLine ok! count! eof!
+
+		if (ok@)
+			ok@ OSStatusGetName "%s\n" Printf
+			return
+		end
+
+		if (eof@)
+			return
+		end
+
+		count@
+		ctx@ MclpParseContext_LexBuffer + @ "%s (%d)\n" Printf
+	end
 
 	0 ok!
 end

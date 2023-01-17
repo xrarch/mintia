@@ -11,6 +11,10 @@ struct MclpMachine
 	OSFastMutex_SIZEOF Mutex
 
 	MclpSymbolTable_SIZEOF SymbolTable
+
+	4 HistoryCount
+	4 HistoryListHead
+	4 HistoryListTail
 endstruct
 
 struct MclpValue
@@ -46,10 +50,16 @@ struct MclpType
 	MclpTypeOperations_SIZEOF Ops
 endstruct
 
+const LEXBUFFERSIZE 1024
+
 struct MclpParseContext
 	4 LexFlags
+	4 LexBuffer
+	4 StreamHandle
+
 	4 ParseFlags
-	4 FileHandle
+
+	4 Machine
 endstruct
 
 const LEX_INTERACTIVE 1
@@ -58,6 +68,8 @@ const PARSE_ROOTBLOCK 1
 extern MclpMachineLock { machine -- }
 extern MclpMachineUnlock { machine -- }
 
-extern MclpParseFile { filehandle machine -- ok }
+extern MclpParseFile { interactive streamhandle machine -- rootblock ok }
 
 extern MclpSymbolTableInitialize { symboltable -- }
+
+extern MclpInteractiveReadLine { buf max ctx -- eof count ok }

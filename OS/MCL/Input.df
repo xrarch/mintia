@@ -1,0 +1,389 @@
+//
+// Implements interactive input.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+#include "<ll>/OSDLL/OSConsoleControl.h"
+#include "<ll>/MCL/Mcl.h"
+
+#include "Mcl.h"
+
+struct MclpInteractiveHistoryEntry
+	4 Next
+	4 Prev
+	4 Length
+
+	0 Buffer
+endstruct
+
+const INPUTMODE_NORMAL 0
+const INPUTMODE_ESC0   1
+const INPUTMODE_ESC1   2
+
+fn MclpInteractiveReadLine { buf max ctx -- eof count ok }
+	auto stream
+	ctx@ MclpParseContext_StreamHandle + @ stream!
+
+	0 count!
+
+	auto pos
+	0 pos!
+
+	auto hist
+	0 hist!
+
+	auto oldhist
+	0 oldhist!
+
+	auto charbuf
+	4 alloc charbuf!
+
+	auto inputmode
+	INPUTMODE_NORMAL inputmode!
+
+	auto fhandle
+	stream@ OSStreamGetFileHandle fhandle!
+
+	OSCONSOLEMODE_RAW // arg2
+	OSCONSOLEIOCONTROL_SETMODE // arg1
+	fhandle@ // filehandle
+	OSIOControl drop drop
+
+	0 ok!
+
+	0 eof!
+
+	while (1)
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		1 // length
+		charbuf@ // buffer
+		stream@ // filehandle
+		OSStreamRead ok! drop
+
+		if (ok@)
+			break
+		end
+
+		auto c
+		charbuf@ gb c!
+
+		if (inputmode@ INPUTMODE_NORMAL ==)
+			if (c@ 0x03 ==) // ^C
+				"^C" Printf
+				0 count!
+				0 buf@ sb
+				break
+			end elseif (c@ 0x04 ==) // ^D
+				"^D" Printf
+				1 eof!
+				0 buf@ count@ + sb
+				break
+			end elseif (c@ 21 ==)
+				buf@ // dest
+				buf@ pos@ + // src
+				count@ pos@ - // sz
+				memmove
+
+				auto clcn
+				pos@ clcn!
+
+				while (clcn@)
+					'\b' Putc
+					1 clcn -=
+				end
+
+				buf@ // buf
+				count@ // totcnt
+				count@ pos@ - // count
+				count@ count@ pos@ - - // clearcount
+				MclpRedrawLine
+
+				pos@ count -=
+				0 pos!
+
+				MclpInteractiveFlush
+			end elseif (c@ '\[' ==)
+				INPUTMODE_ESC0 inputmode!
+			end elseif (c@ '\r' ==)
+				0 buf@ count@ + sb
+
+				0 // tmp
+				buf@ // buf
+				ctx@ // ctx
+				MclpInteractiveCaptureHistory drop
+
+				break
+			end elseif (c@ '\b' ==)
+				if (pos@)
+					1 count -=
+					1 pos -=
+
+					'\b' Putc
+
+					buf@ pos@ + // dest
+					buf@ pos@ + 1 + // src
+					count@ 1 + pos@ - // sz
+					memmove
+
+					buf@ pos@ + // buf
+					count@ pos@ - 1 + // totcnt
+					count@ pos@ - // count
+					1 // clearcount
+					MclpRedrawLine
+
+					MclpInteractiveFlush
+				end
+			end elseif (count@ max@ <)
+				if (c@ 0x20 >= c@ 0x7F <= &&)
+					buf@ pos@ + 1 + // dest
+					buf@ pos@ + // src
+					count@ pos@ - // sz
+					memmove
+
+					c@ buf@ pos@ + sb
+
+					1 count +=
+					1 pos +=
+
+					buf@ pos@ + 1 - // buf
+					count@ pos@ - // totcnt
+					count@ pos@ - 1 + // count
+					0 // clearcount
+					MclpRedrawLine
+
+					MclpInteractiveFlush
+				end
+			end
+		end elseif (inputmode@ INPUTMODE_ESC0 ==)
+			if (c@ '[' ==)
+				INPUTMODE_ESC1 inputmode!
+			end else
+				INPUTMODE_NORMAL inputmode!
+			end
+		end elseif (inputmode@ INPUTMODE_ESC1 ==)
+			INPUTMODE_NORMAL inputmode!
+			
+			auto newhist
+			0 newhist!
+
+			if (c@ 'D' ==) // left
+				if (pos@)
+					1 pos -=
+					'\b' Putc
+					MclpInteractiveFlush
+				end
+			end elseif (c@ 'C' ==) // right
+				if (count@ pos@ -)
+					buf@ pos@ + gb Putc
+					1 pos +=
+					MclpInteractiveFlush
+				end
+			end elseif (c@ 'B' ==) // down
+				if (hist@)
+					if (hist@ MclpInteractiveHistoryEntry_Prev + @)
+						hist@ MclpInteractiveHistoryEntry_Prev + @ hist!
+
+						1 newhist!
+					end else
+						oldhist@ hist!
+
+						1 newhist!
+					end
+				end
+			end elseif (c@ 'A' ==) // up
+				if (hist@ ~~)
+					ctx@ MclpParseContext_Machine + @ MclpMachine_HistoryListHead + @ hist!
+
+					1 newhist!
+
+					0 buf@ count@ + sb
+
+					1 // tmp
+					buf@ // buf
+					ctx@ // ctx
+					MclpInteractiveCaptureHistory oldhist!
+				end else
+					if (hist@ MclpInteractiveHistoryEntry_Next + @)
+						hist@ MclpInteractiveHistoryEntry_Next + @ hist!
+
+						1 newhist!
+					end
+				end
+			end
+
+			if (newhist@)
+				hist@ MclpInteractiveHistoryEntry_Length + @ clcn!
+
+				if (clcn@ max@ >)
+					max@ clcn!
+				end
+
+				buf@ // dest
+				hist@ MclpInteractiveHistoryEntry_Buffer + // src
+				clcn@ 1 + // sz
+				memcpy
+
+				auto cnt
+				pos@ cnt!
+
+				while (cnt@)
+					'\b' Putc
+					1 cnt -=
+				end
+
+				if (count@ clcn@ >)
+					buf@ // buf
+					count@ clcn@ - // totcnt
+					clcn@ // count
+					count@ clcn@ - // clearcount
+					MclpRedrawLine
+				end else
+					buf@ // buf
+					0 // totcnt
+					clcn@ // count
+					0 // clearcount
+					MclpRedrawLine
+				end
+
+				MclpInteractiveFlush
+
+				clcn@ count!
+				clcn@ pos!
+
+				if (hist@ oldhist@ ==)
+					oldhist@ OSHeapFree
+
+					0 oldhist!
+					0 hist!
+				end
+			end
+		end
+	end
+
+	OSCONSOLEMODE_RAW // arg2
+	OSCONSOLEIOCONTROL_RESETMODE // arg1
+	fhandle@ // filehandle
+	OSIOControl drop drop
+
+	'\n' Putc
+
+	MclpInteractiveFlush
+end
+
+fn MclpInteractiveFlush { -- }
+	OSFlushLine
+
+	0 // arg2
+	OSCONSOLEIOCONTROL_EXPEDITE // arg1
+	OSGetStdOut // filehandle
+	OSIOControl drop drop
+end
+
+const MCLHISTORYMAX 16
+
+fn MclpInteractiveCaptureHistory { tmp buf ctx -- hist }
+	auto machine
+	ctx@ MclpParseContext_Machine + @ machine!
+
+	auto h
+
+	if (tmp@ ~~)
+		// check if just whitespace
+
+		auto chk
+		buf@ chk!
+
+		auto justwhitespace
+		1 justwhitespace!
+
+		while (1)
+			if (chk@ gb ~~)
+				break
+			end
+
+			if (chk@ gb ' ' ~=)
+				0 justwhitespace!
+			end
+
+			1 chk +=
+		end
+
+		if (justwhitespace@)
+			return
+		end
+
+		if (machine@ MclpMachine_HistoryCount + @ MCLHISTORYMAX >=)
+			// remove the one on the back of the list
+
+			machine@ MclpMachine_HistoryListTail + @ h!
+
+			h@ MclpInteractiveHistoryEntry_Prev + @ machine@ MclpMachine_HistoryListTail + !
+			0 h@ MclpInteractiveHistoryEntry_Prev + @ MclpInteractiveHistoryEntry_Next + !
+
+			h@ OSHeapFree
+
+			1 machine@ MclpMachine_HistoryCount + -=
+		end
+	end
+
+	auto len
+	buf@ strlen len!
+
+	auto ok
+
+	MclpInteractiveHistoryEntry_SIZEOF len@ + 1 + OSHeapAllocate ok! hist!
+
+	if (ok@)
+		// that's embarrassing, pretend nothing happened and return.
+
+		return
+	end
+
+	len@ hist@ MclpInteractiveHistoryEntry_Length + !
+
+	hist@ MclpInteractiveHistoryEntry_Buffer + // dest
+	buf@ // src
+	len@ 1 + // sz
+	memcpy
+
+	if (tmp@ ~~)
+		machine@ MclpMachine_HistoryListHead + @ h!
+
+		0 hist@ MclpInteractiveHistoryEntry_Prev + !
+		h@ hist@ MclpInteractiveHistoryEntry_Next + !
+
+		if (h@)
+			hist@ h@ MclpInteractiveHistoryEntry_Prev + !
+		end else
+			hist@ machine@ MclpMachine_HistoryListTail + !
+		end
+
+		hist@ machine@ MclpMachine_HistoryListHead + !
+
+		1 machine@ MclpMachine_HistoryCount + +=
+	end
+end
+
+fn MclpRedrawLine { buf totcnt count clearcount -- }
+	while (count@)
+		buf@ gb Putc
+
+		1 buf +=
+		1 count -=
+	end
+
+	while (clearcount@)
+		' ' Putc
+
+		1 clearcount -=
+	end
+
+	while (totcnt@)
+		'\b' Putc
+
+		1 totcnt -=
+	end
+end

@@ -27,7 +27,7 @@
 const MMWORKINGSETTABLESIZE       (PAGESIZE MmProcessHeader_SIZEOF -)
 const MMWORKINGSETENTRIESPERTABLE (MMWORKINGSETTABLESIZE 4 /)
 
-const MMWORKINGSETINITIALENTRIES  256
+const MMWORKINGSETINITIALENTRIES  32
 const MMWORKINGSETEXTENDENTRIES   8
 
 const MMWORKINGSETENTRY_VALID 1
@@ -234,19 +234,9 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 
 	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
 		ipl@ KeIPLLower
+
 		return
 	end
-
-	auto wsli
-	0 wsli!
-
-	auto wsleptr
-	process@ PsProcess_MmHeader + @ MmProcessHeader_SIZEOF + wsleptr!
-
-	auto wsle
-
-	auto ok
-	auto pteaddr
 
 	auto maxi
 	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMaximumIndex + @ maxi!
@@ -256,57 +246,118 @@ fn MmWorkingSetRemap { flags startva endva process -- }
 		return
 	end
 
-	while (wsli@ maxi@ <=)
-		wsleptr@@ wsle!
+	auto ok
+	auto pteaddr
+	0 pteaddr!
 
-		if (wsle@ MMWORKINGSETENTRY_VALID &)
-			wsle@ PAGENUMBERMASK & wsle!
+	auto oldflags
 
-			if (wsle@ startva@ >=)
-				if (wsle@ endva@ <)
-					// found one, remap it
+	auto phyaddr
 
-					if (process@ PsSystemProcess@ ==)
-						wsle@ // vaddr
-						MmVirtualtoPTEAddress pteaddr!
-					end else
-						wsle@ // vaddr
-						MmVirtualtoPTEAddressUser pteaddr!
-					end
+	auto pfdbe
 
-					auto oldflags
+	if (endva@ startva@ - maxi@ PAGESHIFT << >)
+		// there's more in the mapped range than in the working set, so remap
+		// via working set entries rather than search the entire range of
+		// PTEs.
 
-					auto phyaddr
-					pteaddr@ // pteaddr
-					MmPTEInterpret ok! oldflags! phyaddr!
+		auto wsli
+		0 wsli!
 
-					if (DEBUGCHECKS)
-						if (ok@)
-							pteaddr@@ "MmWorkingSetRemap: invalid PTE %08x\n" KeCrash
+		auto wsleptr
+		process@ PsProcess_MmHeader + @ MmProcessHeader_SIZEOF + wsleptr!
+
+		auto wsle
+
+		while (wsli@ maxi@ <=)
+			wsleptr@@ wsle!
+
+			if (wsle@ MMWORKINGSETENTRY_VALID &)
+				wsle@ PAGENUMBERMASK & wsle!
+
+				if (wsle@ startva@ >=)
+					if (wsle@ endva@ <)
+						// found one, remap it
+
+						if (process@ PsSystemProcess@ ==)
+							wsle@ // vaddr
+							MmVirtualtoPTEAddress pteaddr!
+						end else
+							wsle@ // vaddr
+							MmVirtualtoPTEAddressUser pteaddr!
 						end
+
+						pteaddr@ // pteaddr
+						MmPTEInterpret ok! oldflags! phyaddr!
+
+						if (DEBUGCHECKS)
+							if (ok@)
+								pteaddr@@ "MmWorkingSetRemap: invalid PTE %08x\n" KeCrash
+							end
+						end
+
+						if (oldflags@ PTE_D &)
+							// page was dirty, reflect that in the pfdbe.
+
+							phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+							pfdbe@ // pfdbe
+							process@ // process
+							MmEvictablePageModify
+						end
+
+						phyaddr@ // phyaddr
+						flags@ // flags
+						pteaddr@ // pteaddr
+						MmPTEUpdate drop drop
 					end
-
-					if (oldflags@ PTE_D &)
-						// page was dirty, reflect that in the pfdbe.
-
-						auto pfdbe
-						phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
-
-						pfdbe@ // pfdbe
-						process@ // process
-						MmEvictablePageModify
-					end
-
-					phyaddr@ // phyaddr
-					flags@ // flags
-					pteaddr@ // pteaddr
-					MmPTEUpdate drop drop
 				end
 			end
-		end
 
-		4 wsleptr +=
-		1 wsli +=
+			4 wsleptr +=
+			1 wsli +=
+		end
+	end else
+		// there's more in the working set than in the range, so remap via
+		// PTEs rather than search the entire working set list.
+
+		while (startva@ endva@ <)
+			if (startva@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
+				startva@ MmVirtualtoPTEAddressWithFail ok! pteaddr!
+
+				if (ok@)
+					PERPAGETABLE startva +=
+					continue
+				end
+			end
+
+			pteaddr@ // pteaddr
+			MmPTEInterpret ok! oldflags! phyaddr!
+
+			if (ok@)
+				PAGESIZE startva +=
+				PTESIZE pteaddr +=
+				continue
+			end
+
+			if (oldflags@ PTE_D &)
+				// page was dirty, reflect that in the pfdbe.
+
+				phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+
+				pfdbe@ // pfdbe
+				process@ // process
+				MmEvictablePageModify
+			end
+
+			phyaddr@ // phyaddr
+			flags@ // flags
+			pteaddr@ // pteaddr
+			MmPTEUpdate drop drop
+
+			PTESIZE pteaddr +=
+			PAGESIZE startva +=
+		end
 	end
 
 	ipl@ KeIPLLower

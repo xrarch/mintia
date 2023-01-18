@@ -8,6 +8,7 @@ extern MmVirtualToPhysical { vaddr -- phyaddr }
 extern MmVirtualToPFDBE { vaddr -- pfdbe }
 extern MmVirtualtoPTEAddressUser { vaddr -- pteaddr }
 extern MmVirtualtoPTEAddress { vaddr -- pteaddr }
+extern MmVirtualtoPTEAddressWithFail { vaddr -- pteaddr ok }
 
 extern MmVirtualAddressIsValid { vaddr -- isvalid }
 

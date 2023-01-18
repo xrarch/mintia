@@ -72,4 +72,4 @@ extern MclpParseFile { interactive streamhandle machine -- rootblock ok }
 
 extern MclpSymbolTableInitialize { symboltable -- }
 
-extern MclpInteractiveReadLine { buf max ctx -- eof count ok }
+extern MclpInteractiveReadLine { buf max ctx -- count ok }

@@ -641,7 +641,15 @@ fn IOCachePageReadClusterComplete { firstpfdbe mdl -- }
 end
 
 fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
-	// if localpteaddr is set, we must enter and leave at IPLDPC.
+	if (DEBUGCHECKS)
+		if (localpteaddr@ ~~)
+			"IOCachePageRead: localpteaddr == 0\n" KeCrash
+		end
+
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IOCachePageRead: ipl != IPLDPC\n" KeCrash
+		end
+	end
 
 	auto cacheblock
 	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
@@ -654,9 +662,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 
 	auto process
 
-	if (localpteaddr@ ~~)
-		0 process!
-	end elseif (kflags@ IOKFLAG_SWAPIN &)
+	if (kflags@ IOKFLAG_SWAPIN &)
 		PsSystemProcess@ process!
 	end else
 		KeProcessCurrent process!
@@ -687,38 +693,32 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 			end
 		end
 
-		HALCPUInterruptDisable ipl!
-
 		if (kflags@ IOKFLAG_PAGEAC &)
 			1 MmHardPageFaultCount +=
 		end
 
 		1 MmPageInCount +=
 
-		ipl@ HALCPUInterruptRestore
-
 		auto capturedpte
 		auto transitionpte
 
-		if (localpteaddr@)
-			localpteaddr@@ capturedpte!
+		localpteaddr@@ capturedpte!
 
-			auto phyaddr
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
+		auto phyaddr
+		pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
 
-			if (kflags@ IOKFLAG_SWAPIN &)
-				// this is a kernel mapping
-				phyaddr@ PTE_TRANSITION | PTE_TLBHACK | transitionpte!
-			end else
-				phyaddr@ PTE_TRANSITION | transitionpte!
-			end
-
-			transitionpte@ localpteaddr@!
-
-			IPLAPC KeIPLLower
-
-			process@ MmVADListUnlock
+		if (kflags@ IOKFLAG_SWAPIN &)
+			// this is a kernel mapping
+			phyaddr@ PTE_TRANSITION | PTE_TLBHACK | transitionpte!
+		end else
+			phyaddr@ PTE_TRANSITION | transitionpte!
 		end
+
+		transitionpte@ localpteaddr@!
+
+		IPLAPC KeIPLLower
+
+		process@ MmVADListUnlock
 
 		// perform the read operation
 
@@ -779,9 +779,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 			mdl@ MmMDLHeader_Status + @ ok!
 		end
 
-		if (process@)
-			process@ MmVADListLock drop
-		end
+		process@ MmVADListLock drop
 
 		IPLDPC KeIPLRaise ipl!
 
@@ -799,26 +797,18 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_VALID |
 			pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
 
-			if (localpteaddr@)
-				if (localpteaddr@@ transitionpte@ ~=)
-					// PTE was deleted.
-					STATUS_REFAULT ok!
-				end
+			if (localpteaddr@@ transitionpte@ ~=)
+				// PTE was deleted.
+				STATUS_REFAULT ok!
 			end
 		end
 
 		if (ok@)
-			if (localpteaddr@)
-				if (localpteaddr@@ transitionpte@ ==)
-					capturedpte@ localpteaddr@!
-				end
+			if (localpteaddr@@ transitionpte@ ==)
+				capturedpte@ localpteaddr@!
 			end
 
 			pfdbe@ MmEvictablePageDereference drop
-		end
-
-		if (localpteaddr@ ~~)
-			ipl@ KeIPLLower
 		end
 	end elseif (kflags@ IOKFLAG_PAGEAC &)
 		HALCPUInterruptDisable ipl!

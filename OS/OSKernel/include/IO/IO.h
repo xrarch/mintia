@@ -8,7 +8,6 @@ const IOKFLAG_URGENT   2
 const IOKFLAG_ZEROES   4  // force IOCachePageGet to allocate zero pages
 const IOKFLAG_SWAPIN   8  // try forever to allocate pages
 const IOKFLAG_PAGEIN   16 // flush icache for page
-const IOKFLAG_PAGEAC   32 // do page-in accounting
 const IOKFLAG_CLUSTR   64 // return error if IO in progress
 // NOTE: upper 4 bits of IOKFLAG are reserved for driver use
 

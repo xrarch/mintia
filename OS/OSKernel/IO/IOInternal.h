@@ -31,3 +31,37 @@ externptr IOiFileControlBlockCacheTrimEvent
 
 externptr IOiWritebehindTimer
 externptr IOiWritebehindEvent
+
+struct IOiCacheInfoBlock
+	4 Next
+	4 Prev
+
+	4 References
+
+	4 ModifiedPageCount
+
+	4 FirstModifiedPage
+	4 LastModifiedPage
+
+	4 MapCount
+	4 Flags
+
+	4 SplayTreeRoot
+	4 BCBTreeRoot
+
+	KeEvent_SIZEOF BCBTreeEvent
+endstruct
+
+const IOCACHEBLOCKFLAG_TRUNCATING 1
+
+// should be kept in sync with MiPageFrameEntryEvictable
+struct IOiPageFrameEntryCache
+	4 Event // actually Evictable Next, store event pointer here
+	4 Prev
+	1 EvictionFlagsB  1 EvictionTypeB  2 ReferencesI
+	4 FCB
+	4 Parent
+	4 LeftChild
+	4 RightChild
+	4 OffsetInFile
+endstruct

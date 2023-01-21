@@ -1,0 +1,876 @@
+//
+// Implements management for view cache buffers.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "IOInternal.h"
+
+var VcBufferReclaimListHead 0
+public VcBufferReclaimListHead
+
+var VcBufferReclaimListTail 0
+public VcBufferReclaimListTail
+
+fn VcBufferReclaim { -- bcb vaddr }
+	VcBufferReclaimListHead@ bcb!
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"VcBufferReclaim: ipl != IPLDPC \n" KeCrash
+		end
+
+		if (bcb@ ~~)
+			"VcBufferReclaim: no buffer to reclaim\n" KeCrash
+		end
+
+		if (bcb@ VcBuffer_WindowAddress + @ ~~)
+			"VcBufferReclaim: BCB is unmapped\n" KeCrash
+		end
+	end
+
+	// increment the map count to remove it from the reclaim list
+
+	bcb@ VcBufferIncrementMapCount drop
+
+	// disassociate the BCB from the cacheblock and unmap it.
+	// if the BCB is non-permanent, return it to the caller so that it can be
+	// reused without performing an extra allocation.
+
+	bcb@ VcBuffer_WindowAddress + @ vaddr!
+
+	bcb@ MmBufferUnmap
+
+	bcb@ VcBuffer_Parent + // node
+	bcb@ VcBuffer_FileControlBlock + @ IOFileControlBlock_CacheInfoBlock + @ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
+	ExSplayTreeRemove
+
+	if (bcb@ VcBuffer_Type + @ VCBCBTYPE_PERMANENT ==)
+		0 bcb!
+	end
+end
+
+fn VcBufferFree { bcb -- }
+	// disassociate the BCB from the cacheblock and unmap it.
+	// if the BCB is non-permanent, free it.
+
+	if (bcb@ VcBuffer_WindowAddress + @)
+		if (bcb@ VcBuffer_Type + @ VCBCBTYPE_LARGE ==)
+			bcb@ VcBuffer_Length + @ // length
+			bcb@ VcBuffer_WindowAddress + @ // vaddr
+			PsSystemProcess@ // processobject
+			MmUnmapViewProcess drop
+		end else
+			bcb@ MmBufferUnmap
+
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
+
+			bcb@ VcBuffer_Parent + // node
+			bcb@ VcBuffer_FileControlBlock + @ IOFileControlBlock_CacheInfoBlock + @ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
+			ExSplayTreeRemove
+
+			ipl@ KeIPLLower
+
+			bcb@ VcBuffer_WindowAddress + @ VcWindowFree
+		end
+	end
+
+	if (bcb@ VcBuffer_Type + @ VCBCBTYPE_PERMANENT ==)
+		0 bcb@ VcBuffer_FileControlBlock + !
+		0 bcb@ VcBuffer_WindowAddress + !
+	end else
+		bcb@ MmFree
+	end
+end
+
+fn VcBufferAllocate { cacheblock -- bcb ok }
+	// each cacheblock has 1 BCB appended to it.
+	// see if this cacheblock's BCB is free and claim it if so.
+
+	0 ok!
+
+	cacheblock@ IOiCacheInfoBlock_SIZEOF + bcb!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (bcb@ VcBuffer_FileControlBlock + @ ~~)
+		// take it
+
+		-1 bcb@ VcBuffer_FileControlBlock + !
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	// allocate a new BCB from nonpaged pool.
+
+	VcBuffer_SIZEOF // bytes
+	'VcBu' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! bcb!
+
+	if (ok@)
+		return
+	end
+
+	VCBCBTYPE_NORMAL bcb@ VcBuffer_Type + !
+	0 bcb@ VcBuffer_WindowAddress + !
+	0 bcb@ VcBuffer_FileControlBlock + !
+end
+
+fn VcBufferGet { offset fcb -- bcb ok }
+	// looks up a BCB mapping the given offset of the file.
+	// if none exist, a new one is created and mapped.
+	// the MapCount is biased.
+
+	if (DEBUGCHECKS)
+		if (offset@ FILEVIEWOFFSETMASK &)
+			"VcBufferGet: unaligned offset\n" KeCrash
+		end
+	end
+
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ ~~)
+			"VcBufferGet: no cacheblock\n" KeCrash
+		end
+	end
+
+	0 ok!
+
+	// lock the BCB tree. this guards against two threads attempting to
+	// create this BCB at the same time, but does not guard against an
+	// existing BCB being reclaimed, so we still need IPL synch for that.
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	cacheblock@ IOiCacheInfoBlock_BCBTreeEvent + // object
+	KeThreadWaitForObject drop
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	offset@ // value
+	cacheblock@ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
+	ExSplayTreeFindNodeByValue bcb! drop
+
+	if (bcb@)
+		VcBuffer_Parent bcb -=
+
+		bcb@ VcBufferIncrementMapCount drop
+
+		ipl@ KeIPLLower
+
+		0 // priboost
+		cacheblock@ IOiCacheInfoBlock_BCBTreeEvent + // event
+		KeEventSignal
+
+		return
+	end
+
+	ipl@ KeIPLLower
+
+	auto vaddr
+	VcWindowAllocate vaddr! bcb!
+
+	if (bcb@ ~~)
+		cacheblock@ VcBufferAllocate ok! bcb!
+
+		if (ok@)
+			vaddr@ VcWindowFree
+
+			0 // priboost
+			cacheblock@ IOiCacheInfoBlock_BCBTreeEvent + // event
+			KeEventSignal
+
+			return
+		end
+	end
+
+	// initialize the BCB
+
+	fcb@ bcb@ VcBuffer_FileControlBlock + !
+
+	0 bcb@ VcBuffer_ReclaimNext + !
+	0 bcb@ VcBuffer_ReclaimPrev + !
+
+	vaddr@ bcb@ VcBuffer_WindowAddress + !
+	FILEVIEWGRANULARITY bcb@ VcBuffer_Length + !
+
+	0 bcb@ VcBuffer_Parent + !
+	0 bcb@ VcBuffer_LeftChild + !
+	0 bcb@ VcBuffer_RightChild + !
+	offset@ bcb@ VcBuffer_FileOffset + !
+
+	1 bcb@ VcBuffer_MapCountI + si
+	0 bcb@ VcBuffer_PinCountI + si
+
+	// map the buffer
+
+	bcb@ MmBufferMap
+
+	// insert the BCB into the splay tree
+
+	IPLDPC KeIPLRaise ipl!
+
+	0 // insertat
+	bcb@ VcBuffer_Parent + // node
+	cacheblock@ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
+	ExSplayTreeInsert
+
+	ipl@ KeIPLLower
+
+	0 // priboost
+	cacheblock@ IOiCacheInfoBlock_BCBTreeEvent + // event
+	KeEventSignal
+end
+
+fn VcBufferIncrementMapCount { bcb -- oldcount }
+	// increment the MapCount for the BCB. if it was zero, remove it from the
+	// reclaimable list.
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	bcb@ VcBuffer_MapCountI + gi oldcount!
+
+	oldcount@ 1 + bcb@ VcBuffer_MapCountI + si
+
+	if (oldcount@ ~~)
+		// remove from reclaimable list
+
+		auto ls
+		bcb@ VcBuffer_ReclaimPrev + @ ls!
+
+		auto ns
+		bcb@ VcBuffer_ReclaimNext + @ ns!
+
+		if (ls@)
+			ns@ ls@ VcBuffer_ReclaimNext + !
+		end else
+			ns@ VcBufferReclaimListHead!
+		end
+
+		if (ns@)
+			ls@ ns@ VcBuffer_ReclaimPrev + !
+		end else
+			ls@ VcBufferReclaimListTail!
+		end
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn VcBufferDecrementMapCount { bcb -- oldcount }
+	// decrement the MapCount for the BCB. if it became zero, insert it into
+	// the reclaimable list.
+
+	auto free
+	0 free!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	bcb@ VcBuffer_MapCountI + gi oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ ~~)
+			"VcBufferDecrementMapCount: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - bcb@ VcBuffer_MapCountI + si
+
+	if (oldcount@ 1 ==)
+		if (bcb@ VcBuffer_Type + @ VCBCBTYPE_LARGE ~=)
+			// insert into reclaimable list
+
+			auto t
+			VcBufferReclaimListTail@ t!
+
+			if (t@ ~~)
+				0 bcb@ VcBuffer_ReclaimNext + !
+				0 bcb@ VcBuffer_ReclaimPrev + !
+
+				bcb@ VcBufferReclaimListHead!
+				bcb@ VcBufferReclaimListTail!
+			end else
+				0 bcb@ VcBuffer_ReclaimNext + !
+
+				t@ bcb@ VcBuffer_ReclaimPrev + !
+				bcb@ t@ VcBuffer_ReclaimNext + !
+				bcb@ VcBufferReclaimListTail!
+			end
+		end else
+			1 free!
+		end
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	if (free@)
+		bcb@ VcBufferFree
+	end
+end
+
+fn VcBufferLargeMap { offset length fileobject -- vaddr bcb ok }
+	VcBuffer_SIZEOF // bytes
+	'VcBl' // tag
+	CANBLOCK // flags
+	MmAllocWithTag ok! bcb!
+
+	if (ok@)
+		return
+	end
+
+	VCBCBTYPE_LARGE bcb@ VcBuffer_Type + !
+	fileobject@ IOFile_FileControlBlock + @ bcb@ VcBuffer_FileControlBlock + !
+
+	1 bcb@ VcBuffer_MapCountI + si
+	0 bcb@ VcBuffer_PinCountI + si
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & bcb@ VcBuffer_Length + !
+
+	0 bcb@ VcBuffer_Parent + !
+	0 bcb@ VcBuffer_LeftChild + !
+	0 bcb@ VcBuffer_RightChild + !
+	offset@ PAGENUMBERMASK & bcb@ VcBuffer_FileOffset + !
+
+	length@ PAGEOFFSETMASK + PAGENUMBERMASK & // length
+	0 // startva
+	offset@ PAGENUMBERMASK & // sectionoffset
+	fileobject@ // mappedobject
+	PsSystemProcess@ // processobject
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	MmMapViewProcessObject ok! vaddr!
+
+	if (ok@)
+		bcb@ MmFree
+
+		return
+	end
+
+	vaddr@ bcb@ VcBuffer_WindowAddress + !
+
+	offset@ PAGEOFFSETMASK & vaddr +=
+end
+
+fn VcBufferDirty { bcb -- }
+	bcb@ MmBufferDirty
+end
+
+fn VcCacheInfoBlockTruncate { newsize cacheblock -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"VcCacheInfoBlockTruncate: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// unmap and free all the BCBs in the cacheblock's splay tree that contain
+	// the offset at newsize.
+	// this does not remove "LARGE" BCBs since those are special-purpose and
+	// should have all been removed by now.
+
+	auto maxwin
+	newsize@ FILEVIEWNUMBERMASK & maxwin!
+
+	auto bcb
+	auto lbcb
+
+	newsize@ // value
+	cacheblock@ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
+	ExSplayTreeFindNodeByValue bcb! lbcb!
+
+	if (bcb@ ~~)
+		lbcb@ bcb!
+	end
+
+	while (bcb@)
+		VcBuffer_Parent bcb -=
+
+		if (DEBUGCHECKS)
+			if (bcb@ VcBuffer_PinCountI + gi)
+				"VcCacheInfoBlockTruncate: BCB was pinned\n" KeCrash
+			end
+		end
+
+		if (bcb@ VcBuffer_FileOffset + @ newsize@ >=)
+			auto nbcb
+			bcb@ VcBuffer_Parent + // node
+			ExSplayTreeNodeNext nbcb!
+
+			// eliminate the BCB
+
+			bcb@ VcBufferIncrementMapCount drop
+
+			bcb@ VcBufferFree
+
+			nbcb@ bcb!
+		end elseif (bcb@ VcBuffer_FileOffset + @ maxwin@ ==)
+			// truncate the BCB beyond the last page in the new size
+
+			newsize@ FILEVIEWOFFSETMASK & PAGENUMBERMASK & // offset
+			bcb@ // bcb
+			MmBufferTruncate
+
+			bcb@ VcBuffer_Parent + // node
+			ExSplayTreeNodeNext bcb!
+		end else
+			bcb@ VcBuffer_Parent + // node
+			ExSplayTreeNodeNext bcb!
+		end
+	end
+end
+
+fn VcFileMap { offset length fileobject -- vaddr bcb ok }
+	// expects FCB to be locked either shared or exclusive; truncation must be
+	// blocked out.
+
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	auto cacheblock
+	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
+
+	if (DEBUGCHECKS)
+		if (cacheblock@ ~~)
+			"VcFileMap: no cacheblock\n" KeCrash
+		end
+	end
+
+	auto large
+	0 large!
+
+	if (length@)
+		if (length@ FILEVIEWGRANULARITY >)
+			1 large!
+		end elseif (offset@ FILEVIEWNUMBERMASK &
+			offset@ length@ + 1 - FILEVIEWNUMBERMASK & ~=)
+			1 large!
+		end
+	end
+
+	if (large@)
+		// allocate a LARGE bcb and map it into POOLSPACE.
+
+		offset@ // offset
+		length@ // length
+		fileobject@ // fileobject
+		VcBufferLargeMap ok! bcb! vaddr!
+	end else
+		offset@ // offset
+		fcb@ // fcb
+		VcFileControlBlockMap ok! bcb! vaddr!
+	end
+end
+
+fn VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
+	// map a fixed sized window of the file.
+
+	offset@ FILEVIEWNUMBERMASK & // offset
+	fcb@ // fcb
+	VcBufferGet ok! bcb!
+
+	if (ok@)
+		return
+	end
+
+	bcb@ VcBuffer_WindowAddress + @ vaddr!
+	offset@ FILEVIEWOFFSETMASK & vaddr +=
+end
+
+fn VcFileWrite { flags length offset buf fcb lastmode -- byteswritten ok }
+	fnsection "PAGE$text"
+
+	0 byteswritten!
+
+	auto bcb
+	0 bcb!
+
+	auto curvpn
+	-1 curvpn!
+
+	auto data
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	auto truncfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Truncate + @ truncfunc!
+
+	auto oldsize
+
+	if (truncfunc@ ~~)
+		// driver provides no way to grow this file
+
+		if (offset@ bytesize@ >=)
+			fcb@ IOFileControlBlockUnlock
+
+			STATUS_END_OF_DISK ok!
+
+			return
+		end
+
+		bytesize@ offset@ -
+		length@
+		min length!
+	end else
+		if (offset@ FILEVIEWNUMBERMASK >=)
+			fcb@ IOFileControlBlockUnlock
+
+			// prevent underflow
+			STATUS_END_OF_FILE ok!
+
+			return
+		end
+
+		FILEVIEWNUMBERMASK offset@ -
+		length@
+		min length!
+
+		if (offset@ length@ + bytesize@ >)
+			// ga grow tha file
+
+			fcb@ IOFileControlBlockUnlock
+
+			offset@ length@ + // newsize
+			1 // growing
+			1 // keeplocked
+			1 // zero
+			flags@ // flags
+			fcb@ // fcb
+			IOFileControlBlockTruncate ok! oldsize!
+
+			if (ok@)
+				// don't unlock FCB, IOFileControlBlockTruncate leaves it
+				// unlocked in case of error.
+
+				return
+			end
+		end
+	end
+
+	while (byteswritten@ length@ <)
+		if (offset@ FILEVIEWNUMBERMASK & curvpn@ ~=)
+			if (bcb@)
+				bcb@ VcBufferDirty
+				bcb@ VcBufferDecrementMapCount drop
+			end
+
+			offset@ FILEVIEWNUMBERMASK & // offset
+			fcb@ // fcb
+			VcBufferGet ok! bcb!
+
+			if (ok@)
+				0 bcb!
+				break
+			end
+
+			bcb@ VcBuffer_WindowAddress + @ offset@ FILEVIEWOFFSETMASK & + data!
+
+			offset@ FILEVIEWNUMBERMASK & curvpn!
+		end
+
+		auto m
+		length@ byteswritten@ -
+		PAGESIZE offset@ PAGEOFFSETMASK & -
+		min m!
+
+		if (m@ PAGESIZE ==)
+			// writing a full page -- no need to read something we're about to
+			// overwrite. if the PTE isn't already valid, add a zero page to
+			// the file at this offset.
+
+			if (data@ MmVirtualAddressIsValid ~~)
+				auto pfdbe
+				0 // localpteaddr
+				0 // iointent
+				IOKFLAG_ZEROES // kflags
+				offset@ PAGENUMBERMASK & // offset
+				fcb@ // fcb
+				IOCachePageGet ok! pfdbe!
+
+				if (ok@ ~~)
+					pfdbe@ MmEvictablePageDereference drop
+				end
+			end
+		end
+
+		if (lastmode@ USERMODE ==)
+			data@ // dest
+			buf@ // src
+			m@ // size
+			KeSafeCopyIn ok!
+
+			if (ok@)
+				// zero the rest of the page
+
+				m@ byteswritten +=
+
+				break
+			end
+		end else
+			data@ // dest
+			buf@ // src
+			m@ // size
+			memcpy
+		end
+
+		m@ data +=
+		m@ buf +=
+		m@ byteswritten +=
+		m@ offset +=
+	end
+
+	fcb@ IOFileControlBlockUnlock
+
+	if (bcb@)
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapCount drop
+	end
+end
+
+fn VcFileRead { flags length offset buf fcb lastmode -- bytesread ok }
+	fnsection "PAGE$text"
+
+	0 bytesread!
+
+	auto bcb
+	0 bcb!
+
+	auto curvpn
+	-1 curvpn!
+
+	auto data
+
+	auto bytesize
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+
+	if (offset@ bytesize@ >=)
+		return
+	end
+
+	bytesize@ offset@ -
+	length@
+	min length!
+
+	while (bytesread@ length@ <)
+		if (offset@ FILEVIEWNUMBERMASK & curvpn@ ~=)
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
+			end
+
+			offset@ FILEVIEWNUMBERMASK & // offset
+			fcb@ // fcb
+			VcBufferGet ok! bcb!
+
+			if (ok@)
+				0 bcb!
+				break
+			end
+
+			bcb@ VcBuffer_WindowAddress + @ offset@ FILEVIEWOFFSETMASK & + data!
+
+			offset@ FILEVIEWNUMBERMASK & curvpn!
+		end
+
+		auto m
+		length@ bytesread@ -
+		PAGESIZE offset@ PAGEOFFSETMASK & -
+		min m!
+
+		if (lastmode@ USERMODE ==)
+			buf@ // dest
+			data@ // src
+			m@ // size
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				// zero the rest of the page
+
+				break
+			end
+		end else
+			buf@ // dest
+			data@ // src
+			m@ // size
+			memcpy
+		end
+
+		m@ data +=
+		m@ buf +=
+		m@ bytesread +=
+		m@ offset +=
+	end
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
+end
+
+// Terminology:
+//   Window - Region of virtual address space into which a file view is mapped
+//   Buffer/BCB - Outstanding mapping for a file, possibly pinned
+
+var VcWindowFreeListHead 0
+
+buffer VcWindowAvailableEvent KeEvent_SIZEOF
+
+fn VcInitPhase1 { -- }
+	fnsection "INIT$text"
+
+	// initialize the file cache windows by linking the VIEWSPACE PTEs into a
+	// free list.
+
+	auto vaddr
+	VIEWSPACE VIEWSIZE + vaddr!
+
+	while (vaddr@ VIEWSPACE >)
+		FILEVIEWGRANULARITY vaddr -=
+
+		auto pteaddr
+		vaddr@ // vaddr
+		MmVirtualtoPTEAddress pteaddr!
+
+		VcWindowFreeListHead@ pteaddr@!
+		vaddr@ VcWindowFreeListHead!
+	end
+
+rosection "INIT$text"
+
+	VIEWSIZE FILEVIEWSHIFT >>
+	"Managing %d file views\n" "VcInitPhase1" HALLog
+
+rosection "text"
+
+	1 // signaled
+	OSEVENT_NOTIF // type
+	"VcWindowAvailableEvent" // name
+	VcWindowAvailableEvent // event
+	KeEventInitialize
+end
+
+fn VcWindowAllocate { -- bcb vaddr }
+	// allocate a window by either grabbing a free one or reclaiming a BCB.
+	// this routine has the possibility to return a BCB if it reclaims a non-
+	// permanent one, so the caller should check for this case and free the
+	// BCB if it doesn't want it.
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC >=)
+			"VcWindowAllocate: ipl >= IPLDPC\n" KeCrash
+		end
+	end
+
+	auto pteaddr
+	0 pteaddr!
+
+	0 bcb!
+
+	while (1)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		VcWindowFreeListHead@ vaddr!
+
+		if (vaddr@)
+			// found a free window, take it
+
+			vaddr@ // vaddr
+			MmVirtualtoPTEAddress pteaddr!
+
+			pteaddr@@ VcWindowFreeListHead!
+
+			break
+		end
+
+		// no free windows, reclaim one
+
+		if (VcBufferReclaimListHead@)
+			// found a reclaimable buffer, take it.
+
+			VcBufferReclaim vaddr! bcb!
+
+			break
+		end
+
+		// no free or reclaimable windows.
+		// wait and spin until we get one.
+
+		VcWindowAvailableEvent KeEventReset drop
+
+		ipl@ KeIPLLower
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		VcWindowAvailableEvent // object
+		KeThreadWaitForObject drop
+	end
+
+	if (pteaddr@ ~~)
+		vaddr@ // vaddr
+		MmVirtualtoPTEAddress pteaddr!
+	end
+
+	PTE_KERNEL_ZERO pteaddr@!
+
+	ipl@ KeIPLLower
+end
+
+fn VcWindowFree { vaddr -- }
+	// window MUST be unmapped!
+
+	auto pteaddr
+	vaddr@ // vaddr
+	MmVirtualtoPTEAddress pteaddr!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	VcWindowFreeListHead@ pteaddr@!
+	vaddr@ VcWindowFreeListHead!
+
+	if (VcWindowAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		0 // priboost
+		VcWindowAvailableEvent // event
+		KeEventSignal
+	end
+
+	ipl@ KeIPLLower
+end

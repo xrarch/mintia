@@ -148,6 +148,8 @@ extern IOFileControlBlockThrottle { -- }
 extern IOFileControlBlockIncrementReclaimable { -- }
 extern IOFileControlBlockDecrementReclaimable { -- }
 
+extern IOFilePageWriterDispatch { transfer -- }
+
 externptr IOBootDevice
 
 externptr IOFileControlBlockCacheSize

@@ -20,6 +20,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "../KeInternal.h"
+
 // if this seems janked up, its because it is, because this all used to be in
 // the HAL, and the process of moving it into the kernel was rough.
 
@@ -52,8 +54,8 @@ extern HALXr17032TLBFlushAll { -- }
 
 asm "
 
-KeXr17032ExceptionVector:
-.global KeXr17032ExceptionVector
+KiXr17032ExceptionVector:
+.global KiXr17032ExceptionVector
 	mtcr k0, t0 ; save t0 to free it as scratch
 	mtcr k1, t1 ; ditto with t1
 	mtcr k2, sp ; save stack pointer
@@ -124,7 +126,7 @@ KeXr17032ExceptionVector:
 	rshi a1, t0, 28
 	andi a1, a1, 15
 	mfcr a2, ebadaddr
-	mov  a0, sp ; give KeXr17032Exception our context
+	mov  a0, sp ; give KiXr17032Exception our context
 
 	subi sp, sp, 12
 	mov  long [sp + 8], lr
@@ -133,7 +135,7 @@ KeXr17032ExceptionVector:
 	mfcr t0, k3
 	mov  long [sp], t0
 
-	jal  KeXr17032Exception ; call KeXr17032Exception, to handle the exception
+	jal  KiXr17032Exception ; call KiXr17032Exception, to handle the exception
 
 	addi sp, sp, 12
 
@@ -188,13 +190,13 @@ KeXr17032ExceptionVector:
 	mov  long [sp], t0
 
 	mfcr a0, rs
-	jal  KeStackOverflow
+	jal  KiStackOverflow
 
 .hang:
 	b    .hang
 
-LoadInitialContext:
-.global LoadInitialContext
+KiLoadInitialContext:
+.global KiLoadInitialContext
 	mov  t0, long [sp + OSContext_ers]
 	mtcr rs, t0
 
@@ -236,7 +238,7 @@ LoadInitialContext:
 
 	rfe
 
-ThreadTrampoline:
+KiThreadTrampoline:
 	mov  s0, a0
 	mov  s1, a1
 	mov  s2, a2
@@ -250,8 +252,8 @@ ThreadTrampoline:
 	jr   s2
 
 ; a0 - tf
-KeXr17032Syscall:
-.global KeXr17032Syscall
+KiXr17032Syscall:
+.global KiXr17032Syscall
 	subi sp, sp, 20
 	mov  long [sp], zero
 	mov  long [sp + 4], s0
@@ -291,12 +293,12 @@ KeXr17032Syscall:
 
 .section INIT$text
 
-KeCPUInit:
-.global KeCPUInit
+KiCPUInit:
+.global KiCPUInit
 	mfcr t1, evec
 	mov  long [HALXr17032SavedEV], t1, tmp=t0
 
-	la   t0, KeXr17032ExceptionVector
+	la   t0, KiXr17032ExceptionVector
 	mtcr evec, t0
 
 	mtcr ebadaddr, zero
@@ -312,9 +314,9 @@ KeIPLCurrentGet:
 
 "
 
-extern ThreadTrampoline { -- }
+extern KiThreadTrampoline { -- }
 
-extern KeXr17032Syscall { tf -- }
+extern KiXr17032Syscall { tf -- }
 
 const EXCNAMESMAX 15
 
@@ -339,7 +341,7 @@ endtable
 
 extern PsPrepareUsermode { trapframe -- }
 
-fn KeStackOverflow { rs -- }
+fn KiStackOverflow { rs -- }
 	auto current
 	KeThreadCurrent@ current!
 
@@ -352,7 +354,7 @@ fn KeStackOverflow { rs -- }
 	rs@ "Kernel stack overflow %x\n" KeCrash
 end
 
-fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
+fn KiCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 	0 recheck!
 
 	auto usp
@@ -360,7 +362,7 @@ fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 
 	if (DEBUGCHECKS)
 		if (trapframe@ OSContext_ers + @ XR17032_ERS_USER & ~~)
-			trapframe@ "KeCopySignalFrame: not usermode trapframe %x\n" KeCrash
+			trapframe@ "KiCopySignalFrame: not usermode trapframe %x\n" KeCrash
 		end
 	end
 
@@ -450,7 +452,7 @@ fn KeThreadContinue { signum context thread -- ok }
 	end
 end
 
-fn KeXr17032Exception { badaddr ecause tf -- }
+fn KiXr17032Exception { badaddr ecause tf -- }
 	auto handled
 	1 handled!
 	
@@ -483,14 +485,14 @@ fn KeXr17032Exception { badaddr ecause tf -- }
 			KeIPLCurrent@ ipl!
 
 			if (ipl@ IPLDPC <)
-				if (KePendingSoftwareInterrupts@)
+				if (KiPendingSoftwareInterrupts@)
 					auto p
-					KePendingSoftwareInterrupts@ [ipl@]KePendingSoftwareInterruptMask@ & p!
+					KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 
 					while (p@)
-						[p@]KePendingSoftwareInterruptFirst@ KeSoftwareInterruptHandlerF
+						[p@]KiPendingSoftwareInterruptFirst@ KiSoftwareInterruptHandlerF
 
-						KePendingSoftwareInterrupts@ [ipl@]KePendingSoftwareInterruptMask@ & p!
+						KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 					end
 				end
 
@@ -502,7 +504,7 @@ fn KeXr17032Exception { badaddr ecause tf -- }
 		end elseif (ecause@ ECAUSESYS ==)
 			1 KeStatistics OSStatistics_SystemCalls + +=
 
-			tf@ KeXr17032Syscall
+			tf@ KiXr17032Syscall
 			1 handled!
 		end elseif (ecause@ ECAUSEPAGEFAULT ==)
 			HALCPUInterruptEnable
@@ -613,7 +615,7 @@ fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 	// enable interrupts and paging in the thread's context
 	XR17032_ERS_KTHREAD XR17032_RS_MMU | ctx@ OSContext_ers + !
 
-	pointerof ThreadTrampoline ctx@ OSContext_epc + !
+	pointerof KiThreadTrampoline ctx@ OSContext_epc + !
 
 	kstack@ ctx@ OSContext_sp + !
 
@@ -621,5 +623,5 @@ fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 
 	XR17032_RS_MMU ctx@ OSContext_ers + !
 
-	pointerof LoadInitialContext ctx@ OSContext_lr + !
+	pointerof KiLoadInitialContext ctx@ OSContext_lr + !
 end

@@ -1,6 +1,3 @@
-externptr KeTimerListHead
-externptr KeTimerListTail
-
 // do NOT change the size of this
 struct KeTimer
 	KeDispatchHeader_SIZEOF DispatchHeader

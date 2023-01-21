@@ -14,25 +14,10 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "KeInternal.h"
+
 var KeThreadWaitListHead 0
 public KeThreadWaitListHead
-
-// initializes a dispatch object's header
-
-fn KeDispatchInitialize { name type dobject -- }
-	0 dobject@ KeDispatchHeader_Signaled + !
-
-	type@ dobject@ KeDispatchHeader_Type + !
-
-	if (name@ ~~)
-		"NONE" dobject@ KeDispatchHeader_Name + !
-	end else
-		name@ dobject@ KeDispatchHeader_Name + !
-	end
-
-	0 dobject@ KeDispatchHeader_WaitBlockListHead + !
-	0 dobject@ KeDispatchHeader_WaitBlockListTail + !
-end
 
 fn KeDispatchIsSignaled { dobject -- signaled }
 	dobject@ KeDispatchHeader_Signaled + @ z> signaled!
@@ -59,197 +44,16 @@ fn KeDispatchWaitBlockTableInitialize { thread count waitblocktable -- }
 	end
 end
 
-fn KeDispatchWaitBlockDequeue { waitstatus waitblock -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeDispatchWaitBlockDequeue: ipl != IPLDPC\n" KeCrash
-		end
-
-		if (waitblock@ KeDispatchWaitBlock_Object + @ ~~)
-			"KeDispatchWaitBlockDequeue: attempt to dequeue a non-enqueued WaitBlock\n" KeCrash
-		end
-	end
-
-	auto object
-	waitblock@ KeDispatchWaitBlock_Object + @ object!
-
-	auto n
-	waitblock@ KeDispatchWaitBlock_Next + @ n!
-
-	if (n@)
-		waitblock@ KeDispatchWaitBlock_Prev + @ n@ KeDispatchWaitBlock_Prev + !
-	end else // no next means we were the tail
-		waitblock@ KeDispatchWaitBlock_Prev + @ object@ KeDispatchHeader_WaitBlockListTail + !
-	end
-
-	auto p
-	waitblock@ KeDispatchWaitBlock_Prev + @ p!
-
-	if (p@)
-		waitblock@ KeDispatchWaitBlock_Next + @ p@ KeDispatchWaitBlock_Next + !
-	end else // no prev means we were the head
-		waitblock@ KeDispatchWaitBlock_Next + @ object@ KeDispatchHeader_WaitBlockListHead + !
-	end
-
-	0 waitblock@ KeDispatchWaitBlock_Next + !
-	0 waitblock@ KeDispatchWaitBlock_Prev + !
-
-	0 waitblock@ KeDispatchWaitBlock_Object + !
-
-	waitstatus@ waitblock@ KeDispatchWaitBlock_WaitStatusReturn + !
-end
-
-// adds a WaitBlock to the tail of a dispatch object's WaitBlockList
-
-fn KeDispatchWaitBlockEnqueue { waitindex waittype waitblock object -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeDispatchWaitBlockInsert: ipl != IPLDPC\n" KeCrash
-		end
-
-		if (waitblock@ KeDispatchWaitBlock_Object + @)
-			"KeDispatchWaitBlockEnqueue: attempt to queue an enqueued WaitBlock\n" KeCrash
-		end
-	end
-
-	object@ waitblock@ KeDispatchWaitBlock_Object + !
-	waittype@ waitblock@ KeDispatchWaitBlock_WaitType + !
-	waitindex@ waitblock@ KeDispatchWaitBlock_WaitIndex + !
-
-	auto t
-	object@ KeDispatchHeader_WaitBlockListTail + @ t!
-
-	if (t@ ~~)
-		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
-		waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
-		return
-	end
-
-	// seek to the appropriate place to put this waitblock based on priority.
-
-	auto pri
-	waitblock@ KeDispatchWaitBlock_Thread + @ KeThread_PriorityB + gb pri!
-
-	while (t@)
-		if (t@ KeDispatchWaitBlock_Thread + @ KeThread_PriorityB + gb pri@ >=)
-			break
-		end
-
-		t@ KeDispatchWaitBlock_Prev + @ t!
-	end
-
-	// insert after t.
-
-	if (t@ ~~)
-		// nobody was higher priority, place at head
-
-		object@ KeDispatchHeader_WaitBlockListHead + @ t!
-
-		waitblock@ t@ KeDispatchWaitBlock_Prev + !
-		t@ waitblock@ KeDispatchWaitBlock_Next + !
-
-		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
-
-		return
-	end
-
-	auto n
-	t@ KeDispatchWaitBlock_Next + @ n!
-
-	if (n@)
-		waitblock@ n@ KeDispatchWaitBlock_Prev + !
-		n@ waitblock@ KeDispatchWaitBlock_Next + !
-	end else
-		waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
-	end
-
-	waitblock@ t@ KeDispatchWaitBlock_Next + !
-	t@ waitblock@ KeDispatchWaitBlock_Prev + !
-end
-
-// satisfies a WaitBlock
-
-fn KeDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeDispatchWaitBlockSatisfy: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	waitstatus@ waitblock@ KeDispatchWaitBlockDequeue
-
-	auto thread
-	waitblock@ KeDispatchWaitBlock_Thread + @ thread!
-
-	thread@ KeThread_WaitCountI + gi 1 -
-	thread@ KeThread_WaitCountI + si
-
-	auto wt
-	waitblock@ KeDispatchWaitBlock_WaitType + @ wt!
-
-	if (wt@ OSWAITANY ==)
-		waitblock@ KeDispatchWaitBlock_WaitIndex + @ // waitstatus
-		priboost@ // priboost
-		thread@ // thread
-		KeThreadWakeup drop
-	end elseif (wt@ OSWAITALL ==)
-		if (thread@ KeThread_WaitCountI + gi ~~)
-			0 priboost@ thread@ KeThreadWakeup drop
-		end
-	end
-end
-
-// satisfies all waiters on a dispatch object
-// this SIGNALS the object
-
-fn KeDispatchSatisfyAll { waitstatus priboost object -- count }
-	0 count!
-
-	1 object@ KeDispatchHeader_Signaled + !
-
-	auto h
-	object@ KeDispatchHeader_WaitBlockListHead + @ h!
-
-	auto wb
-
-	while (h@)
-		h@ wb!
-		h@ KeDispatchWaitBlock_Next + @ h!
-
-		waitstatus@ priboost@ wb@ KeDispatchWaitBlockSatisfy
-
-		1 count +=
-	end
-end
-
-// satisfies the highest priority, earliest wait on a dispatch object.
-// this signals the object if no thread was awoken and signal is non-zero.
-
-fn KeDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
-	auto h
-	object@ KeDispatchHeader_WaitBlockListHead + @ h!
-
-	if (h@)
-		h@ KeDispatchWaitBlock_Thread + @ wokenthread!
-		waitstatus@ priboost@ h@ KeDispatchWaitBlockSatisfy
-	end elseif (signal@)
-		0 wokenthread!
-		1 object@ KeDispatchHeader_Signaled + !
-	end else
-		0 wokenthread!
-	end
-end
-
 fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable waitblocktable -- ok }
 	0 ok!
 
 	if (DEBUGCHECKS)
 		if (waittype@ OSWAITALL <)
-			waittype@ "KeThreadWaitBlocksDequeue: waittype=%d\n" KeCrash
+			waittype@ "KeThreadWaitForMultipleObjects: waittype=%d\n" KeCrash
 		end
 
 		if (waittype@ OSWAITANY >)
-			waittype@ "KeThreadWaitBlocksDequeue: waittype=%d\n" KeCrash
+			waittype@ "KeThreadWaitForMultipleObjects: waittype=%d\n" KeCrash
 		end
 	end
 
@@ -298,7 +102,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 
 						current@ // thread
 						object@ // mutex
-						KeMutexOwnerSet
+						KiMutexOwnerSet
 
 						i@ ok!
 
@@ -310,7 +114,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 							// recursively acquiring this mutex again would cause
 							// an underflow.
 
-							current@ KeThreadWaitBlocksDequeue
+							current@ KiThreadWaitBlocksDequeue
 
 							waitipl@ KeIPLLower
 
@@ -350,7 +154,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 								// recursively acquiring this mutex again would cause
 								// an underflow.
 
-								current@ KeThreadWaitBlocksDequeue
+								current@ KiThreadWaitBlocksDequeue
 
 								waitipl@ KeIPLLower
 
@@ -372,7 +176,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 				waittype@ // waittype
 				waitblock@ // waitblock
 				object@ // object
-				KeDispatchWaitBlockEnqueue
+				KiDispatchWaitBlockEnqueue
 			end
 
 			KeDispatchWaitBlock_SIZEOF waitblock +=
@@ -391,7 +195,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 			// the wait is already satisfied. dequeue any wait blocks we just
 			// enqueued and then return.
 
-			current@ KeThreadWaitBlocksDequeue
+			current@ KiThreadWaitBlocksDequeue
 
 			waitipl@ KeIPLLower
 
@@ -406,7 +210,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		if (ok@)
 			// we died, don't sleep
 
-			current@ KeThreadWaitBlocksDequeue
+			current@ KiThreadWaitBlocksDequeue
 
 			waitipl@ KeIPLLower
 
@@ -429,7 +233,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 			OSWAITANY // waittype
 			waitblock@ // waitblock
 			current@ KeThread_Timer + // object
-			KeDispatchWaitBlockEnqueue
+			KiDispatchWaitBlockEnqueue
 
 			0 // context1
 			0 // context2
@@ -442,7 +246,7 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		waitmode@ // waitmode
 		alertable@ // alertable
 		0 // explicitstatus
-		KeThreadWait ok!
+		KiThreadWait ok!
 
 		waitipl@ KeIPLLower
 
@@ -474,7 +278,7 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 
 				current@ // thread
 				object@ // mutex
-				KeMutexOwnerSet
+				KiMutexOwnerSet
 
 				waitipl@ KeIPLLower
 
@@ -550,7 +354,7 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 		OSWAITANY // waittype
 		current@ KeThread_WaitBlocks + // waitblock
 		object@ // object
-		KeDispatchWaitBlockEnqueue
+		KiDispatchWaitBlockEnqueue
 
 		if (timeout@ OSWAIT_TIMEOUTINFINITE ~=)
 			// there's a timeout and its not infinite, set up a timer waitblock
@@ -564,7 +368,7 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 			OSWAITANY // waittype
 			current@ KeThread_TimeoutWaitBlock + // waitblock
 			current@ KeThread_Timer + // object
-			KeDispatchWaitBlockEnqueue
+			KiDispatchWaitBlockEnqueue
 
 			0 // context1
 			0 // context2
@@ -577,7 +381,7 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 		waitmode@ // waitmode
 		alertable@ // alertable
 		0 // explicitstatus
-		KeThreadWait ok!
+		KiThreadWait ok!
 
 		waitipl@ KeIPLLower
 
@@ -587,10 +391,270 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 	end
 end
 
-fn KeThreadWakeup { waitstatus priboost thread -- woken }
+fn KeThreadSleep { ms waitmode alertable -- ok }
+	0 ok!	
+
+	if (ms@ 0 ==)
+		THREADSTATUS_READY KeThreadYield
+
+		return
+	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	while (1)
+		0 current@ KeThread_WaitBlockCountI + si
+		0 current@ KeThread_WaitBlockTable + !
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		"KeThreadSleep" // name
+		0 // function
+		current@ KeThread_Timer + // timer
+		KeTimerInitialize
+
+		STATUS_WAIT_TIMEOUT // waitindex
+		OSWAITANY // waittype
+		current@ KeThread_TimeoutWaitBlock + // waitblock
+		current@ KeThread_Timer + // object
+		KiDispatchWaitBlockEnqueue
+
+		0 // context1
+		0 // context2
+		ms@ // interval
+		current@ KeThread_Timer + // timer
+		KeTimerEnqueue drop
+
+		ipl@ // waitipl
+		waitmode@ // waitmode
+		alertable@ // alertable
+		0 // explicitstatus
+		KiThreadWait ok!
+
+		ipl@ KeIPLLower
+
+		if (ok@ STATUS_KERNEL_APC ~=)
+			return
+		end
+	end
+end
+
+fn KeThreadWaitSuspended { -- }
+	IPLDPC KeIPLRaise drop
+
+	IPLLOW // waitipl
+	USERMODE // waitmode
+	1 // alertable
+	THREADSTATUS_SUSPENDED // explicitstatus
+	KiThreadWait drop
+
+	IPLLOW KeIPLLower
+end
+
+// initializes a dispatch object's header
+
+fn KiDispatchInitialize { name type dobject -- }
+	0 dobject@ KeDispatchHeader_Signaled + !
+
+	type@ dobject@ KeDispatchHeader_Type + !
+
+	if (name@ ~~)
+		"NONE" dobject@ KeDispatchHeader_Name + !
+	end else
+		name@ dobject@ KeDispatchHeader_Name + !
+	end
+
+	0 dobject@ KeDispatchHeader_WaitBlockListHead + !
+	0 dobject@ KeDispatchHeader_WaitBlockListTail + !
+end
+
+fn KiDispatchWaitBlockDequeue { waitstatus waitblock -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadWakeup: ipl != IPLDPC\n" KeCrash
+			"KiDispatchWaitBlockDequeue: ipl != IPLDPC\n" KeCrash
+		end
+
+		if (waitblock@ KeDispatchWaitBlock_Object + @ ~~)
+			"KiDispatchWaitBlockDequeue: attempt to dequeue a non-enqueued WaitBlock\n" KeCrash
+		end
+	end
+
+	auto object
+	waitblock@ KeDispatchWaitBlock_Object + @ object!
+
+	auto n
+	waitblock@ KeDispatchWaitBlock_Next + @ n!
+
+	if (n@)
+		waitblock@ KeDispatchWaitBlock_Prev + @ n@ KeDispatchWaitBlock_Prev + !
+	end else // no next means we were the tail
+		waitblock@ KeDispatchWaitBlock_Prev + @ object@ KeDispatchHeader_WaitBlockListTail + !
+	end
+
+	auto p
+	waitblock@ KeDispatchWaitBlock_Prev + @ p!
+
+	if (p@)
+		waitblock@ KeDispatchWaitBlock_Next + @ p@ KeDispatchWaitBlock_Next + !
+	end else // no prev means we were the head
+		waitblock@ KeDispatchWaitBlock_Next + @ object@ KeDispatchHeader_WaitBlockListHead + !
+	end
+
+	0 waitblock@ KeDispatchWaitBlock_Next + !
+	0 waitblock@ KeDispatchWaitBlock_Prev + !
+
+	0 waitblock@ KeDispatchWaitBlock_Object + !
+
+	waitstatus@ waitblock@ KeDispatchWaitBlock_WaitStatusReturn + !
+end
+
+// adds a WaitBlock to the tail of a dispatch object's WaitBlockList
+
+fn KiDispatchWaitBlockEnqueue { waitindex waittype waitblock object -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KeDispatchWaitBlockInsert: ipl != IPLDPC\n" KeCrash
+		end
+
+		if (waitblock@ KeDispatchWaitBlock_Object + @)
+			"KiDispatchWaitBlockEnqueue: attempt to queue an enqueued WaitBlock\n" KeCrash
+		end
+	end
+
+	object@ waitblock@ KeDispatchWaitBlock_Object + !
+	waittype@ waitblock@ KeDispatchWaitBlock_WaitType + !
+	waitindex@ waitblock@ KeDispatchWaitBlock_WaitIndex + !
+
+	auto t
+	object@ KeDispatchHeader_WaitBlockListTail + @ t!
+
+	if (t@ ~~)
+		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
+		waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
+		return
+	end
+
+	// seek to the appropriate place to put this waitblock based on priority.
+
+	auto pri
+	waitblock@ KeDispatchWaitBlock_Thread + @ KeThread_PriorityB + gb pri!
+
+	while (t@)
+		if (t@ KeDispatchWaitBlock_Thread + @ KeThread_PriorityB + gb pri@ >=)
+			break
+		end
+
+		t@ KeDispatchWaitBlock_Prev + @ t!
+	end
+
+	// insert after t.
+
+	if (t@ ~~)
+		// nobody was higher priority, place at head
+
+		object@ KeDispatchHeader_WaitBlockListHead + @ t!
+
+		waitblock@ t@ KeDispatchWaitBlock_Prev + !
+		t@ waitblock@ KeDispatchWaitBlock_Next + !
+
+		waitblock@ object@ KeDispatchHeader_WaitBlockListHead + !
+
+		return
+	end
+
+	auto n
+	t@ KeDispatchWaitBlock_Next + @ n!
+
+	if (n@)
+		waitblock@ n@ KeDispatchWaitBlock_Prev + !
+		n@ waitblock@ KeDispatchWaitBlock_Next + !
+	end else
+		waitblock@ object@ KeDispatchHeader_WaitBlockListTail + !
+	end
+
+	waitblock@ t@ KeDispatchWaitBlock_Next + !
+	t@ waitblock@ KeDispatchWaitBlock_Prev + !
+end
+
+// satisfies a WaitBlock
+
+fn KiDispatchWaitBlockSatisfy { waitstatus priboost waitblock -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiDispatchWaitBlockSatisfy: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	waitstatus@ waitblock@ KiDispatchWaitBlockDequeue
+
+	auto thread
+	waitblock@ KeDispatchWaitBlock_Thread + @ thread!
+
+	thread@ KeThread_WaitCountI + gi 1 -
+	thread@ KeThread_WaitCountI + si
+
+	auto wt
+	waitblock@ KeDispatchWaitBlock_WaitType + @ wt!
+
+	if (wt@ OSWAITANY ==)
+		waitblock@ KeDispatchWaitBlock_WaitIndex + @ // waitstatus
+		priboost@ // priboost
+		thread@ // thread
+		KiThreadWakeup drop
+	end elseif (wt@ OSWAITALL ==)
+		if (thread@ KeThread_WaitCountI + gi ~~)
+			0 priboost@ thread@ KiThreadWakeup drop
+		end
+	end
+end
+
+// satisfies all waiters on a dispatch object
+// this SIGNALS the object
+
+fn KiDispatchSatisfyAll { waitstatus priboost object -- count }
+	0 count!
+
+	1 object@ KeDispatchHeader_Signaled + !
+
+	auto h
+	object@ KeDispatchHeader_WaitBlockListHead + @ h!
+
+	auto wb
+
+	while (h@)
+		h@ wb!
+		h@ KeDispatchWaitBlock_Next + @ h!
+
+		waitstatus@ priboost@ wb@ KiDispatchWaitBlockSatisfy
+
+		1 count +=
+	end
+end
+
+// satisfies the highest priority, earliest wait on a dispatch object.
+// this signals the object if no thread was awoken and signal is non-zero.
+
+fn KiDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
+	auto h
+	object@ KeDispatchHeader_WaitBlockListHead + @ h!
+
+	if (h@)
+		h@ KeDispatchWaitBlock_Thread + @ wokenthread!
+		waitstatus@ priboost@ h@ KiDispatchWaitBlockSatisfy
+	end elseif (signal@)
+		0 wokenthread!
+		1 object@ KeDispatchHeader_Signaled + !
+	end else
+		0 wokenthread!
+	end
+end
+
+fn KiThreadWakeup { waitstatus priboost thread -- woken }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadWakeup: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
@@ -630,12 +694,12 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 
 	// wake up thread
 
-	thread@ KeThreadWaitBlocksDequeue
+	thread@ KiThreadWaitBlocksDequeue
 
 	thread@ KeThread_Timer + KeTimerDequeue drop
 
 	if (priboost@)
-		priboost@ thread@ KeThreadPriorityBoost
+		priboost@ thread@ KiThreadPriorityBoost
 	end
 
 	waitstatus@ thread@ KeThread_WaitStatus + !
@@ -644,10 +708,10 @@ fn KeThreadWakeup { waitstatus priboost thread -- woken }
 	1 woken!
 end
 
-fn KeThreadWaitBlocksDequeue { thread -- }
+fn KiThreadWaitBlocksDequeue { thread -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadWaitBlocksDequeue: ipl != IPLDPC\n" KeCrash
+			"KiThreadWaitBlocksDequeue: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
@@ -661,7 +725,7 @@ fn KeThreadWaitBlocksDequeue { thread -- }
 		if (wb@ KeDispatchWaitBlock_Object + @)
 			0 // waitstatus
 			wb@ // waitblock
-			KeDispatchWaitBlockDequeue
+			KiDispatchWaitBlockDequeue
 		end
 
 		1 count -=
@@ -673,22 +737,22 @@ fn KeThreadWaitBlocksDequeue { thread -- }
 	if (wb@ KeDispatchWaitBlock_Object + @)
 		0 // waitstatus
 		wb@ // waitblock
-		KeDispatchWaitBlockDequeue
+		KiDispatchWaitBlockDequeue
 	end
 end
 
-fn KeThreadWait { waitipl waitmode alertable explicitstatus -- ok }
+fn KiThreadWait { waitipl waitmode alertable explicitstatus -- ok }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadWait: ipl != IPLDPC\n" KeCrash
+			"KiThreadWait: ipl != IPLDPC\n" KeCrash
 		end
 
 		if (waitipl@ IPLDPC >=)
-			"KeThreadWait: waitipl >= IPLDPC\n" KeCrash
+			"KiThreadWait: waitipl >= IPLDPC\n" KeCrash
 		end
 
 		if (KeThreadCurrent@ KeThread_PriorityB + gb PRIORITY_IDLE ==)
-			"KeThreadWait: idle thread slept!\n" KeCrash
+			"KiThreadWait: idle thread slept!\n" KeCrash
 		end
 	end
 
@@ -733,54 +797,4 @@ fn KeThreadWait { waitipl waitmode alertable explicitstatus -- ok }
 	end
 
 	current@ KeThread_WaitStatus + @ ok!
-end
-
-fn KeThreadSleep { ms waitmode alertable -- ok }
-	0 ok!	
-
-	if (ms@ 0 ==)
-		THREADSTATUS_READY KeThreadYield
-
-		return
-	end
-
-	auto current
-	KeThreadCurrent@ current!
-
-	while (1)
-		0 current@ KeThread_WaitBlockCountI + si
-		0 current@ KeThread_WaitBlockTable + !
-
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		"KeThreadSleep" // name
-		0 // function
-		current@ KeThread_Timer + // timer
-		KeTimerInitialize
-
-		STATUS_WAIT_TIMEOUT // waitindex
-		OSWAITANY // waittype
-		current@ KeThread_TimeoutWaitBlock + // waitblock
-		current@ KeThread_Timer + // object
-		KeDispatchWaitBlockEnqueue
-
-		0 // context1
-		0 // context2
-		ms@ // interval
-		current@ KeThread_Timer + // timer
-		KeTimerEnqueue drop
-
-		ipl@ // waitipl
-		waitmode@ // waitmode
-		alertable@ // alertable
-		0 // explicitstatus
-		KeThreadWait ok!
-
-		ipl@ KeIPLLower
-
-		if (ok@ STATUS_KERNEL_APC ~=)
-			return
-		end
-	end
 end

@@ -12,6 +12,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "KeInternal.h"
+
 var KeThreadCurrent 0
 public KeThreadCurrent
 
@@ -20,131 +22,19 @@ public KeThreadCurrentStackBottom
 
 externptr KeThreadCurrentStackTop
 
-var KeThreadNext 0
-public KeThreadNext
+var KiThreadNext 0
+public KiThreadNext
 
-var KeThreadNextReason 0
-public KeThreadNextReason
+var KiThreadNextReason 0
+public KiThreadNextReason
 
 var KeThreadSwapInListHead 0
 public KeThreadSwapInListHead
 
-externptr KeThreadTimerWake
+table KiThreadPriorityQueueHeads[PRIORITIES]
+public KiThreadPriorityQueueHeads
 
-table KeThreadPriorityQueueHeads[PRIORITIES]
-public KeThreadPriorityQueueHeads
-
-table KeThreadPriorityQueueTails[PRIORITIES]
-
-fn KeThreadEnqueue { front thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadEnqueue: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	// add thread to the tail of the proper ready queue for its priority level
-
-	if (DEBUGCHECKS)
-		if (thread@ KeThread_EnqueuedB + gb)
-			"KeThreadEnqueue: attempt to enqueue an enqueued thread\n" KeCrash
-		end
-	end
-
-	1 thread@ KeThread_EnqueuedB + sb
-
-	auto pri
-	thread@ KeThread_PriorityB + gb pri!
-
-	auto t
-
-	if (front@)
-		[pri@]KeThreadPriorityQueueHeads@ t!
-
-		if (t@ ~~)
-			thread@ [pri@]KeThreadPriorityQueueTails!
-
-			0 thread@ KeThread_QueueNext + !
-			0 thread@ KeThread_QueuePrev + !
-		end else
-			t@ thread@ KeThread_QueueNext + !
-			thread@ t@ KeThread_QueuePrev + !
-
-			0 thread@ KeThread_QueuePrev + !
-		end
-
-		thread@ [pri@]KeThreadPriorityQueueHeads!
-	end else
-		[pri@]KeThreadPriorityQueueTails@ t!
-
-		if (t@ ~~)
-			thread@ [pri@]KeThreadPriorityQueueHeads!
-
-			0 thread@ KeThread_QueueNext + !
-			0 thread@ KeThread_QueuePrev + !
-		end else
-			thread@ t@ KeThread_QueueNext + !
-			t@ thread@ KeThread_QueuePrev + !
-
-			0 thread@ KeThread_QueueNext + !
-		end
-
-		thread@ [pri@]KeThreadPriorityQueueTails!
-	end
-
-	auto current
-	KeThreadCurrent@ current!
-
-	if (current@)
-		if (thread@ KeThread_PriorityB + gb current@ KeThread_PriorityB + gb >)
-			// this thread's priority is greater than the current thread's
-
-			thread@ THREADYIELD_PREEMPTED KeThreadNextSelect
-		end
-	end
-end
-
-fn KeThreadDequeue { thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadDequeue: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	// remove thread from the proper ready queue for its priority level
-
-	if (DEBUGCHECKS)
-		if (thread@ KeThread_EnqueuedB + gb ~~)
-			"KeThreadDequeue: attempt to dequeue a dequeued thread\n" KeCrash
-		end
-	end
-
-	0 thread@ KeThread_EnqueuedB + sb
-
-	auto pri
-	thread@ KeThread_PriorityB + gb pri!
-
-	auto n
-	thread@ KeThread_QueueNext + @ n!
-
-	if (n@)
-		thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
-	end else // no next means we were the tail
-		thread@ KeThread_QueuePrev + @ [pri@]KeThreadPriorityQueueTails!
-	end
-
-	auto p
-	thread@ KeThread_QueuePrev + @ p!
-
-	if (p@)
-		thread@ KeThread_QueueNext + @ p@ KeThread_QueueNext + !
-	end else // no prev means we were the head
-		thread@ KeThread_QueueNext + @ [pri@]KeThreadPriorityQueueHeads!
-	end
-
-	0 thread@ KeThread_QueueNext + !
-	0 thread@ KeThread_QueuePrev + !
-end
+table KiThreadPriorityQueueTails[PRIORITIES]
 
 externptr MmSwapEvent
 
@@ -224,406 +114,10 @@ fn KeThreadReady { front thread -- }
 	if (thread@ KeThread_EnqueuedB + gb ~~)
 		front@ // front
 		thread@ // thread
-		KeThreadEnqueue
+		KiThreadEnqueue
 	end
 
 	ipl@ KeIPLLower
-end
-
-fn KeThreadQuantumIncrement { inc thread -- qt }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	thread@ KeThread_QuantumB + gb qt!
-
-	inc@ qt +=
-
-	qt@ thread@ KeThread_QuantumB + sb
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn KeThreadQuantumDecrement { dec thread -- qt }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	thread@ KeThread_QuantumB + gb qt!
-
-	if (qt@ dec@ <=)
-		0 qt!
-	end else
-		dec@ qt -=
-	end
-
-	qt@ thread@ KeThread_QuantumB + sb
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn KeThreadQuantumEnd { -- }
-	auto current
-	KeThreadCurrent@ current!
-
-	if (DEBUGCHECKS)
-		if (current@ KeThread_StatusB + gb THREADSTATUS_RUNNING ~=)
-			"KeThreadQuantumEnd: current thread isn't RUNNING\n" KeCrash
-		end
-
-		if (current@ KeThread_EnqueuedB + gb)
-			"KeThreadQuantumEnd: current thread is RUNNING yet enqueued\n" KeCrash
-		end
-	end
-
-	// decrement the thread's priority in order to decay boosting.
-
-	auto pri
-	current@ KeThread_PriorityB + gb pri!
-
-	if (pri@ PRIORITY_IDLE >)
-		if (pri@ PRIORITY_LOWREALTIME <)
-			auto newpri
-
-			if (current@ KeThread_InstantDecayB + gb)
-				current@ KeThread_BasePriorityB + gb newpri!
-				0 current@ KeThread_InstantDecayB + sb
-			end else
-				pri@ 1 - newpri!
-			end
-
-			if (newpri@ current@ KeThread_BasePriorityB + gb >=)
-				newpri@ current@ KeThread_PriorityB + sb
-			end
-		end
-	end
-
-	KeThreadNextPick THREADYIELD_QUANTUMEND KeThreadNextSelect
-end
-
-fn (DPCFunction) KeThreadQuantumDPCFunction { context1 context2 -- }
-	KeThreadQuantumEnd
-end
-
-fn KeThreadNextPick { -- thread }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadNextPick: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	auto i
-	PRIORITIES i!
-
-	while (i@)
-		1 i -=
-
-		[i@]KeThreadPriorityQueueHeads@ thread!
-
-		if (thread@)
-			if (DEBUGCHECKS)
-				if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ~=)
-					"KeThreadNextPick: thread on ready queue but not READY\n" KeCrash
-				end
-			end
-
-			return
-		end
-	end
-
-	// we must be the idle thread, just continue
-	KeThreadCurrent@ thread!
-end
-
-var InitialContext 0
-
-// should be called with interrupts disabled at IPLDPC.
-// current thread should have been transitioned to the proper state beforehand
-
-// XXX maybe this function should be rolled into KeThreadNextSwitch?
-
-fn KeThreadSwitch { thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadSwitch: ipl ~= IPLDPC\n" KeCrash
-		end
-	end
-
-	auto current
-	KeThreadCurrent@ current!
-
-	THREADSTATUS_RUNNING thread@ KeThread_StatusB + sb
-
-	if (thread@ KeThread_EnqueuedB + gb)
-		thread@ KeThreadDequeue
-	end
-
-	if (thread@ current@ ==)
-		return
-	end
-
-	auto old
-
-	if (current@)
-		current@ KeThread_Context + old!
-
-		auto nextproc
-		thread@ KeThread_Process + @ nextproc!
-
-		if (current@ KeThread_Process + @ KeProcess_PageDirectory + @ nextproc@ KeProcess_PageDirectory + @ ~=)
-			nextproc@ KeProcess_ASID + @ // asid
-			nextproc@ KeProcess_PageDirectory + @ // addrinfo
-			HALCPUAddressSpaceSwitch
-		end
-	end else
-		if (DEBUGCHECKS)
-			if (InitialContext@)
-				"KeThreadSwitch: two initial contexts?\n" KeCrash
-			end
-		end
-
-		InitialContext old!
-	end
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	thread@ KeThreadCurrent!
-
-	thread@ KeThread_KernelStackTop + @ KeThreadCurrentStackTop!
-	thread@ KeThread_KernelStackTop + @ KETHREADSTACKSIZE - KeThreadCurrentStackBottom!
-
-	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
-
-	rs@ HALCPUInterruptRestore
-
-	auto qtm
-	current@ KeThread_QuantumB + gb qtm!
-
-	if (qtm@ ~~)
-		// no more quantum, do a quantum end
-
-		KeThreadQuantumEnd
-	end
-
-	if (current@ KeThread_APCListHead + @)
-		IPLAPC KeSoftwareInterruptRequest
-	end
-end
-
-fn KeThreadBasePrioritySet { priority thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadBasePrioritySet: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	auto pri
-	thread@ KeThread_BasePriorityB + gb pri!
-
-	if (pri@ priority@ ==)
-		return
-	end
-
-	if (priority@ thread@ KeThread_PriorityB + gb >)
-		priority@ // priority
-		thread@ // thread
-		KeThreadPrioritySetDPCLevel
-	end
-
-	priority@ thread@ KeThread_BasePriorityB + sb
-end
-
-fn KeThreadPrioritySetDPCLevel { priority thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadPrioritySetDPCLevel: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	auto pri
-	thread@ KeThread_PriorityB + gb pri!
-
-	if (pri@ priority@ ==)
-		return
-	end
-
-	if (priority@ pri@ >)
-		// the priority has been raised. if the thread is running or waiting,
-		// do nothing. however, if the thread is in a ready queue, it must be
-		// requeued. if this action raises its priority above that of the
-		// current thread, ask the scheduler to run.
-
-		if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ==)
-			thread@ KeThreadDequeue
-
-			priority@ thread@ KeThread_PriorityB + sb
-
-			QUEUEBACK // front
-			thread@ // thread
-			KeThreadEnqueue
-		end else
-			if (DEBUGCHECKS)
-				if (thread@ KeThread_EnqueuedB + gb)
-					"KeThreadPrioritySetDPCLevel: thread was enqueued despite not being READY\n" KeCrash
-				end
-			end
-
-			priority@ thread@ KeThread_PriorityB + sb
-		end
-	end else
-		// the priority has been lowered. if the thread is in a ready queue,
-		// it must be requeued. if the thread is currently running, see if
-		// there is now a higher priority thread that can run. if so, ask the
-		// scheduler to run.
-
-		auto status
-		thread@ KeThread_StatusB + gb status!
-
-		if (status@ THREADSTATUS_READY ==)
-			thread@ KeThreadDequeue
-
-			priority@ thread@ KeThread_PriorityB + sb
-
-			QUEUEBACK // front
-			thread@ // thread
-			KeThreadEnqueue
-		end elseif (status@ THREADSTATUS_RUNNING ==)
-			if (DEBUGCHECKS)
-				if (thread@ KeThreadCurrent@ ~=)
-					"KeThreadPrioritySetDPCLevel: thread is RUNNING, but is not the current thread\n" KeCrash
-				end
-			end
-
-			priority@ thread@ KeThread_PriorityB + sb
-
-			auto i
-			PRIORITIES 1 - i!
-
-			while (i@ priority@ >)
-				auto qh
-				[i@]KeThreadPriorityQueueHeads@ qh!
-
-				if (qh@)
-					qh@ THREADYIELD_PREEMPTED KeThreadNextSelect
-
-					break
-				end
-
-				1 i -=
-			end
-		end
-	end
-end
-
-fn KeThreadNextSelect { next reason -- }
-	auto onext
-	KeThreadNext@ onext!
-
-	auto curpri
-	KeThreadCurrent@ KeThread_PriorityB + gb curpri!
-
-	if (reason@ THREADYIELD_QUANTUMEND ==)
-		if (curpri@ PRIORITY_IDLE ~=)
-			1 KeStatistics OSStatistics_QuantumEnds + +=
-		end
-
-		if (curpri@ next@ KeThread_PriorityB + gb >)
-			return
-		end
-	end elseif (reason@ THREADYIELD_PREEMPTED ==)
-		if (curpri@ PRIORITY_IDLE ~=)
-			1 KeStatistics OSStatistics_Preemptions + +=
-		end
-	end
-
-	if (onext@)
-		if (next@ KeThread_PriorityB + gb onext@ KeThread_PriorityB + gb >=)
-			next@ KeThreadNext!
-			reason@ KeThreadNextReason!
-		end
-	end else
-		next@ KeThreadNext!
-		reason@ KeThreadNextReason!
-	end
-
-	if (KeThreadNext@ KeThreadCurrent@ ==)
-		// no reschedule required
-
-		0 KeThreadNext!
-	end else
-		IPLDPC KeSoftwareInterruptRequest
-	end
-end
-
-fn KeThreadPriorityBoost { boost thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadPriorityBoost: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	auto pri
-	thread@ KeThread_PriorityB + gb pri!
-
-	if (pri@ PRIORITY_LOWREALTIME <)
-		auto newpri
-		thread@ KeThread_BasePriorityB + gb boost@ + newpri!
-
-		if (newpri@ PRIORITY_HIGHUSER >)
-			PRIORITY_HIGHUSER newpri!
-		end
-
-		if (newpri@ pri@ >)
-			newpri@ thread@ KeThreadPrioritySetDPCLevel
-		end
-	end
-end
-
-fn KeThreadNextSwitch { -- }
-	auto next
-	KeThreadNext@ next!
-
-	0 KeThreadNext!
-
-	auto current
-	KeThreadCurrent@ current!
-
-	auto cause
-	KeThreadNextReason@ cause!
-
-	0 KeThreadNextReason!
-
-	THREADSTATUS_READY current@ KeThread_StatusB + sb
-
-	if (cause@ THREADYIELD_QUANTUMEND ==)
-		// the quantum ended, place it at the back
-
-		current@ KeThread_Process + @ KeProcess_BaseQuantumB + gb current@ KeThread_QuantumB + sb
-
-		if (current@ KeThread_EnqueuedB + gb ~~)
-			QUEUEBACK // front
-			current@ // current
-			KeThreadEnqueue
-		end
-	end elseif (cause@ THREADYIELD_PREEMPTED ==)
-		// it was preempted, place it at the front
-
-		1 current@ KeThreadQuantumDecrement drop
-
-		if (current@ KeThread_EnqueuedB + gb ~~)
-			QUEUEFRONT // front
-			current@ // current
-			KeThreadEnqueue
-		end
-	end elseif (DEBUGCHECKS)
-		cause@ "KeThreadNextSwitch: weird cause (0x%x)\n" KeCrash
-	end
-
-	// if a reschedule was deferred, do it here
-
-	// this is done here instead of in a DPC to ensure that the entire
-	// DPC queue is processed before the thread switch occurs.
-
-	next@ KeThreadSwitch
 end
 
 // for when you want to yield NOW and in a particular state
@@ -648,14 +142,14 @@ fn KeThreadYield { yieldstatus -- }
 		if (current@ KeThread_EnqueuedB + gb ~~)
 			QUEUEBACK // front
 			current@ // thread
-			KeThreadEnqueue
+			KiThreadEnqueue
 		end
 	end
 
-	0 KeThreadNextReason!
-	0 KeThreadNext!
+	0 KiThreadNextReason!
+	0 KiThreadNext!
 
-	KeThreadNextPick KeThreadSwitch
+	KiThreadNextPick KiThreadSwitch
 
 	ipl@ KeIPLLower
 end
@@ -681,7 +175,7 @@ fn KeBoostReadyThreads { -- }
 
 	while (pri@ PRIORITY_HIGHUSER <)
 		auto thread
-		[pri@]KeThreadPriorityQueueHeads@ thread!
+		[pri@]KiThreadPriorityQueueHeads@ thread!
 
 		while (thread@)
 			auto nthread
@@ -701,7 +195,7 @@ fn KeBoostReadyThreads { -- }
 
 					PRIORITY_HIGHUSER // priority
 					thread@ // thread
-					KeThreadPrioritySetDPCLevel
+					KiThreadPrioritySet
 				end
 			end
 
@@ -718,7 +212,522 @@ fn KeThreadPrioritySet { priority thread -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	priority@ thread@ KeThreadPrioritySetDPCLevel
+	priority@ thread@ KiThreadPrioritySet
 
 	ipl@ KeIPLLower
+end
+
+fn KeThreadPriorityBoost { boost thread -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	boost@ thread@ KiThreadPriorityBoost
+
+	ipl@ KeIPLLower
+end
+
+fn KiThreadEnqueue { front thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadEnqueue: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// add thread to the tail of the proper ready queue for its priority level
+
+	if (DEBUGCHECKS)
+		if (thread@ KeThread_EnqueuedB + gb)
+			"KiThreadEnqueue: attempt to enqueue an enqueued thread\n" KeCrash
+		end
+	end
+
+	1 thread@ KeThread_EnqueuedB + sb
+
+	auto pri
+	thread@ KeThread_PriorityB + gb pri!
+
+	auto t
+
+	if (front@)
+		[pri@]KiThreadPriorityQueueHeads@ t!
+
+		if (t@ ~~)
+			thread@ [pri@]KiThreadPriorityQueueTails!
+
+			0 thread@ KeThread_QueueNext + !
+			0 thread@ KeThread_QueuePrev + !
+		end else
+			t@ thread@ KeThread_QueueNext + !
+			thread@ t@ KeThread_QueuePrev + !
+
+			0 thread@ KeThread_QueuePrev + !
+		end
+
+		thread@ [pri@]KiThreadPriorityQueueHeads!
+	end else
+		[pri@]KiThreadPriorityQueueTails@ t!
+
+		if (t@ ~~)
+			thread@ [pri@]KiThreadPriorityQueueHeads!
+
+			0 thread@ KeThread_QueueNext + !
+			0 thread@ KeThread_QueuePrev + !
+		end else
+			thread@ t@ KeThread_QueueNext + !
+			t@ thread@ KeThread_QueuePrev + !
+
+			0 thread@ KeThread_QueueNext + !
+		end
+
+		thread@ [pri@]KiThreadPriorityQueueTails!
+	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	if (current@)
+		if (thread@ KeThread_PriorityB + gb current@ KeThread_PriorityB + gb >)
+			// this thread's priority is greater than the current thread's
+
+			thread@ THREADYIELD_PREEMPTED KiThreadNextSelect
+		end
+	end
+end
+
+fn KiThreadDequeue { thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadDequeue: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// remove thread from the proper ready queue for its priority level
+
+	if (DEBUGCHECKS)
+		if (thread@ KeThread_EnqueuedB + gb ~~)
+			"KiThreadDequeue: attempt to dequeue a dequeued thread\n" KeCrash
+		end
+	end
+
+	0 thread@ KeThread_EnqueuedB + sb
+
+	auto pri
+	thread@ KeThread_PriorityB + gb pri!
+
+	auto n
+	thread@ KeThread_QueueNext + @ n!
+
+	if (n@)
+		thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+	end else // no next means we were the tail
+		thread@ KeThread_QueuePrev + @ [pri@]KiThreadPriorityQueueTails!
+	end
+
+	auto p
+	thread@ KeThread_QueuePrev + @ p!
+
+	if (p@)
+		thread@ KeThread_QueueNext + @ p@ KeThread_QueueNext + !
+	end else // no prev means we were the head
+		thread@ KeThread_QueueNext + @ [pri@]KiThreadPriorityQueueHeads!
+	end
+
+	0 thread@ KeThread_QueueNext + !
+	0 thread@ KeThread_QueuePrev + !
+end
+
+fn KiThreadQuantumIncrement { inc thread -- qt }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_QuantumB + gb qt!
+
+	inc@ qt +=
+
+	qt@ thread@ KeThread_QuantumB + sb
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KiThreadQuantumDecrement { dec thread -- qt }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThread_QuantumB + gb qt!
+
+	if (qt@ dec@ <=)
+		0 qt!
+	end else
+		dec@ qt -=
+	end
+
+	qt@ thread@ KeThread_QuantumB + sb
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KiThreadQuantumEnd { -- }
+	auto current
+	KeThreadCurrent@ current!
+
+	if (DEBUGCHECKS)
+		if (current@ KeThread_StatusB + gb THREADSTATUS_RUNNING ~=)
+			"KiThreadQuantumEnd: current thread isn't RUNNING\n" KeCrash
+		end
+
+		if (current@ KeThread_EnqueuedB + gb)
+			"KiThreadQuantumEnd: current thread is RUNNING yet enqueued\n" KeCrash
+		end
+	end
+
+	// decrement the thread's priority in order to decay boosting.
+
+	auto pri
+	current@ KeThread_PriorityB + gb pri!
+
+	if (pri@ PRIORITY_IDLE >)
+		if (pri@ PRIORITY_LOWREALTIME <)
+			auto newpri
+
+			if (current@ KeThread_InstantDecayB + gb)
+				current@ KeThread_BasePriorityB + gb newpri!
+				0 current@ KeThread_InstantDecayB + sb
+			end else
+				pri@ 1 - newpri!
+			end
+
+			if (newpri@ current@ KeThread_BasePriorityB + gb >=)
+				newpri@ current@ KeThread_PriorityB + sb
+			end
+		end
+	end
+
+	KiThreadNextPick THREADYIELD_QUANTUMEND KiThreadNextSelect
+end
+
+fn (DPCFunction) KiThreadQuantumDPCFunction { context1 context2 -- }
+	KiThreadQuantumEnd
+end
+
+fn KiThreadNextPick { -- thread }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadNextPick: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	auto i
+	PRIORITIES i!
+
+	while (i@)
+		1 i -=
+
+		[i@]KiThreadPriorityQueueHeads@ thread!
+
+		if (thread@)
+			if (DEBUGCHECKS)
+				if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ~=)
+					"KiThreadNextPick: thread on ready queue but not READY\n" KeCrash
+				end
+			end
+
+			return
+		end
+	end
+
+	// we must be the idle thread, just continue
+	KeThreadCurrent@ thread!
+end
+
+var InitialContext 0
+
+// should be called with interrupts disabled at IPLDPC.
+// current thread should have been transitioned to the proper state beforehand
+
+// XXX maybe this function should be rolled into KiThreadNextSwitch?
+
+fn KiThreadSwitch { thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadSwitch: ipl ~= IPLDPC\n" KeCrash
+		end
+	end
+
+	auto current
+	KeThreadCurrent@ current!
+
+	THREADSTATUS_RUNNING thread@ KeThread_StatusB + sb
+
+	if (thread@ KeThread_EnqueuedB + gb)
+		thread@ KiThreadDequeue
+	end
+
+	if (thread@ current@ ==)
+		return
+	end
+
+	auto old
+
+	if (current@)
+		current@ KeThread_Context + old!
+
+		auto nextproc
+		thread@ KeThread_Process + @ nextproc!
+
+		if (current@ KeThread_Process + @ KeProcess_PageDirectory + @ nextproc@ KeProcess_PageDirectory + @ ~=)
+			nextproc@ KeProcess_ASID + @ // asid
+			nextproc@ KeProcess_PageDirectory + @ // addrinfo
+			HALCPUAddressSpaceSwitch
+		end
+	end else
+		if (DEBUGCHECKS)
+			if (InitialContext@)
+				"KiThreadSwitch: two initial contexts?\n" KeCrash
+			end
+		end
+
+		InitialContext old!
+	end
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	thread@ KeThreadCurrent!
+
+	thread@ KeThread_KernelStackTop + @ KeThreadCurrentStackTop!
+	thread@ KeThread_KernelStackTop + @ KETHREADSTACKSIZE - KeThreadCurrentStackBottom!
+
+	old@ thread@ KeThread_Context + @ HALCPUContextSwitch
+
+	rs@ HALCPUInterruptRestore
+
+	auto qtm
+	current@ KeThread_QuantumB + gb qtm!
+
+	if (qtm@ ~~)
+		// no more quantum, do a quantum end
+
+		KiThreadQuantumEnd
+	end
+
+	if (current@ KeThread_APCListHead + @)
+		IPLAPC KiSoftwareInterruptRequest
+	end
+end
+
+fn KiThreadBasePrioritySet { priority thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadBasePrioritySet: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	auto pri
+	thread@ KeThread_BasePriorityB + gb pri!
+
+	if (pri@ priority@ ==)
+		return
+	end
+
+	if (priority@ thread@ KeThread_PriorityB + gb >)
+		priority@ // priority
+		thread@ // thread
+		KiThreadPrioritySet
+	end
+
+	priority@ thread@ KeThread_BasePriorityB + sb
+end
+
+fn KiThreadPrioritySet { priority thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadPrioritySet: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	auto pri
+	thread@ KeThread_PriorityB + gb pri!
+
+	if (pri@ priority@ ==)
+		return
+	end
+
+	if (priority@ pri@ >)
+		// the priority has been raised. if the thread is running or waiting,
+		// do nothing. however, if the thread is in a ready queue, it must be
+		// requeued. if this action raises its priority above that of the
+		// current thread, ask the scheduler to run.
+
+		if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ==)
+			thread@ KiThreadDequeue
+
+			priority@ thread@ KeThread_PriorityB + sb
+
+			QUEUEBACK // front
+			thread@ // thread
+			KiThreadEnqueue
+		end else
+			if (DEBUGCHECKS)
+				if (thread@ KeThread_EnqueuedB + gb)
+					"KiThreadPrioritySet: thread was enqueued despite not being READY\n" KeCrash
+				end
+			end
+
+			priority@ thread@ KeThread_PriorityB + sb
+		end
+	end else
+		// the priority has been lowered. if the thread is in a ready queue,
+		// it must be requeued. if the thread is currently running, see if
+		// there is now a higher priority thread that can run. if so, ask the
+		// scheduler to run.
+
+		auto status
+		thread@ KeThread_StatusB + gb status!
+
+		if (status@ THREADSTATUS_READY ==)
+			thread@ KiThreadDequeue
+
+			priority@ thread@ KeThread_PriorityB + sb
+
+			QUEUEBACK // front
+			thread@ // thread
+			KiThreadEnqueue
+		end elseif (status@ THREADSTATUS_RUNNING ==)
+			if (DEBUGCHECKS)
+				if (thread@ KeThreadCurrent@ ~=)
+					"KiThreadPrioritySet: thread is RUNNING, but is not the current thread\n" KeCrash
+				end
+			end
+
+			priority@ thread@ KeThread_PriorityB + sb
+
+			auto i
+			PRIORITIES 1 - i!
+
+			while (i@ priority@ >)
+				auto qh
+				[i@]KiThreadPriorityQueueHeads@ qh!
+
+				if (qh@)
+					qh@ THREADYIELD_PREEMPTED KiThreadNextSelect
+
+					break
+				end
+
+				1 i -=
+			end
+		end
+	end
+end
+
+fn KiThreadNextSelect { next reason -- }
+	auto onext
+	KiThreadNext@ onext!
+
+	auto curpri
+	KeThreadCurrent@ KeThread_PriorityB + gb curpri!
+
+	if (reason@ THREADYIELD_QUANTUMEND ==)
+		if (curpri@ PRIORITY_IDLE ~=)
+			1 KeStatistics OSStatistics_QuantumEnds + +=
+		end
+
+		if (curpri@ next@ KeThread_PriorityB + gb >)
+			return
+		end
+	end elseif (reason@ THREADYIELD_PREEMPTED ==)
+		if (curpri@ PRIORITY_IDLE ~=)
+			1 KeStatistics OSStatistics_Preemptions + +=
+		end
+	end
+
+	if (onext@)
+		if (next@ KeThread_PriorityB + gb onext@ KeThread_PriorityB + gb >=)
+			next@ KiThreadNext!
+			reason@ KiThreadNextReason!
+		end
+	end else
+		next@ KiThreadNext!
+		reason@ KiThreadNextReason!
+	end
+
+	if (KiThreadNext@ KeThreadCurrent@ ==)
+		// no reschedule required
+
+		0 KiThreadNext!
+	end else
+		IPLDPC KiSoftwareInterruptRequest
+	end
+end
+
+fn KiThreadPriorityBoost { boost thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadPriorityBoost: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	auto pri
+	thread@ KeThread_PriorityB + gb pri!
+
+	if (pri@ PRIORITY_LOWREALTIME <)
+		auto newpri
+		thread@ KeThread_BasePriorityB + gb boost@ + newpri!
+
+		if (newpri@ PRIORITY_HIGHUSER >)
+			PRIORITY_HIGHUSER newpri!
+		end
+
+		if (newpri@ pri@ >)
+			newpri@ thread@ KiThreadPrioritySet
+		end
+	end
+end
+
+fn KiThreadNextSwitch { -- }
+	auto next
+	KiThreadNext@ next!
+
+	0 KiThreadNext!
+
+	auto current
+	KeThreadCurrent@ current!
+
+	auto cause
+	KiThreadNextReason@ cause!
+
+	0 KiThreadNextReason!
+
+	THREADSTATUS_READY current@ KeThread_StatusB + sb
+
+	if (cause@ THREADYIELD_QUANTUMEND ==)
+		// the quantum ended, place it at the back
+
+		current@ KeThread_Process + @ KeProcess_BaseQuantumB + gb current@ KeThread_QuantumB + sb
+
+		if (current@ KeThread_EnqueuedB + gb ~~)
+			QUEUEBACK // front
+			current@ // current
+			KiThreadEnqueue
+		end
+	end elseif (cause@ THREADYIELD_PREEMPTED ==)
+		// it was preempted, place it at the front
+
+		1 current@ KiThreadQuantumDecrement drop
+
+		if (current@ KeThread_EnqueuedB + gb ~~)
+			QUEUEFRONT // front
+			current@ // current
+			KiThreadEnqueue
+		end
+	end elseif (DEBUGCHECKS)
+		cause@ "KiThreadNextSwitch: weird cause (0x%x)\n" KeCrash
+	end
+
+	// if a reschedule was deferred, do it here
+
+	// this is done here instead of in a DPC to ensure that the entire
+	// DPC queue is processed before the thread switch occurs.
+
+	next@ KiThreadSwitch
 end

@@ -177,20 +177,14 @@ extern KeThreadSignal { signal thread -- ok }
 extern KeThreadTerminate { status thread -- }
 extern KeThreadSuspend { thread -- }
 extern KeThreadResume { thread -- }
-extern KeThreadWakeForSignal { thread -- }
 extern KeThreadMaskSignal { signal thread -- ok }
 extern KeThreadUnmaskSignal { signal thread -- ok }
 extern KeThreadRundown { thread -- }
-extern KeThreadNextSignal { thread -- signum }
+extern KeThreadDispatchSignal { dispatchfunc trapframe -- }
 extern KeThreadIsKilled { mode alertable thread -- ok }
-extern KeThreadEnqueue { front thread -- }
-extern KeThreadDequeue { thread -- }
-extern KeThreadNextPick { -- thread }
-extern KeThreadSwitch { thread -- }
 extern KeThreadReady { front thread -- }
 extern KeThreadYield { yieldstatus -- }
 extern KeThreadPriorityBoost { boost thread -- }
-extern KeThreadNextSwitch { -- }
 extern KeThreadSleep { ms waitmode alertable -- ok }
 extern KeThreadBasePrioritySet { priority thread -- }
 extern KeThreadPrioritySet { priority thread -- }
@@ -199,10 +193,6 @@ extern KeThreadAPCEnable { thread -- oldcount }
 
 extern KeBoostReadyThreads { -- }
 
-externptr KeThreadNext
-externptr KeThreadNextReason
 externptr KeThreadCurrent
-externptr KeThreadQuantumDPC
-externptr KeThreadPriorityQueueHeads
 externptr KeThreadSwapInListHead
 externptr KeThreadWaitListHead

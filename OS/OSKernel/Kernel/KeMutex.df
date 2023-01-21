@@ -12,10 +12,12 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
+#include "KeInternal.h"
+
 // initializes a KeMutex
 
 fn KeMutexInitialize { name mode mutex -- }
-	name@ DISPATCHOBJECT_MUTEX mutex@ KeDispatchInitialize
+	name@ DISPATCHOBJECT_MUTEX mutex@ KiDispatchInitialize
 
 	0 mutex@ KeMutex_OwningThread + !
 	mode@ mutex@ KeMutex_Mode + !
@@ -24,27 +26,6 @@ fn KeMutexInitialize { name mode mutex -- }
 	0 mutex@ KeMutex_Next + !
 
 	1 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
-end
-
-fn KeMutexOwnerSet { thread mutex -- }
-	if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
-		1 thread@ KeThread_APCDisableCount + +=
-	end
-
-	thread@ mutex@ KeMutex_OwningThread + !
-
-	auto h
-	thread@ KeThread_MutexListHead + @ h!
-
-	h@ mutex@ KeMutex_Next + !
-
-	if (h@)
-		mutex@ h@ KeMutex_Prev + !
-	end
-
-	mutex@ thread@ KeThread_MutexListHead + !
-
-	0 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 end
 
 fn KeMutexRelease { abandon mutex -- ok }
@@ -97,7 +78,9 @@ fn KeMutexRelease { abandon mutex -- ok }
 				"KeMutexRelease: thread '%s' didn't own mutex '%s'\n" KeCrash
 			end else
 				ipl@ KeIPLLower
+
 				STATUS_MUTEX_NOT_OWNED ok!
+
 				return
 			end
 		end
@@ -144,7 +127,7 @@ fn KeMutexRelease { abandon mutex -- ok }
 		1 // priboost
 		mutex@ // object
 		1 // signal
-		KeDispatchSatisfyFirst wokenthread!
+		KiDispatchSatisfyFirst wokenthread!
 
 		if (wokenthread@)
 			// we woke up a thread who was waiting. make them the owner of the
@@ -152,7 +135,7 @@ fn KeMutexRelease { abandon mutex -- ok }
 
 			wokenthread@ // thread
 			mutex@ // mutex
-			KeMutexOwnerSet
+			KiMutexOwnerSet
 		end else
 			// just unown the mutex
 			0 mutex@ KeMutex_OwningThread + !
@@ -163,7 +146,7 @@ fn KeMutexRelease { abandon mutex -- ok }
 
 			if (current@ KeThread_APCDisableCount + @ ~~)
 				if (current@ KeThread_APCListHead + @)
-					IPLAPC KeSoftwareInterruptRequest
+					IPLAPC KiSoftwareInterruptRequest
 				end
 			end
 		end
@@ -176,4 +159,25 @@ end
 
 fn KeMutexIsLocked { mutex -- locked }
 	mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + @ z> locked!
+end
+
+fn KiMutexOwnerSet { thread mutex -- }
+	if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+		1 thread@ KeThread_APCDisableCount + +=
+	end
+
+	thread@ mutex@ KeMutex_OwningThread + !
+
+	auto h
+	thread@ KeThread_MutexListHead + @ h!
+
+	h@ mutex@ KeMutex_Next + !
+
+	if (h@)
+		mutex@ h@ KeMutex_Prev + !
+	end
+
+	mutex@ thread@ KeThread_MutexListHead + !
+
+	0 mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 end

@@ -10,5 +10,4 @@ endstruct
 
 extern KeMutexInitialize { name mode mutex -- }
 extern KeMutexRelease { abandon mutex -- ok }
-extern KeMutexOwnerSet { thread mutex -- }
 extern KeMutexIsLocked { mutex -- locked }

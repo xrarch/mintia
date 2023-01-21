@@ -20,6 +20,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "../KeInternal.h"
+
 // if this seems janked up, its because it is, because this all used to be in
 // the HAL, and the process of moving it into the kernel was rough.
 
@@ -80,7 +82,7 @@ VFox32DismissVector:
 
 	mov  a0, sp
 	mov  a1, 0xFFFF
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -158,7 +160,7 @@ VFox32VsyncVector:
 
 	mov  a0, sp
 	mov  a1, 0xFF
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -236,7 +238,7 @@ VFox32DivideZeroVector:
 
 	mov  a0, sp
 	mov  a1, 0x100
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -314,7 +316,7 @@ VFox32SyscallVector:
 
 	mov  a0, sp
 	mov  a1, 0x30
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -392,7 +394,7 @@ VFox32InvalidOpcodeVector:
 
 	mov  a0, sp
 	mov  a1, 0x101
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -470,7 +472,7 @@ VFox32PageFaultVector:
 
 	mov  a0, sp
 	mov  a1, 0x102
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -548,7 +550,7 @@ VFox32PageFaultWriteVector:
 
 	mov  a0, sp
 	mov  a1, 0x103
-	call KeFox32Exception
+	call KiFox32Exception
 
 	pop  t0
 	pop  t1
@@ -587,8 +589,8 @@ VFox32PageFaultWriteVector:
 	reti
 
 ; a0 - tf
-KeFox32Syscall:
-.global KeFox32Syscall
+KiFox32Syscall:
+.global KiFox32Syscall
 	push fp
 	mov  fp, sp
 
@@ -615,8 +617,8 @@ KeFox32Syscall:
 	pop  fp
 	ret
 
-ThreadTrampoline:
-.global ThreadTrampoline
+KiThreadTrampoline:
+.global KiThreadTrampoline
 	mov  [HALfox32InterruptsDisabled], 0
 	ise
 
@@ -639,9 +641,9 @@ KeIPLCurrentGet:
 
 "
 
-extern ThreadTrampoline { -- }
+extern KiThreadTrampoline { -- }
 
-extern KeFox32Syscall { tf -- }
+extern KiFox32Syscall { tf -- }
 
 const EXCNAMESMAX 4
 
@@ -654,7 +656,7 @@ endtable
 
 extern PsPrepareUsermode { trapframe -- }
 
-fn KeStackOverflow { rs -- }
+fn KiStackOverflow { rs -- }
 	auto current
 	KeThreadCurrent@ current!
 
@@ -667,7 +669,7 @@ fn KeStackOverflow { rs -- }
 	rs@ "Kernel stack overflow %x\n" KeCrash
 end
 
-fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
+fn KiCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 	0 recheck!
 
 	auto usp
@@ -675,7 +677,7 @@ fn KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 
 	if (DEBUGCHECKS)
 		if (trapframe@ OSContext_eflagsB + gb FOX32_RS_USER & ~~)
-			trapframe@ "KeCopySignalFrame: not usermode trapframe %x\n" KeCrash
+			trapframe@ "KiCopySignalFrame: not usermode trapframe %x\n" KeCrash
 		end
 	end
 
@@ -765,20 +767,20 @@ fn KeThreadContinue { signum context thread -- ok }
 	end
 end
 
-var KeFox32OldIPL 0
-public KeFox32OldIPL
+var KiFox32OldIPL 0
+public KiFox32OldIPL
 
 const EXCPAGEFAULT 2
 const EXCPAGEFAULTWRITE 3
 
 externptr KeInterlockedIncrementEnd
 
-fn KeFox32Exception { ecause tf -- }
+fn KiFox32Exception { ecause tf -- }
 	1 HALfox32InterruptsDisabled!
 
 	auto ipl
 	KeIPLCurrent@ ipl!
-	ipl@ KeFox32OldIPL!
+	ipl@ KiFox32OldIPL!
 
 	auto handled
 	1 handled!
@@ -851,7 +853,7 @@ fn KeFox32Exception { ecause tf -- }
 
 				HALCPUInterruptEnable
 
-				tf@ KeFox32Syscall
+				tf@ KiFox32Syscall
 
 				HALCPUInterruptDisable drop
 			end else
@@ -866,14 +868,14 @@ fn KeFox32Exception { ecause tf -- }
 				// this is an inlined version of what KeIPLLower also does
 
 				if (ipl@ IPLDPC <)
-					if (KePendingSoftwareInterrupts@)
+					if (KiPendingSoftwareInterrupts@)
 						auto p
-						KePendingSoftwareInterrupts@ [ipl@]KePendingSoftwareInterruptMask@ & p!
+						KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 
 						while (p@)
-							[p@]KePendingSoftwareInterruptFirst@ KeSoftwareInterruptHandlerF
+							[p@]KiPendingSoftwareInterruptFirst@ KiSoftwareInterruptHandlerF
 
-							KePendingSoftwareInterrupts@ [ipl@]KePendingSoftwareInterruptMask@ & p!
+							KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 						end
 					end
 				end
@@ -932,7 +934,7 @@ fn KeFox32Exception { ecause tf -- }
 	0 HALfox32InterruptsDisabled!
 end
 
-fn KeCPUInit { -- }
+fn KiCPUInit { -- }
 	fnsection "INIT$text"
 
 	auto i
@@ -996,5 +998,5 @@ fn HALCPUContextInit { context1 context2 startfunc kstack process -- ctx }
 
 	0 ctx@ OSContext_fp + !
 
-	pointerof ThreadTrampoline ctx@ OSContext_epc + !
+	pointerof KiThreadTrampoline ctx@ OSContext_epc + !
 end

@@ -16,7 +16,22 @@
 #include "<ll>/OSDLL/OSStatistics.h"
 #include "<ll>/OSDLL/OSContext.h"
 
-const RTC_PORT 0x80000700
+externptr KiTimerExpirationEarliest
+externptr KiTimerExpirationDPC
+
+externptr KiThreadQuantumDPC
+externptr KiFox32OldIPL
+
+var FoxClockStart 0
+
+extern FoxDiskInit { -- }
+extern Fox32KeyboardInit { -- }
+extern Fox32MouseInit { -- }
+extern Fox32FramebufferInit { -- }
+
+buffer Fox32VsyncDPC KeDPC_SIZEOF
+
+const RTC_PORT       0x80000700
 const RTC_PORT_YEAR  0
 const RTC_PORT_MONTH 1
 const RTC_PORT_DAY   2
@@ -77,15 +92,6 @@ fn (HALUptimeQueryF) DriverRTCUptimeQuery { time -- }
 	uptime@ 1000 % time@ KeTime_MsPart + !
 end
 
-var FoxClockStart 0
-
-extern FoxDiskInit { -- }
-extern Fox32KeyboardInit { -- }
-extern Fox32MouseInit { -- }
-extern Fox32FramebufferInit { -- }
-
-buffer Fox32VsyncDPC KeDPC_SIZEOF
-
 fn (FDriverInit) DriverInit { stage -- ok }
 	fnsection "INIT$text"
 
@@ -113,14 +119,10 @@ fn (FDriverInit) DriverInit { stage -- ok }
 	0 ok!
 end
 
-externptr KeTimerExpirationEarliest
-externptr KeTimerExpirationDPC
-externptr KeFox32OldIPL
-
 fn Fox32RTCInterrupt { trapframe -- }
 	1 KeStatistics OSStatistics_ClockTicks + +=
 
-	17 KeStatistics OSStatistics_IPLTimes + KeFox32OldIPL@ 4 * + +=
+	17 KeStatistics OSStatistics_IPLTimes + KiFox32OldIPL@ 4 * + +=
 
 	auto uptime
 	KeTime_SIZEOF alloc uptime!
@@ -128,9 +130,9 @@ fn Fox32RTCInterrupt { trapframe -- }
 	uptime@ DriverRTCUptimeQuery
 
 	auto expdpc
-	KeTimerExpirationDPC expdpc!
+	KiTimerExpirationDPC expdpc!
 
-	if (KeTimerExpirationEarliest uptime@ KeTimeCompare TIMEEARLIER ==)
+	if (KiTimerExpirationEarliest uptime@ KeTimeCompare TIMEEARLIER ==)
 		0 // context1
 		0 // context2
 		DPCLOWIMPORTANCE // importance
@@ -152,7 +154,7 @@ fn Fox32RTCInterrupt { trapframe -- }
 		if (trapframe@ OSContext_eflagsB + gb FOX32_RS_USER &)
 			17 cth@ KeThread_UserTimeMs + +=
 			17 process@ KeProcess_UserTimeMs + +=
-		end elseif (KeFox32OldIPL@ IPLDPC ==)
+		end elseif (KiFox32OldIPL@ IPLDPC ==)
 			17 cth@ KeThread_DPCTimeMs + +=
 			17 process@ KeProcess_DPCTimeMs + +=
 		end else
@@ -170,12 +172,10 @@ fn Fox32RTCInterrupt { trapframe -- }
 		end
 
 		if (qt@ ~~)
-			KeThreadQuantumDPC expdpc!
-
 			0 // context1
 			0 // context2
 			DPCLOWIMPORTANCE // importance
-			expdpc@ // dpc
+			KiThreadQuantumDPC // dpc
 			KeDPCEnqueue drop
 		end
 

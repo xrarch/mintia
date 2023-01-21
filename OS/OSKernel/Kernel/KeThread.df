@@ -12,33 +12,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "KeInternal.h"
+
 // 'context1' and 'context2' are parameters passed to the start function
-
-fn KeThreadInitializeAddToList { thread process -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto h
-	process@ KeProcess_ThreadListHead + @ h!
-
-	0 thread@ KeThread_ProcessNext + !
-	0 thread@ KeThread_ProcessPrev + !
-
-	if (h@)
-		thread@ h@ KeThread_ProcessPrev + !
-		h@ thread@ KeThread_ProcessNext + !
-	end
-
-	thread@ process@ KeProcess_ThreadListHead + !
-
-	process@ KeProcess_ThreadCountI + gi 1 +
-	process@ KeProcess_ThreadCountI + si
-
-	process@ KeProcess_ResidentStackCountI + gi 1 +
-	process@ KeProcess_ResidentStackCountI + si
-
-	rs@ HALCPUInterruptRestore
-end
 
 fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -- }
 	fnsection "PAGE$text"
@@ -68,7 +44,7 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	thread@ // thread
 	process@ // process
-	KeThreadInitializeAddToList
+	KiThreadInitializeAddToList
 
 	0 thread@ KeThread_QueueNext + !
 	0 thread@ KeThread_QueuePrev + !
@@ -220,7 +196,7 @@ fn KeThreadAPCEnable { thread -- oldcount }
 	if (oldcount@ 1 ==)
 		if (thread@ KeThreadCurrent@ ==)
 			if (thread@ KeThread_APCListHead + @)
-				IPLAPC KeSoftwareInterruptRequest
+				IPLAPC KiSoftwareInterruptRequest
 			end
 		end
 	end
@@ -279,14 +255,7 @@ fn KeThreadResume { thread -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	0 thread@ KeThread_SuspendedB + sb
-
-	if (thread@ KeThread_StatusB + gb THREADSTATUS_SUSPENDED ==)
-		0 // waitstatus
-		0 // priboost
-		thread@ // thread
-		KeThreadWakeup drop
-	end
+	thread@ KiThreadResume
 
 	ipl@ KeIPLLower
 end
@@ -328,60 +297,9 @@ fn KeThreadUnmaskSignal { signal thread -- ok }
 
 	1 signal@ << thread@ KeThread_SignalAcceptMask + |=
 
-	thread@ KeThreadWakeForSignal
+	thread@ KiThreadWakeForSignal
 
 	ipl@ KeIPLLower
-end
-
-fn KeThreadWakeForSignal { thread -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeThreadWakeForSignal: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	// determine whether we need to wake the thread up
-
-	if (thread@ KeThread_IgnoreKill + @)
-		// no
-		return
-	end
-
-	auto sig
-	thread@ KeThread_Signals + @ sig!
-
-	auto status
-	if (sig@ 1 OSSIGNAL_KILL << &)
-		STATUS_KILLED status!
-	end elseif (sig@ thread@ KeThread_SignalAcceptMask + @ &)
-		STATUS_SIGNALLED status!
-	end else
-		return
-	end
-
-	if (thread@ KeThread_SuspendedB + gb)
-		thread@ KeThreadResume
-	end
-
-	if (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGALERTABLE ==)
-		// yes, wake it up
-
-		status@ // waitstatus
-		0 // priboost
-		thread@ // thread
-		KeThreadWakeup drop
-	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGUNALERTABLE ==)
-		if (thread@ KeThread_WaitModeB + gb USERMODE ==)
-			if (sig@ 1 OSSIGNAL_KILL << &)
-				// yes, wake it up
-
-				status@ // waitstatus
-				0 // priboost
-				thread@ // thread
-				KeThreadWakeup drop
-			end
-		end
-	end
 end
 
 fn KeThreadRundown { thread -- }
@@ -411,25 +329,6 @@ fn KeThreadRundown { thread -- }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadNextSignal { thread -- signum }
-	// assumes IPLDPC or equivalent.
-
-	auto excsignals
-	thread@ KeThread_Signals + @ excsignals!
-
-	0 signum!
-
-	while (signum@ 32 <)
-		if (excsignals@ 1 signum@ << &)
-			return
-		end
-
-		1 signum +=
-	end
-
-	0 signum!
-end
-
 fn KeThreadIsKilled { mode alertable thread -- ok }
 	// gives the status code that should be returned for the thread's signal
 	// state. this only determines what should interrupt a syscall and be
@@ -440,12 +339,14 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 
 	if (thread@ KeThread_IgnoreKill + @)
 		// all signals are being hard-ignored by the system
+
 		return
 	end
 
 	if (alertable@ ~~)
 		if (mode@ KERNELMODE ==)
 			// kernel mode unalertable can block all signals
+
 			return
 		end
 	end
@@ -462,17 +363,21 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 
 	if (sig@ ~~)
 		// no signals, return now
+
 		return
 	end
 
 	if (sig@ 1 OSSIGNAL_KILL << &)
 		// OSSIGNAL_KILL cannot be ignored
+
 		STATUS_KILLED ok!
+
 		return
 	end
 
 	if (alertable@ ~~)
 		// usermode unalertable can block all signals except OSSIGNAL_KILL
+
 		return
 	end
 
@@ -497,7 +402,135 @@ fn KeThreadSignal { signal thread -- ok }
 
 	1 signal@ << thread@ KeThread_Signals + |=
 
-	thread@ KeThreadWakeForSignal
+	thread@ KiThreadWakeForSignal
 
 	ipl@ KeIPLLower
+end
+
+fn KeThreadDispatchSignal { dispatchfunc trapframe -- }
+	auto thread
+	KeThreadCurrent@ thread!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto excsignals
+	thread@ KeThread_Signals + @ excsignals!
+
+	auto signum
+	0 signum!
+
+	while (signum@ 32 <)
+		if (excsignals@ 1 signum@ << &)
+			break
+		end
+
+		1 signum +=
+	end
+
+	ipl@ KeIPLLower
+
+	if (signum@ 32 >=)
+		return
+	end
+
+	signum@ // signum
+	dispatchfunc@ // dispatchfunc
+	thread@ // thread
+	trapframe@ // trapframe
+	KiCopySignalFrame drop
+end
+
+fn KiThreadInitializeAddToList { thread process -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto h
+	process@ KeProcess_ThreadListHead + @ h!
+
+	0 thread@ KeThread_ProcessNext + !
+	0 thread@ KeThread_ProcessPrev + !
+
+	if (h@)
+		thread@ h@ KeThread_ProcessPrev + !
+		h@ thread@ KeThread_ProcessNext + !
+	end
+
+	thread@ process@ KeProcess_ThreadListHead + !
+
+	process@ KeProcess_ThreadCountI + gi 1 +
+	process@ KeProcess_ThreadCountI + si
+
+	process@ KeProcess_ResidentStackCountI + gi 1 +
+	process@ KeProcess_ResidentStackCountI + si
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KiThreadResume { thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadResume: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	0 thread@ KeThread_SuspendedB + sb
+
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_SUSPENDED ==)
+		0 // waitstatus
+		0 // priboost
+		thread@ // thread
+		KiThreadWakeup drop
+	end
+end
+
+fn KiThreadWakeForSignal { thread -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiThreadWakeForSignal: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// determine whether we need to wake the thread up
+
+	if (thread@ KeThread_IgnoreKill + @)
+		// no
+		return
+	end
+
+	auto sig
+	thread@ KeThread_Signals + @ sig!
+
+	auto status
+	if (sig@ 1 OSSIGNAL_KILL << &)
+		STATUS_KILLED status!
+	end elseif (sig@ thread@ KeThread_SignalAcceptMask + @ &)
+		STATUS_SIGNALLED status!
+	end else
+		return
+	end
+
+	if (thread@ KeThread_SuspendedB + gb)
+		thread@ KiThreadResume
+	end
+
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGALERTABLE ==)
+		// yes, wake it up
+
+		status@ // waitstatus
+		0 // priboost
+		thread@ // thread
+		KiThreadWakeup drop
+	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGUNALERTABLE ==)
+		if (thread@ KeThread_WaitModeB + gb USERMODE ==)
+			if (sig@ 1 OSSIGNAL_KILL << &)
+				// yes, wake it up
+
+				status@ // waitstatus
+				0 // priboost
+				thread@ // thread
+				KiThreadWakeup drop
+			end
+		end
+	end
 end

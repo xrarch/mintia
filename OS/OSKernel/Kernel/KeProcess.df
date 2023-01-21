@@ -12,6 +12,11 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "KeInternal.h"
+
+externptr MmSwapEvent
+externptr MmProcessSwapOutListHead
+
 var KeProcessListHead 0
 public KeProcessListHead
 
@@ -104,43 +109,10 @@ fn KeProcessBasePrioritySet { priority process -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	priority@ process@ KeProcessBasePrioritySetDPCLevel
+	priority@ process@ KiProcessBasePrioritySet
 
 	ipl@ KeIPLLower
 end
-
-fn KeProcessBasePrioritySetDPCLevel { priority process -- }
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"KeProcessBasePrioritySetDPCLevel: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	if (process@ KeProcess_BasePriorityB + gb priority@ ==)
-		return
-	end
-
-	// iterate the list of threads for this process and increase their base
-	// priority if needed.
-
-	auto thread
-	process@ KeProcess_ThreadListHead + @ thread!
-
-	while (thread@)
-		if (priority@ thread@ KeThread_BasePriorityB + gb >)
-			priority@ // priority
-			thread@ // thread
-			KeThreadBasePrioritySet
-		end
-
-		thread@ KeThread_ProcessNext + @ thread!
-	end
-
-	priority@ process@ KeProcess_BasePriorityB + sb
-end
-
-externptr MmSwapEvent
-externptr MmProcessSwapOutListHead
 
 fn KeProcessAttach { try process -- ipl ok }
 	// switch the current thread to the address space of the provided process.
@@ -213,10 +185,10 @@ fn KeProcessAttach { try process -- ipl ok }
 
 		IPLAPC current@ KeThread_WaitIPLB + sb
 
-		0 KeThreadNextReason!
-		0 KeThreadNext!
+		0 KiThreadNextReason!
+		0 KiThreadNext!
 
-		KeThreadNextPick KeThreadSwitch
+		KiThreadNextPick KiThreadSwitch
 	end
 
 	IPLAPC KeIPLLower
@@ -267,4 +239,34 @@ fn KeProcessDetach { ipl -- }
 	HALCPUAddressSpaceSwitch
 
 	ipl@ KeIPLLower
+end
+
+fn KiProcessBasePrioritySet { priority process -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"KiProcessBasePrioritySet: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	if (process@ KeProcess_BasePriorityB + gb priority@ ==)
+		return
+	end
+
+	// iterate the list of threads for this process and increase their base
+	// priority if needed.
+
+	auto thread
+	process@ KeProcess_ThreadListHead + @ thread!
+
+	while (thread@)
+		if (priority@ thread@ KeThread_BasePriorityB + gb >)
+			priority@ // priority
+			thread@ // thread
+			KiThreadBasePrioritySet
+		end
+
+		thread@ KeThread_ProcessNext + @ thread!
+	end
+
+	priority@ process@ KeProcess_BasePriorityB + sb
 end

@@ -1,6 +1,5 @@
 INCLUDES := $(subst :, ,$(INCDIR))
 INCLUDEFILES := $(foreach incdir,$(INCLUDES),$(shell find $(incdir) -type f -name "*.h"))
-INCLUDEFILES += $(wildcard *.h)
 
 SFILES := $(foreach component,$(COMPONENTS),$(wildcard $(component)/$(ARCHITECTURE)/*.s))
 
@@ -35,8 +34,16 @@ else
 	echo "$(OUTPUTFILE) $(FULLOUTPUTFILE) $(EXECFILEMODE)" >> $(REPO)/DELTA
 endif
 
-%.$(ARCHITECTURE).$(CHKFRE).o: %.df $(INCLUDEFILES)
-	$(DFC) $< $@ incdir=$(INCDIR) libdir=$(LIBDIR)
+define COMPONENT_TEMPLATE
+
+$(1)/%.$$(ARCHITECTURE).$$(CHKFRE).o: $(1)/%.df $$(INCLUDEFILES) $$(wildcard $(1)/*.h)
+	$$(DFC) $$< $$@ incdir=$$(INCDIR) libdir=$$(LIBDIR)
+
+endef
+
+$(foreach component,$(COMPONENTS), \
+	$(eval $(call COMPONENT_TEMPLATE,$(component))) \
+)
 
 %.$(ARCHITECTURE).$(CHKFRE).o: %.s
 	$(ASM) $< $@

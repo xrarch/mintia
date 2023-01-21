@@ -29,87 +29,16 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "IOInternal.h"
+
 var IOCacheInfoBlockDirtyCount 0
 public IOCacheInfoBlockDirtyCount
 
-var IOCacheInfoBlockDirtyListHead 0
-public IOCacheInfoBlockDirtyListHead
+var IOiCacheInfoBlockDirtyListHead 0
+public IOiCacheInfoBlockDirtyListHead
 
-var IOCacheInfoBlockDirtyListTail 0
-public IOCacheInfoBlockDirtyListTail
-
-fn IOCacheInfoBlockCreate { -- cacheblock ok }
-	fnsection "PAGE$text"
-
-	IOCacheInfoBlock_SIZEOF VcBuffer_SIZEOF + // bytes
-	'Cach' // tag
-	CANBLOCK POOLALLOC | // flags
-	MmAllocWithTag ok! cacheblock!
-
-	if (ok@)
-		// allocation failed
-
-		return
-	end
-
-	0 cacheblock@ IOCacheInfoBlock_Next + !
-	0 cacheblock@ IOCacheInfoBlock_Prev + !
-
-	1 cacheblock@ IOCacheInfoBlock_References + !
-
-	0 cacheblock@ IOCacheInfoBlock_ModifiedPageCount + !
-
-	-1 cacheblock@ IOCacheInfoBlock_FirstModifiedPage + !
-	0 cacheblock@ IOCacheInfoBlock_LastModifiedPage + !
-
-	0 cacheblock@ IOCacheInfoBlock_MapCount + !
-	0 cacheblock@ IOCacheInfoBlock_Flags + !
-	
-	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
-	0 cacheblock@ IOCacheInfoBlock_BCBTreeRoot + !
-
-	1 // signaled
-	OSEVENT_SYNCH // type
-	"BCBTreeEvent" // name
-	cacheblock@ IOCacheInfoBlock_BCBTreeEvent + // event
-	KeEventInitialize
-
-	0 cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_WindowAddress + !
-	0 cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_FileControlBlock + !
-	VCBCBTYPE_PERMANENT cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_Type + !
-end
-
-fn IOCacheInfoBlockReference { cacheblock -- oldcount }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	cacheblock@ IOCacheInfoBlock_References + @ oldcount!
-
-	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_References + !
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOCacheInfoBlockDereference { cacheblock -- oldcount }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	cacheblock@ IOCacheInfoBlock_References + @ oldcount!
-
-	if (DEBUGCHECKS)
-		if (oldcount@ 0 ==)
-			"IOCacheInfoBlockDereference: underflow\n" KeCrash
-		end
-	end
-
-	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_References + !
-
-	rs@ HALCPUInterruptRestore
-
-	if (oldcount@ 1 ==)
-		cacheblock@ MmFree
-	end
-end
+var IOiCacheInfoBlockDirtyListTail 0
+public IOiCacheInfoBlockDirtyListTail
 
 fn IOCacheInfoBlockTryIncrementMap { cacheblock -- oldcount ok }
 	0 ok!
@@ -309,7 +238,80 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	ipl@ KeIPLLower
 end
 
-fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
+fn IOiCacheInfoBlockCreate { -- cacheblock ok }
+	fnsection "PAGE$text"
+
+	IOCacheInfoBlock_SIZEOF VcBuffer_SIZEOF + // bytes
+	'Cach' // tag
+	CANBLOCK POOLALLOC | // flags
+	MmAllocWithTag ok! cacheblock!
+
+	if (ok@)
+		// allocation failed
+
+		return
+	end
+
+	0 cacheblock@ IOCacheInfoBlock_Next + !
+	0 cacheblock@ IOCacheInfoBlock_Prev + !
+
+	1 cacheblock@ IOCacheInfoBlock_References + !
+
+	0 cacheblock@ IOCacheInfoBlock_ModifiedPageCount + !
+
+	-1 cacheblock@ IOCacheInfoBlock_FirstModifiedPage + !
+	0 cacheblock@ IOCacheInfoBlock_LastModifiedPage + !
+
+	0 cacheblock@ IOCacheInfoBlock_MapCount + !
+	0 cacheblock@ IOCacheInfoBlock_Flags + !
+	
+	0 cacheblock@ IOCacheInfoBlock_SplayTreeRoot + !
+	0 cacheblock@ IOCacheInfoBlock_BCBTreeRoot + !
+
+	1 // signaled
+	OSEVENT_SYNCH // type
+	"BCBTreeEvent" // name
+	cacheblock@ IOCacheInfoBlock_BCBTreeEvent + // event
+	KeEventInitialize
+
+	0 cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_WindowAddress + !
+	0 cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_FileControlBlock + !
+	VCBCBTYPE_PERMANENT cacheblock@ IOCacheInfoBlock_SIZEOF + VcBuffer_Type + !
+end
+
+fn IOiCacheInfoBlockReference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_References + @ oldcount!
+
+	oldcount@ 1 + cacheblock@ IOCacheInfoBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn IOiCacheInfoBlockDereference { cacheblock -- oldcount }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	cacheblock@ IOCacheInfoBlock_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ 0 ==)
+			"IOiCacheInfoBlockDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - cacheblock@ IOCacheInfoBlock_References + !
+
+	rs@ HALCPUInterruptRestore
+
+	if (oldcount@ 1 ==)
+		cacheblock@ MmFree
+	end
+end
+
+fn IOiCacheInfoBlockDestroy { writeout cacheblock -- ok }
 	fnsection "PAGE$text"
 
 	// assumes caller made sure there's no way this cacheblock can be used by
@@ -323,7 +325,7 @@ fn IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 	IOCacheInfoBlockTruncate ok!
 
 	if (ok@ ~~)
-		cacheblock@ IOCacheInfoBlockDereference drop
+		cacheblock@ IOiCacheInfoBlockDereference drop
 	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop

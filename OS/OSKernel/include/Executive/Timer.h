@@ -1,5 +1,3 @@
-extern ExTimerInit { -- }
-
 extern ExTimerCreateObject { permissions name -- timerobject ok }
 extern ExTimerCreate { permissions name -- timerhandle ok }
 

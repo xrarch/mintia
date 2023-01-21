@@ -27,17 +27,19 @@
 
 #include "<inc>/IPC.h"
 
+#include "IPCInternal.h"
+
 fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	fnsection "PAGE$text"
 
-	IPCThreadBlockCreate ok!
+	IPCiThreadBlockCreate ok!
 
 	if (ok@)
 		return
 	end
 
 	auto ipl
-	1 IPCGlobalLock ok! ipl!
+	1 IPCiGlobalLock ok! ipl!
 
 	if (ok@)
 		return
@@ -55,7 +57,7 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	IPCPortCreateObject ok! clientport!
 
 	if (ok@)
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		portobject@ ObObjectDereferenceByPointer drop
 
@@ -68,10 +70,10 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	mode@ // mode
 	OSPORT_CONID_CONNECTION // conid
 	clientport@ // portobject
-	IPCMessageAllocate ok! ktxmsg! drop
+	IPCiMessageAllocate ok! ktxmsg! drop
 
 	if (ok@)
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		clientport@ ObObjectDereferenceByPointer drop
 		portobject@ ObObjectDereferenceByPointer drop
@@ -79,20 +81,20 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 		return
 	end
 
-	OSPORT_MESSAGE_CONNECTION ktxmsg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
+	OSPORT_MESSAGE_CONNECTION ktxmsg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + sb
 
 	// send the connection message.
 
 	ktxmsg@ // msg
 	portobject@ // portobject
-	IPCPortSendMessage ok!
+	IPCiPortSendMessage ok!
 
 	// dereference the server port so it can be closed by host properly.
 
 	portobject@ ObObjectDereferenceByPointer drop
 
 	if (ok@)
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		clientport@ ObObjectDereferenceByPointer drop
 
@@ -106,20 +108,20 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 	OSPORT_CONID_CONNECTION // conid
 	timeout@ // timeout
 	clientport@ // portobject
-	IPCPortReceiveMessage ok!
+	IPCiPortReceiveMessage ok!
 
 	if (ok@)
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		clientport@ ObObjectDereferenceByPointer drop
 
 		return
 	end
 
-	if (clientport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
+	if (clientport@ IPCiPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
 		// failed to connect.
 
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		clientport@ ObObjectDereferenceByPointer drop
 
@@ -128,7 +130,7 @@ fn IPCPortConnectObject { mode rxmsg txmsg timeout portobject -- clientport ok }
 		return
 	end
 
-	ipl@ IPCGlobalUnlock
+	ipl@ IPCiGlobalUnlock
 end
 
 fn IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
@@ -164,7 +166,7 @@ fn IPCPortConnect { mode rxmsg txmsg timeout path -- porthandle ok }
 		return
 	end
 
-	if (serverport@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+	if (serverport@ IPCiPort_Flags + @ IPCPORTFLAG_CLIENT &)
 		// this is a client port. these shouldn't be allowed in the object
 		// namespace at all but check and return failure anyway.
 
@@ -202,7 +204,7 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 	fnsection "PAGE$text"
 
 	auto ipl
-	1 IPCGlobalLock ok! ipl!
+	1 IPCiGlobalLock ok! ipl!
 
 	if (ok@)
 		return
@@ -215,25 +217,25 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 	mode@ // mode
 	OSPORT_CONID_CONNECTION // conid
 	portobject@ // portobject
-	IPCMessageAllocate ok! ktxmsg! clientid!
+	IPCiMessageAllocate ok! ktxmsg! clientid!
 
 	if (ok@)
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		return
 	end
 
-	OSPORT_MESSAGE_REPLY ktxmsg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
+	OSPORT_MESSAGE_REPLY ktxmsg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + sb
 
 	auto clienttable
-	portobject@ IPCPort_ClientTableHeader + @ clienttable!
+	portobject@ IPCiPort_ClientTableHeader + @ clienttable!
 
 	clienttable@ ExHandleTableLockShared ok!
 
 	if (ok@)
-		ktxmsg@ IPCMessageFree
+		ktxmsg@ IPCiMessageFree
 
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		return
 	end
@@ -247,9 +249,9 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 	if (ok@)
 		clienttable@ ExHandleTableUnlock
 
-		ktxmsg@ IPCMessageFree
+		ktxmsg@ IPCiMessageFree
 
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		if (ok@ STATUS_INVALID_HANDLE ==)
 			STATUS_NO_SUCH_CLIENT ok!
@@ -258,14 +260,14 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 		return
 	end
 
-	if (clientport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
+	if (clientport@ IPCiPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
 		// connection already accepted?
 
 		clienttable@ ExHandleTableUnlock
 
-		ktxmsg@ IPCMessageFree
+		ktxmsg@ IPCiMessageFree
 
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		clientport@ ObObjectDereferenceByPointer drop
 
@@ -276,20 +278,20 @@ fn IPCPortAcceptObject { mode context txmsg reject portobject -- ok }
 
 	ktxmsg@ // msg
 	clientport@ // portobject
-	IPCPortSendMessage ok!
+	IPCiPortSendMessage ok!
 
 	if (ok@)
 		1 reject!
 	end
 
 	if (reject@ ~~)
-		IPCPORTFLAG_UNFINISHED_CONNECTION ~ clientport@ IPCPort_Flags + &=
-		context@ clientport@ IPCPort_ServerContextForClient + !
+		IPCPORTFLAG_UNFINISHED_CONNECTION ~ clientport@ IPCiPort_Flags + &=
+		context@ clientport@ IPCiPort_ServerContextForClient + !
 	end
 
 	clienttable@ ExHandleTableUnlock
 
-	ipl@ IPCGlobalUnlock
+	ipl@ IPCiGlobalUnlock
 
 	clientport@ ObObjectDereferenceByPointer drop
 end
@@ -306,7 +308,7 @@ fn IPCPortAccept { mode context txmsg reject porthandle -- ok }
 		return
 	end
 
-	if (portobject@ IPCPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
+	if (portobject@ IPCiPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
 		portobject@ ObObjectDereferenceByPointer drop
 
 		STATUS_PERMISSION_DENIED ok!
@@ -314,7 +316,7 @@ fn IPCPortAccept { mode context txmsg reject porthandle -- ok }
 		return
 	end
 
-	if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+	if (portobject@ IPCiPort_Flags + @ IPCPORTFLAG_CLIENT &)
 		portobject@ ObObjectDereferenceByPointer drop
 
 		STATUS_INVALID_OBJECT_TYPE ok!

@@ -27,7 +27,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-buffer IOFilesystemSyncTimer KeTimer_SIZEOF
+#include "IOInternal.h"
+
+buffer IOiFilesystemSyncTimer KeTimer_SIZEOF
 
 const IOWRITEBEHINDINTERVAL 5000
 
@@ -37,7 +39,7 @@ const IOPAGEFILECONTRACTINTERVAL 30000
 
 const IOPAGEFILECONTRACTTICKS (IOPAGEFILECONTRACTINTERVAL IOFSSYNCINTERVAL /)
 
-fn IOFilesystemSyncWorker { context1 context2 -- }
+fn IOiFilesystemSyncWorker { context1 context2 -- }
 	fnsection "PAGE$text"
 
 	PRIORITY_LOWREALTIME // priority
@@ -52,22 +54,22 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 	waitblocktable@ // waitblocktable
 	KeDispatchWaitBlockTableInitialize
 
-	"IOFilesystemSyncTimer" // name
+	"IOiFilesystemSyncTimer" // name
 	0 // function
-	IOFilesystemSyncTimer // timer
+	IOiFilesystemSyncTimer // timer
 	KeTimerInitialize
 
 	auto objecttable
 	12 alloc objecttable!
 
 	IOPageFileExtendEvent objecttable@!
-	IOFilesystemSyncTimer objecttable@ 4 + !
-	IOFileControlBlockCacheTrimEvent objecttable@ 8 + !
+	IOiFilesystemSyncTimer objecttable@ 4 + !
+	IOiFileControlBlockCacheTrimEvent objecttable@ 8 + !
 
 	0 // context1
 	0 // context2
 	IOFSSYNCINTERVAL // interval
-	IOFilesystemSyncTimer // timer
+	IOiFilesystemSyncTimer // timer
 	KeTimerEnqueue drop
 
 	auto ticks
@@ -94,13 +96,13 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 		if (DEBUGCHECKS)
 			if (reason@ z<)
 				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "IOFilesystemSyncWorker: failed to wait on event (%i)\n" KeCrash
+					reason@ "IOiFilesystemSyncWorker: failed to wait on event (%i)\n" KeCrash
 				end
 			end
 		end
 
 		if (ExShuttingDown@)
-			1 IOFilesystemSyncAll drop
+			1 IOiFilesystemSyncAll drop
 
 			// let the shutdown thread know we did our bit
 			2 ExShuttingDown!
@@ -114,36 +116,36 @@ fn IOFilesystemSyncWorker { context1 context2 -- }
 		end
 
 		if (reason@ 2 ==)
-			IOFilesystemReclaimFCB
+			IOiFilesystemReclaimFCB
 		end elseif (reason@ 1 ==)
-			0 IOFilesystemSyncAll drop
+			0 IOiFilesystemSyncAll drop
 
 			1 ticks +=
 
 			if (ticks@ IOPAGEFILECONTRACTTICKS ==)
-				IOPageFileContract
+				IOiPageFileContract
 
 				0 ticks!
 			end
 
-			IOFilesystemSyncTimer KeTimerReset drop
+			IOiFilesystemSyncTimer KeTimerReset drop
 
 			0 // context1
 			0 // context2
 			IOFSSYNCINTERVAL // interval
-			IOFilesystemSyncTimer // timer
+			IOiFilesystemSyncTimer // timer
 			KeTimerEnqueue drop
 		end elseif (reason@ 0 ==)
-			IOPageFileExtend
+			IOiPageFileExtend
 		end
 	end
 end
 
-fn (DPCFunction) IOWritebehindTimerDPCFunction { context1 context2 -- }
-	IOWritebehindTimer KeTimerReset drop
+fn (DPCFunction) IOiWritebehindTimerDPCFunction { context1 context2 -- }
+	IOiWritebehindTimer KeTimerReset drop
 end
 
-fn IOWritebehindWorker { context1 context2 -- }
+fn IOiWritebehindWorker { context1 context2 -- }
 	PRIORITY_LOWREALTIME // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
@@ -151,8 +153,8 @@ fn IOWritebehindWorker { context1 context2 -- }
 	auto objecttable
 	8 alloc objecttable!
 
-	IOWritebehindTimer objecttable@!
-	IOWritebehindEvent objecttable@ 4 + !
+	IOiWritebehindTimer objecttable@!
+	IOiWritebehindEvent objecttable@ 4 + !
 
 	while (1)
 		auto reason
@@ -168,7 +170,7 @@ fn IOWritebehindWorker { context1 context2 -- }
 		if (DEBUGCHECKS)
 			if (reason@ z<)
 				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "IOWritebehindWorker: failed to wait on event (%i)\n" KeCrash
+					reason@ "IOiWritebehindWorker: failed to wait on event (%i)\n" KeCrash
 				end
 			end
 		end
@@ -189,7 +191,7 @@ fn IOWritebehindWorker { context1 context2 -- }
 			auto ipl
 			IPLDPC KeIPLRaise ipl!
 
-			IOCacheInfoBlockDirtyListHead@ cacheblock!
+			IOiCacheInfoBlockDirtyListHead@ cacheblock!
 
 			if (cacheblock@ ~~)
 				ipl@ KeIPLLower
@@ -201,10 +203,10 @@ fn IOWritebehindWorker { context1 context2 -- }
 			auto n
 			cacheblock@ IOCacheInfoBlock_Next + @ n!
 
-			n@ IOCacheInfoBlockDirtyListHead!
+			n@ IOiCacheInfoBlockDirtyListHead!
 
 			if (n@ ~~)
-				0 IOCacheInfoBlockDirtyListTail!
+				0 IOiCacheInfoBlockDirtyListTail!
 			end else
 				0 n@ IOCacheInfoBlock_Prev + !
 			end
@@ -213,24 +215,24 @@ fn IOWritebehindWorker { context1 context2 -- }
 
 			cacheblock@ IOCacheInfoBlockFlush drop
 
-			cacheblock@ IOCacheInfoBlockDereference drop
+			cacheblock@ IOiCacheInfoBlockDereference drop
 
 			1 modcount -=
 		end
 	end
 end
 
-fn IOScheduleWritebehind { -- }
+fn IOiScheduleWritebehind { -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
-			"IOScheduleWritebehind: ipl != IPLDPC\n" KeCrash
+			"IOiScheduleWritebehind: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
 	0 // context1
 	0 // context2
 	IOWRITEBEHINDINTERVAL // interval
-	IOWritebehindTimer
+	IOiWritebehindTimer
 	KeTimerEnqueue drop
 end
 
@@ -242,6 +244,6 @@ fn IOTriggerWritebehind { -- }
 	// dirty page count and figure out when they've all been written.
 
 	0 // priboost
-	IOWritebehindEvent // event
+	IOiWritebehindEvent // event
 	KeEventSignal
 end

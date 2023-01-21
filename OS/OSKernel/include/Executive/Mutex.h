@@ -1,5 +1,3 @@
-extern ExMutexInit { -- }
-
 extern ExMutexCreateObject { permissions name -- mutexobject ok }
 extern ExMutexCreate { permissions name -- mutexhandle ok }
 

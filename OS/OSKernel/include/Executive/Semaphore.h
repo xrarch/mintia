@@ -1,5 +1,3 @@
-extern ExSemaphoreInit { -- }
-
 extern ExSemaphoreCreateObject { count permissions name -- semaphoreobject ok }
 extern ExSemaphoreCreate { count permissions name -- semaphorehandle ok }
 

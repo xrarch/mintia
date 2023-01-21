@@ -1,5 +1,3 @@
-extern IOPageFileInit { -- }
-
 extern IOPageFileCreate { minpages maxpages pri path -- ok }
 extern IOPageFileQuery { query id -- ok }
 
@@ -12,9 +10,6 @@ extern IOPageFileWriteMDL { pagecount offset mdl -- ok }
 extern IOPageFileAwaitCreation { -- }
 
 extern IOPageFileRequestExpansion { pages -- ok }
-extern IOPageFileExtend { -- }
-
-extern IOPageFileContract { -- }
 
 extern IOPageFileGetPriority { pagefile -- pri }
 extern IOPageFileGetFree { pagefile -- free }

@@ -27,6 +27,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "IOInternal.h"
+
 #include "../../Common/Common.h"
 
 extern MmMPWAssessTransfers { transfer1 -- }
@@ -60,39 +62,27 @@ struct IOPageFile
 	4 Next
 endstruct
 
-buffer IOPageFileCreationMutex KeMutex_SIZEOF
+buffer IOiPageFileCreationMutex KeMutex_SIZEOF
 
 buffer IOPageFileExtendEvent KeEvent_SIZEOF
 public IOPageFileExtendEvent
 
 table IOPageFiles[IOPAGEFILEMAX]
 
-table IOPageFilePriorityListHeads[IOPAGEFILEMAXPRI]
-table IOPageFilePriorityListTails[IOPAGEFILEMAXPRI]
-
-var IOPageFileExtensionIndex 0
+var IOiPageFileExtensionIndex 0
 
 var IOPageFileCount 0
 public IOPageFileCount
 
-fn IOPageFileInsert { pri fcb pagefile -- }
+fn IOiPageFileInsert { pri fcb pagefile -- }
 	// set system file flag
 	auto rs
 	HALCPUInterruptDisable rs!
+
 	IOFCBFLAG_SYSTEMFILE fcb@ IOFileControlBlock_Flags + |=
 
 	pagefile@ [IOPageFileCount@]IOPageFiles!
 	pagefile@ IOPageFile_MinimumSize + @ IOSwapPagesCount +=
-
-	auto h
-	[pri@]IOPageFilePriorityListHeads@ h!
-
-	h@ pagefile@ IOPageFile_Next + !
-	pagefile@ [pri@]IOPageFilePriorityListHeads!
-
-	if (h@ ~~)
-		pagefile@ [pri@]IOPageFilePriorityListTails!
-	end
 
 	2 MmAnonTransfersAvailable +=
 
@@ -122,30 +112,30 @@ fn IOPageFileGetFree { pagefile -- free }
 	pagefile@ IOPageFile_CurrentSize + @ pagefile@ IOPageFile_UsedCount + @ - free!
 end
 
-fn IOPageFileInit { -- }
+fn IOiPageFileInit { -- }
 	fnsection "INIT$text"
 
-	"IOPageFileCreationMutex" // name
+	"IOiPageFileCreationMutex" // name
 	KERNELMODE // mode
-	IOPageFileCreationMutex // mutex
+	IOiPageFileCreationMutex // mutex
 	KeMutexInitialize
 end
 
-fn IOPageFileCreateLock { -- }
+fn IOiPageFileCreateLock { -- }
 	fnsection "PAGE$text"
 
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	IOPageFileCreationMutex // object
+	IOiPageFileCreationMutex // object
 	KeThreadWaitForObject drop
 end
 
-fn IOPageFileCreateUnlock { -- }
+fn IOiPageFileCreateUnlock { -- }
 	fnsection "PAGE$text"
 
 	0 // abandon
-	IOPageFileCreationMutex // mutex
+	IOiPageFileCreationMutex // mutex
 	KeMutexRelease drop
 end
 
@@ -172,10 +162,10 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
-	IOPageFileCreateLock
+	IOiPageFileCreateLock
 
 	if (IOPageFileCount@ IOPAGEFILEMAX >=)
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		STATUS_TOO_MANY_PAGEFILES ok!
 
@@ -192,7 +182,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	ObObjectOpenByPath ok! handle!
 
 	if (ok@)
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		return
 	end
@@ -206,7 +196,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	handle@ ObObjectClose drop
 
 	if (ok@)
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		return
 	end
@@ -214,7 +204,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	access@ ACCESS_WRITE ACCESS_READ | SeCheckAccess ok!
 
 	if (ok@)
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -225,7 +215,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
 	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -250,7 +240,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 		IOFileControlBlockTruncate ok! drop
 
 		if (ok@)
-			IOPageFileCreateUnlock
+			IOiPageFileCreateUnlock
 
 			fileobject@ ObObjectDereferenceByPointer drop
 
@@ -259,7 +249,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	end else
 		// bad
 
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -271,7 +261,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	if (minpages@ 128 <)
 		// needs to be at least 128 pages (512KB with 4KB pages)
 
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -292,7 +282,7 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	MmAllocWithTag ok! pagefile!
 
 	if (ok@)
-		IOPageFileCreateUnlock
+		IOiPageFileCreateUnlock
 
 		fileobject@ ObObjectDereferenceByPointer drop
 
@@ -348,12 +338,12 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	pri@ // pri
 	fcb@ // fcb
 	pagefile@ // pagefile
-	IOPageFileInsert
+	IOiPageFileInsert
 
 	transfer1@ IOTransferComplete
 	transfer2@ IOTransferComplete
 
-	IOPageFileCreateUnlock
+	IOiPageFileCreateUnlock
 
 	// leave fileobject refcount biased
 
@@ -596,7 +586,7 @@ fn IOPageFileWriteMDL { pagecount offset mdl -- ok }
 	MmMDLInitialize
 
 	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
-	pointerof IOSwapPageWriteMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
+	pointerof IOiSwapPageWriteMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
 	offset@ mdl@ MmMDLHeader_Context + !
 
 	auto pagefile
@@ -627,7 +617,7 @@ fn IOPageFileWriteMDL { pagecount offset mdl -- ok }
 	pagecount@ IOSwapPagesWritten +=
 end
 
-fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
+fn (MmMDLCompleteRoutine) IOiSwapPageWriteMDLComplete { mdl -- }
 	// runs as an APC in the context of the modified page writer.
 
 	auto status
@@ -701,8 +691,8 @@ fn (MmMDLCompleteRoutine) IOSwapPageWriteMDLComplete { mdl -- }
 	mdl@ IOTransferComplete
 end
 
-var IOPageFileExtensionListHead 0
-var IOPageFileExtensionListTail 0
+var IOiPageFileExtensionListHead 0
+var IOiPageFileExtensionListTail 0
 
 struct IOPageFileExtension
 	4 Next
@@ -761,15 +751,15 @@ fn IOPageFileRequestExpansion { pages -- ok }
 	HALCPUInterruptDisable rs!
 
 	auto t
-	IOPageFileExtensionListTail@ t!
+	IOiPageFileExtensionListTail@ t!
 
 	if (t@ ~~)
-		extension@ IOPageFileExtensionListHead!
+		extension@ IOiPageFileExtensionListHead!
 	end else
 		extension@ t@ IOPageFileExtension_Next + !
 	end
 
-	extension@ IOPageFileExtensionListTail!
+	extension@ IOiPageFileExtensionListTail!
 
 	rs@ HALCPUInterruptRestore
 
@@ -788,32 +778,32 @@ fn IOPageFileRequestExpansion { pages -- ok }
 	IPLDPC KeIPLRaise drop
 end
 
-fn IOPageFileExtend { -- }
+fn IOiPageFileExtend { -- }
 	// called by worker thread.
 	// pops extension requests off the listhead and tries to satisfy them.
 	// satisfying a request is done by extending the pagefile & signaling the
 	// event to wake up the waiting thread.
 
-	while (IOPageFileExtensionListHead@)
+	while (IOiPageFileExtensionListHead@)
 		auto extension
 
 		auto rs
 		HALCPUInterruptDisable rs!
 
-		IOPageFileExtensionListHead@ extension!
-		extension@ IOPageFileExtension_Next + @ IOPageFileExtensionListHead!
+		IOiPageFileExtensionListHead@ extension!
+		extension@ IOPageFileExtension_Next + @ IOiPageFileExtensionListHead!
 
-		if (IOPageFileExtensionListHead@ ~~)
-			0 IOPageFileExtensionListTail!
+		if (IOiPageFileExtensionListHead@ ~~)
+			0 IOiPageFileExtensionListTail!
 		end
 
 		rs@ HALCPUInterruptRestore
 
-		extension@ IOPageFileSatisfyExtension
+		extension@ IOiPageFileSatisfyExtension
 	end
 end
 
-fn IOPageFileSatisfyExtension { extension -- }
+fn IOiPageFileSatisfyExtension { extension -- }
 	auto i
 	0 i!
 
@@ -867,18 +857,18 @@ fn IOPageFileSatisfyExtension { extension -- }
 
 	ipl@ KeIPLLower
 
-	requiredextension@ IOPageFileTryExtendAll extension@ IOPageFileExtension_Success + !
+	requiredextension@ IOiPageFileTryExtendAll extension@ IOPageFileExtension_Success + !
 
 	0 // priboost
 	extension@ IOPageFileExtension_Event + // event
 	KeEventSignal
 end
 
-fn IOPageFileTryExtendAll { extension -- ok }
+fn IOiPageFileTryExtendAll { extension -- ok }
 	fnsection "PAGE$text"
 
-	if (IOPageFileExtensionIndex@ IOPageFileCount@ >=)
-		0 IOPageFileExtensionIndex!
+	if (IOiPageFileExtensionIndex@ IOPageFileCount@ >=)
+		0 IOiPageFileExtensionIndex!
 	end
 
 	0 ok!
@@ -892,9 +882,9 @@ fn IOPageFileTryExtendAll { extension -- ok }
 
 		if (i@ 0 ==)
 			IOPageFileCount@ max!
-			IOPageFileExtensionIndex@ j!
+			IOiPageFileExtensionIndex@ j!
 		end else
-			IOPageFileExtensionIndex@ max!
+			IOiPageFileExtensionIndex@ max!
 			0 j!
 		end
 
@@ -902,7 +892,7 @@ fn IOPageFileTryExtendAll { extension -- ok }
 			auto realextension
 			extension@ // extension
 			[j@]IOPageFiles@ // pagefile
-			IOPageFileTryExtend realextension!
+			IOiPageFileTryExtend realextension!
 
 			if (realextension@ extension@ >)
 				0 extension!
@@ -918,7 +908,7 @@ fn IOPageFileTryExtendAll { extension -- ok }
 		end
 
 		if (extension@ ~~)
-			j@ 1 + IOPageFileExtensionIndex!
+			j@ 1 + IOiPageFileExtensionIndex!
 			break
 		end
 
@@ -932,7 +922,7 @@ end
 
 const IOPAGEFILEMINIMUMEXTENSION 128
 
-fn IOPageFileTryExtend { extension pagefile -- realextension }
+fn IOiPageFileTryExtend { extension pagefile -- realextension }
 	auto maxextend
 	pagefile@ IOPageFile_MaximumSize + @ pagefile@ IOPageFile_CurrentSize + @ - maxextend!
 
@@ -1006,7 +996,7 @@ fn IOPageFileTryExtend { extension pagefile -- realextension }
 	ipl@ KeIPLLower
 end
 
-fn IOPageFileContract { -- }
+fn IOiPageFileContract { -- }
 	fnsection "PAGE$text"
 
 	// called by the worker thread every 5 seconds to scan the pagefiles and
@@ -1055,14 +1045,14 @@ fn IOPageFileContract { -- }
 		return
 	end
 
-	potentialcontraction@ IOPageFileTryContractAll
+	potentialcontraction@ IOiPageFileTryContractAll
 end
 
-fn IOPageFileTryContractAll { contraction -- }
+fn IOiPageFileTryContractAll { contraction -- }
 	fnsection "PAGE$text"
 
-	if (IOPageFileExtensionIndex@ IOPageFileCount@ >=)
-		0 IOPageFileExtensionIndex!
+	if (IOiPageFileExtensionIndex@ IOPageFileCount@ >=)
+		0 IOiPageFileExtensionIndex!
 	end
 
 	auto i
@@ -1074,9 +1064,9 @@ fn IOPageFileTryContractAll { contraction -- }
 
 		if (i@ 0 ==)
 			IOPageFileCount@ max!
-			IOPageFileExtensionIndex@ j!
+			IOiPageFileExtensionIndex@ j!
 		end else
-			IOPageFileExtensionIndex@ max!
+			IOiPageFileExtensionIndex@ max!
 			0 j!
 		end
 
@@ -1084,7 +1074,7 @@ fn IOPageFileTryContractAll { contraction -- }
 			auto contractedby
 			contraction@ // contraction
 			[j@]IOPageFiles@ // pagefile
-			IOPageFileTryContract contractedby!
+			IOiPageFileTryContract contractedby!
 
 			if (contractedby@ contraction@ >=)
 				0 contraction!
@@ -1097,7 +1087,7 @@ fn IOPageFileTryContractAll { contraction -- }
 		end
 
 		if (contraction@ ~~)
-			j@ 1 + IOPageFileExtensionIndex!
+			j@ 1 + IOiPageFileExtensionIndex!
 			break
 		end
 
@@ -1105,7 +1095,7 @@ fn IOPageFileTryContractAll { contraction -- }
 	end
 end
 
-fn IOPageFileTryContract { contraction pagefile -- contractedby }
+fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 	0 contractedby!
 
 	if (contraction@ IOPAGEFILEMINIMUMEXTENSION <)

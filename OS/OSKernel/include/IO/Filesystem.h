@@ -78,8 +78,4 @@ extern IOMountGetContext { mount -- context }
 extern IOMountSetRootFCB { fcb mount -- }
 extern IOMountGetRootFCB { mount -- fcb }
 
-extern IOFilesystemReclaimFCB { -- }
-
-extern IOFilesystemSyncAll { shutdown -- ok }
-
 externptr IOMountCount

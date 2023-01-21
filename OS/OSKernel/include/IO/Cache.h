@@ -32,12 +32,7 @@ struct IOPageFrameEntryCache
 	4 OffsetInFile
 endstruct
 
-extern IOWritebehindWorker { context1 context2 -- }
-extern IOFilesystemSyncWorker { context1 context2 -- }
-
 extern IOCacheDumpInfo { cacheblock -- }
-
-extern IOCacheInfoBlockCreate { -- cacheblock ok }
 
 extern IOCacheInfoBlockLockBCB { cacheblock -- }
 extern IOCacheInfoBlockUnlockBCB { cacheblock -- }
@@ -45,12 +40,8 @@ extern IOCacheInfoBlockUnlockBCB { cacheblock -- }
 extern IOCacheInfoBlockTryIncrementMap { cacheblock -- oldcount ok }
 extern IOCacheInfoBlockDecrementMap { cacheblock -- oldcount }
 
-extern IOCacheInfoBlockDestroy { writeout cacheblock -- ok }
 extern IOCacheInfoBlockFlush { cacheblock -- ok }
 extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
-
-extern IOCacheInfoBlockReference { cacheblock -- oldcount }
-extern IOCacheInfoBlockDereference { cacheblock -- oldcount }
 
 extern IOCachePageModified { pfdbe -- }
 
@@ -60,8 +51,6 @@ extern IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 extern IOCachePageWrite { transfer kflags pfdbe -- ok }
 
 extern IOCachePageFlush { pfdbe -- ok }
-
-extern IOCacheInitialize { fcb -- cacheblock ok }
 
 extern IOCacheZeroData { size offset flags fcb -- ok }
 

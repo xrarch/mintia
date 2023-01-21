@@ -27,17 +27,19 @@
 
 #include "<inc>/IPC.h"
 
-fn (ObTypeOpenFunction) IPCPortObjectOpen { access object process -- ok }
+#include "IPCInternal.h"
+
+fn (ObTypeOpenFunction) IPCiPortObjectOpen { access object process -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
 
-	if (process@ object@ IPCPort_OwningProcess + @ ~=)
+	if (process@ object@ IPCiPort_OwningProcess + @ ~=)
 		STATUS_PERMISSION_DENIED ok!
 	end
 end
 
-fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
+fn (ObTypeDeleteFunction) IPCiPortObjectDelete { object -- }
 	fnsection "PAGE$text"
 
 	auto ok
@@ -45,66 +47,66 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 	auto clienttable
 
 	auto ipl
-	0 IPCGlobalLock drop ipl!
+	0 IPCiGlobalLock drop ipl!
 
 	// rundown all of my messages still out there in a queue
 
 	auto msg
 
 	while (1)
-		object@ IPCPort_SentListHead + @ msg!
+		object@ IPCiPort_SentListHead + @ msg!
 
 		if (msg@ ~~)
 			break
 		end
 
-		msg@ IPCMessageDequeueRundown
+		msg@ IPCiMessageDequeueRundown
 
-		if (msg@ IPCKernelMessage_RundownPointer + @)
-			0 msg@ IPCKernelMessage_RundownPointer + @ !
+		if (msg@ IPCiKernelMessage_RundownPointer + @)
+			0 msg@ IPCiKernelMessage_RundownPointer + @ !
 		end else
-			msg@ IPCMessageDequeue
+			msg@ IPCiMessageDequeue
 		end
 
-		msg@ IPCMessageFree
+		msg@ IPCiMessageFree
 	end
 
-	if (object@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+	if (object@ IPCiPort_Flags + @ IPCPORTFLAG_CLIENT &)
 		// it's a client, check if there's a server port still.
 
-		if (object@ IPCPort_ServerPort + @)
-			if (object@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
+		if (object@ IPCiPort_ServerPort + @)
+			if (object@ IPCiPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
 				auto kdms
-				object@ IPCPort_DisconnectionMessage + @ kdms!
+				object@ IPCiPort_DisconnectionMessage + @ kdms!
 
-				object@ IPCPort_ServerContextForClient + @ kdms@ IPCKernelMessage_Header + OSMessageHeader_Context + !
-				OSPORT_MESSAGE_DISCONNECT kdms@ IPCKernelMessage_Header + OSMessageHeader_TypeB + sb
-				object@ IPCPort_ClientID + @ kdms@ IPCKernelMessage_Header + OSMessageHeader_ClientID + !
+				object@ IPCiPort_ServerContextForClient + @ kdms@ IPCiKernelMessage_Header + OSMessageHeader_Context + !
+				OSPORT_MESSAGE_DISCONNECT kdms@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + sb
+				object@ IPCiPort_ClientID + @ kdms@ IPCiKernelMessage_Header + OSMessageHeader_ClientID + !
 
-				object@ IPCPort_DisconnectionMessage + @ // msg
-				object@ IPCPort_ServerPort + @ // portobject
-				IPCPortSendMessage drop
+				object@ IPCiPort_DisconnectionMessage + @ // msg
+				object@ IPCiPort_ServerPort + @ // portobject
+				IPCiPortSendMessage drop
 			end
 
 			// remove client ID from server's table
 
-			object@ IPCPort_ServerPort + @ IPCPort_ClientTableHeader + @ clienttable!
+			object@ IPCiPort_ServerPort + @ IPCiPort_ClientTableHeader + @ clienttable!
 
-			object@ IPCPort_ClientID + @ // handle
+			object@ IPCiPort_ClientID + @ // handle
 			clienttable@ // handletable
 			0 // locked
 			ExHandleDelete ok! drop drop
 
 			if (DEBUGCHECKS)
 				if (ok@)
-					"IPCPortObjectDelete: failed to delete handle (%i)\n" KeCrash
+					"IPCiPortObjectDelete: failed to delete handle (%i)\n" KeCrash
 				end
 			end
 		end
 	end else
-		object@ IPCPort_ClientTableHeader + @ clienttable!
+		object@ IPCiPort_ClientTableHeader + @ clienttable!
 
-		pointerof IPCPortHandleDestroyFunction // func
+		pointerof IPCiPortHandleDestroyFunction // func
 		clienttable@ // handletable
 		ExHandleTableDelete
 	end
@@ -112,38 +114,38 @@ fn (ObTypeDeleteFunction) IPCPortObjectDelete { object -- }
 	// orphan all of the pending messages in my queue
 
 	while (1)
-		object@ IPCPort_MessageListHead + @ msg!
+		object@ IPCiPort_MessageListHead + @ msg!
 
 		if (msg@ ~~)
 			break
 		end
 
-		msg@ IPCMessageDequeueRundown
-		msg@ IPCMessageDequeue
+		msg@ IPCiMessageDequeueRundown
+		msg@ IPCiMessageDequeue
 
-		if (msg@ IPCKernelMessage_Object + @ ~~)
-			msg@ IPCMessageFree
+		if (msg@ IPCiKernelMessage_Object + @ ~~)
+			msg@ IPCiMessageFree
 		end
 	end
 
-	ipl@ IPCGlobalUnlock
+	ipl@ IPCiGlobalUnlock
 
-	object@ IPCPort_OwningProcess + @ ObObjectDereferenceByPointer drop
+	object@ IPCiPort_OwningProcess + @ ObObjectDereferenceByPointer drop
 
 	// destroy my zone
 
-	object@ IPCPort_ZoneHeader + MmZoneEmpty
+	object@ IPCiPort_ZoneHeader + MmZoneEmpty
 
 	// uncharge quota for zone extensions
 
-	if (object@ IPCPort_ZoneExtensionCharge + @)
-		object@ IPCPort_ZoneExtensionCharge + @ // charge
+	if (object@ IPCiPort_ZoneExtensionCharge + @)
+		object@ IPCiPort_ZoneExtensionCharge + @ // charge
 		object@ ObObjectNonpagedHeader ObNonpagedHeader_QuotaBlock + @ // quotablock
 		MmQuotaBlockUnchargePaged
 	end
 end
 
-fn (ExHandleEnumFunction) IPCPortHandleDestroyFunction { entryptr handle handletable -- ok }
+fn (ExHandleEnumFunction) IPCiPortHandleDestroyFunction { entryptr handle handletable -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
@@ -151,11 +153,11 @@ fn (ExHandleEnumFunction) IPCPortHandleDestroyFunction { entryptr handle handlet
 	auto clientport
 	entryptr@@ clientport!
 
-	0 clientport@ IPCPort_ServerPort + !
+	0 clientport@ IPCiPort_ServerPort + !
 
 	while (1)
 		auto waiter
-		clientport@ IPCPort_WaiterListHead + @ waiter!
+		clientport@ IPCiPort_WaiterListHead + @ waiter!
 
 		if (waiter@ ~~)
 			break
@@ -164,10 +166,10 @@ fn (ExHandleEnumFunction) IPCPortHandleDestroyFunction { entryptr handle handlet
 		-1 // rxmsg
 		waiter@ // waiter
 		clientport@ // portobject
-		IPCPortWakeWaiter
+		IPCiPortWakeWaiter
 	end
 
-	clientport@ IPCPort_DisconnectionMessage + @ IPCMessageFree
+	clientport@ IPCiPort_DisconnectionMessage + @ IPCiMessageFree
 end
 
 fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name -- portobject ok }
@@ -182,14 +184,14 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 	auto msgzonesize
 
 	if (serverport@)
-		serverport@ IPCPort_UFlags + @ flags!
-		serverport@ IPCPort_MaximumMessageBody + @ maxlen!
+		serverport@ IPCiPort_UFlags + @ flags!
+		serverport@ IPCiPort_MaximumMessageBody + @ maxlen!
 
-		IPCKernelMessage_SIZEOF maxlen@ +
+		IPCiKernelMessage_SIZEOF maxlen@ +
 		IPCINITIALMESSAGES_CLIENT *
 		MMZONEOVERHEAD + msgzonesize!
 	end else
-		IPCKernelMessage_SIZEOF maxlen@ +
+		IPCiKernelMessage_SIZEOF maxlen@ +
 		IPCINITIALMESSAGES_SERVER *
 		MMZONEOVERHEAD + msgzonesize!
 	end
@@ -199,7 +201,7 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 	permissions@ // permissions
 	0 // npquotabias
 	msgzonesize@ MmChargeBytesGet // pquotabias
-	IPCPort_SIZEOF // bodysize
+	IPCiPort_SIZEOF // bodysize
 	IPCPortObjectType@ // type
 	ObObjectCreate ok! portobject!
 
@@ -207,30 +209,30 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 		return
 	end
 
-	0 portobject@ IPCPort_MessageListHead + !
-	0 portobject@ IPCPort_MessageListTail + !
+	0 portobject@ IPCiPort_MessageListHead + !
+	0 portobject@ IPCiPort_MessageListTail + !
 
-	0 portobject@ IPCPort_QueueLength + !
+	0 portobject@ IPCiPort_QueueLength + !
 
-	0 portobject@ IPCPort_SentListHead + !
-	0 portobject@ IPCPort_SentListTail + !
+	0 portobject@ IPCiPort_SentListHead + !
+	0 portobject@ IPCiPort_SentListTail + !
 
-	0 portobject@ IPCPort_WaiterListHead + !
-	0 portobject@ IPCPort_WaiterListTail + !
+	0 portobject@ IPCiPort_WaiterListHead + !
+	0 portobject@ IPCiPort_WaiterListTail + !
 
-	0 portobject@ IPCPort_Flags + !
+	0 portobject@ IPCiPort_Flags + !
 
-	flags@ portobject@ IPCPort_UFlags + !
+	flags@ portobject@ IPCiPort_UFlags + !
 
-	0 portobject@ IPCPort_ServerContextForClient + !
+	0 portobject@ IPCiPort_ServerContextForClient + !
 
-	OSPORT_CONID_FIRSTDYNAMIC portobject@ IPCPort_NextConversationID + !
+	OSPORT_CONID_FIRSTDYNAMIC portobject@ IPCiPort_NextConversationID + !
 
-	owningprocess@ portobject@ IPCPort_OwningProcess + !
+	owningprocess@ portobject@ IPCiPort_OwningProcess + !
 
-	0 portobject@ IPCPort_ZoneExtensionCharge + !
+	0 portobject@ IPCiPort_ZoneExtensionCharge + !
 
-	0 portobject@ IPCPort_DisconnectionMessage + !
+	0 portobject@ IPCiPort_DisconnectionMessage + !
 
 	auto chunk
 	msgzonesize@ // bytes
@@ -246,8 +248,8 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 
 	msgzonesize@ // bytes
 	chunk@ // chunk
-	IPCKernelMessage_SIZEOF maxlen@ + // blocksize
-	portobject@ IPCPort_ZoneHeader + // zoneheader
+	IPCiKernelMessage_SIZEOF maxlen@ + // blocksize
+	portobject@ IPCiPort_ZoneHeader + // zoneheader
 	MmZoneInitialize
 
 	auto clienttable
@@ -255,12 +257,12 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 	if (serverport@)
 		// this is a client port.
 
-		serverport@ portobject@ IPCPort_ServerPort + !
-		0 portobject@ IPCPort_ClientTableHeader + !
+		serverport@ portobject@ IPCiPort_ServerPort + !
+		0 portobject@ IPCiPort_ClientTableHeader + !
 
 		// provide a way to inform the server that a client is not consuming
 		// its messages before the server exhausts all of its pool quota.
-		16 portobject@ IPCPort_MaximumQueueLength + !
+		16 portobject@ IPCiPort_MaximumQueueLength + !
 
 		auto kdms
 		OSMessageHeader_SIZEOF alloc kdms!
@@ -273,7 +275,7 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 		KERNELMODE // mode
 		OSPORT_CONID_DISCONNECT // conid
 		serverport@ // portobject
-		IPCMessageAllocate ok! kdms! drop
+		IPCiMessageAllocate ok! kdms! drop
 
 		if (ok@)
 			chunk@ MmFree
@@ -283,9 +285,9 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 			return
 		end
 
-		kdms@ portobject@ IPCPort_DisconnectionMessage + !
+		kdms@ portobject@ IPCiPort_DisconnectionMessage + !
 
-		serverport@ IPCPort_ClientTableHeader + @ clienttable!
+		serverport@ IPCiPort_ClientTableHeader + @ clienttable!
 
 		auto clientid
 		portobject@ // entryvalue
@@ -294,7 +296,7 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 		ExHandleCreate ok! drop clientid!
 
 		if (ok@)
-			kdms@ IPCMessageFree
+			kdms@ IPCiMessageFree
 
 			chunk@ MmFree
 
@@ -303,18 +305,18 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 			return
 		end
 
-		clientid@ portobject@ IPCPort_ClientID + !
+		clientid@ portobject@ IPCiPort_ClientID + !
 
-		IPCPORTFLAG_CLIENT portobject@ IPCPort_Flags + |=
-		IPCPORTFLAG_UNFINISHED_CONNECTION portobject@ IPCPort_Flags + |=
+		IPCPORTFLAG_CLIENT portobject@ IPCiPort_Flags + |=
+		IPCPORTFLAG_UNFINISHED_CONNECTION portobject@ IPCiPort_Flags + |=
 	end else
 		// this IS a server port.
 
-		0 portobject@ IPCPort_ClientID + !
+		0 portobject@ IPCiPort_ClientID + !
 
-		0 portobject@ IPCPort_ServerPort + !
+		0 portobject@ IPCiPort_ServerPort + !
 
-		-1 portobject@ IPCPort_MaximumQueueLength + !
+		-1 portobject@ IPCiPort_MaximumQueueLength + !
 
 		portobject@ // context
 		owningprocess@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
@@ -329,12 +331,12 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 			return
 		end
 
-		clienttable@ portobject@ IPCPort_ClientTableHeader + !
+		clienttable@ portobject@ IPCiPort_ClientTableHeader + !
 	end
 
 	owningprocess@ ObObjectReferenceByPointer drop
 
-	maxlen@ portobject@ IPCPort_MaximumMessageBody + !
+	maxlen@ portobject@ IPCiPort_MaximumMessageBody + !
 end
 
 fn IPCPortCreate { flags maxlen permissions name -- porthandle ok }
@@ -368,7 +370,7 @@ fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
 	fnsection "PAGE$text"
 
 	auto clienttable
-	portobject@ IPCPort_ClientTableHeader + @ clienttable!
+	portobject@ IPCiPort_ClientTableHeader + @ clienttable!
 
 	clienttable@ ExHandleTableLockShared ok!
 
@@ -392,7 +394,7 @@ fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
 		return
 	end
 
-	if (otherport@ IPCPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
+	if (otherport@ IPCiPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION &)
 		clienttable@ ExHandleTableUnlock
 
 		otherport@ ObObjectDereferenceByPointer drop
@@ -402,7 +404,7 @@ fn IPCPortReferenceProcessByClientID { clientid portobject -- processobject ok }
 		return
 	end
 
-	otherport@ IPCPort_OwningProcess + @ processobject!
+	otherport@ IPCiPort_OwningProcess + @ processobject!
 	processobject@ ObObjectReferenceByPointer drop
 
 	clienttable@ ExHandleTableUnlock
@@ -422,7 +424,7 @@ fn IPCPortOpenProcessByClientID { access clientid porthandle -- processhandle ok
 		return
 	end
 
-	if (portobject@ IPCPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
+	if (portobject@ IPCiPort_OwningProcess + @ KeThreadCurrent@ KeThread_Process + @ ~=)
 		portobject@ ObObjectDereferenceByPointer drop
 
 		STATUS_PERMISSION_DENIED ok!
@@ -430,7 +432,7 @@ fn IPCPortOpenProcessByClientID { access clientid porthandle -- processhandle ok
 		return
 	end
 
-	if (portobject@ IPCPort_Flags + @ IPCPORTFLAG_CLIENT &)
+	if (portobject@ IPCiPort_Flags + @ IPCPORTFLAG_CLIENT &)
 		portobject@ ObObjectDereferenceByPointer drop
 
 		STATUS_INVALID_OBJECT_TYPE ok!
@@ -460,31 +462,31 @@ fn IPCPortOpenProcessByClientID { access clientid porthandle -- processhandle ok
 	end
 end
 
-fn IPCPortWakeWaiter { rxmsg waiter portobject -- }
+fn IPCiPortWakeWaiter { rxmsg waiter portobject -- }
 	fnsection "PAGE$text"
 
 	// store message pointer
 
-	rxmsg@ waiter@ IPCThreadBlock_RXMessage + !
+	rxmsg@ waiter@ IPCiThreadBlock_RXMessage + !
 	
 	if (rxmsg@ -1 ~=)
-		waiter@ IPCThreadBlock_RXMessage + rxmsg@ IPCKernelMessage_RundownPointer + !
+		waiter@ IPCiThreadBlock_RXMessage + rxmsg@ IPCiKernelMessage_RundownPointer + !
 	end
 
 	// dequeue waiter
 
 	waiter@ // waiter
 	portobject@ // portobject
-	IPCPortWaiterDequeue
+	IPCiPortWaiterDequeue
 
 	// signal event
 
 	IPCBOOST // priboost
-	waiter@ IPCThreadBlock_Event + // event
+	waiter@ IPCiThreadBlock_Event + // event
 	KeEventSignal
 end
 
-fn IPCPortSendMessage { msg portobject -- ok }
+fn IPCiPortSendMessage { msg portobject -- ok }
 	fnsection "PAGE$text"
 
 	// assumes global rwlock is held shared and port object queue is locked.
@@ -505,30 +507,30 @@ fn IPCPortSendMessage { msg portobject -- ok }
 
 	0 ok!
 
-	msg@ IPCMessageEnqueueRundown
+	msg@ IPCiMessageEnqueueRundown
 
 	// wake up waiter
 
 	auto conid
-	msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + @ conid!
+	msg@ IPCiKernelMessage_Header + OSMessageHeader_ConversationID + @ conid!
 
 	auto msgtype
-	msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb msgtype!
+	msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + gb msgtype!
 
 	auto waiter
-	portobject@ IPCPort_WaiterListHead + @ waiter!
+	portobject@ IPCiPort_WaiterListHead + @ waiter!
 
 	while (waiter@)
 		auto wake
 		0 wake!
 
 		if (msgtype@ OSPORT_MESSAGE_REPLY ==)
-			if (waiter@ IPCThreadBlock_WaitingConversationID + @ conid@ ==)
-				if (waiter@ IPCThreadBlock_WaitingClientID + @ msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + @ ==)
+			if (waiter@ IPCiThreadBlock_WaitingConversationID + @ conid@ ==)
+				if (waiter@ IPCiThreadBlock_WaitingClientID + @ msg@ IPCiKernelMessage_Header + OSMessageHeader_ClientID + @ ==)
 					1 wake!
 				end
 			end
-		end elseif (waiter@ IPCThreadBlock_WaitingConversationID + @ OSPORT_CONID_ANY ==)
+		end elseif (waiter@ IPCiThreadBlock_WaitingConversationID + @ OSPORT_CONID_ANY ==)
 			1 wake!
 		end
 
@@ -536,46 +538,46 @@ fn IPCPortSendMessage { msg portobject -- ok }
 			msg@ // rxmsg
 			waiter@ // waiter
 			portobject@ // portobject
-			IPCPortWakeWaiter
+			IPCiPortWakeWaiter
 
 			return
 		end
 
-		waiter@ IPCThreadBlock_WaiterNext + @ waiter!
+		waiter@ IPCiThreadBlock_WaiterNext + @ waiter!
 	end
 
 	// add message to message queue
 
-	if (portobject@ IPCPort_QueueLength + @ portobject@ IPCPort_MaximumQueueLength + @ >=)
+	if (portobject@ IPCiPort_QueueLength + @ portobject@ IPCiPort_MaximumQueueLength + @ >=)
 		// full. just ditch the message.
 
-		msg@ IPCMessageDequeueRundown
-		msg@ IPCMessageFree
+		msg@ IPCiMessageDequeueRundown
+		msg@ IPCiMessageFree
 
 		STATUS_PORT_QUEUE_FULL ok!
 
 		return
 	end
 
-	1 portobject@ IPCPort_QueueLength + +=
+	1 portobject@ IPCiPort_QueueLength + +=
 
 	auto t
-	portobject@ IPCPort_MessageListTail + @ t!
+	portobject@ IPCiPort_MessageListTail + @ t!
 
-	t@ msg@ IPCKernelMessage_QueuePrev + !
+	t@ msg@ IPCiKernelMessage_QueuePrev + !
 
 	if (t@ ~~)
-		msg@ portobject@ IPCPort_MessageListHead + !
+		msg@ portobject@ IPCiPort_MessageListHead + !
 	end else
-		msg@ t@ IPCKernelMessage_QueueNext + !
+		msg@ t@ IPCiKernelMessage_QueueNext + !
 	end
 
-	msg@ portobject@ IPCPort_MessageListTail + !
+	msg@ portobject@ IPCiPort_MessageListTail + !
 
-	portobject@ msg@ IPCKernelMessage_EnqueuedTo + !
+	portobject@ msg@ IPCiKernelMessage_EnqueuedTo + !
 end
 
-fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok }
+fn IPCiPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok }
 	fnsection "PAGE$text"
 
 	// entered with port queue mutex held, and global rwlock held shared.
@@ -583,19 +585,19 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 	0 ok!
 
 	auto msg
-	portobject@ IPCPort_MessageListHead + @ msg!
+	portobject@ IPCiPort_MessageListHead + @ msg!
 
 	while (msg@)
 		auto found
 		0 found!
 
 		if (conid@ OSPORT_CONID_ANY ==)
-			if (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ~=)
+			if (msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ~=)
 				1 found!
 			end
-		end elseif (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ==)
-			if (msg@ IPCKernelMessage_Header + OSMessageHeader_ConversationID + @ conid@ ==)
-				if (msg@ IPCKernelMessage_Header + OSMessageHeader_ClientID + @ clientid@ ==)
+		end elseif (msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ==)
+			if (msg@ IPCiKernelMessage_Header + OSMessageHeader_ConversationID + @ conid@ ==)
+				if (msg@ IPCiKernelMessage_Header + OSMessageHeader_ClientID + @ clientid@ ==)
 					1 found!
 				end
 			end
@@ -604,12 +606,12 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 		if (found@)
 			// dequeue message
 
-			msg@ IPCMessageDequeue
+			msg@ IPCiMessageDequeue
 
 			break
 		end
 
-		msg@ IPCKernelMessage_QueueNext + @ msg!
+		msg@ IPCiKernelMessage_QueueNext + @ msg!
 	end
 
 	if (msg@ ~~)
@@ -630,33 +632,33 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 
 		if (DEBUGCHECKS)
 			if (waiter@ ~~)
-				"IPCPortReceiveMessage: no ipcblock\n" KeCrash
+				"IPCiPortReceiveMessage: no ipcblock\n" KeCrash
 			end
 		end
 
-		conid@ waiter@ IPCThreadBlock_WaitingConversationID + !
-		clientid@ waiter@ IPCThreadBlock_WaitingClientID + !
-		0 waiter@ IPCThreadBlock_RXMessage + !
+		conid@ waiter@ IPCiThreadBlock_WaitingConversationID + !
+		clientid@ waiter@ IPCiThreadBlock_WaitingClientID + !
+		0 waiter@ IPCiThreadBlock_RXMessage + !
 
-		0 waiter@ IPCThreadBlock_WaiterNext + !
+		0 waiter@ IPCiThreadBlock_WaiterNext + !
 
 		waiter@ // waiter
 		portobject@ // portobject
-		IPCPortWaiterEnqueue
+		IPCiPortWaiterEnqueue
 
 		// NOTE: event should already be initialized and cleared
 
-		ipl@ IPCGlobalUnlock
+		ipl@ IPCiGlobalUnlock
 
 		mode@ // waitmode
 		1 // alertable
 		timeout@ // timeout
-		waiter@ IPCThreadBlock_Event + // object
+		waiter@ IPCiThreadBlock_Event + // object
 		KeThreadWaitForObject ok!
 
-		0 IPCGlobalLock drop ipl!
+		0 IPCiGlobalLock drop ipl!
 
-		waiter@ IPCThreadBlock_RXMessage + @ msg!
+		waiter@ IPCiThreadBlock_RXMessage + @ msg!
 
 		if (msg@ ~~)
 			// we were awoken before the message could be received.
@@ -664,7 +666,7 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 
 			waiter@ // waiter
 			portobject@ // portobject
-			IPCPortWaiterDequeue
+			IPCiPortWaiterDequeue
 
 			return
 		end elseif (msg@ -1 ==)
@@ -684,21 +686,21 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 
 	// remove this message from rundown list since its in our custody now
 
-	msg@ IPCMessageDequeueRundown
+	msg@ IPCiMessageDequeueRundown
 
 	auto msgport
-	msg@ IPCKernelMessage_OriginatingPort + @ msgport!
+	msg@ IPCiKernelMessage_OriginatingPort + @ msgport!
 
 	// reference any passed object
 
 	auto object
-	msg@ IPCKernelMessage_Object + @ object!
+	msg@ IPCiKernelMessage_Object + @ object!
 
 	if (object@)
-		msg@ IPCKernelMessage_Object + @ ObObjectReferenceByPointer drop
-		0 msg@ IPCKernelMessage_Object + !
-	end elseif (msg@ IPCKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_IOCOMPLETE ~=)
-		OSNONE msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + !
+		msg@ IPCiKernelMessage_Object + @ ObObjectReferenceByPointer drop
+		0 msg@ IPCiKernelMessage_Object + !
+	end elseif (msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_IOCOMPLETE ~=)
+		OSNONE msg@ IPCiKernelMessage_Header + OSMessageHeader_Handle + !
 	end
 
 	if (object@)
@@ -706,12 +708,12 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 
 		auto handle
 		1 // nocheck
-		msg@ IPCKernelMessage_Header + OSMessageHeader_Access + @ // access
+		msg@ IPCiKernelMessage_Header + OSMessageHeader_Access + @ // access
 		object@ // object
 		KeProcessCurrent // process
 		ObObjectOpenProcess ok! handle!
 
-		handle@ msg@ IPCKernelMessage_Header + OSMessageHeader_Handle + !
+		handle@ msg@ IPCiKernelMessage_Header + OSMessageHeader_Handle + !
 
 		if (ok@)
 			// failed to open the object
@@ -724,8 +726,8 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 
 		if (mode@ USERMODE ==)
 			umsg@ // dest
-			msg@ IPCKernelMessage_Header + // src
-			msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi OSMessageHeader_SIZEOF + // sz
+			msg@ IPCiKernelMessage_Header + // src
+			msg@ IPCiKernelMessage_Header + OSMessageHeader_LengthI + gi OSMessageHeader_SIZEOF + // sz
 			KeSafeCopyOut ok!
 
 			if (ok@)
@@ -736,8 +738,8 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 			end
 		end else
 			umsg@ // dest
-			msg@ IPCKernelMessage_Header + // src
-			msg@ IPCKernelMessage_Header + OSMessageHeader_LengthI + gi OSMessageHeader_SIZEOF + // sz
+			msg@ IPCiKernelMessage_Header + // src
+			msg@ IPCiKernelMessage_Header + OSMessageHeader_LengthI + gi OSMessageHeader_SIZEOF + // sz
 			memcpy
 		end
 	end
@@ -746,30 +748,30 @@ fn IPCPortReceiveMessage { ipl umsg mode clientid conid timeout portobject -- ok
 		// free to message zone. don't free if there's a passed object because
 		// the synchronous IPC call will free the message instead.
 
-		msg@ IPCMessageFree
+		msg@ IPCiMessageFree
 	end
 end
 
-fn IPCPortWaiterEnqueue { waiter portobject -- }
+fn IPCiPortWaiterEnqueue { waiter portobject -- }
 	fnsection "PAGE$text"
 
 	// protected by queue lock.
 
 	auto t
-	portobject@ IPCPort_WaiterListTail + @ t!
+	portobject@ IPCiPort_WaiterListTail + @ t!
 
-	t@ waiter@ IPCThreadBlock_WaiterPrev + !
+	t@ waiter@ IPCiThreadBlock_WaiterPrev + !
 
 	if (t@ ~~)
-		waiter@ portobject@ IPCPort_WaiterListHead + !
+		waiter@ portobject@ IPCiPort_WaiterListHead + !
 	end else
-		waiter@ t@ IPCThreadBlock_WaiterNext + !
+		waiter@ t@ IPCiThreadBlock_WaiterNext + !
 	end
 
-	waiter@ portobject@ IPCPort_WaiterListTail + !
+	waiter@ portobject@ IPCiPort_WaiterListTail + !
 end
 
-fn IPCPortWaiterDequeue { waiter portobject -- }
+fn IPCiPortWaiterDequeue { waiter portobject -- }
 	fnsection "PAGE$text"
 
 	// protected by queue lock.
@@ -777,23 +779,23 @@ fn IPCPortWaiterDequeue { waiter portobject -- }
 	auto ls
 	auto ns
 
-	waiter@ IPCThreadBlock_WaiterPrev + @ ls!
-	waiter@ IPCThreadBlock_WaiterNext + @ ns!
+	waiter@ IPCiThreadBlock_WaiterPrev + @ ls!
+	waiter@ IPCiThreadBlock_WaiterNext + @ ns!
 
 	if (ls@)
-		ns@ ls@ IPCThreadBlock_WaiterNext + !
+		ns@ ls@ IPCiThreadBlock_WaiterNext + !
 	end else
-		ns@ portobject@ IPCPort_WaiterListHead + !
+		ns@ portobject@ IPCiPort_WaiterListHead + !
 	end
 
 	if (ns@)
-		ls@ ns@ IPCThreadBlock_WaiterPrev + !
+		ls@ ns@ IPCiThreadBlock_WaiterPrev + !
 	end else
-		ls@ portobject@ IPCPort_WaiterListTail + !
+		ls@ portobject@ IPCiPort_WaiterListTail + !
 	end
 end
 
-fn IPCThreadBlockCreate { -- ok }
+fn IPCiThreadBlockCreate { -- ok }
 	fnsection "PAGE$text"
 
 	if (KeThreadCurrent@ PsThread_IPCBlock + @)
@@ -802,7 +804,7 @@ fn IPCThreadBlockCreate { -- ok }
 		return
 	end
 
-	IPCThreadBlock_SIZEOF MmChargeBytesGet // charge
+	IPCiThreadBlock_SIZEOF MmChargeBytesGet // charge
 	KeThreadCurrent@ KeThread_Process + @ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
 	MmQuotaBlockCharge ok!
 
@@ -811,32 +813,40 @@ fn IPCThreadBlockCreate { -- ok }
 	end
 
 	auto ipcblock
-	IPCThreadBlock_SIZEOF // bytes
+	IPCiThreadBlock_SIZEOF // bytes
 	'IPCt' // tag
 	CANBLOCK // flags
 	MmAllocWithTag ok! ipcblock!
 
 	if (ok@)
-		IPCThreadBlock_SIZEOF MmChargeBytesGet // charge
+		IPCiThreadBlock_SIZEOF MmChargeBytesGet // charge
 		KeThreadCurrent@ KeThread_Process + @ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
 		MmQuotaBlockUncharge
 
 		return
 	end
 
-	0 ipcblock@ IPCThreadBlock_WaiterNext + !
-	0 ipcblock@ IPCThreadBlock_WaiterPrev + !
+	0 ipcblock@ IPCiThreadBlock_WaiterNext + !
+	0 ipcblock@ IPCiThreadBlock_WaiterPrev + !
 
-	0 ipcblock@ IPCThreadBlock_WaitingConversationID + !
-	0 ipcblock@ IPCThreadBlock_WaitingClientID + !
+	0 ipcblock@ IPCiThreadBlock_WaitingConversationID + !
+	0 ipcblock@ IPCiThreadBlock_WaitingClientID + !
 
-	0 ipcblock@ IPCThreadBlock_RXMessage + !
+	0 ipcblock@ IPCiThreadBlock_RXMessage + !
 
 	0 // signaled
 	OSEVENT_SYNCH // type
 	"IPCWaiterEvent" // name
-	ipcblock@ IPCThreadBlock_Event + // event
+	ipcblock@ IPCiThreadBlock_Event + // event
 	KeEventInitialize
 
 	ipcblock@ KeThreadCurrent@ PsThread_IPCBlock + !
+end
+
+fn IPCThreadBlockFree { thread -- }
+	thread@ PsThread_IPCBlock + @ MmFree
+
+	IPCiThreadBlock_SIZEOF MmChargeBytesGet // charge
+	thread@ KeThread_Process + @ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
+	MmQuotaBlockUncharge
 end

@@ -122,8 +122,6 @@ extern IOFileControlBlockTryLock { fcb -- ok }
 extern IOFileControlBlockTryLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 
-extern IOFileControlBlockPinMetadata { fcb -- ok }
-
 extern IOFileControlBlockFlush { fcb -- ok }
 
 extern IOFileControlBlockDeleteLastReference { fcb -- }
@@ -141,7 +139,6 @@ extern IOFileSetContext { context fileobject -- }
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }
 
-extern IOScheduleWritebehind { -- }
 extern IOTriggerWritebehind { -- }
 
 extern IOThreadRundown { -- }
@@ -157,13 +154,5 @@ externptr IOFileControlBlockCacheSize
 externptr IOFileControlBlockCount
 externptr IOFileControlBlockMaximum
 externptr IOFileControlBlockPreferred
-externptr IOFileControlBlockThrottleCount
-
-externptr IOFileControlBlockCacheTrimEvent
-
-externptr IOWritebehindTimer
-externptr IOWritebehindEvent
 
 externptr IOCacheInfoBlockDirtyCount
-externptr IOCacheInfoBlockDirtyListHead
-externptr IOCacheInfoBlockDirtyListTail

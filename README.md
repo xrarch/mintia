@@ -76,7 +76,8 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 ### Userspace
 
 - [x] Userspace dynamic linking.
-- [x] Minimal command-line interface over TTY.
+- [x] Command-line interface over TTY.
+- [x] Fully multi-user.
 
 ## TODO
 

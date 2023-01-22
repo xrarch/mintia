@@ -118,8 +118,6 @@ extern IOFileControlBlockReference { fcb -- oldcount }
 extern IOFileControlBlockDereference { fcb -- oldcount }
 extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockLockShared { fcb -- ok }
-extern IOFileControlBlockTryLock { fcb -- ok }
-extern IOFileControlBlockTryLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 
 extern IOFileControlBlockFlush { fcb -- ok }

@@ -38,10 +38,6 @@ extern IOiLockMountList { alertable -- ok }
 extern IOiLockMountListShared { alertable -- ok }
 extern IOiUnlockMountList { -- }
 
-extern IOiLockMount { alertable fcb -- ok }
-extern IOiLockMountShared { alertable fcb -- ok }
-extern IOiUnlockMount { fcb -- }
-
 struct IOiCacheInfoBlock
 	4 Next
 	4 Prev

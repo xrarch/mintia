@@ -93,19 +93,12 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 		0 flags!
 	end
 
-	auto rwlocksize
-	0 rwlocksize!
-
-	if (driver@ IODriver_DeviceType + @ OSFILETYPE_BLOCKDEVICE ==)
-		ExRwLock_SIZEOF rwlocksize!
-	end
-
 	name@ // name
 	flags@ // flags
 	permissions@ // permissions
 	0 // npquotabias
 	0 // pquotabias
-	IODevice_SIZEOF driver@ IODriver_ExtensionSize + @ + rwlocksize@ + // bodysize
+	IODevice_SIZEOF driver@ IODriver_ExtensionSize + @ + // bodysize
 	IODeviceTypeObject@ // type
 	ObObjectCreate ok! deviceobject!
 
@@ -117,16 +110,6 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 	deviceobject@ IODevice_SIZEOF + deviceobject@ IODevice_Extension + !
 	0 deviceobject@ IODevice_BlockLog + !
 	0 deviceobject@ IODevice_ConsoleHeader + !
-
-	if (rwlocksize@)
-		deviceobject@ IODevice_SIZEOF + driver@ IODriver_ExtensionSize + @ + deviceobject@ IODevice_MountRwLock + !
-		
-		"IODeviceMountLock" // name
-		deviceobject@ IODevice_MountRwLock + @ // rwlock
-		ExRwLockInitialize
-	end else
-		0 deviceobject@ IODevice_MountRwLock + !
-	end
 
 	auto fcb
 	deviceobject@ IODeviceCreateFileControlBlock ok! fcb!
@@ -238,10 +221,6 @@ fn (IODispatchDeleteObjectFunction) IODeviceDeleteObject { object -- ok }
 		end
 	end
 
-	if (object@ IODevice_MountRwLock + @)
-		object@ IODevice_MountRwLock + @ ExRwLockUninitialize
-	end
-
 	auto deletefunc
 	object@ IODevice_Driver + @ IODriver_DispatchTable + @ IODispatchTable_DeleteDeviceObject + @ deletefunc!
 
@@ -267,38 +246,4 @@ fn (IODispatchDeleteObjectFunction) IODeviceDeleteFileObject { object -- ok }
 
 	fcb@ IOFileControlBlockDereference drop
 	fcb@ IOFileControlBlock_DeviceObject + @ ObObjectDereferenceByPointer drop
-end
-
-fn IOiLockMount { alertable fcb -- ok }
-	fnsection "PAGE$text"
-
-	auto dev
-	fcb@ IOFileControlBlock_DeviceObject + @ dev!
-
-	alertable@ // alertable
-	0 // nowait
-	dev@ IODevice_MountRwLock + @ // rwlock
-	ExRwLockAcquireExclusive ok!
-end
-
-fn IOiLockMountShared { alertable fcb -- ok }
-	fnsection "PAGE$text"
-
-	auto dev
-	fcb@ IOFileControlBlock_DeviceObject + @ dev!
-
-	alertable@ // alertable
-	0 // nowait
-	0 // canstarve
-	dev@ IODevice_MountRwLock + @ // rwlock
-	ExRwLockAcquireShared ok!
-end
-
-fn IOiUnlockMount { fcb -- }
-	fnsection "PAGE$text"
-
-	auto dev
-	fcb@ IOFileControlBlock_DeviceObject + @ dev!
-
-	dev@ IODevice_MountRwLock + @ ExRwLockRelease
 end

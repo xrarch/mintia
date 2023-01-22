@@ -10,6 +10,8 @@ extern AmsClientCreate { cid -- client ok }
 extern AmsClientDelete { client -- }
 extern AmsClientInitialize { cid client -- }
 
+extern AmsUserGetRestrictionLevel { userptr -- level }
+
 extern AmsInternalLogon { flags password uid processhandle -- obdirhandle ok }
 extern AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 

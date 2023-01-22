@@ -34,6 +34,9 @@ extern AmsEditGroup { info gid -- ok }
 const AMSPASSWORDMAX 32
 const AMSNAMEMAX     32
 
+const AMSRESTRICT_NORMAL 0
+const AMSRESTRICT_PASSWD 8
+
 struct AmsUserInformation
 	4 GID
 
@@ -47,7 +50,9 @@ struct AmsUserInformation
 	OSFILEPATHMAX Home
 	OSFILEPATHMAX Shell
 
-	32 Reserved
+	4 RestrictionLevel
+
+	28 Reserved
 endstruct
 
 struct AmsGroupInformation

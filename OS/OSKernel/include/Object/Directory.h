@@ -2,7 +2,6 @@ extern ObRootDirectoryLock { alertable -- ok }
 extern ObRootDirectoryLockShared { alertable -- ok }
 extern ObRootDirectoryUnlock { -- }
 
-extern ObDirectoryObjectDelete { object -- }
 extern ObDirectoryCreate { permissions name -- dirhandle ok }
 extern ObDirectoryCreateObject { permissions name flags -- dirobject ok }
 extern ObDirectoryCountQuery { directoryhandle -- count ok }

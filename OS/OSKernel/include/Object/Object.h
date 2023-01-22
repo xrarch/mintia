@@ -48,23 +48,6 @@ struct ObPagedHeader
 	4 NonpagedQuotaCharge
 endstruct
 
-struct ObType
-	4 Tag
-
-	4 ObjectListHead
-
-	4 OpenFunction
-	4 CloseFunction
-	4 DeleteFunction
-	4 ParseFunction
-	4 SetSecurityFunction
-
-	4 Paged
-	4 WaitOffset
-
-	KeMutex_SIZEOF Mutex
-endstruct
-
 struct ObTypeInitializer
 	4 Name
 	4 Tag
@@ -78,17 +61,6 @@ struct ObTypeInitializer
 
 	4 Paged
 	4 WaitOffset
-endstruct
-
-struct ObDirectory
-	4 ObjectListHead
-	4 ChildCount
-endstruct
-
-// modify OBHANDLEENTRYSIZELOG if you change the size of this structure
-struct ObObjectTableEntry
-	4 Object
-	4 Access
 endstruct
 
 fnptr ObTypeOpenFunction { access object process -- ok }
@@ -128,9 +100,6 @@ extern ObObjectCloseProcess { handle process -- ok }
 
 extern ObObjectOpen { nocheck access object -- handle ok }
 extern ObObjectOpenProcess { nocheck access object process -- handle ok }
-
-extern ObObjectHandleCountIncrement { object -- oldcount }
-extern ObObjectHandleCountDecrement { object -- oldcount }
 
 extern ObObjectReferenceByPointerCapturedHeader { npheader -- oldcount }
 extern ObObjectReferenceByPointer { object -- oldcount }

@@ -122,6 +122,8 @@ externptr MiModifiedPageListTail
 externptr MiEvictablePageListHead
 externptr MiEvictablePageListTail
 
+extern MiModifiedPageWriter { context1 context2 -- }
+
 externptr MiModifiedPageWriterThread
 
 // free page count threshold that counts as "dire", meaning the working set

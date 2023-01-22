@@ -1,10 +1,5 @@
 const WORKINGSETLISTCOUNT 8
 
-struct PsProcessActivationBlock
-	KeEvent_SIZEOF Event
-	4 References
-endstruct
-
 // XXX if we ever have remote unmapping etc force the swap-in of the process
 // header then we will be able to move some more of the stuff below into there
 // instead of the process object body.
@@ -130,7 +125,6 @@ endstruct
 
 externptr PsProcessObjectType
 externptr PsThreadObjectType
-externptr PsProcessTable
 
 externptr PsProcessListHead
 externptr PsProcessListTail
@@ -149,13 +143,7 @@ externptr PsOSDLLFileObject
 externptr PsProcessCreationCount
 externptr PsProcessDeletionCount
 
-externptr PsReaperEvent
-extern PsReaperWorker { context1 context2 -- }
-
-extern PsProcessListLock { -- ok }
-extern PsProcessListLockUnalertable { -- }
-extern PsProcessListTryLock { -- ok }
-extern PsProcessListIsLocked { -- locked }
+extern PsProcessListLock { alertable -- ok }
 extern PsProcessListUnlock { -- }
 
 extern PsInitPhase0 { -- }
@@ -206,11 +194,6 @@ extern PsProcessCreate { quotauid sectionhandle creationflags permissions name -
 extern PsThreadCreateObject { context1 context2 startfunc creationflags permissions name processobject -- threadobject ok }
 extern PsThreadCreate { context1 context2 startfunc creationflags permissions name processhandle -- threadhandle ok }
 
-extern PsProcessObjectDelete { object -- }
-extern PsThreadObjectDelete { object -- }
-
-extern PsThreadExit { -- }
-
 extern PsThreadTerminateObject { status threadobject -- ok }
 extern PsThreadTerminate { status threadhandle -- ok }
 
@@ -224,3 +207,6 @@ extern PsProcessGetGID { process -- gid }
 
 extern PsProcessRemove { trim process -- }
 extern PsProcessInsert { trim process -- }
+
+externptr PsProcessTable
+externptr PsReaperEvent

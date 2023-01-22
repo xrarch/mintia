@@ -110,14 +110,6 @@ end
 fn SeCheckAccessFilesystemX { access permbits owninguid owninggid process -- ok }
 	fnsection "PAGE$text"
 
-	SYSTEMPERMISSION_ADMIN // permission
-	process@ // process
-	SeProcessCheckPermission ok!
-
-	if (ok@ ~~)
-		return
-	end
-
 	auto pagedarea
 	process@ PsProcess_PagedArea + @ pagedarea!
 
@@ -136,8 +128,37 @@ fn SeCheckAccessFilesystemX { access permbits owninguid owninggid process -- ok 
 	permbits@ shift@ >> ACCESS_ALL & permbits!
 
 	if (permbits@ access@ | permbits@ ==)
+		// access is a subset of the permissions we have.
+
 		0 ok!
+
+		return
 	end
+
+	if (pagedarea@ PsProcessPaged_UID + @ UID_SYSTEM ==)
+		// access isn't a subset, but we are the system user, so continue
+		// anyway.
+
+		0 ok!
+
+		return
+	end
+
+	if (owninguid@ UID_SYSTEM ==)
+		// access isn't a subset, and we aren't the system user, and the owner
+		// of this object is the system user. permission is denied.
+
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	// if we are an admin, we can access all objects except those owned by the
+	// system user.
+
+	SYSTEMPERMISSION_ADMIN // permission
+	process@ // process
+	SeProcessCheckPermission ok!
 end
 
 fn SeCheckAccessObjectUserX { access object process -- ok }
@@ -171,17 +192,32 @@ end
 fn SeCheckAccessObjectOwnerX { object process -- ok }
 	fnsection "PAGE$text"
 
-	SeAmIAdmin ok!
-
-	if (ok@ ~~)
-		return
-	end
-
 	auto pagedarea
 	process@ PsProcess_PagedArea + @ pagedarea!
 
-	if (object@ ObObjectPagedHeader ObPagedHeader_UID + @ pagedarea@ PsProcessPaged_UID + @ ~=)
-		STATUS_PERMISSION_DENIED ok!
+	auto owninguid
+	object@ ObObjectPagedHeader ObPagedHeader_UID + @ owninguid!
+
+	if (owninguid@ pagedarea@ PsProcessPaged_UID + @ ==)
+		// we are the owner.
+
+		0 ok!
+
 		return
 	end
+
+	if (owninguid@ UID_SYSTEM ==)
+		// we aren't the owner, and this is owned by the system user.
+
+		STATUS_PERMISSION_DENIED ok!
+
+		return
+	end
+
+	// if we are an admin, we can access all objects except those owned by the
+	// system user.
+
+	SYSTEMPERMISSION_ADMIN // permission
+	process@ // process
+	SeProcessCheckPermission ok!
 end

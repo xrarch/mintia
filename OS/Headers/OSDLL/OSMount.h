@@ -9,3 +9,7 @@ struct OSMountInformation
 
 	24 Reserved
 endstruct
+
+const OSMOUNT_READONLY 1
+const OSMOUNT_NOUID    2
+const OSMOUNT_MATCHUID 4

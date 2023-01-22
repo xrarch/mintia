@@ -149,6 +149,7 @@ extern OSConsoleSignal { signal filehandle -- ok }
 
 // Se
 extern OSCheckPermission { permission processhandle -- ok }
+extern OSGrantPermission { permission processhandle -- ok }
 
 // IPC
 extern OSPortCreate { flags maxlen permissions name -- porthandle ok }

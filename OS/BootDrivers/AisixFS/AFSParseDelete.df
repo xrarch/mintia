@@ -92,26 +92,24 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 			// more path, traverse
 
-			if (mount@ IOMountGetFlags OSMOUNT_NOUID & ~~)
-				if (process@)
-					// check traverse rights (on behalf of the CALLING process,
-					// not the receiver of the handle)
+			if (process@)
+				// check traverse rights (on behalf of the CALLING process,
+				// not the receiver of the handle)
 
-					ACCESS_EXEC // access
-					fcbdata@ AFSFCBData_Permissions + @ // permbits
-					fcbdata@ AFSFCBData_UID + @ // owninguid
-					fcbdata@ AFSFCBData_GID + @ // owninggid 
-					KeProcessCurrent // process
-					SeCheckAccessFilesystemX ok!
+				ACCESS_EXEC // access
+				fcbdata@ AFSFCBData_Permissions + @ // permbits
+				fcbdata@ AFSFCBData_UID + @ // owninguid
+				fcbdata@ AFSFCBData_GID + @ // owninggid
+				mount@ // mount
+				FSCheckAccess ok!
 
-					if (ok@)
-						// no rights
+				if (ok@)
+					// no rights
 
-						initialfcb@ IOFileControlBlockUnlock
-						initialfcb@ IOFileControlBlockDereference drop
+					initialfcb@ IOFileControlBlockUnlock
+					initialfcb@ IOFileControlBlockDereference drop
 
-						return
-					end
+					return
 				end
 			end
 
@@ -207,24 +205,20 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				if (ok@ STATUS_NOT_FOUND ==)
 					if (path@ gb ~~)
 						if (flags@ OSFILEFLAG_CREATE &)
-							if (mount@ IOMountGetFlags OSMOUNT_READONLY &)
-								STATUS_READONLY_FILESYSTEM ok!
-							end else
-								ACCESS_WRITE // access
-								fcbdata@ AFSFCBData_Permissions + @ // permbits
-								fcbdata@ AFSFCBData_UID + @ // owninguid
-								fcbdata@ AFSFCBData_GID + @ // owninggid 
-								KeProcessCurrent // process
-								SeCheckAccessFilesystemX ok!
+							ACCESS_WRITE // access
+							fcbdata@ AFSFCBData_Permissions + @ // permbits
+							fcbdata@ AFSFCBData_UID + @ // owninguid
+							fcbdata@ AFSFCBData_GID + @ // owninggid
+							mount@ // mount
+							FSCheckAccess ok!
 
-								if (ok@ ~~)
-									process@ // process
-									fullpath@ // fullpath
-									flags@ // flags
-									pcomp@ // name
-									initialfcb@ // dirfcb
-									AFSCreateFile ok! object!
-								end
+							if (ok@ ~~)
+								process@ // process
+								fullpath@ // fullpath
+								flags@ // flags
+								pcomp@ // name
+								initialfcb@ // dirfcb
+								AFSCreateFile ok! object!
 							end
 						end
 					end
@@ -345,13 +339,11 @@ fn AFSCreateFileObject { fullpath flags permissions process fcb -- object ok }
 		return
 	end
 
-	if (mount@ IOMountGetFlags OSMOUNT_NOUID &)
-		process@ PsProcessGetUID object@ ObObjectSetUID
-		process@ PsProcessGetGID object@ ObObjectSetGID
-	end else
-		fcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ object@ ObObjectSetUID
-		fcb@ IOFileControlBlockGetContext AFSFCBData_GID + @ object@ ObObjectSetGID
-	end
+	fcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ // uid
+	fcb@ IOFileControlBlockGetContext AFSFCBData_GID + @ // gid
+	object@ // object
+	mount@ // mount
+	FSFileObjectSetSecurity
 end
 
 fn AFSVerifyName { name -- ok }

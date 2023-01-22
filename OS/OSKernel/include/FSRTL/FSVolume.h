@@ -15,3 +15,6 @@ extern FSVolumeGetFile { mount -- volfile }
 
 extern FSVolumeFCBGetReadFunction { volfcb -- readfunc }
 extern FSVolumeFCBGetWriteFunction { volfcb -- writefunc }
+
+extern FSCheckAccess { access permbits owninguid owninggid mount -- ok }
+extern FSFileObjectSetSecurity { uid gid object mount -- }

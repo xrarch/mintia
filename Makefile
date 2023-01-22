@@ -97,8 +97,8 @@ all: $(PROJECT)
 	rm -f DELTA
 
 update:
-	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
+	$(FSTOOL) udf / ExecManifest .$(ARCHITECTURE).$(CHKFRE)
 	$(FSTOOL) ud / TextManifest
 	$(FSTOOL) ud / TextManifestSuffixed $(TEXTSUFFIX)
 

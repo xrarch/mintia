@@ -24,13 +24,7 @@ struct IODevice
 	4 BlockLog
 	4 ConsoleHeader
 
-	4 Reserved1
-	4 Reserved2
-	4 Reserved3
-	4 Reserved4
-	4 Reserved5
-	4 Reserved6
-	4 Reserved7
+	4 MountRwLock
 endstruct
 
 extern IODeviceDirectoryInsert { deviceobject -- ok }

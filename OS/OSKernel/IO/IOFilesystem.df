@@ -38,6 +38,31 @@ public IOMountListHead
 var IOMountCount 0
 public IOMountCount
 
+fn IOiLockMountList { alertable -- ok }
+	fnsection "PAGE$text"
+
+	alertable@ // alertable
+	0 // nowait
+	IOiMountListRwLock // rwlock
+	ExRwLockAcquireExclusive ok!
+end
+
+fn IOiLockMountListShared { alertable -- ok }
+	fnsection "PAGE$text"
+
+	alertable@ // alertable
+	0 // nowait
+	0 // canstarve
+	IOiMountListRwLock // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn IOiUnlockMountList { -- }
+	fnsection "PAGE$text"
+
+	IOiMountListRwLock ExRwLockRelease
+end
+
 fn IOFilesystemRegister { filesystem -- ok }
 	fnsection "INIT$text"
 
@@ -103,15 +128,13 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	auto filetype
 	fcb@ IOFileControlBlock_FileType + @ filetype!
 
-	if (filetype@ OSFILETYPE_CHARDEVICE ==)
-		STATUS_NOT_SUPPORTED ok!
-
-		return
-	end elseif (filetype@ OSFILETYPE_DIRECTORY ==)
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
 		STATUS_IS_A_DIRECTORY ok!
 
 		return
-	end elseif (filetype@ OSFILETYPE_FILE ==)
+	end
+
+	if (filetype@ OSFILETYPE_BLOCKDEVICE ~=)
 		STATUS_NOT_SUPPORTED ok!
 
 		return
@@ -138,14 +161,25 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 		end
 	end
 
-	1 ObRootDirectoryLock ok!
+	1 IOiLockMountList ok!
 
 	if (ok@)
 		return
 	end
 
+	1 // alertable
+	fcb@ // fcb
+	IOiLockMount ok!
+
+	if (ok@)
+		IOiUnlockMountList
+
+		return
+	end
+
 	if (fcb@ IOFileControlBlock_Mount + @)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
+		IOiUnlockMountList
 
 		STATUS_DEVICE_BUSY ok!
 
@@ -158,7 +192,8 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	MmAllocWithTag ok! mount!
 
 	if (ok@)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
+		IOiUnlockMountList
 
 		return
 	end
@@ -225,7 +260,8 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	end
 
 	if (ok@)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
+		IOiUnlockMountList
 
 		// did not successfully mount
 
@@ -253,7 +289,8 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 
 	1 IOMountCount +=
 
-	ObRootDirectoryUnlock
+	fcb@ IOiUnlockMount
+	IOiUnlockMountList
 end
 
 fn IOFilesystemUnmount { handle -- ok }
@@ -293,9 +330,34 @@ fn IOUnmountObject { fileobject -- ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-	1 ObRootDirectoryLock ok!
+	auto filetype
+	fcb@ IOFileControlBlock_FileType + @ filetype!
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (filetype@ OSFILETYPE_BLOCKDEVICE ~=)
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	1 IOiLockMountList ok!
 
 	if (ok@)
+		return
+	end
+
+	1 // alertable
+	fcb@ // fcb
+	IOiLockMount ok!
+
+	if (ok@)
+		IOiUnlockMountList
+
 		return
 	end
 
@@ -303,7 +365,8 @@ fn IOUnmountObject { fileobject -- ok }
 	fcb@ IOFileControlBlock_Mount + @ mount!
 
 	if (mount@ ~~)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
+		IOiUnlockMountList
 
 		STATUS_NOT_MOUNTED ok!
 
@@ -328,7 +391,8 @@ fn IOUnmountObject { fileobject -- ok }
 	if (ok@)
 		// failed to unmount
 
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
+		IOiUnlockMountList
 
 		return
 	end
@@ -365,7 +429,8 @@ fn IOUnmountObject { fileobject -- ok }
 
 	volfile@ ObObjectDereferenceByPointer drop
 
-	ObRootDirectoryUnlock
+	fcb@ IOiUnlockMount
+	IOiUnlockMountList
 end
 
 fn IOMountUpdateFlags { newflags handle -- ok }
@@ -418,7 +483,24 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-	1 ObRootDirectoryLock ok!
+	auto filetype
+	fcb@ IOFileControlBlock_FileType + @ filetype!
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (filetype@ OSFILETYPE_BLOCKDEVICE ~=)
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	1 // alertable
+	fcb@ // fcb
+	IOiLockMount ok!
 
 	if (ok@)
 		return
@@ -428,7 +510,7 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 	fcb@ IOFileControlBlock_Mount + @ mount!
 
 	if (mount@ ~~)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
 
 		STATUS_NOT_MOUNTED ok!
 
@@ -439,7 +521,7 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 	mount@ IOMount_Flags + @ oldflags!
 
 	if (oldflags@ newflags@ ==)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
 
 		return
 	end
@@ -465,7 +547,7 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 		newflags@ mount@ IOMount_Flags + !
 	end
 
-	ObRootDirectoryUnlock
+	fcb@ IOiUnlockMount
 end
 
 fn IOMountGetFilesystemName { buffer handle -- ok }
@@ -506,12 +588,29 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
+	auto filetype
+	fcb@ IOFileControlBlock_FileType + @ filetype!
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (filetype@ OSFILETYPE_BLOCKDEVICE ~=)
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
 	buffer@ // ptr
 	OBNAMEMAX // size
 	0 // word
 	memset
 
-	1 ObRootDirectoryLockShared ok!
+	1 // alertable
+	fcb@ // fcb
+	IOiLockMountShared ok!
 
 	if (ok@)
 		return
@@ -521,7 +620,7 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 	fcb@ IOFileControlBlock_Mount + @ mount!
 
 	if (mount@ ~~)
-		ObRootDirectoryUnlock
+		fcb@ IOiUnlockMount
 
 		STATUS_NOT_MOUNTED ok!
 
@@ -533,7 +632,7 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 	OBNAMEMAX 1 -
 	strncpy
 
-	ObRootDirectoryUnlock
+	fcb@ IOiUnlockMount
 end
 
 fn IOMountQueryAll { buffer maxquery -- count ok }
@@ -544,7 +643,7 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 	0 // word
 	memset
 
-	1 ObRootDirectoryLockShared ok!
+	1 IOiLockMountListShared ok!
 
 	if (ok@)
 		return
@@ -591,7 +690,7 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	ObRootDirectoryUnlock
+	IOiUnlockMountList
 end
 
 fn IOMountGetFlags { mount -- flags }
@@ -621,7 +720,7 @@ end
 fn IOiFilesystemSyncAll { shutdown -- ok }
 	fnsection "PAGE$text"
 
-	1 ObRootDirectoryLockShared ok!
+	1 IOiLockMountListShared ok!
 
 	if (ok@)
 		return
@@ -646,7 +745,7 @@ fn IOiFilesystemSyncAll { shutdown -- ok }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	ObRootDirectoryUnlock
+	IOiUnlockMountList
 end
 
 fn IOiFilesystemReclaimFCB { -- }
@@ -680,7 +779,12 @@ fn IOiFilesystemReclaimFCB { -- }
 	auto skipped
 	0 skipped!
 
-	0 ObRootDirectoryLockShared drop
+	auto ok
+	0 IOiLockMountListShared ok!
+
+	if (ok@)
+		return
+	end
 
 	auto mount
 	IOMountListHead@ mount!
@@ -714,7 +818,7 @@ fn IOiFilesystemReclaimFCB { -- }
 	end
 
 	if (actual@ count@ >=)
-		ObRootDirectoryUnlock
+		IOiUnlockMountList
 
 		return
 	end
@@ -724,7 +828,7 @@ fn IOiFilesystemReclaimFCB { -- }
 	if (skipped@ ~~)
 		// we didn't skip any mounts, so that can't be why.
 
-		ObRootDirectoryUnlock
+		IOiUnlockMountList
 
 		return
 	end
@@ -755,5 +859,5 @@ fn IOiFilesystemReclaimFCB { -- }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	ObRootDirectoryUnlock
+	IOiUnlockMountList
 end

@@ -146,41 +146,6 @@ fn AmsInternalLogon { flags password uid processhandle -- obdirhandle ok }
 end
 
 fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
-	auto notadmin
-
-	auto self
-	0 self!
-
-	SYSTEMPERMISSION_ADMIN // permission
-	processhandle@ // processhandle
-	OSCheckPermission notadmin!
-
-	if (notadmin@)
-		// not admin, check if same UID at least
-
-		auto pinfo
-		OSObjectQuery_SIZEOF alloc pinfo!
-
-		processhandle@ // handle
-		pinfo@ // query
-		OSQuery ok!
-
-		if (ok@)
-			return
-		end
-
-		if (pinfo@ OSObjectQuery_UID + @ uid@ ~=)
-			// not same UID; can't change password even if we have the correct
-			// old password.
-
-			STATUS_PERMISSION_DENIED ok!
-
-			return
-		end
-
-		1 self!
-	end
-
 	auto userptr
 	uid@ AmsDbUserGetByUID ok! userptr!
 
@@ -188,20 +153,61 @@ fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 		return
 	end
 
-	if (self@)
+	auto pinfo
+	OSObjectQuery_SIZEOF alloc pinfo!
+
+	processhandle@ // handle
+	pinfo@ // query
+	OSQuery ok!
+
+	if (ok@)
+		return
+	end
+
+	auto remote
+	0 remote!
+
+	if (pinfo@ OSObjectQuery_UID + @ uid@ ~=)
+		// not same UID.
+
+		if (uid@ UID_SYSTEM ==)
+			// this is the system user and we aren't the system user, so we
+			// cannot change the password.
+
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			return
+		end
+
+		SYSTEMPERMISSION_ADMIN // permission
+		processhandle@ // processhandle
+		OSCheckPermission ok!
+
+		if (ok@)
+			// not the same UID and we aren't an admin, so return.
+
+			return
+		end
+
+		1 remote!
+	end else
 		auto level
 		userptr@ AmsUserGetRestrictionLevel level!
 
 		if (level@ AMSRESTRICT_PASSWD >=)
 			// user is restricted from changing their password.
 
-			STATUS_FORBIDDEN_OPERATION ok!
+			STATUS_PERMISSION_DENIED ok!
 
 			return
 		end
+
+		if (pinfo@ OSObjectQuery_UID + @ UID_SYSTEM ==)
+			1 remote!
+		end
 	end
 
-	if (notadmin@ uid@ UID_SYSTEM == ||)
+	if (remote@ ~~)
 		auto userpass
 		"password" // property
 		userptr@ // userptr
@@ -214,6 +220,7 @@ fn AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
 		if (uid@ UID_SYSTEM ~=)
 			if (userpass@ "none" strcmp)
 				STATUS_INCORRECT_PASSWORD ok!
+
 				return
 			end
 		end

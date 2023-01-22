@@ -16,11 +16,15 @@
 
 #include "<inc>/Memory.h"
 
+#include "<inc>/Security.h"
+
 #include "<inc>/Object.h"
 
 #include "<inc>/IO.h"
 
 #include "<inc>/FSRTL.h"
+
+#include "<inc>/Process.h"
 
 #include "<ll>/OSDLL/OS.h"
 
@@ -286,4 +290,80 @@ end
 
 fn FSVolumeFCBGetWriteFunction { volfcb -- writefunc }
 	volfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+end
+
+fn FSCheckAccess { access permbits owninguid owninggid mount -- ok }
+	fnsection "PAGE$text"
+
+	if (access@ ACCESS_WRITE &)
+		if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
+			STATUS_READONLY_FILESYSTEM ok!
+
+			return
+		end
+	end
+
+	if (mount@ IOMount_Flags + @ OSMOUNT_NOUID &)
+		0 ok!
+
+		return
+	end
+
+	auto process
+	KeProcessCurrent process!
+
+	if (mount@ IOMount_Flags + @ OSMOUNT_MATCHUID &)
+		auto dev
+		mount@ IOMount_VolumeCapturedFCB + @ dev!
+		dev@ IOFileControlBlock_DeviceObject + @ dev!
+
+		auto pheader
+		dev@ ObCommonHeader_SIZEOF - ObCommonHeader_PagedHeader + @ pheader!
+
+		access@ // access
+		permbits@ // permbits
+		pheader@ ObPagedHeader_UID + @ // owninguid
+		pheader@ ObPagedHeader_GID + @ // owninggid
+		process@ // process
+		SeCheckAccessFilesystemX ok!
+
+		return
+	end
+
+	access@ // access
+	permbits@ // permbits
+	owninguid@ // owninguid
+	owninggid@ // owninggid 
+	process@ // process
+	SeCheckAccessFilesystemX ok!
+end
+
+fn FSFileObjectSetSecurity { uid gid object mount -- }
+	fnsection "PAGE$text"
+
+	auto paged
+	KeProcessCurrent PsProcess_PagedArea + @ paged!
+
+	if (mount@ IOMount_Flags + @ OSMOUNT_NOUID &)
+		paged@ PsProcessPaged_GID + @ object@ ObObjectSetGID
+		paged@ PsProcessPaged_UID + @ object@ ObObjectSetUID
+
+		return
+	end
+
+	if (mount@ IOMount_Flags + @ OSMOUNT_MATCHUID &)
+		auto dev
+		mount@ IOMount_VolumeCapturedFCB + @ dev!
+		dev@ IOFileControlBlock_DeviceObject + @ dev!
+
+		dev@ ObObjectPagedHeader paged!
+
+		paged@ ObPagedHeader_GID + @ object@ ObObjectSetGID
+		paged@ ObPagedHeader_UID + @ object@ ObObjectSetUID
+
+		return
+	end
+
+	uid@ object@ ObObjectSetUID
+	gid@ object@ ObObjectSetGID
 end

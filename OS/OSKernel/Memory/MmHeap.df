@@ -17,6 +17,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
 // heap allocation functions. should be called only through MmAllocWithTag and
 // MmFree. manages free-list allocations within pages.
 
@@ -75,18 +77,18 @@ public MmPagedHeapBytesUsedPeak
 var MmPagedHeapBytesUsedExternally 0
 public MmPagedHeapBytesUsedExternally
 
-buffer MmPagedHeapMutex KeMutex_SIZEOF
+buffer MiPagedHeapMutex KeMutex_SIZEOF
 
-fn MmHeapInit { -- }
+fn MiHeapInit { -- }
 	fnsection "INIT$text"
 
-	"MmPagedHeapMutex" // name
+	"MiPagedHeapMutex" // name
 	KERNELMODE // mode
-	MmPagedHeapMutex
+	MiPagedHeapMutex
 	KeMutexInitialize
 end
 
-fn MmHeapAlloc { bytes tag flags -- ptr ok }
+fn MiHeapAlloc { bytes tag flags -- ptr ok }
 	auto maxlevel
 
 	auto ipl
@@ -97,7 +99,7 @@ fn MmHeapAlloc { bytes tag flags -- ptr ok }
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
-		MmPagedHeapMutex // object
+		MiPagedHeapMutex // object
 		KeThreadWaitForObject drop
 
 		-1 // ipl
@@ -105,10 +107,10 @@ fn MmHeapAlloc { bytes tag flags -- ptr ok }
 		tag@ // tag
 		MMHEAPPAGED // level
 		flags@ // flags
-		MmHeapAllocateLevel ok! ptr!
+		MiHeapAllocateLevel ok! ptr!
 
 		0 // abandon
-		MmPagedHeapMutex // mutex
+		MiPagedHeapMutex // mutex
 		KeMutexRelease drop
 
 		ipl@ KeIPLLower
@@ -136,14 +138,14 @@ fn MmHeapAlloc { bytes tag flags -- ptr ok }
 			tag@ // tag
 			level@ // level
 			flags@ // flags
-			MmHeapAllocateLevel ok! ptr!
+			MiHeapAllocateLevel ok! ptr!
 		end else
 			ipl@ // ipl
 			bytes@ // bytes
 			tag@ // tag
 			level@ // level
 			[level@]MmHeapLevelPriorities@ // flags
-			MmHeapAllocateLevel ok! ptr!
+			MiHeapAllocateLevel ok! ptr!
 		end
 
 		ipl@ KeIPLLower
@@ -156,10 +158,10 @@ fn MmHeapAlloc { bytes tag flags -- ptr ok }
 	end
 end
 
-fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
-	// called at IPLDPC if nonpaged, or with MmPagedHeapMutex held if paged.
+fn MiHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
+	// called at IPLDPC if nonpaged, or with MiPagedHeapMutex held if paged.
 
-	MmAllocatedHeapBlock_SIZEOF bytes +=
+	MiAllocatedHeapBlock_SIZEOF bytes +=
 
 	auto n
 
@@ -176,22 +178,22 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 	if (ptr@)
 		// there's a properly sized block already
 
-		if (ptr@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ~=)
-			ptr@ MmHeapBlock_Magic + gi "MmHeapAllocate: bad magic 0x%04x\n" KeCrash
+		if (ptr@ MiHeapBlock_Magic + gi MMHEAPFREEMAGIC ~=)
+			ptr@ MiHeapBlock_Magic + gi "MiHeapAllocate: bad magic 0x%04x\n" KeCrash
 		end
 
-		if (ptr@ MmHeapBlock_BucketIndex + gb bucketindex@ ~=)
-			bucketindex@ ptr@ MmHeapBlock_BucketIndex + gb "MmHeapAllocate: bad bucketindex %d (expected %d)\n" KeCrash
+		if (ptr@ MiHeapBlock_BucketIndex + gb bucketindex@ ~=)
+			bucketindex@ ptr@ MiHeapBlock_BucketIndex + gb "MiHeapAllocate: bad bucketindex %d (expected %d)\n" KeCrash
 		end
 
 		// set magic to indicate allocated
-		MMHEAPSWIFTMAGIC level@ | ptr@ MmHeapBlock_Magic + si
+		MMHEAPSWIFTMAGIC level@ | ptr@ MiHeapBlock_Magic + si
 
 		// unlink from free list
-		ptr@ MmHeapBlock_NextFree + @ n!
+		ptr@ MiHeapBlock_NextFree + @ n!
 
 		if (n@)
-			0 n@ MmHeapBlock_PrevFree + !
+			0 n@ MiHeapBlock_PrevFree + !
 		end
 
 		n@ listheads@ bucketindex@ 2 << + !
@@ -210,10 +212,10 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 			end
 		end
 
-		tag@ ptr@ MmAllocatedHeapBlock_Tag + !
+		tag@ ptr@ MiAllocatedHeapBlock_Tag + !
 
 		// return block
-		MmAllocatedHeapBlock_SIZEOF ptr +=
+		MiAllocatedHeapBlock_SIZEOF ptr +=
 
 		0 ok!
 
@@ -235,27 +237,27 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 		if (ptr@)
 			// found one to split, do that
 
-			if (ptr@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ~=)
-				ptr@ MmHeapBlock_Magic + gi "MmHeapAllocate: bad magic 2 0x%04x\n" KeCrash
+			if (ptr@ MiHeapBlock_Magic + gi MMHEAPFREEMAGIC ~=)
+				ptr@ MiHeapBlock_Magic + gi "MiHeapAllocate: bad magic 2 0x%04x\n" KeCrash
 			end
 
-			if (ptr@ MmHeapBlock_BucketIndex + gb i@ ~=)
-				i@ ptr@ MmHeapBlock_BucketIndex + gb "MmHeapAllocate: bad bucketindex 2 %d (expected %d)\n" KeCrash
+			if (ptr@ MiHeapBlock_BucketIndex + gb i@ ~=)
+				i@ ptr@ MiHeapBlock_BucketIndex + gb "MiHeapAllocate: bad bucketindex 2 %d (expected %d)\n" KeCrash
 			end
 
 			// remove from free list
-			ptr@ MmHeapBlock_NextFree + @ n!
+			ptr@ MiHeapBlock_NextFree + @ n!
 
 			if (n@)
-				0 n@ MmHeapBlock_PrevFree + !
+				0 n@ MiHeapBlock_PrevFree + !
 			end
 
 			n@ listheads@ i@ 2 << + !
 
 			// set new bucketindex in old block header
 			// already has correct lastbucketindex
-			bucketindex@ ptr@ MmHeapBlock_BucketIndex + sb
-			MMHEAPSWIFTMAGIC level@ | ptr@ MmHeapBlock_Magic + si
+			bucketindex@ ptr@ MiHeapBlock_BucketIndex + sb
+			MMHEAPSWIFTMAGIC level@ | ptr@ MiHeapBlock_Magic + si
 
 			// calculate index of bucket to place split block in
 			i@ bucketindex@ - newbucketindex!
@@ -263,27 +265,27 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 			ptr@ bytes@ + newblock!
 
 			// create new block header
-			bucketindex@ newblock@ MmHeapBlock_LastBucketIndex + sb
-			newbucketindex@ newblock@ MmHeapBlock_BucketIndex + sb
-			MMHEAPFREEMAGIC newblock@ MmHeapBlock_Magic + si
+			bucketindex@ newblock@ MiHeapBlock_LastBucketIndex + sb
+			newbucketindex@ newblock@ MiHeapBlock_BucketIndex + sb
+			MMHEAPFREEMAGIC newblock@ MiHeapBlock_Magic + si
 
 			// update next block to point to new block unless it is page
 			// -aligned which means theres no next block
 			newblock@ newbucketindex@ MMHEAPBLOCKSIZESHIFT << + n!
 
 			if (n@ PAGEOFFSETMASK &)
-				newbucketindex@ n@ MmHeapBlock_LastBucketIndex + sb
+				newbucketindex@ n@ MiHeapBlock_LastBucketIndex + sb
 			end
 
 			// insert in new bucket list
 			listheads@ newbucketindex@ 2 << + @ n!
 
 			if (n@)
-				newblock@ n@ MmHeapBlock_PrevFree + !
+				newblock@ n@ MiHeapBlock_PrevFree + !
 			end
 
-			n@ newblock@ MmHeapBlock_NextFree + !
-			0 newblock@ MmHeapBlock_PrevFree + !
+			n@ newblock@ MiHeapBlock_NextFree + !
+			0 newblock@ MiHeapBlock_PrevFree + !
 
 			newblock@ listheads@ newbucketindex@ 2 << + !
 
@@ -302,10 +304,10 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 			end
 
 			// set tag
-			tag@ ptr@ MmAllocatedHeapBlock_Tag + !
+			tag@ ptr@ MiAllocatedHeapBlock_Tag + !
 
 			// return block
-			MmAllocatedHeapBlock_SIZEOF ptr +=
+			MiAllocatedHeapBlock_SIZEOF ptr +=
 
 			0 ok!
 
@@ -322,7 +324,7 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 		PAGESIZE // bytes
 		'PgHp' // tag
 		flags@ POOLEXP | // flags
-		MmPagedPoolAllocPages ok! ptr!
+		MiPagedPoolAllocPages ok! ptr!
 
 		if (ok@)
 			return
@@ -335,7 +337,7 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 		PAGESIZE // bytes
 		'NpHp' // tag
 		flags@ POOLEXP | // flags
-		MmNonpagedPoolAllocPages ok! ptr! n!
+		MiNonpagedPoolAllocPages ok! ptr! n!
 
 		if (flags@ CANBLOCK &)
 			IPLDPC KeIPLRaise drop
@@ -346,15 +348,15 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 		end
 
 		// initialize the pfdbe
-		level@ n@ MmPageFrameEntryHeap_Level + !
-		0 n@ MmPageFrameEntryHeap_Permanent + !
-		//n@ MmPoolPageInsert
+		level@ n@ MiPageFrameEntryHeap_Level + !
+		0 n@ MiPageFrameEntryHeap_Permanent + !
+		//n@ MiPoolPageInsert
 	end
 
 	// set bucketindex in our block header
-	0 ptr@ MmHeapBlock_LastBucketIndex + sb
-	bucketindex@ ptr@ MmHeapBlock_BucketIndex + sb
-	MMHEAPSWIFTMAGIC level@ | ptr@ MmHeapBlock_Magic + si
+	0 ptr@ MiHeapBlock_LastBucketIndex + sb
+	bucketindex@ ptr@ MiHeapBlock_BucketIndex + sb
+	MMHEAPSWIFTMAGIC level@ | ptr@ MiHeapBlock_Magic + si
 
 	// calculate index of bucket to place split block in
 	PAGESIZE MMHEAPBLOCKSIZESHIFT >> bucketindex@ - newbucketindex!
@@ -362,19 +364,19 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 	ptr@ bytes@ + newblock!
 
 	// create free block header
-	bucketindex@ newblock@ MmHeapBlock_LastBucketIndex + sb
-	newbucketindex@ newblock@ MmHeapBlock_BucketIndex + sb
-	MMHEAPFREEMAGIC newblock@ MmHeapBlock_Magic + si
+	bucketindex@ newblock@ MiHeapBlock_LastBucketIndex + sb
+	newbucketindex@ newblock@ MiHeapBlock_BucketIndex + sb
+	MMHEAPFREEMAGIC newblock@ MiHeapBlock_Magic + si
 
 	// insert in free list
 	listheads@ newbucketindex@ 2 << + @ n!
 
 	if (n@)
-		newblock@ n@ MmHeapBlock_PrevFree + !
+		newblock@ n@ MiHeapBlock_PrevFree + !
 	end
 
-	n@ newblock@ MmHeapBlock_NextFree + !
-	0 newblock@ MmHeapBlock_PrevFree + !
+	n@ newblock@ MiHeapBlock_NextFree + !
+	0 newblock@ MiHeapBlock_PrevFree + !
 
 	newblock@ listheads@ newbucketindex@ 2 << + !
 
@@ -395,15 +397,15 @@ fn MmHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
 	end
 
 	// set tag
-	tag@ ptr@ MmAllocatedHeapBlock_Tag + !
+	tag@ ptr@ MiAllocatedHeapBlock_Tag + !
 
-	MmAllocatedHeapBlock_SIZEOF ptr +=
+	MiAllocatedHeapBlock_SIZEOF ptr +=
 
 	0 ok!
 end
 
-fn MmHeapFree { ptr -- }
-	MmAllocatedHeapBlock_SIZEOF ptr -=
+fn MiHeapFree { ptr -- }
+	MiAllocatedHeapBlock_SIZEOF ptr -=
 
 	// check if the block has free blocks physically to its left or right.
 	// if so, merge.
@@ -416,14 +418,14 @@ fn MmHeapFree { ptr -- }
 	auto next
 	auto prev
 
-	ptr@ MmHeapBlock_BucketIndex + gb bucketindex!
+	ptr@ MiHeapBlock_BucketIndex + gb bucketindex!
 
-	if (ptr@ MmHeapBlock_Magic + gi 15 ~ & MMHEAPSWIFTMAGIC ~=)
-		ptr@ MmHeapBlock_Magic + gi "MmHeapFree: bad magic %x\n" KeCrash
+	if (ptr@ MiHeapBlock_Magic + gi 15 ~ & MMHEAPSWIFTMAGIC ~=)
+		ptr@ MiHeapBlock_Magic + gi "MiHeapFree: bad magic %x\n" KeCrash
 	end
 
 	auto level
-	ptr@ MmHeapBlock_Magic + gi 15 & level!
+	ptr@ MiHeapBlock_Magic + gi 15 & level!
 
 	auto listheads
 	[level@]MmHeapListHeads@ listheads!
@@ -439,7 +441,7 @@ fn MmHeapFree { ptr -- }
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
-		MmPagedHeapMutex // object
+		MiPagedHeapMutex // object
 		KeThreadWaitForObject drop
 
 		bucketindex@ MMHEAPBLOCKSIZESHIFT <<
@@ -449,39 +451,39 @@ fn MmHeapFree { ptr -- }
 	if (ptr@ PAGEOFFSETMASK &)
 		// we're not at the start of the page, check left
 
-		ptr@ MmHeapBlock_LastBucketIndex + gb lastbucketindex!
+		ptr@ MiHeapBlock_LastBucketIndex + gb lastbucketindex!
 
 		ptr@ lastbucketindex@ MMHEAPBLOCKSIZESHIFT << - nb!
 
-		if (nb@ MmHeapBlock_BucketIndex + gb lastbucketindex@ ~=)
-			lastbucketindex@ nb@ MmHeapBlock_BucketIndex + gb "MmHeapFree: bad bucketindex %d (expected %d)\n" KeCrash
+		if (nb@ MiHeapBlock_BucketIndex + gb lastbucketindex@ ~=)
+			lastbucketindex@ nb@ MiHeapBlock_BucketIndex + gb "MiHeapFree: bad bucketindex %d (expected %d)\n" KeCrash
 		end
 
-		if (nb@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ==)
+		if (nb@ MiHeapBlock_Magic + gi MMHEAPFREEMAGIC ==)
 			// free! merge left.
 
 			// remove from old free list
-			nb@ MmHeapBlock_PrevFree + @ prev!
+			nb@ MiHeapBlock_PrevFree + @ prev!
 
-			nb@ MmHeapBlock_NextFree + @ next!
+			nb@ MiHeapBlock_NextFree + @ next!
 
 			if (prev@)
-				next@ prev@ MmHeapBlock_NextFree + !
+				next@ prev@ MiHeapBlock_NextFree + !
 			end else
 				next@ listheads@ lastbucketindex@ 2 << + !
 			end
 
 			if (next@)
-				prev@ next@ MmHeapBlock_PrevFree + !
+				prev@ next@ MiHeapBlock_PrevFree + !
 			end
 
 			// turn block into bigger block
 			lastbucketindex@ bucketindex +=
 
-			bucketindex@ nb@ MmHeapBlock_BucketIndex + sb
+			bucketindex@ nb@ MiHeapBlock_BucketIndex + sb
 
 			// invalidate magic number of old block
-			0 ptr@ MmHeapBlock_Magic + si
+			0 ptr@ MiHeapBlock_Magic + si
 
 			// set block pointer to last block
 			nb@ ptr!
@@ -493,7 +495,7 @@ fn MmHeapFree { ptr -- }
 			ptr@ bucketindex@ MMHEAPBLOCKSIZESHIFT << + nb!
 
 			if (nb@ PAGEOFFSETMASK &)
-				bucketindex@ nb@ MmHeapBlock_LastBucketIndex + sb
+				bucketindex@ nb@ MiHeapBlock_LastBucketIndex + sb
 			end
 		end
 	end
@@ -503,40 +505,40 @@ fn MmHeapFree { ptr -- }
 	if (nb@ PAGEOFFSETMASK &)
 		// next block exists, see if it can be merged
 
-		nb@ MmHeapBlock_BucketIndex + gb lastbucketindex!
+		nb@ MiHeapBlock_BucketIndex + gb lastbucketindex!
 
-		if (nb@ MmHeapBlock_Magic + gi MMHEAPFREEMAGIC ==)
+		if (nb@ MiHeapBlock_Magic + gi MMHEAPFREEMAGIC ==)
 			// free! merge right
 
 			// remove from old free list
-			nb@ MmHeapBlock_PrevFree + @ prev!
+			nb@ MiHeapBlock_PrevFree + @ prev!
 
-			nb@ MmHeapBlock_NextFree + @ next!
+			nb@ MiHeapBlock_NextFree + @ next!
 
 			if (prev@)
-				next@ prev@ MmHeapBlock_NextFree + !
+				next@ prev@ MiHeapBlock_NextFree + !
 			end else
 				next@ listheads@ lastbucketindex@ 2 << + !
 			end
 
 			if (next@)
-				prev@ next@ MmHeapBlock_PrevFree + !
+				prev@ next@ MiHeapBlock_PrevFree + !
 			end
 
 			// turn block into bigger block
 			lastbucketindex@ bucketindex +=
 
-			bucketindex@ ptr@ MmHeapBlock_BucketIndex + sb
+			bucketindex@ ptr@ MiHeapBlock_BucketIndex + sb
 
 			// invalidate magic number of old block
-			0 nb@ MmHeapBlock_Magic + si
+			0 nb@ MiHeapBlock_Magic + si
 
 			// set right block lastbucketindex to our new one.
 
 			ptr@ bucketindex@ MMHEAPBLOCKSIZESHIFT << + nb!
 
 			if (nb@ PAGEOFFSETMASK &)
-				bucketindex@ nb@ MmHeapBlock_LastBucketIndex + sb
+				bucketindex@ nb@ MiHeapBlock_LastBucketIndex + sb
 			end
 		end
 	end
@@ -548,12 +550,12 @@ fn MmHeapFree { ptr -- }
 			PAGESIZE MmPagedHeapBytesUsedExternally -=
 
 			0 // abandon
-			MmPagedHeapMutex // mutex
+			MiPagedHeapMutex // mutex
 			KeMutexRelease drop
 
 			1 // noaccount
 			ptr@ // ptr
-			MmPagedPoolFreePages
+			MiPagedPoolFreePages
 
 			return
 		end else
@@ -561,7 +563,7 @@ fn MmHeapFree { ptr -- }
 
 			1 // noaccount
 			ptr@ // ptr
-			MmNonpagedPoolFreePages
+			MiNonpagedPoolFreePages
 
 			ipl@ KeIPLLower
 			return
@@ -569,23 +571,23 @@ fn MmHeapFree { ptr -- }
 	end
 
 	// set free magic
-	MMHEAPFREEMAGIC ptr@ MmHeapBlock_Magic + si
+	MMHEAPFREEMAGIC ptr@ MiHeapBlock_Magic + si
 
 	// put on relevant free list
 	listheads@ bucketindex@ 2 << + @ nb!
 
 	if (nb@)
-		ptr@ nb@ MmHeapBlock_PrevFree + !
+		ptr@ nb@ MiHeapBlock_PrevFree + !
 	end
 
-	nb@ ptr@ MmHeapBlock_NextFree + !
-	0 ptr@ MmHeapBlock_PrevFree + !
+	nb@ ptr@ MiHeapBlock_NextFree + !
+	0 ptr@ MiHeapBlock_PrevFree + !
 
 	ptr@ listheads@ bucketindex@ 2 << + !
 
 	if (level@ MMHEAPPAGED ==)
 		0 // abandon
-		MmPagedHeapMutex // mutex
+		MiPagedHeapMutex // mutex
 		KeMutexRelease drop
 	end else
 		ipl@ KeIPLLower
@@ -593,7 +595,7 @@ fn MmHeapFree { ptr -- }
 end
 
 fn MmHeapChargeBytesGet { bytes -- charge }
-	MmAllocatedHeapBlock_SIZEOF bytes +=
+	MiAllocatedHeapBlock_SIZEOF bytes +=
 
 	auto bucketindex
 	bytes@ MMHEAPBLOCKSIZEMASK + MMHEAPBLOCKSIZESHIFT >> bucketindex!
@@ -602,14 +604,14 @@ fn MmHeapChargeBytesGet { bytes -- charge }
 end
 
 fn MmHeapChargeGet { block -- charge }
-	MmAllocatedHeapBlock_SIZEOF block -=
+	MiAllocatedHeapBlock_SIZEOF block -=
 
-	if (block@ MmAllocatedHeapBlock_Magic + gi 15 ~ & MMHEAPSWIFTMAGIC ~=)
-		block@ MmAllocatedHeapBlock_Magic + gi
+	if (block@ MiAllocatedHeapBlock_Magic + gi 15 ~ & MMHEAPSWIFTMAGIC ~=)
+		block@ MiAllocatedHeapBlock_Magic + gi
 		block@ "MmHeapChargeGet: ptr 0x%08x had bad magic 0x%08x\n" KeCrash
 	end
 
-	block@ MmAllocatedHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << charge!
+	block@ MiAllocatedHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << charge!
 end
 
 extern MmHeapPrintTag { tag -- }
@@ -618,18 +620,18 @@ fn MmHeapDumpPage { tag page -- usage }
 	0 usage!
 
 	while (1)
-		if (page@ MmHeapBlock_Magic + gi MMHEAPSWIFTMAGIC ==)
-			if (page@ MmAllocatedHeapBlock_Tag + @ tag@ == tag@ ~~ ||)
-				page@ MmAllocatedHeapBlock_Tag + @ MmHeapPrintTag
-				page@ MmHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT <<
-				page@ MmAllocatedHeapBlock_SIZEOF +
+		if (page@ MiHeapBlock_Magic + gi MMHEAPSWIFTMAGIC ==)
+			if (page@ MiAllocatedHeapBlock_Tag + @ tag@ == tag@ ~~ ||)
+				page@ MiAllocatedHeapBlock_Tag + @ MmHeapPrintTag
+				page@ MiHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT <<
+				page@ MiAllocatedHeapBlock_SIZEOF +
 				" %08x (%d bytes)\n" Printf
 
-				page@ MmHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << usage +=
+				page@ MiHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << usage +=
 			end
 		end
 
-		page@ MmHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << page +=
+		page@ MiHeapBlock_BucketIndex + gb MMHEAPBLOCKSIZESHIFT << page +=
 
 		if (page@ PAGEOFFSETMASK & ~~)
 			return

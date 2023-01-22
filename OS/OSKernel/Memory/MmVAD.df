@@ -24,17 +24,19 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
 // routines for creating, destroying, and manipulating
 // Virtual Address Descriptors (VADs).
 
-fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock -- vad ok }
+fn MiVADCreate { startva endva prot offset processobject mappedobject quotablock -- vad ok }
 	fnsection "PAGE$text"
 
 	// allocates a VAD structure.
 	// references the section object, and the quotablock if applicable.
 
 	auto qcharge
-	MmVAD_SIZEOF MmChargeBytesGet qcharge!
+	MiVAD_SIZEOF MmChargeBytesGet qcharge!
 
 	qcharge@ // charge
 	quotablock@ // quotablock
@@ -48,12 +50,12 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 		// system VADs are nonpaged to avoid deadlock in the page fault
 		// handler.
 
-		MmVAD_SIZEOF // bytes
+		MiVAD_SIZEOF // bytes
 		'sVAD' // tag
 		CANBLOCK // flags
 		MmAllocWithTag ok! vad!
 	end else
-		MmVAD_SIZEOF // bytes
+		MiVAD_SIZEOF // bytes
 		'nVAD' // tag
 		PAGED // flags
 		MmAllocWithTag ok! vad!
@@ -67,7 +69,7 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 		return
 	end
 
-	0 vad@ MmVAD_ChargeVMQuota + !
+	0 vad@ MiVAD_ChargeVMQuota + !
 
 	if (prot@)
 		// charge vm quota for the number of page tables this VAD could lead to.
@@ -75,7 +77,7 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 		startva@ // startva
 		endva@ // endva
 		processobject@ // process
-		MmProcessChargePageTables ok!
+		MiProcessChargePageTables ok!
 
 		if (ok@)
 			vad@ MmFree
@@ -105,43 +107,43 @@ fn MmVADCreate { startva endva prot offset processobject mappedobject quotablock
 				return
 			end
 
-			endva@ startva@ - vad@ MmVAD_ChargeVMQuota + !
+			endva@ startva@ - vad@ MiVAD_ChargeVMQuota + !
 		end
 	end
 
 	quotablock@ MmQuotaBlockReference
 
-	mappedobject@ vad@ MmVAD_MappedObject + !
-	offset@ vad@ MmVAD_OffsetInSection + !
+	mappedobject@ vad@ MiVAD_MappedObject + !
+	offset@ vad@ MiVAD_OffsetInSection + !
 
-	0 vad@ MmVAD_Flags + !
+	0 vad@ MiVAD_Flags + !
 
-	startva@ vad@ MmVAD_StartVA + !
-	endva@ vad@ MmVAD_EndVA + !
-	0 vad@ MmVAD_FurthestExtentMapped + !
-	prot@ vad@ MmVAD_PageProtection + !
-	quotablock@ vad@ MmVAD_QuotaBlock + !
+	startva@ vad@ MiVAD_StartVA + !
+	endva@ vad@ MiVAD_EndVA + !
+	0 vad@ MiVAD_FurthestExtentMapped + !
+	prot@ vad@ MiVAD_PageProtection + !
+	quotablock@ vad@ MiVAD_QuotaBlock + !
 
-	0 vad@ MmVAD_COWCount + !
+	0 vad@ MiVAD_COWCount + !
 
 	if (mappedobject@)
 		mappedobject@ ObObjectReferenceByPointer drop
 
 		if (mappedobject@ ObObjectType IOFileTypeObject@ ==)
-			MMVADFLAG_FILE vad@ MmVAD_Flags + |=
+			MMVADFLAG_FILE vad@ MiVAD_Flags + |=
 
 			if (mappedobject@ IOFile_FileControlBlock + @ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
-				MMVADFLAG_NOCOMMIT vad@ MmVAD_Flags + |=
+				MMVADFLAG_NOCOMMIT vad@ MiVAD_Flags + |=
 			end
 		end elseif (mappedobject@ ObObjectType MmSectionObjectType@ ==)
-			MMVADFLAG_SECTION vad@ MmVAD_Flags + |=
+			MMVADFLAG_SECTION vad@ MiVAD_Flags + |=
 		end elseif (DEBUGCHECKS)
-			"MmVADCreate: mappedobject has unsupported type\n" KeCrash
+			"MiVADCreate: mappedobject has unsupported type\n" KeCrash
 		end
 	end
 end
 
-fn MmMapLock { processobject -- ok }
+fn MiMapLock { processobject -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
@@ -149,7 +151,7 @@ fn MmMapLock { processobject -- ok }
 	KeThreadWaitForObject ok!
 end
 
-fn MmMapUnlock { processobject -- }
+fn MiMapUnlock { processobject -- }
 	0 // abandon
 	processobject@ PsProcess_MappingMutex + // mutex
 	KeMutexRelease drop
@@ -169,7 +171,7 @@ fn MmVADListUnlock { processobject -- }
 	KeMutexRelease drop
 end
 
-fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
+fn MiVADFind { vaddr length mustbestart processobject -- vad ok }
 	fnsection "PAGE$text"
 
 	// locate the VAD containing the given virtual address. if mustbestart is
@@ -190,17 +192,17 @@ fn MmVADFind { vaddr length mustbestart processobject -- vad ok }
 		return
 	end
 
-	MmVAD_Parent vad -=
+	MiVAD_Parent vad -=
 
 	if (mustbestart@)
-		if (length@ PAGEOFFSETMASK + PAGENUMBERMASK & vad@ MmVAD_EndVA + @ vad@ MmVAD_StartVA + @ - ~=)
+		if (length@ PAGEOFFSETMASK + PAGENUMBERMASK & vad@ MiVAD_EndVA + @ vad@ MiVAD_StartVA + @ - ~=)
 			STATUS_BAD_ADDRESS ok!
 			return
 		end
 	end
 end
 
-fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset mappedobject processobject -- realva ok }
+fn MiVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionoffset mappedobject processobject -- realva ok }
 	fnsection "PAGE$text"
 
 	// find a fitting region with a preferred virtual address of startva.
@@ -217,7 +219,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	auto vad
 	0 vad!
 
-	processobject@ MmMapLock ok!
+	processobject@ MiMapLock ok!
 
 	if (ok@)
 		return
@@ -226,7 +228,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	processobject@ MmVADListLock ok!
 
 	if (ok@)
-		processobject@ MmMapUnlock
+		processobject@ MiMapUnlock
 
 		return
 	end
@@ -236,7 +238,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			if (startva@ PAGESIZE <)
 				if (fixedva@)
 					processobject@ MmVADListUnlock
-					processobject@ MmMapUnlock
+					processobject@ MiMapUnlock
 
 					STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -255,32 +257,32 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			if (vad@)
 				if (fixedva@)
 					processobject@ MmVADListUnlock
-					processobject@ MmMapUnlock
+					processobject@ MiMapUnlock
 
 					STATUS_UNAVAILABLE_ADDRESS ok!
 
 					return
 				end
 
-				MmVAD_Parent vad -=
+				MiVAD_Parent vad -=
 
 				while (1)
 					auto nextvad
-					vad@ MmVAD_Parent + // node
+					vad@ MiVAD_Parent + // node
 					ExSplayTreeNodeNext nextvad!
 
 					if (nextvad@ ~~)
-						if (MMHIGHESTUSERADDRESS 1 + vad@ MmVAD_EndVA + @ - viewsize@ >=)
-							vad@ MmVAD_EndVA + @ realva!
+						if (MMHIGHESTUSERADDRESS 1 + vad@ MiVAD_EndVA + @ - viewsize@ >=)
+							vad@ MiVAD_EndVA + @ realva!
 						end
 
 						break
 					end
 
-					MmVAD_Parent nextvad -=
+					MiVAD_Parent nextvad -=
 
-					if (nextvad@ MmVAD_StartVA + @ vad@ MmVAD_EndVA + @ - viewsize@ >=)
-						vad@ MmVAD_EndVA + @ realva!
+					if (nextvad@ MiVAD_StartVA + @ vad@ MiVAD_EndVA + @ - viewsize@ >=)
+						vad@ MiVAD_EndVA + @ realva!
 						break
 					end
 
@@ -291,7 +293,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 			end
 		end elseif (fixedva@)
 			processobject@ MmVADListUnlock
-			processobject@ MmMapUnlock
+			processobject@ MiMapUnlock
 
 			STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -305,7 +307,7 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 
 			if (realva@ ~~)
 				processobject@ MmVADListUnlock
-				processobject@ MmMapUnlock
+				processobject@ MiMapUnlock
 
 				STATUS_UNAVAILABLE_ADDRESS ok!
 
@@ -325,29 +327,29 @@ fn MmVADFindAndMapFreeRegion { viewsize startva fixedva pageprotection sectionof
 	processobject@ // processobject
 	mappedobject@ // mappedobject
 	processobject@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
-	MmVADCreate ok! vad!
+	MiVADCreate ok! vad!
 	
 	if (ok@)
 		processobject@ MmVADListUnlock
-		processobject@ MmMapUnlock
+		processobject@ MiMapUnlock
 
 		return
 	end
 
 	0 // insertat
-	vad@ MmVAD_Parent + // node
+	vad@ MiVAD_Parent + // node
 	processobject@ PsProcess_PagedArea + @ PsProcessPaged_VADTreeRoot + // rootptr
 	ExSplayTreeInsert
 
-	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
+	if (vad@ MiVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		1 processobject@ PsProcess_PagedArea + @ PsProcessPaged_MappedMMIOCount + +=
 	end
 
 	processobject@ MmVADListUnlock
-	processobject@ MmMapUnlock
+	processobject@ MiMapUnlock
 end
 
-fn MmVADUnmap { vad processobject -- }
+fn MiVADUnmap { vad processobject -- }
 	fnsection "PAGE$text"
 
 	// assumes the caller locked the process VAD list.
@@ -357,7 +359,7 @@ fn MmVADUnmap { vad processobject -- }
 
 	if (DEBUGCHECKS)
 		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"MmVADUnmap: could be killed\n" KeCrash
+			"MiVADUnmap: could be killed\n" KeCrash
 		end
 	end
 
@@ -367,41 +369,41 @@ fn MmVADUnmap { vad processobject -- }
 	auto ok
 
 	auto vaddr
-	vad@ MmVAD_StartVA + @ vaddr!
+	vad@ MiVAD_StartVA + @ vaddr!
 
 	auto max
-	vad@ MmVAD_EndVA + @ max!
+	vad@ MiVAD_EndVA + @ max!
 
 	auto commitcharge
-	vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT & ~~ commitcharge!
+	vad@ MiVAD_Flags + @ MMVADFLAG_NOCOMMIT & ~~ commitcharge!
 
 	if (commitcharge@)
 		vaddr@ // startva
 		max@ // endva
 		processobject@ // process
-		MmWorkingSetTrimRange
+		MiWorkingSetTrimRange
 	end
 
 	// only unmap up to the highest vaddr that was ever faulted in, as an
 	// optimization.
-	vad@ MmVAD_FurthestExtentMapped + @ max!
+	vad@ MiVAD_FurthestExtentMapped + @ max!
 
 	if (DEBUGCHECKS)
 		if (vaddr@ PAGEOFFSETMASK &)
-			vaddr@ "MmVADUnmap: vaddr wasn't page-aligned (0x%08x)\n" KeCrash
+			vaddr@ "MiVADUnmap: vaddr wasn't page-aligned (0x%08x)\n" KeCrash
 		end
 
 		if (max@ PAGEOFFSETMASK &)
-			max@ "MmVADUnmap: max wasn't page-aligned (0x%08x)\n" KeCrash
+			max@ "MiVADUnmap: max wasn't page-aligned (0x%08x)\n" KeCrash
 		end
 
 		if (kernelmapping@)
 			if (vaddr@ MMLOWESTSYSTEMADDRESS <)
-				vaddr@ "MmVADUnmap: vaddr < MMLOWESTSYSTEMADDRESS (0x%08x)\n" KeCrash
+				vaddr@ "MiVADUnmap: vaddr < MMLOWESTSYSTEMADDRESS (0x%08x)\n" KeCrash
 			end
 		end else
 			if (vaddr@ MMHIGHESTUSERADDRESS >)
-				vaddr@ "MmVADUnmap: vaddr > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
+				vaddr@ "MiVADUnmap: vaddr > MMHIGHESTUSERADDRESS (0x%08x)\n" KeCrash
 			end
 		end
 	end
@@ -414,7 +416,7 @@ fn MmVADUnmap { vad processobject -- }
 	auto pinnedvaddr
 
 	auto chargevmquota
-	vad@ MmVAD_ChargeVMQuota + @ chargevmquota!
+	vad@ MiVAD_ChargeVMQuota + @ chargevmquota!
 
 	if (chargevmquota@ commitcharge@ ~~ || max@ &&)
 		// this means that the VAD is or was mapped COW. we need to traverse
@@ -431,10 +433,10 @@ fn MmVADUnmap { vad processobject -- }
 			if (kernelmapping@ ~~)
 				if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
 					if (ptpfdbe@)
-						pinnedvaddr@ ptpfdbe@ MmPTEUnpin
+						pinnedvaddr@ ptpfdbe@ MiPTEUnpin
 					end
 
-					vaddr@ MmPTEPin pteaddr! ptpfdbe!
+					vaddr@ MiPTEPin pteaddr! ptpfdbe!
 
 					if (ptpfdbe@ ~~)
 						PERPAGETABLE vaddr +=
@@ -455,22 +457,22 @@ fn MmVADUnmap { vad processobject -- }
 				pteaddr@ // pteaddr
 				vaddr@ // vaddr
 				processobject@ // process
-				MmAnonymousPageDeleteByPTE
+				MiAnonymousPageDeleteByPTE
 			end else
 				// this is a character device mapping, just destroy the PTEs
 				// manually. we can be sure that new ones won't be faulted in
 				// because the VAD list lock is held throughout the duration
 				// of character device faults.
 
-				if (pteaddr@@ MmPTEIsZero ~~)
+				if (pteaddr@@ MiPTEIsZero ~~)
 					0 // phyaddr
 					0 // flags
 					pteaddr@ // pteaddr
-					MmPTEUpdate drop drop
+					MiPTEUpdate drop drop
 
 					1 // deref
 					pteaddr@ // pteaddr
-					MmPTEDelete
+					MiPTEDelete
 				end
 			end
 
@@ -479,22 +481,22 @@ fn MmVADUnmap { vad processobject -- }
 		end
 
 		if (ptpfdbe@)
-			pinnedvaddr@ ptpfdbe@ MmPTEUnpin
+			pinnedvaddr@ ptpfdbe@ MiPTEUnpin
 		end
 	end
 
 	// remove from VAD tree
 
-	vad@ MmVAD_Parent + // node
+	vad@ MiVAD_Parent + // node
 	processobject@ PsProcess_PagedArea + @ PsProcessPaged_VADTreeRoot + // rootptr
 	ExSplayTreeRemove
 
 	// uncharge quota
 
 	auto quotablock
-	vad@ MmVAD_QuotaBlock + @ quotablock!
+	vad@ MiVAD_QuotaBlock + @ quotablock!
 
-	MmVAD_SIZEOF MmChargeBytesGet // charge
+	MiVAD_SIZEOF MmChargeBytesGet // charge
 	quotablock@ // quotablock
 	MmQuotaBlockUnchargePaged
 
@@ -506,23 +508,23 @@ fn MmVADUnmap { vad processobject -- }
 
 	quotablock@ MmQuotaBlockDereference
 
-	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
+	if (vad@ MiVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		1 processobject@ PsProcess_PagedArea + @ PsProcessPaged_MappedMMIOCount + -=
 	end
 
-	if (vad@ MmVAD_Flags + @ MMVADFLAG_FILE &)
-		vad@ MmVAD_MappedObject + @ // fileobject
-		MmFileUnprepareForMap
+	if (vad@ MiVAD_Flags + @ MMVADFLAG_FILE &)
+		vad@ MiVAD_MappedObject + @ // fileobject
+		MiFileUnprepareForMap
 	end
 
-	if (vad@ MmVAD_MappedObject + @)
-		vad@ MmVAD_MappedObject + @ ObObjectDereferenceByPointer drop
+	if (vad@ MiVAD_MappedObject + @)
+		vad@ MiVAD_MappedObject + @ ObObjectDereferenceByPointer drop
 	end
 
 	vad@ MmFree
 end
 
-fn MmVADListCheckRange { startva endva process -- ok }
+fn MiVADListCheckRange { startva endva process -- ok }
 	fnsection "PAGE$text"
 
 	// assumes the caller locked the process VAD list.
@@ -537,20 +539,20 @@ fn MmVADListCheckRange { startva endva process -- ok }
 	ExSplayTreeFindFirstContainingNode vad!
 
 	while (vad@)
-		MmVAD_Parent vad -=
+		MiVAD_Parent vad -=
 
-		if (vad@ MmVAD_StartVA + @ endva@ >=)
+		if (vad@ MiVAD_StartVA + @ endva@ >=)
 			// we're at the end of the range, no more to check.
 
 			break
 		end
 
-		if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
+		if (vad@ MiVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 			// this VAD maps an MMIO range, check if it overlaps our checked
 			// range.
 
-			if (endva@ vad@ MmVAD_StartVA + @ >)
-				if (startva@ vad@ MmVAD_EndVA + @ <)
+			if (endva@ vad@ MiVAD_StartVA + @ >)
+				if (startva@ vad@ MiVAD_EndVA + @ <)
 					// it does overlap.
 
 					STATUS_OVERLAPS_MMIO ok!
@@ -560,7 +562,7 @@ fn MmVADListCheckRange { startva endva process -- ok }
 			end
 		end
 
-		vad@ MmVAD_Parent + // node
+		vad@ MiVAD_Parent + // node
 		ExSplayTreeNodeNext vad!
 	end
 

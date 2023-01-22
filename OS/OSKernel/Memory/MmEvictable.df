@@ -24,20 +24,22 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-var MmEvictablePageListHead 0
-public MmEvictablePageListHead
+#include "MmInternal.h"
 
-var MmEvictablePageListTail 0
-public MmEvictablePageListTail
+var MiEvictablePageListHead 0
+public MiEvictablePageListHead
+
+var MiEvictablePageListTail 0
+public MiEvictablePageListTail
 
 var MmEvictablePageCount 0
 public MmEvictablePageCount
 
-var MmModifiedPageListHead 0
-public MmModifiedPageListHead
+var MiModifiedPageListHead 0
+public MiModifiedPageListHead
 
-var MmModifiedPageListTail 0
-public MmModifiedPageListTail
+var MiModifiedPageListTail 0
+public MiModifiedPageListTail
 
 var MmModifiedPageCount 0
 public MmModifiedPageCount
@@ -52,14 +54,14 @@ var MmPeakWorkingSetSize 0
 public MmPeakWorkingSetSize
 
 extern IOCachePageEvictionFunction { pfdbe -- }
-extern MmAnonymousEvictionFunction { pfdbe -- }
+extern MiAnonymousEvictionFunction { pfdbe -- }
 
-table MmEvictableFunctionsTable
+table MiEvictableFunctionsTable
 	// file
 	pointerof IOCachePageEvictionFunction
 
 	// anon
-	pointerof MmAnonymousEvictionFunction
+	pointerof MiAnonymousEvictionFunction
 endtable
 
 fn MmEvictablePageGet { flags evictabletype priority -- pfdbe pfn ok }
@@ -70,13 +72,13 @@ fn MmEvictablePageGet { flags evictabletype priority -- pfdbe pfn ok }
 		return
 	end
 
-	1 pfdbe@ MmPageFrameEntryEvictable_ReferencesI + si
+	1 pfdbe@ MiPageFrameEntryEvictable_ReferencesI + si
 
-	0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-	0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+	0 pfdbe@ MiPageFrameEntryEvictable_Next + !
+	0 pfdbe@ MiPageFrameEntryEvictable_Prev + !
 
-	flags@ pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
-	evictabletype@ pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + sb
+	flags@ pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
+	evictabletype@ pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + sb
 
 	if (flags@ MMEVICTFLAG_WORKINGSET &)
 		auto rs
@@ -99,70 +101,70 @@ fn MmEvictablePageDelete { pfdbe -- }
 	HALCPUInterruptDisable rs!
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi ~~)
+		if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi ~~)
 			"MmEvictablePageDelete: page frame will leak\n" KeCrash
 		end
 
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
 			"MmEvictablePageDelete: page frame already deleted\n" KeCrash
 		end
 	end
 
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED |
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED |
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
 	rs@ HALCPUInterruptRestore
 end
 
-fn MmEvictablePageInsert { pfdbe -- }
+fn MiEvictablePageInsert { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 		// insertion to evictable list implies removal from a working set.
 		1 MmTotalWorkingSetSize -=
 	end
 
 	auto t
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
 			1 MmModifiedFilePageCount +=
 		end
 
 		1 MmModifiedPageCount +=
 
-		MmModifiedPageListTail@ t!
+		MiModifiedPageListTail@ t!
 
 		if (t@ ~~)
-			0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-			0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+			0 pfdbe@ MiPageFrameEntryEvictable_Next + !
+			0 pfdbe@ MiPageFrameEntryEvictable_Prev + !
 
-			pfdbe@ MmModifiedPageListHead!
-			pfdbe@ MmModifiedPageListTail!
+			pfdbe@ MiModifiedPageListHead!
+			pfdbe@ MiModifiedPageListTail!
 		end else
-			0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+			0 pfdbe@ MiPageFrameEntryEvictable_Next + !
 
-			t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
-			pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-			pfdbe@ MmModifiedPageListTail!
+			t@ pfdbe@ MiPageFrameEntryEvictable_Prev + !
+			pfdbe@ t@ MiPageFrameEntryEvictable_Next + !
+			pfdbe@ MiModifiedPageListTail!
 		end
 	end else
 		1 MmEvictablePageCount +=
 
-		MmEvictablePageListTail@ t!
+		MiEvictablePageListTail@ t!
 
 		if (t@ ~~)
-			0 pfdbe@ MmPageFrameEntryEvictable_Next + !
-			0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
+			0 pfdbe@ MiPageFrameEntryEvictable_Next + !
+			0 pfdbe@ MiPageFrameEntryEvictable_Prev + !
 
-			pfdbe@ MmEvictablePageListHead!
-			pfdbe@ MmEvictablePageListTail!
+			pfdbe@ MiEvictablePageListHead!
+			pfdbe@ MiEvictablePageListTail!
 		end else
-			0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+			0 pfdbe@ MiPageFrameEntryEvictable_Next + !
 
-			t@ pfdbe@ MmPageFrameEntryEvictable_Prev + !
-			pfdbe@ t@ MmPageFrameEntryEvictable_Next + !
-			pfdbe@ MmEvictablePageListTail!
+			t@ pfdbe@ MiPageFrameEntryEvictable_Prev + !
+			pfdbe@ t@ MiPageFrameEntryEvictable_Next + !
+			pfdbe@ MiEvictablePageListTail!
 		end
 	end
 end
@@ -171,7 +173,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi oldcount!
+	pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -179,11 +181,11 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 		end
 	end
 
-	oldcount@ 1 - pfdbe@ MmPageFrameEntryEvictable_ReferencesI + si
+	oldcount@ 1 - pfdbe@ MiPageFrameEntryEvictable_ReferencesI + si
 
 	if (oldcount@ 1 ==)
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
+			if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 				1 MmTotalWorkingSetSize -=
 			end
 
@@ -192,20 +194,20 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 			// page frame was marked deleted, free it instead of putting it on
 			// evictable list.
 
-			pfdbe@ MmPageFreeByEntry
+			pfdbe@ MiPageFreeByEntry
 
 			return
 		end
 
 		// no refs now, add to back of evictable page LRU list
 
-		pfdbe@ MmEvictablePageInsert
+		pfdbe@ MiEvictablePageInsert
 	end
 
 	auto ipl
 
 	if (oldcount@ 1 ==)
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			if (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
 				IPLDPC KeIPLRaise ipl!
 				rs@ HALCPUInterruptRestore
@@ -223,7 +225,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 			rs@ HALCPUInterruptRestore
 
 			0 // priboost
-			MmEventPageAvailable // event
+			MiEventPageAvailable // event
 			KeEventSignal
 
 			ipl@ KeIPLLower
@@ -232,7 +234,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 			rs@ HALCPUInterruptRestore
 
 			0 // priboost
-			MmEventMSPageAvailable // event
+			MiEventMSPageAvailable // event
 			KeEventSignal
 
 			ipl@ KeIPLLower
@@ -244,10 +246,10 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	end
 end
 
-fn MmEvictablePageRemove { pfdbe -- }
+fn MiEvictablePageRemove { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 		// removal from evictable list implies addition to a working set.
 		1 MmTotalWorkingSetSize +=
 
@@ -256,8 +258,8 @@ fn MmEvictablePageRemove { pfdbe -- }
 		end
 	end
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
 			1 MmModifiedFilePageCount -=
 		end
 
@@ -267,47 +269,47 @@ fn MmEvictablePageRemove { pfdbe -- }
 	end
 
 	auto ls
-	pfdbe@ MmPageFrameEntryEvictable_Prev + @ ls!
+	pfdbe@ MiPageFrameEntryEvictable_Prev + @ ls!
 
 	auto ns
-	pfdbe@ MmPageFrameEntryEvictable_Next + @ ns!
+	pfdbe@ MiPageFrameEntryEvictable_Next + @ ns!
 
 	if (ls@)
-		ns@ ls@ MmPageFrameEntryEvictable_Next + !
+		ns@ ls@ MiPageFrameEntryEvictable_Next + !
 	end else
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-			ns@ MmModifiedPageListHead!
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+			ns@ MiModifiedPageListHead!
 		end else
-			ns@ MmEvictablePageListHead!
+			ns@ MiEvictablePageListHead!
 		end
 	end
 
 	if (ns@)
-		ls@ ns@ MmPageFrameEntryEvictable_Prev + !
+		ls@ ns@ MiPageFrameEntryEvictable_Prev + !
 	end else
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-			ls@ MmModifiedPageListTail!
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+			ls@ MiModifiedPageListTail!
 		end else
-			ls@ MmEvictablePageListTail!
+			ls@ MiEvictablePageListTail!
 		end
 	end
 
-	0 pfdbe@ MmPageFrameEntryEvictable_Prev + !
-	0 pfdbe@ MmPageFrameEntryEvictable_Next + !
+	0 pfdbe@ MiPageFrameEntryEvictable_Prev + !
+	0 pfdbe@ MiPageFrameEntryEvictable_Next + !
 end
 
 fn MmEvictablePageReference { pfdbe -- oldcount }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi oldcount!
+	pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi oldcount!
 
-	oldcount@ 1 + pfdbe@ MmPageFrameEntryEvictable_ReferencesI + si
+	oldcount@ 1 + pfdbe@ MiPageFrameEntryEvictable_ReferencesI + si
 
 	if (oldcount@ 0 ==)
 		// ref'd, remove from evictable page LRU list
 
-		pfdbe@ MmEvictablePageRemove
+		pfdbe@ MiEvictablePageRemove
 	end
 
 	rs@ HALCPUInterruptRestore
@@ -315,7 +317,7 @@ end
 
 fn MmEvictablePageModify { pfdbe process -- }
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi ~~)
+		if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi ~~)
 			"MmEvictablePageModify: modified a page with no references\n" KeCrash
 		end
 	end
@@ -328,7 +330,7 @@ fn MmEvictablePageModify { pfdbe process -- }
 		HALCPUInterruptDisable rs!
 
 		if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ==)
-			1 process@ PsProcess_MmHeader + @ MmProcessHeader_ModifiedPageCount + +=
+			1 process@ PsProcess_MmHeader + @ MiProcessHeader_ModifiedPageCount + +=
 		end
 
 		rs@ HALCPUInterruptRestore
@@ -336,39 +338,39 @@ fn MmEvictablePageModify { pfdbe process -- }
 	
 	auto tx
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ==)
 		// mark the page modified & valid, call into IO cache layer to add
 		// cacheblock to dirty list.
 
 		HALCPUInterruptDisable rs!
 
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb tx!
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb tx!
 
 		tx@ MMEVICTFLAG_MODIFIED | MMEVICTFLAG_VALID |
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		rs@ HALCPUInterruptRestore
 
 		if (tx@ MMEVICTFLAG_MODIFIED & ~~)
 			pfdbe@ IOCachePageModified
 		end
-	end elseif (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+	end elseif (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
 		// mark the page modified, set the saved swap PTE to DEMANDZERO, and
 		// free the associated pagefile page (if any).
 
 		HALCPUInterruptDisable rs!
 
-		pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ tx!
+		pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + @ tx!
 
 		SWAPPTE_DEMANDZERO
 		tx@ PTE_TLBHACK & |
 #ifdef DEBUGCHECKS
 		tx@ PTE_KERNELSTACK & |
 #endif
-		pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+		pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		rs@ HALCPUInterruptRestore
 
@@ -383,10 +385,10 @@ fn MmEvictablePageModify { pfdbe process -- }
 	end
 end
 
-fn MmEvictSinglePage { -- pfdbe ok }
+fn MiEvictSinglePage { -- pfdbe ok }
 	// assumes IPLDPC
 
-	MmEvictablePageListHead@ pfdbe!
+	MiEvictablePageListHead@ pfdbe!
 
 	if (pfdbe@ ~~)
 		STATUS_NO_MEMORY ok!
@@ -396,20 +398,20 @@ fn MmEvictSinglePage { -- pfdbe ok }
 	// call the appropriate eviction function for the page type.
 
 	pfdbe@ // pfdbe
-	[pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb]MmEvictableFunctionsTable@ MmEvictionFunction
+	[pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb]MiEvictableFunctionsTable@ MmEvictionFunction
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi 0 ~=)
-			pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
+		if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi 0 ~=)
+			pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi
 			"MmEvictSingleFastPage: attempt to evict a page with %d references\n" KeCrash
 		end
 	end
 
 	// remove the page from the evictable list.
 
-	pfdbe@ MmEvictablePageRemove
+	pfdbe@ MiEvictablePageRemove
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
 		1 MmTotalWorkingSetSize -=
 	end
 
@@ -439,7 +441,7 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 	0 ok!
 
 	auto eventblock
-	pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
+	pfdbe@ MiPageFrameEntryWaitable_EventBlock + @ eventblock!
 
 	if (eventblock@ ~~)
 		// allocate an event block.
@@ -451,7 +453,7 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 			process@ MmVADListUnlock
 		end
 
-		MmEvictablePageEvent_SIZEOF // bytes
+		MiEvictablePageEvent_SIZEOF // bytes
 		'IOCE' // tag
 		pri@ // flags
 		MmAllocWithTag ok! eventblock!
@@ -466,7 +468,7 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 			return
 		end
 
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS & ~~)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS & ~~)
 			// IO completed while doing that allocation, free our eventblock
 			// and go home.
 
@@ -475,28 +477,28 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 			return
 		end
 
-		if (pfdbe@ MmPageFrameEntryWaitable_EventBlock + @)
+		if (pfdbe@ MiPageFrameEntryWaitable_EventBlock + @)
 			// awkward, someone allocated one while we were trying to.
 			// free ours and use theirs.
 
 			eventblock@ MmFree
-			pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
+			pfdbe@ MiPageFrameEntryWaitable_EventBlock + @ eventblock!
 		end else
-			eventblock@ pfdbe@ MmPageFrameEntryWaitable_EventBlock + !
+			eventblock@ pfdbe@ MiPageFrameEntryWaitable_EventBlock + !
 
 			0 // signaled
 			OSEVENT_NOTIF // type
 			"MmEvictablePageWaitEvent" // name
-			eventblock@ MmEvictablePageEvent_Event + // event
+			eventblock@ MiEvictablePageEvent_Event + // event
 			KeEventInitialize
 
-			0 eventblock@ MmEvictablePageEvent_References + !
-			0 eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + !
+			0 eventblock@ MiEvictablePageEvent_References + !
+			0 eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + !
 		end
 	end
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryWaitable_OwningThread + @ KeThreadCurrent@ ==)
+		if (pfdbe@ MiPageFrameEntryWaitable_OwningThread + @ KeThreadCurrent@ ==)
 			"MmEvictablePageWait: self-collision\n" KeCrash
 		end
 	end
@@ -506,13 +508,13 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 		// deadlock the system, sneeze on the thread performing IO on this
 		// page and give it the memory privilege sickness temporarily.
 
-		if (eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + @ ~~)
-			1 eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + !
-			1 pfdbe@ MmPageFrameEntryWaitable_OwningThread + @ PsThread_MemoryPrivilegedCount + +=
+		if (eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + @ ~~)
+			1 eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + !
+			1 pfdbe@ MiPageFrameEntryWaitable_OwningThread + @ PsThread_MemoryPrivilegedCount + +=
 		end
 	end
 
-	1 eventblock@ MmEvictablePageEvent_References + +=
+	1 eventblock@ MiEvictablePageEvent_References + +=
 
 	IPLAPC KeIPLLower
 
@@ -523,7 +525,7 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	eventblock@ MmEvictablePageEvent_Event + // object
+	eventblock@ MiEvictablePageEvent_Event + // object
 	KeThreadWaitForObject drop
 
 	if (process@)
@@ -532,9 +534,9 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 
 	IPLDPC KeIPLRaise drop
 
-	1 eventblock@ MmEvictablePageEvent_References + -=
+	1 eventblock@ MiEvictablePageEvent_References + -=
 
-	if (eventblock@ MmEvictablePageEvent_References + @ ~~)
+	if (eventblock@ MiEvictablePageEvent_References + @ ~~)
 		eventblock@ MmFree
 	end
 end
@@ -545,32 +547,32 @@ fn MmEvictablePageSatisfy { pfdbe -- }
 			"MmEvictablePageSatisfy: ipl != IPLDPC \n" KeCrash
 		end
 
-		if (pfdbe@ MmPageFrameEntryWaitable_OwningThread + @ KeThreadCurrent@ ~=)
+		if (pfdbe@ MiPageFrameEntryWaitable_OwningThread + @ KeThreadCurrent@ ~=)
 			"MmEvictablePageSatisfy: IO satisfied from other context\n" KeCrash
 		end
 	end
 
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS ~ &
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS ~ &
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
 	auto eventblock
-	pfdbe@ MmPageFrameEntryWaitable_EventBlock + @ eventblock!
+	pfdbe@ MiPageFrameEntryWaitable_EventBlock + @ eventblock!
 
 	if (eventblock@)
-		if (eventblock@ MmEvictablePageEvent_WasMemoryPrivileged + @)
+		if (eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + @)
 			1 KeThreadCurrent@ PsThread_MemoryPrivilegedCount + -=
 		end
 
 		0 // priboost
-		eventblock@ MmEvictablePageEvent_Event + // event
+		eventblock@ MiEvictablePageEvent_Event + // event
 		KeEventSignal
 	end
 end
 
 fn MmEvictablePageStartIO { pfdbe -- }
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
-	pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
-	KeThreadCurrent@ pfdbe@ MmPageFrameEntryWaitable_OwningThread + !
-	0 pfdbe@ MmPageFrameEntryWaitable_EventBlock + !
+	KeThreadCurrent@ pfdbe@ MiPageFrameEntryWaitable_OwningThread + !
+	0 pfdbe@ MiPageFrameEntryWaitable_EventBlock + !
 end

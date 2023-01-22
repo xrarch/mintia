@@ -25,6 +25,12 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
+fn MmPFDBEToPhysicalAddress { pfdbe -- phyaddr }
+	pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
+end
+
 fn MmKflagToPriority { kflags -- pri }
 	0 pri!
 
@@ -49,23 +55,23 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 		// attempt to get a page from the free list first.
 		// if its empty, try to get one from the zero list.
 
-		MmPageFreeListHead@ pfdbe!
+		MiPageFreeListHead@ pfdbe!
 
 		if (pfdbe@)
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
-			pfdbe@ MmPageFrameEntryFree_Next + @ MmPageFreeListHead!
-			0 pfdbe@ MmPageFrameEntryFree_Next + !
+			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
+			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
+			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
 			1 MmPageFreeCount -=
 		end else
 			// resort to a zero page
 
-			MmPageZeroListHead@ pfdbe!
+			MiPageZeroListHead@ pfdbe!
 
 			if (pfdbe@)
-				pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
-				pfdbe@ MmPageFrameEntryFree_Next + @ MmPageZeroListHead!
-				0 pfdbe@ MmPageFrameEntryFree_Next + !
+				pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
+				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
+				0 pfdbe@ MiPageFrameEntryFree_Next + !
 
 				1 MmPageFreeCount -=
 			end
@@ -74,23 +80,23 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 		// attempt to get one from the zero list first.
 		// if its empty, get one from the free list, and zero it out.
 
-		MmPageZeroListHead@ pfdbe!
+		MiPageZeroListHead@ pfdbe!
 
 		if (pfdbe@)
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
-			pfdbe@ MmPageFrameEntryFree_Next + @ MmPageZeroListHead!
-			0 pfdbe@ MmPageFrameEntryFree_Next + !
+			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
+			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
+			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
 			1 MmPageFreeCount -=
 		end else
 			// resort to a free page
 
-			MmPageFreeListHead@ pfdbe!
+			MiPageFreeListHead@ pfdbe!
 
 			if (pfdbe@)
-				pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
-				pfdbe@ MmPageFrameEntryFree_Next + @ MmPageFreeListHead!
-				0 pfdbe@ MmPageFrameEntryFree_Next + !
+				pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
+				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
+				0 pfdbe@ MiPageFrameEntryFree_Next + !
 
 				1 MmPageFreeCount -=
 
@@ -98,7 +104,7 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 
 				// zero the free page out
 
-				pfn@ PAGESHIFT << MmPageFrameZero
+				pfn@ PAGESHIFT << MiPageFrameZero
 
 				IPLDPC KeIPLRaise ipl!
 			end
@@ -110,17 +116,17 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 	if (pfdbe@ ~~)
 		// none in free or zero list, get one from standby list
 
-		MmEvictSinglePage ok! pfdbe!
+		MiEvictSinglePage ok! pfdbe!
 
 		if (ok@ ~~)
-			pfdbe@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / pfn!
+			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
 
 			if (priority@ 0xFF & ZEROMUST ==)
 				// zero out the standby page
 
 				ipl@ KeIPLLower
 
-				pfn@ PAGESHIFT << MmPageFrameZero
+				pfn@ PAGESHIFT << MiPageFrameZero
 
 				IPLDPC KeIPLRaise ipl!
 			end
@@ -129,7 +135,7 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 
 	if (MmEvictablePageCount@ MmPageFreeCount@ + MmPageFreeCountLow@ <)
 		0 // priboost
-		MmEventLowMemory // event
+		MiEventLowMemory // event
 		KeEventSignal
 	end
 
@@ -140,7 +146,7 @@ fn MmPageAlloc { priority -- pfdbe pfn ok }
 	0 ok!
 
 	if (DEBUGCHECKS)
-		if (MmInited@ ~~)
+		if (MiInited@ ~~)
 			"MmPageAlloc: used before MmInit called\n" KeCrash
 		end
 	end
@@ -233,9 +239,9 @@ fn MmPageWait { process priority -- waited ok }
 	auto event
 
 	if (blockon@ MMNORMALTHRESH >=)
-		MmEventPageAvailable event!
+		MiEventPageAvailable event!
 	end else
-		MmEventMSPageAvailable event!
+		MiEventMSPageAvailable event!
 	end
 
 	while (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
@@ -277,7 +283,7 @@ fn MmPageWait { process priority -- waited ok }
 
 				if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
 					MMMUSTSUCCEEDTHRESH blockon!
-					MmEventMSPageAvailable event!
+					MiEventMSPageAvailable event!
 				end
 			end else
 				return
@@ -290,14 +296,14 @@ fn MmPageWait { process priority -- waited ok }
 	0 ok!
 end
 
-fn MmPageFreeByEntry { pfdbe -- }
+fn MiPageFreeByEntry { pfdbe -- }
 	// insert a page frame into the free list
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	MmPageFreeListHead@ pfdbe@ MmPageFrameEntryFree_Next + !
-	pfdbe@ MmPageFreeListHead!
+	MiPageFreeListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
+	pfdbe@ MiPageFreeListHead!
 
 	1 MmPageFreeCount +=
 
@@ -308,7 +314,7 @@ fn MmPageFreeByEntry { pfdbe -- }
 		rs@ HALCPUInterruptRestore
 
 		0 // priboost
-		MmEventPageAvailable // event
+		MiEventPageAvailable // event
 		KeEventSignal
 
 		ipl@ KeIPLLower
@@ -317,7 +323,7 @@ fn MmPageFreeByEntry { pfdbe -- }
 		rs@ HALCPUInterruptRestore
 
 		0 // priboost
-		MmEventMSPageAvailable // event
+		MiEventMSPageAvailable // event
 		KeEventSignal
 
 		ipl@ KeIPLLower
@@ -326,23 +332,23 @@ fn MmPageFreeByEntry { pfdbe -- }
 	end
 end
 
-fn MmPageFree { pfn -- }
+fn MiPageFree { pfn -- }
 	auto pfdbe
-	pfn@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+	pfn@ MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
-	pfdbe@ MmPageFreeByEntry
+	pfdbe@ MiPageFreeByEntry
 end
 
-fn MmPageFrameZero { phyaddr -- }
+fn MiPageFrameZero { phyaddr -- }
 	auto ok
 	auto vaddr
 
-	phyaddr@ MmMapQuickPage vaddr!
+	phyaddr@ MiMapQuickPage vaddr!
 
 	vaddr@ // ptr
 	PAGESIZE // sz
 	0 // word
 	memset
 
-	vaddr@ MmUnmapQuickPage
+	vaddr@ MiUnmapQuickPage
 end

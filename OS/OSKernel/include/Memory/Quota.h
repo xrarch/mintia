@@ -1,22 +1,3 @@
-struct MmQuotaBlock
-	4 References
-	4 Next
-	4 Prev
-	4 UID
-
-	4 PoolUsed
-	4 PoolMax
-
-	4 PagedPoolUsed
-	4 PagedPoolMax
-
-	4 VMUsed
-	4 VMMax
-
-	4 WorkingSetUsed
-	4 WorkingSetMax
-endstruct
-
 const MMQUOTAINFINITE -1
 
 extern MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }

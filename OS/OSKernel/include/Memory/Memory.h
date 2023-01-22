@@ -2,68 +2,19 @@ const MMHIGHESTUSERADDRESS  0x7FFEFFFF
 // 64kb no-mans-land
 const MMLOWESTSYSTEMADDRESS 0x80000000
 
-struct MmPageFrameEntry
-	4 R1
-	4 R2
-	4 R3
-	4 R4
-	4 R5
-	4 R6
-	4 R7
-	4 R8
-endstruct
-
-struct MmPageFrameEntryFree
-	4 Next
-	4 R2
-	4 R3
-	4 R4
-	4 R5
-	4 R6
-	4 R7
-	4 R8
-endstruct
-
-struct MmPageFrameEntryPool
-	4 ByteSize
-	4 Tag
-	4 ZeroIfNonPaged
-	4 VirtualAddress
-	4 Context4
-	4 Level
-	4 PoolListNext
-	4 PoolListPrev
-endstruct
-
-struct MmPageFrameEntryHeap
-	4 Context1
-	4 Context2
-	4 Context3
-	4 Context4
-	4 Permanent
-	4 Level
-	4 PoolListNext
-	4 PoolListPrev
-endstruct
-
 extern MmUsageDump { -- }
 
 extern MmInitPhase0 { -- }
 extern MmInitPhase1 { -- }
-extern MmInitPhysicalCommit { -- }
 
 extern MmQuery { query -- ok }
 
-extern MmResourceJettison { -- }
-
-extern MmPoolInit { -- }
-
 extern MmKflagToPriority { kflags -- pri }
+
 extern MmPageWait { process priority -- waited ok }
 extern MmPageGet { priority -- pfdbe pfn ok }
 extern MmPageAlloc { priority -- pfdbe pfn ok }
-extern MmPageFree { pfn -- }
-extern MmPageFreeByEntry { pfdbe -- }
+
 extern MmHeapCheck { -- }
 extern MmHeapDumpBuckets { -- }
 extern MmHeapDumpBlockInfo { block -- }
@@ -74,35 +25,32 @@ extern MmBlockChargeGet { block -- charge }
 
 extern MmKernelStackAlloc { -- pooladdr kstack ok }
 extern MmKernelStackFree { kstack -- }
-extern MmKernelStackSwapOut { thread -- }
-extern MmKernelStackSwapIn { thread -- }
 
 extern MmModifiedPageWriter { context1 context2 -- }
 extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 
 extern MmMPWAnonTransferInitialize { pagefile transfer -- }
+extern MmMPWAnonPageWriteMDLComplete { mdl -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }
 
+extern MmResourceJettison { -- }
+extern MmInitPhysicalCommit { -- }
+
 extern MmThrottle { -- }
 
-externptr MmPageTotal
-externptr MmPageFrameDatabase
-externptr MmPageFreeListHead
-externptr MmPageZeroListHead
-externptr MmPageFreeCount
-externptr MmConstantZeroPage
-externptr MmZeroThreadPoolPage
-externptr MmInited
-externptr MmEventPageAvailable
-externptr MmEventMSPageAvailable
-externptr MmEventLowMemory
+extern MmPFDBEToPhysicalAddress { pfdbe -- phyaddr }
+
 externptr MmModifiedPageEvent
+
+externptr MmConstantZeroPage
+
+externptr MmPageTotal
+externptr MmPageFreeCount
 externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
-externptr MmModifiedPageWriterThread
 externptr MmBalanceSetManagerThread
 
 externptr MmPageFaultCount
@@ -141,27 +89,6 @@ const MMNORMALTHRESH        16 // normal allocations           (blocking user al
 const MMPOOLTHRESH          12 // nonblocking pool allocations (nonblocking non-fatal allocations)
 const MMMUSTSUCCEEDL2THRESH 4  // mustsucceed level 2          (i would really like this to not fail)
 const MMMUSTSUCCEEDTHRESH   1  // mustsucceed                  (if this fails the system will definitely go down)
-
-// free page count threshold that counts as "dire", meaning the working set
-// trimmer will ignore working set lower limits and go woo wild.
-
-const MMDIREPAGES           (MMNORMALTHRESH 1 -)
-
-// default working set heuristics
-
-externptr MmWorkingSetDefaultMinimum
-externptr MmWorkingSetDefaultMaximum
-externptr MmWorkingSetDefaultQuota
-
-// a process will always be able to pin at least this many pages, no matter
-// what kind of load the system is undergoing.
-
-const MMPROCESSPINGUARANTEE 8
-
-// default physical commit heuristics
-
-const MMSYSTEMPROMISE         32
-const MMPHYSICALCOMMITMINIMUM 64
 
 // page allocation priorities
 

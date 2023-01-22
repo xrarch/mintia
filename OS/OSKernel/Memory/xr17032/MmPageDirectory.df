@@ -23,23 +23,25 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
-fn MmPageDirectoryDestroy { process -- }
+#include "../MmInternal.h"
+
+fn MiPageDirectoryDestroy { process -- }
 	fnsection "PAGE$text"
 
 	auto pagemap
 	process@ KeProcess_PageDirectory + @ pagemap!
 
 	auto pfdbe
-	pagemap@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+	pagemap@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
 	if (DEBUGCHECKS)
-		if (pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi 1 ~=)
-			pfdbe@ MmPageFrameEntryEvictable_ReferencesI + gi
-			"MmPageDirectoryDestroy: page directory had %d references\n" KeCrash
+		if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi 1 ~=)
+			pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi
+			"MiPageDirectoryDestroy: page directory had %d references\n" KeCrash
 		end
 	end
 
-	pfdbe@ MmAnonymousPageDelete
+	pfdbe@ MiAnonymousPageDelete
 
 	pfdbe@ MmEvictablePageDereference drop
 
@@ -55,7 +57,7 @@ fn MmPageDirectoryDestroy { process -- }
 	MmQuotaBlockUnchargeWS
 end
 
-fn MmPageDirectoryAlloc { process -- pdir ok }
+fn MiPageDirectoryAlloc { process -- ok }
 	fnsection "PAGE$text"
 
 	auto quotablock
@@ -81,10 +83,11 @@ fn MmPageDirectoryAlloc { process -- pdir ok }
 		return
 	end
 
+	auto pdir
 	auto pfdbe
 	process@ KeProcess_PageDirectory + // pte
 	ZEROMUST // priority
-	MmAnonymousPageAlloc ok! pdir! pfdbe!
+	MiAnonymousPageAlloc ok! pdir! pfdbe!
 
 	if (ok@)
 		PAGESIZE // charge
@@ -98,7 +101,7 @@ fn MmPageDirectoryAlloc { process -- pdir ok }
 		return
 	end
 
-	process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+	process@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
 
 	pfdbe@ // pfdbe
 	0 // process
@@ -107,7 +110,7 @@ fn MmPageDirectoryAlloc { process -- pdir ok }
 	PAGESHIFT pdir <<=
 
 	auto qp
-	pdir@ MmMapQuickPage qp!
+	pdir@ MiMapQuickPage qp!
 
 	qp@ 2048 + // dest
 	PAGEDIRECTORY 2048 + // src
@@ -119,13 +122,15 @@ fn MmPageDirectoryAlloc { process -- pdir ok }
 	pdir@ 12 >> 5 << PTE_V | PTE_W | PTE_K |
 	qp@ PAGETABLE 22 >> 2 << + !
 
-	qp@ MmUnmapQuickPage
+	qp@ MiUnmapQuickPage
+
+	pdir@ process@ KeProcess_PageDirectory + !
 end
 
-fn MmPageDirectoryReference { pri process -- ok }
+fn MiPageDirectoryReference { pri process -- ok }
 	if (DEBUGCHECKS)
 		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"MmPageDirectoryReference: thread could be killed\n" KeCrash
+			"MiPageDirectoryReference: thread could be killed\n" KeCrash
 		end
 	end
 
@@ -152,7 +157,7 @@ fn MmPageDirectoryReference { pri process -- ok }
 		process@ KeProcess_PageDirectory + // pte
 		process@ KeProcess_PageDirectory + @ PAGESHIFT >> // pno
 		ipl@ // ipl
-		MmAnonymousSwapIn ok! pt! pfdbe!
+		MiAnonymousSwapIn ok! pt! pfdbe!
 
 		if (ok@)
 			return
@@ -161,32 +166,32 @@ fn MmPageDirectoryReference { pri process -- ok }
 		pt@ PAGESHIFT << process@ KeProcess_PageDirectory + !
 
 		auto qp
-		pt@ PAGESHIFT << MmMapQuickPage qp!
+		pt@ PAGESHIFT << MiMapQuickPage qp!
 
 		// create recursive mapping of page tables
 
 		pt@ 5 << PTE_V | PTE_W | PTE_K |
 		qp@ PAGETABLE 22 >> 2 << + !
 
-		process@ pfdbe@ MmPageFrameEntryAnonymous_Process + !
+		process@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
 
-		qp@ MmUnmapQuickPage
+		qp@ MiUnmapQuickPage
 	end else
-		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 		
 		pfdbe@ MmEvictablePageReference drop
 
 		ipl@ KeIPLLower
 	end
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
 		pfdbe@ // pfdbe
 		0 // process
 		MmEvictablePageModify
 	end
 end
 
-fn MmPageDirectoryDereference { process -- }
-	process@ KeProcess_PageDirectory + @ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ +
+fn MiPageDirectoryDereference { process -- }
+	process@ KeProcess_PageDirectory + @ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ +
 	MmEvictablePageDereference drop
 end

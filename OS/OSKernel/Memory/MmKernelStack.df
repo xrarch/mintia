@@ -25,6 +25,8 @@
 
 #include "<ll>/OSDLL/OSStatus.h"
 
+#include "MmInternal.h"
+
 fn MmKernelStackAlloc { -- pooladdr kstack ok }
 	fnsection "PAGE$text"
 
@@ -33,7 +35,7 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 
 	auto offset
 	KETHREADSTACKSIZE PAGESHIFT >> 1 + 2 + // pagesneeded
-	MmPoolSpaceReserve ok! offset!
+	MiPoolSpaceReserve ok! offset!
 
 	if (ok@)
 		return
@@ -66,7 +68,7 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 
 		pteaddr@ // pte
 		FREEFIRST CANBLOCK | // pri
-		MmAnonymousPageAlloc ok! phyaddr! pfdbe!
+		MiAnonymousPageAlloc ok! phyaddr! pfdbe!
 
 		if (ok@)
 			// failed, free the ones we just allocated
@@ -75,24 +77,24 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 				4 stackpagestab -=
 				1 i -=
 
-				stackpagestab@@ MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+				stackpagestab@@ MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
-				pfdbe@ MmAnonymousPageDelete
+				pfdbe@ MiAnonymousPageDelete
 
 				pfdbe@ MmEvictablePageDereference drop
 			end
 
 			KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
 			offset@ // offset
-			MmPoolSpaceRelease
+			MiPoolSpaceRelease
 
 			return
 		end
 
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
-		SWAPPTE_DEMANDZERO PTE_TLBHACK | PTE_KERNELSTACK | pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + !
+		SWAPPTE_DEMANDZERO PTE_TLBHACK | PTE_KERNELSTACK | pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
 		phyaddr@ ptr@!
 
@@ -122,7 +124,7 @@ fn MmKernelStackAlloc { -- pooladdr kstack ok }
 		ptr@@ PAGESHIFT << // phyaddr
 		PTE_V PTE_W | // flags
 		vaddr@ // vaddr
-		MmPTEUpdateByVirtual drop drop
+		MiPTEUpdateByVirtual drop drop
 
 		PAGESIZE vaddr +=
 		4 ptr +=
@@ -168,7 +170,7 @@ fn MmKernelStackFree { kstack -- }
 		0 // phyaddr
 		0 // flags
 		kstack@ // vaddr
-		MmPTEUpdateByVirtual flags! phyaddr!
+		MiPTEUpdateByVirtual flags! phyaddr!
 
 		if (DEBUGCHECKS)
 			if (flags@ PTE_V & ~~)
@@ -177,13 +179,13 @@ fn MmKernelStackFree { kstack -- }
 		end
 
 		auto pfdbe
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 		pfdbe@ MmEvictablePageDelete
 
 		-1 MmAnonymousPageCount KeInterlockedIncrement drop
 
 		if (DEBUGCHECKS)
-			if (pfdbe@ MmPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
+			if (pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
 				"MmKernelStackFree: had a swap page\n" KeCrash
 			end
 		end
@@ -198,10 +200,10 @@ fn MmKernelStackFree { kstack -- }
 
 	KETHREADSTACKSIZE PAGESHIFT >> 1 + 2 + // pages
 	offset@ // offset
-	MmPoolSpaceRelease
+	MiPoolSpaceRelease
 end
 
-fn MmKernelStackSwapOut { thread -- }
+fn MiKernelStackSwapOut { thread -- }
 	// dereference the thread's kernel stack pages.
 
 	// called at IPLDPC.
@@ -227,21 +229,21 @@ fn MmKernelStackSwapOut { thread -- }
 		auto flags
 
 		pteaddr@ // pteaddr
-		MmPTEInterpret ok! flags! phyaddr!
+		MiPTEInterpret ok! flags! phyaddr!
 
 		if (DEBUGCHECKS)
 			if (ok@)
-				pteaddr@@ "MmKernelStackSwapOut: invalid PTE %x\n" KeCrash
+				pteaddr@@ "MiKernelStackSwapOut: invalid PTE %x\n" KeCrash
 			end
 		end
 
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
 		// unmap
 
 		phyaddr@ PTE_TRANSITION | PTE_KERNELSTACK | // pte
 		pteaddr@ // pteaddr
-		MmPTESet
+		MiPTESet
 
 		pfdbe@ MmEvictablePageDereference drop
 
@@ -250,7 +252,7 @@ fn MmKernelStackSwapOut { thread -- }
 	end
 end
 
-fn MmKernelStackSwapIn { thread -- }
+fn MiKernelStackSwapIn { thread -- }
 	// bring in the thread's kernel stack pages.
 	// read from swap if necessary.
 
@@ -278,14 +280,14 @@ fn MmKernelStackSwapIn { thread -- }
 
 		if (DEBUGCHECKS)
 			pteaddr@ // pteaddr
-			MmPTEInterpret ok! flags! phyaddr!
+			MiPTEInterpret ok! flags! phyaddr!
 
 			if (ok@ ~~)
-				"MmKernelStackSwapIn: valid PTE\n" KeCrash
+				"MiKernelStackSwapIn: valid PTE\n" KeCrash
 			end
 
 			if (pteaddr@@ PTE_KERNELSTACK & ~~)
-				pteaddr@@ "MmKernelStackSwapIn: lost the KERNELSTACK debug bit: %x\n" KeCrash
+				pteaddr@@ "MiKernelStackSwapIn: lost the KERNELSTACK debug bit: %x\n" KeCrash
 			end
 		end
 
@@ -295,7 +297,7 @@ fn MmKernelStackSwapIn { thread -- }
 
 		if (DEBUGCHECKS)
 			if (ok@)
-				ok@ "MmKernelStackSwapIn: failed to wait for page (%i)\n" KeCrash
+				ok@ "MiKernelStackSwapIn: failed to wait for page (%i)\n" KeCrash
 			end
 		end
 
@@ -307,17 +309,17 @@ fn MmKernelStackSwapIn { thread -- }
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
 		0 // localpteaddr
-		MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+		MiAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 
 		ipl@ KeIPLLower
 
 		if (DEBUGCHECKS)
 			if (ok@)
-				ok@ "MmKernelStackSwapIn: failed to reference kernel stack (%i)\n" KeCrash
+				ok@ "MiKernelStackSwapIn: failed to reference kernel stack (%i)\n" KeCrash
 			end
 		end
 
-		if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
 			pfdbe@ // pfdbe
 			0 // process
 			MmEvictablePageModify
@@ -328,7 +330,7 @@ fn MmKernelStackSwapIn { thread -- }
 		phyaddr@ // phyaddr
 		PTE_V PTE_W | // flags
 		pteaddr@ // pteaddr
-		MmPTEUpdate drop drop
+		MiPTEUpdate drop drop
 
 		PAGESIZE vaddr +=
 		1 i +=

@@ -22,7 +22,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-var MmQuotaBlockListHead 0
+#include "MmInternal.h"
+
+var MiQuotaBlockListHead 0
 
 fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 	KERNELMODE // waitmode
@@ -38,10 +40,10 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	MmQuotaBlockListHead@ quotablock!
+	MiQuotaBlockListHead@ quotablock!
 
 	while (quotablock@)
-		if (quotablock@ MmQuotaBlock_UID + @ uid@ ==)
+		if (quotablock@ MiQuotaBlock_UID + @ uid@ ==)
 			quotablock@ MmQuotaBlockReference
 
 			ipl@ KeIPLLower
@@ -51,7 +53,7 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 			return
 		end
 
-		quotablock@ MmQuotaBlock_Next + @ quotablock!
+		quotablock@ MiQuotaBlock_Next + @ quotablock!
 	end
 
 	ipl@ KeIPLLower
@@ -74,7 +76,7 @@ end
 fn MmQuotaBlockCreate { uid wsmax pghpmax vmmax heapmax -- quotablock ok }
 	fnsection "PAGE$text"
 
-	MmQuotaBlock_SIZEOF // bytes
+	MiQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
 	CANBLOCK // flags
 	MmAllocWithTag ok! quotablock!
@@ -89,7 +91,7 @@ end
 fn MmQuotaBlockFork { uid quotablock -- newquotablock ok }
 	fnsection "PAGE$text"
 
-	MmQuotaBlock_SIZEOF // bytes
+	MiQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
 	CANBLOCK // flags
 	MmAllocWithTag ok! newquotablock!
@@ -99,10 +101,10 @@ fn MmQuotaBlockFork { uid quotablock -- newquotablock ok }
 	end
 
 	uid@ // uid
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ // wsmax
-	quotablock@ MmQuotaBlock_PagedPoolMax + @ // pghpmax
-	quotablock@ MmQuotaBlock_VMMax + @ // vmmax
-	quotablock@ MmQuotaBlock_PoolMax + @ // heapmax
+	quotablock@ MiQuotaBlock_WorkingSetMax + @ // wsmax
+	quotablock@ MiQuotaBlock_PagedPoolMax + @ // pghpmax
+	quotablock@ MiQuotaBlock_VMMax + @ // vmmax
+	quotablock@ MiQuotaBlock_PoolMax + @ // heapmax
 	newquotablock@ // quotablock
 	MmQuotaBlockInitialize ok!
 end
@@ -110,36 +112,36 @@ end
 fn MmQuotaBlockInitialize { uid wsmax pghpmax vmmax heapmax quotablock -- ok }
 	0 ok!
 
-	1 quotablock@ MmQuotaBlock_References + !
-	uid@ quotablock@ MmQuotaBlock_UID + !
+	1 quotablock@ MiQuotaBlock_References + !
+	uid@ quotablock@ MiQuotaBlock_UID + !
 
-	0 quotablock@ MmQuotaBlock_PoolUsed + !
-	heapmax@ quotablock@ MmQuotaBlock_PoolMax + !
+	0 quotablock@ MiQuotaBlock_PoolUsed + !
+	heapmax@ quotablock@ MiQuotaBlock_PoolMax + !
 
-	0 quotablock@ MmQuotaBlock_VMUsed + !
-	vmmax@ quotablock@ MmQuotaBlock_VMMax + !
+	0 quotablock@ MiQuotaBlock_VMUsed + !
+	vmmax@ quotablock@ MiQuotaBlock_VMMax + !
 
-	0 quotablock@ MmQuotaBlock_PagedPoolUsed + !
-	pghpmax@ quotablock@ MmQuotaBlock_PagedPoolMax + !
+	0 quotablock@ MiQuotaBlock_PagedPoolUsed + !
+	pghpmax@ quotablock@ MiQuotaBlock_PagedPoolMax + !
 
-	0 quotablock@ MmQuotaBlock_WorkingSetUsed + !
-	wsmax@ quotablock@ MmQuotaBlock_WorkingSetMax + !
+	0 quotablock@ MiQuotaBlock_WorkingSetUsed + !
+	wsmax@ quotablock@ MiQuotaBlock_WorkingSetMax + !
 
-	0 quotablock@ MmQuotaBlock_Prev + !
+	0 quotablock@ MiQuotaBlock_Prev + !
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
 	auto h
-	MmQuotaBlockListHead@ h!
+	MiQuotaBlockListHead@ h!
 
-	h@ quotablock@ MmQuotaBlock_Next + !
+	h@ quotablock@ MiQuotaBlock_Next + !
 
 	if (h@)
-		quotablock@ h@ MmQuotaBlock_Prev + !
+		quotablock@ h@ MiQuotaBlock_Prev + !
 	end
 
-	quotablock@ MmQuotaBlockListHead!
+	quotablock@ MiQuotaBlockListHead!
 
 	rs@ HALCPUInterruptRestore
 end
@@ -149,12 +151,12 @@ fn MmQuotaBlockReference { quotablock -- }
 	HALCPUInterruptDisable rs!
 
 	if (DEBUGCHECKS)
-		if (quotablock@ MmQuotaBlock_References + @ 0xFFFFFFFF ==)
+		if (quotablock@ MiQuotaBlock_References + @ 0xFFFFFFFF ==)
 			"MmQuotaBlockReference: overflow!\n" KeCrash
 		end
 	end
 
-	1 quotablock@ MmQuotaBlock_References + +=
+	1 quotablock@ MiQuotaBlock_References + +=
 
 	rs@ HALCPUInterruptRestore
 end
@@ -164,7 +166,7 @@ fn MmQuotaBlockDereference { quotablock -- }
 	HALCPUInterruptDisable rs!
 
 	auto oldcount
-	quotablock@ MmQuotaBlock_References + @ oldcount!
+	quotablock@ MiQuotaBlock_References + @ oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
@@ -172,7 +174,7 @@ fn MmQuotaBlockDereference { quotablock -- }
 		end
 	end
 
-	oldcount@ 1 - quotablock@ MmQuotaBlock_References + !
+	oldcount@ 1 - quotablock@ MiQuotaBlock_References + !
 
 	if (oldcount@ 1 ==)
 		// got dereferenced to 0, delete
@@ -180,17 +182,17 @@ fn MmQuotaBlockDereference { quotablock -- }
 		auto ls
 		auto ns
 
-		quotablock@ MmQuotaBlock_Prev + @ ls!
-		quotablock@ MmQuotaBlock_Next + @ ns!
+		quotablock@ MiQuotaBlock_Prev + @ ls!
+		quotablock@ MiQuotaBlock_Next + @ ns!
 
 		if (ls@)
-			ns@ ls@ MmQuotaBlock_Next + !
+			ns@ ls@ MiQuotaBlock_Next + !
 		end else
-			ns@ MmQuotaBlockListHead!
+			ns@ MiQuotaBlockListHead!
 		end
 
 		if (ns@)
-			ls@ ns@ MmQuotaBlock_Prev + !
+			ls@ ns@ MiQuotaBlock_Prev + !
 		end
 
 		rs@ HALCPUInterruptRestore
@@ -228,10 +230,10 @@ fn MmQuotaBlockCharge { charge quotablock -- ok }
 	HALCPUInterruptDisable rs!
 
 	auto heapmax
-	quotablock@ MmQuotaBlock_PoolMax + @ heapmax!
+	quotablock@ MiQuotaBlock_PoolMax + @ heapmax!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_PoolUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_PoolUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ + heapmax@ >)
 		rs@ HALCPUInterruptRestore
@@ -241,7 +243,7 @@ fn MmQuotaBlockCharge { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ + quotablock@ MmQuotaBlock_PoolUsed + !
+	oldcharge@ charge@ + quotablock@ MiQuotaBlock_PoolUsed + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -251,7 +253,7 @@ fn MmQuotaBlockUncharge { charge quotablock -- }
 	HALCPUInterruptDisable rs!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_PoolUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_PoolUsed + @ oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
@@ -261,7 +263,7 @@ fn MmQuotaBlockUncharge { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MmQuotaBlock_PoolUsed + !
+	oldcharge@ charge@ - quotablock@ MiQuotaBlock_PoolUsed + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -293,10 +295,10 @@ fn MmQuotaBlockChargeWS { charge quotablock -- ok }
 	end
 
 	auto wsmax
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ wsmax!
+	quotablock@ MiQuotaBlock_WorkingSetMax + @ wsmax!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_WorkingSetUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ + wsmax@ >)
 		ipl@ KeIPLLower
@@ -306,7 +308,7 @@ fn MmQuotaBlockChargeWS { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ + quotablock@ MmQuotaBlock_WorkingSetUsed + !
+	oldcharge@ charge@ + quotablock@ MiQuotaBlock_WorkingSetUsed + !
 	commitused@ charge@ + MmPhysicalCommitUsage!
 
 	ipl@ KeIPLLower
@@ -317,7 +319,7 @@ fn MmQuotaBlockUnchargeWS { charge quotablock -- }
 	HALCPUInterruptDisable rs!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_WorkingSetUsed + @ oldcharge!
 
 	auto commitused
 	MmPhysicalCommitUsage@ commitused!
@@ -336,7 +338,7 @@ fn MmQuotaBlockUnchargeWS { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MmQuotaBlock_WorkingSetUsed + !
+	oldcharge@ charge@ - quotablock@ MiQuotaBlock_WorkingSetUsed + !
 	commitused@ charge@ - MmPhysicalCommitUsage!
 
 	rs@ HALCPUInterruptRestore
@@ -363,10 +365,10 @@ fn MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
 	IPLDPC KeIPLRaise ipl!
 
 	auto vmmax
-	quotablock@ MmQuotaBlock_VMMax + @ vmmax!
+	quotablock@ MiQuotaBlock_VMMax + @ vmmax!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
 		ipl@ KeIPLLower
@@ -376,7 +378,7 @@ fn MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ PAGESHIFT << + quotablock@ MmQuotaBlock_VMUsed + !
+	oldcharge@ charge@ PAGESHIFT << + quotablock@ MiQuotaBlock_VMUsed + !
 
 	auto commitlimit
 	MmCommitLimit@ commitlimit!
@@ -386,7 +388,7 @@ fn MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
 
 	if (commitused@ charge@ + commitlimit@ >)
 		// uncharge quota
-		charge@ PAGESHIFT << quotablock@ MmQuotaBlock_VMUsed + -=
+		charge@ PAGESHIFT << quotablock@ MiQuotaBlock_VMUsed + -=
 
 		ipl@ KeIPLLower
 
@@ -421,10 +423,10 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 	IPLDPC KeIPLRaise ipl!
 
 	auto vmmax
-	quotablock@ MmQuotaBlock_VMMax + @ vmmax!
+	quotablock@ MiQuotaBlock_VMMax + @ vmmax!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
 		ipl@ KeIPLLower
@@ -434,7 +436,7 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ PAGESHIFT << + quotablock@ MmQuotaBlock_VMUsed + !
+	oldcharge@ charge@ PAGESHIFT << + quotablock@ MiQuotaBlock_VMUsed + !
 
 	auto commitlimit
 	MmCommitLimit@ commitlimit!
@@ -447,7 +449,7 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 
 		if (ok@)
 			// uncharge quota
-			charge@ PAGESHIFT << quotablock@ MmQuotaBlock_VMUsed + -=
+			charge@ PAGESHIFT << quotablock@ MiQuotaBlock_VMUsed + -=
 
 			ipl@ KeIPLLower
 
@@ -474,7 +476,7 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 	HALCPUInterruptDisable rs!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_VMUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
 
 	auto commitused
 	MmCommitUsage@ commitused!
@@ -491,7 +493,7 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MmQuotaBlock_VMUsed + !
+	oldcharge@ charge@ - quotablock@ MiQuotaBlock_VMUsed + !
 	commitused@ charge@ PAGESHIFT >> - MmCommitUsage!
 
 	rs@ HALCPUInterruptRestore
@@ -510,10 +512,10 @@ fn MmQuotaBlockChargePaged { charge quotablock -- ok }
 	HALCPUInterruptDisable rs!
 
 	auto phmax
-	quotablock@ MmQuotaBlock_PagedPoolMax + @ phmax!
+	quotablock@ MiQuotaBlock_PagedPoolMax + @ phmax!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_PagedPoolUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_PagedPoolUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ + phmax@ >)
 		rs@ HALCPUInterruptRestore
@@ -523,7 +525,7 @@ fn MmQuotaBlockChargePaged { charge quotablock -- ok }
 		return
 	end
 
-	oldcharge@ charge@ + quotablock@ MmQuotaBlock_PagedPoolUsed + !
+	oldcharge@ charge@ + quotablock@ MiQuotaBlock_PagedPoolUsed + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -533,7 +535,7 @@ fn MmQuotaBlockUnchargePaged { charge quotablock -- }
 	HALCPUInterruptDisable rs!
 
 	auto oldcharge
-	quotablock@ MmQuotaBlock_PagedPoolUsed + @ oldcharge!
+	quotablock@ MiQuotaBlock_PagedPoolUsed + @ oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
@@ -541,7 +543,7 @@ fn MmQuotaBlockUnchargePaged { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MmQuotaBlock_PagedPoolUsed + !
+	oldcharge@ charge@ - quotablock@ MiQuotaBlock_PagedPoolUsed + !
 
 	rs@ HALCPUInterruptRestore
 end
@@ -551,10 +553,10 @@ fn MmSetQuota { quota quotablock -- }
 
 	// set new limits on the quotablock.
 
-	quota@ OSQuota_Pool + @ quotablock@ MmQuotaBlock_PoolMax + !
-	quota@ OSQuota_VirtualMemory + @ quotablock@ MmQuotaBlock_VMMax + !
-	quota@ OSQuota_PagedPool + @ quotablock@ MmQuotaBlock_PagedPoolMax + !
-	quota@ OSQuota_WorkingSet + @ quotablock@ MmQuotaBlock_WorkingSetMax + !
+	quota@ OSQuota_Pool + @ quotablock@ MiQuotaBlock_PoolMax + !
+	quota@ OSQuota_VirtualMemory + @ quotablock@ MiQuotaBlock_VMMax + !
+	quota@ OSQuota_PagedPool + @ quotablock@ MiQuotaBlock_PagedPoolMax + !
+	quota@ OSQuota_WorkingSet + @ quotablock@ MiQuotaBlock_WorkingSetMax + !
 end
 
 fn MmQuotaQuery { query quotablock -- }
@@ -565,35 +567,35 @@ fn MmQuotaQuery { query quotablock -- }
 	0 // word
 	memset
 
-	quotablock@ MmQuotaBlock_PoolUsed + @ query@ OSQuotaInformation_PoolUsed + !
-	quotablock@ MmQuotaBlock_PoolMax + @ query@ OSQuotaInformation_PoolMaximum + !
+	quotablock@ MiQuotaBlock_PoolUsed + @ query@ OSQuotaInformation_PoolUsed + !
+	quotablock@ MiQuotaBlock_PoolMax + @ query@ OSQuotaInformation_PoolMaximum + !
 
-	quotablock@ MmQuotaBlock_VMUsed + @ query@ OSQuotaInformation_VirtualMemoryUsed + !
-	quotablock@ MmQuotaBlock_VMMax + @ query@ OSQuotaInformation_VirtualMemoryMaximum + !
+	quotablock@ MiQuotaBlock_VMUsed + @ query@ OSQuotaInformation_VirtualMemoryUsed + !
+	quotablock@ MiQuotaBlock_VMMax + @ query@ OSQuotaInformation_VirtualMemoryMaximum + !
 
-	quotablock@ MmQuotaBlock_PagedPoolUsed + @ query@ OSQuotaInformation_PagedPoolUsed + !
-	quotablock@ MmQuotaBlock_PagedPoolMax + @ query@ OSQuotaInformation_PagedPoolMaximum + !
+	quotablock@ MiQuotaBlock_PagedPoolUsed + @ query@ OSQuotaInformation_PagedPoolUsed + !
+	quotablock@ MiQuotaBlock_PagedPoolMax + @ query@ OSQuotaInformation_PagedPoolMaximum + !
 
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ query@ OSQuotaInformation_WorkingSetUsed + !
-	quotablock@ MmQuotaBlock_WorkingSetMax + @ query@ OSQuotaInformation_WorkingSetMaximum + !
+	quotablock@ MiQuotaBlock_WorkingSetUsed + @ query@ OSQuotaInformation_WorkingSetUsed + !
+	quotablock@ MiQuotaBlock_WorkingSetMax + @ query@ OSQuotaInformation_WorkingSetMaximum + !
 end
 
 #ifdef DEBUGCHECKS
 
 fn MmQuotaBlockPrint { quotablock -- }
-	quotablock@ MmQuotaBlock_PoolMax + @
-	quotablock@ MmQuotaBlock_PoolUsed + @       " POOL = %d/%i bytes\n" Printf
+	quotablock@ MiQuotaBlock_PoolMax + @
+	quotablock@ MiQuotaBlock_PoolUsed + @       " POOL = %d/%i bytes\n" Printf
 
-	quotablock@ MmQuotaBlock_PagedPoolMax + @
-	quotablock@ MmQuotaBlock_PagedPoolUsed + @  " PGPL = %d/%i pages\n" Printf
+	quotablock@ MiQuotaBlock_PagedPoolMax + @
+	quotablock@ MiQuotaBlock_PagedPoolUsed + @  " PGPL = %d/%i pages\n" Printf
 
-	quotablock@ MmQuotaBlock_VMMax + @
-	quotablock@ MmQuotaBlock_VMUsed + @         " VM   = %d/%i bytes\n" Printf
+	quotablock@ MiQuotaBlock_VMMax + @
+	quotablock@ MiQuotaBlock_VMUsed + @         " VM   = %d/%i bytes\n" Printf
 
-	quotablock@ MmQuotaBlock_References + @     " REFS = %d\n" Printf
+	quotablock@ MiQuotaBlock_References + @     " REFS = %d\n" Printf
 
-	quotablock@ MmQuotaBlock_WorkingSetMax + @
-	quotablock@ MmQuotaBlock_WorkingSetUsed + @ " WS   = %d/%i pages\n" Printf
+	quotablock@ MiQuotaBlock_WorkingSetMax + @
+	quotablock@ MiQuotaBlock_WorkingSetUsed + @ " WS   = %d/%i pages\n" Printf
 end
 
 #endif

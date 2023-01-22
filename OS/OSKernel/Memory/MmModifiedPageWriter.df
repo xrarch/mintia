@@ -28,6 +28,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
 const MPWFILETRANSFERS 8
 
 struct IOAnonTransferTable
@@ -40,7 +42,7 @@ struct IOFileTransferTable
 	4 FreeListHead
 endstruct
 
-buffer MmFilePageWriterEvent KeEvent_SIZEOF
+buffer MiFilePageWriterEvent KeEvent_SIZEOF
 
 var MmAnonTransfersAvailable 0 // counts both on the freelist and in-flight
 public MmAnonTransfersAvailable
@@ -184,7 +186,7 @@ fn MmMPWAnonTransferInitialize { pagefile transfer -- }
 	IOTRANSFER_ACTIVE transfer@ IOTransfer_State + !
 end
 
-fn MmMPWGetAnonTransfer { wait ipl -- transfer }
+fn MiMPWGetAnonTransfer { wait ipl -- transfer }
 	auto h
 	MmMPWAnonTransfers IOAnonTransferTable_FreeListHeads + h!
 
@@ -215,7 +217,7 @@ fn MmMPWGetAnonTransfer { wait ipl -- transfer }
 	end
 end
 
-fn MmMPWGetFileTransfer { wait ipl -- transfer }
+fn MiMPWGetFileTransfer { wait ipl -- transfer }
 	MmMPWFileTransfers IOFileTransferTable_FreeListHead + @ transfer!
 
 	if (transfer@)
@@ -304,7 +306,7 @@ fn MmMPWAssessTransfers { transfer1 -- }
 	end
 end
 
-fn MmModifiedPageWriter { context1 context2 -- }
+fn MiModifiedPageWriter { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
@@ -315,8 +317,8 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 	0 // signaled
 	OSEVENT_SYNCH // type
-	"MmFilePageWriterEvent" // name
-	MmFilePageWriterEvent // event
+	"MiFilePageWriterEvent" // name
+	MiFilePageWriterEvent // event
 	KeEventInitialize
 
 	0 // signaled
@@ -354,7 +356,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 	auto ok
 	0 // context1
 	0 // context2
-	pointerof MmFilePageWriter // startfunc
+	pointerof MiFilePageWriter // startfunc
 	0 // creationflags
 	ACCESS_OWNER_ALL // permissions
 	"FilePageWriter" // name
@@ -362,7 +364,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 	PsThreadCreateObject ok! drop
 
 	if (ok@)
-		ok@ "MmModifiedPageWriter: couldn't create 'FilePageWriter' thread (%i)\n" KeCrash
+		ok@ "MiModifiedPageWriter: couldn't create 'FilePageWriter' thread (%i)\n" KeCrash
 	end
 
 	// the page writer thread. writes out modified pages and slaps them on the
@@ -381,7 +383,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 		if (DEBUGCHECKS)
 			if (waitok@ z<)
 				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
-					waitok@ "MmModifiedPageWriter: failed to wait on low memory event (%i)\n" KeCrash
+					waitok@ "MiModifiedPageWriter: failed to wait on low memory event (%i)\n" KeCrash
 				end
 			end
 		end
@@ -391,7 +393,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			IPLDPC KeIPLRaise ipl!
 
 			auto pfdbe
-			MmModifiedPageListHead@ pfdbe!
+			MiModifiedPageListHead@ pfdbe!
 
 			if (pfdbe@ ~~)
 				// no modified pages to write.
@@ -410,20 +412,20 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			// in this way, we try to make page-out as efficient as possible
 			// by saturating output with one or the other type.
 
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+			if (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
 				0 // wait
 				ipl@ // ipl
-				MmMPWGetAnonTransfer transfer!
+				MiMPWGetAnonTransfer transfer!
 
 				if (transfer@ ~~)
 					if (MmModifiedFilePageCount@) // there must be a file page to find
 						0 // wait
 						ipl@ // ipl
-						MmMPWGetFileTransfer transfer!
+						MiMPWGetFileTransfer transfer!
 
 						if (transfer@)
-							while (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ~=)
-								pfdbe@ MmPageFrameEntryEvictable_Next + @ pfdbe!
+							while (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_FILE ~=)
+								pfdbe@ MiPageFrameEntryEvictable_Next + @ pfdbe!
 							end
 						end
 					end
@@ -431,28 +433,28 @@ fn MmModifiedPageWriter { context1 context2 -- }
 			end else
 				0 // wait
 				ipl@ // ipl
-				MmMPWGetFileTransfer transfer!
+				MiMPWGetFileTransfer transfer!
 
 				if (transfer@ ~~)
 					if (MmModifiedPageCount@ MmModifiedFilePageCount@ -) // there must be an anon page to find
 						0 // wait
 						ipl@ // ipl
-						MmMPWGetAnonTransfer transfer!
+						MiMPWGetAnonTransfer transfer!
 
 						if (transfer@)
-							while (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ~=)
-								pfdbe@ MmPageFrameEntryEvictable_Next + @ pfdbe!
+							while (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ~=)
+								pfdbe@ MiPageFrameEntryEvictable_Next + @ pfdbe!
 							end
 						end
 					end
 				end
 			end
 
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+			if (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
 				if (transfer@ ~~)
 					1 // wait
 					ipl@ // ipl
-					MmMPWGetAnonTransfer transfer!
+					MiMPWGetAnonTransfer transfer!
 
 					if (transfer@ ~~)
 						// no transfer, meaning it dropped IPL and waited.
@@ -464,12 +466,12 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 				transfer@ // transfer
 				pfdbe@ // pfdbe
-				MmMPWClusterAnonymousPages
+				MiMPWClusterAnonymousPages
 			end else
 				if (transfer@ ~~)
 					1 // wait
 					ipl@ // ipl
-					MmMPWGetFileTransfer transfer!
+					MiMPWGetFileTransfer transfer!
 
 					if (transfer@ ~~)
 						// no transfer, meaning it dropped IPL and waited.
@@ -481,7 +483,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 
 				transfer@ // transfer
 				pfdbe@ // pfdbe
-				MmMPWClusterFilePages
+				MiMPWClusterFilePages
 			end
 
 			ipl@ KeIPLLower
@@ -489,7 +491,7 @@ fn MmModifiedPageWriter { context1 context2 -- }
 	end
 end
 
-fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
+fn MiMPWClusterAnonymousPages { transfer pfdbe -- }
 	// try to allocate a contiguous cluster from the pagefile.
 
 	auto clustermax
@@ -531,11 +533,11 @@ fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
 		// destroy the list links.
 
 		auto n
-		pfdbe@ MmPageFrameEntryEvictable_Next + @ n!
+		pfdbe@ MiPageFrameEntryEvictable_Next + @ n!
 		pfdbe@ MmEvictablePageReference drop
 
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-		pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
+		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
 		// store current pfdbe in transfer MDL
 
@@ -550,11 +552,11 @@ fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
 		n@ pfdbe!
 
 		while (pfdbe@)
-			if (pfdbe@ MmPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
+			if (pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb MMEVICTTYPE_ANON ==)
 				break
 			end
 
-			pfdbe@ MmPageFrameEntryEvictable_Next + @ pfdbe!
+			pfdbe@ MiPageFrameEntryEvictable_Next + @ pfdbe!
 		end
 
 		if (pfdbe@ ~~)
@@ -583,7 +585,7 @@ fn MmMPWClusterAnonymousPages { transfer pfdbe -- }
 	IPLDPC KeIPLRaise drop
 end
 
-fn MmMPWClusterFilePages { transfer pfdbe -- }
+fn MiMPWClusterFilePages { transfer pfdbe -- }
 	// ask page cache to cluster file pages into this MDL.
 	// it will not perform the write because we specify a transfer mdl.
 
@@ -600,11 +602,11 @@ fn MmMPWClusterFilePages { transfer pfdbe -- }
 	// signal the file page writer.
 
 	0 // priboost
-	MmFilePageWriterEvent // event
+	MiFilePageWriterEvent // event
 	KeEventSignal
 end
 
-fn MmFilePageWriter { context1 context2 -- }
+fn MiFilePageWriter { context1 context2 -- }
 	PRIORITY_LOWREALTIME 1 + // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
@@ -620,13 +622,13 @@ fn MmFilePageWriter { context1 context2 -- }
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
-		MmFilePageWriterEvent // object
+		MiFilePageWriterEvent // object
 		KeThreadWaitForObject waitok!
 
 		if (DEBUGCHECKS)
 			if (waitok@ z<)
 				if (waitok@ STATUS_WAIT_TIMEOUT ~=)
-					waitok@ "MmFilePageWriter: failed to wait on event (%i)\n" KeCrash
+					waitok@ "MiFilePageWriter: failed to wait on event (%i)\n" KeCrash
 				end
 			end
 		end
@@ -655,4 +657,78 @@ fn MmFilePageWriter { context1 context2 -- }
 
 		rs@ HALCPUInterruptRestore
 	end
+end
+
+fn (MmMDLCompleteRoutine) MmMPWAnonPageWriteMDLComplete { mdl -- }
+	// runs as an APC in the context of the modified page writer.
+
+	auto status
+	mdl@ MmMDLHeader_Status + @ status!
+
+	auto pagecount
+	mdl@ MmMDLHeader_Pages + @ pagecount!
+
+	auto pagefile
+	mdl@ IOTransfer_PageFile + @ pagefile!
+
+	auto offset
+	mdl@ MmMDLHeader_Context + @ offset!
+
+	auto mdlpos
+	mdl@ MmMDLHeader_SIZEOF + mdlpos!
+
+	auto number
+	pagefile@ IOPageFileGetNumber number!
+
+	while (pagecount@)
+		auto pfdbe
+		mdlpos@@ pfdbe!
+
+		if (status@)
+			// IO error, don't save the swap page
+
+			offset@ pagefile@ IOSwapPageFree
+
+			auto rs
+			HALCPUInterruptDisable rs!
+			pfdbe@ MiPageFrameEntryAnonymous_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+			pfdbe@ MiPageFrameEntryAnonymous_EvictionFlagsB + sb
+			rs@ HALCPUInterruptRestore
+		end else
+			if (pfdbe@ MiPageFrameEntryAnonymous_EvictionFlagsB + gb
+				MMEVICTFLAG_MODIFIED MMEVICTFLAG_DELETED | &)
+				// modified or deleted, free the swap page :(
+
+				offset@ pagefile@ IOSwapPageFree
+			end else
+				auto swappte
+				pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + @ swappte!
+
+				offset@ PAGESHIFT << number@ PTE_PAGEFILE_SHIFT << | PTE_INSWAP |
+				swappte@ PTE_TLBHACK & |
+#ifdef DEBUGCHECKS
+				swappte@ PTE_KERNELSTACK & |
+#endif
+				pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
+			end
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
+
+		1 offset +=
+		1 pagecount -=
+		4 mdlpos +=
+	end
+
+	if (status@)
+		// TODO pop-up window or something
+		status@ "I/O error while writing data to pagefile (%i)\n" Printf
+	end
+
+	// root MDL, complete transfer.
+	// this requires no synchronization as the transfer structures are
+	// only accessed by the modified page writer, which is currently
+	// executing this routine
+
+	mdl@ IOTransferComplete
 end

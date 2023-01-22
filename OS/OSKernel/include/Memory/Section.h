@@ -1,16 +1,5 @@
-extern MmSectionObjectDelete { object -- }
-
-struct MmSection
-	4 PageProtection // processes may only map with protections that are a subset of this
-	4 AnonSize
-	4 QuotaBlock
-endstruct
-
 extern MmSectionCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
 extern MmSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
-
-extern MmFilePrepareForMap { prot endofview offset fileobject -- ok }
-extern MmFileUnprepareForMap { fileobject -- }
 
 extern MmMapViewProcessObject { length startva sectionoffset mappedobject processobject pageprotection flags -- realva ok }
 extern MmMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
@@ -26,14 +15,4 @@ extern MmAllocate { length startva processhandle pageprotection flags -- realva 
 extern MmFlushViewProcess { length vaddr processobject -- ok }
 extern MmFlushView { length vaddr processhandle -- ok }
 
-extern MmAnonymousSwapIn { pri pte pno ipl -- pfdbe pfn ok }
-
-extern MmAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
-extern MmAnonymousPageGet { pte pri -- pfdbe pfn ok }
-extern MmAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
-extern MmAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr localpteaddr -- pfdbe phyaddr ok }
-extern MmAnonymousPageDelete { pfdbe -- }
-extern MmSectionPageGet { localpteaddr pri sectionoffset sectionobject -- phyaddr pfdbe ok }
-
 externptr MmAnonymousPageCount
-externptr MmAnonymousEvictableFunctions

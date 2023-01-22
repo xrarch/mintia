@@ -13,6 +13,7 @@ extern IOPageFileRequestExpansion { pages -- ok }
 
 extern IOPageFileGetPriority { pagefile -- pri }
 extern IOPageFileGetFree { pagefile -- free }
+extern IOPageFileGetNumber { pagefile -- number }
 
 extern IOPageFileReserve { pagesneeded pagefile -- offset ok }
 extern IOPageFileRelease { pages offset pagefile -- }

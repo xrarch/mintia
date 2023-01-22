@@ -25,6 +25,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
 buffer MmSystemProcessHeader PAGESIZE
 
 fn MmProcessInitialize { sectionobject process -- ok }
@@ -70,24 +72,34 @@ fn MmProcessInitialize { sectionobject process -- ok }
 
 	if (PsSystemProcess@ ~~)
 		MmSystemProcessHeader process@ PsProcess_MmHeader + !
+		HALPlatformKernelPageDirectory@ process@ KeProcess_PageDirectory + !
 	end else
-		process@ MmProcessHeaderCreate ok! drop drop
+		process@ MiProcessHeaderCreate ok!
 
 		if (ok@)
 			return
 		end
+
+		process@ MiPageDirectoryAlloc ok!
+
+		if (ok@)
+			process@ MiProcessHeaderDestroy
+
+			return
+		end
 	end
 
-	process@ MmWorkingSetListInitialize ok!
+	process@ MiWorkingSetListInitialize ok!
 
 	if (ok@)
-		process@ MmProcessHeaderDestroy
+		process@ MmProcessDelete
 
 		return
 	end
 
 	if (PsSystemProcess@ ~~)
 		// thats enough for the system process
+
 		return
 	end
 
@@ -109,9 +121,10 @@ fn MmProcessInitialize { sectionobject process -- ok }
 	MmMapViewProcessObject ok! drop
 
 	if (ok@)
-		process@ MmWorkingSetListFree
-		process@ MmProcessHeaderDestroy
-		process@ MmProcessUnchargePageTables
+		process@ MiWorkingSetListFree
+		process@ MiProcessUnchargePageTables
+
+		process@ MmProcessDelete
 
 		return
 	end
@@ -140,9 +153,10 @@ fn MmProcessInitialize { sectionobject process -- ok }
 			end
 		end
 
-		process@ MmWorkingSetListFree
-		process@ MmProcessHeaderDestroy
-		process@ MmProcessUnchargePageTables
+		process@ MiWorkingSetListFree
+		process@ MiProcessUnchargePageTables
+
+		process@ MmProcessDelete
 
 		return
 	end
@@ -178,9 +192,10 @@ fn MmProcessInitialize { sectionobject process -- ok }
 			end
 		end
 
-		process@ MmWorkingSetListFree
-		process@ MmProcessHeaderDestroy
-		process@ MmProcessUnchargePageTables
+		process@ MiWorkingSetListFree
+		process@ MiProcessUnchargePageTables
+
+		process@ MmProcessDelete
 
 		return
 	end
@@ -230,16 +245,17 @@ fn MmProcessInitialize { sectionobject process -- ok }
 				end
 			end
 
-			process@ MmWorkingSetListFree
-			process@ MmProcessHeaderDestroy
-			process@ MmProcessUnchargePageTables
+			process@ MiWorkingSetListFree
+			process@ MiProcessUnchargePageTables
+
+			process@ MmProcessDelete
 
 			return
 		end
 	end
 end
 
-fn MmProcessPTECountGet { pri vaddr process -- ptect ok }
+fn MiProcessPTECountGet { pri vaddr process -- ptect ok }
 	fnsection "PAGE$text"
 
 	// assumes VAD list locked
@@ -252,17 +268,17 @@ fn MmProcessPTECountGet { pri vaddr process -- ptect ok }
 	process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + @ ptect!
 
 	while (ptect@)
-		if (ptect@ MmPTECountTableHeader_Number + @ ptn@ ==)
+		if (ptect@ MiPTECountTableHeader_Number + @ ptn@ ==)
 			break
 		end
 
-		ptect@ MmPTECountTableHeader_Next + @ ptect!
+		ptect@ MiPTECountTableHeader_Next + @ ptect!
 	end
 
 	if (ptect@ ~~)
 		// create
 
-		MmPTECountTableHeader_SIZEOF MMPTECOUNTTABLESIZE + // bytes
+		MiPTECountTableHeader_SIZEOF MMPTECOUNTTABLESIZE + // bytes
 		'MmPC' // tag
 		pri@ CANBLOCK | // flags
 		MmAllocWithTag ok! ptect!
@@ -271,18 +287,18 @@ fn MmProcessPTECountGet { pri vaddr process -- ptect ok }
 			return
 		end
 
-		process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + @ ptect@ MmPTECountTableHeader_Next + !
-		ptn@ ptect@ MmPTECountTableHeader_Number + !
+		process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + @ ptect@ MiPTECountTableHeader_Next + !
+		ptn@ ptect@ MiPTECountTableHeader_Number + !
 
 		ptect@ process@ PsProcess_PagedArea + @ PsProcessPaged_PTECountTableListHead + !
 
-		ptect@ MmPTECountTableHeader_SIZEOF + // ptr
+		ptect@ MiPTECountTableHeader_SIZEOF + // ptr
 		MMPTECOUNTTABLESIZE // size
 		0 // word
 		memset
 	end
 
-	ptect@ MmPTECountTableHeader_SIZEOF +
+	ptect@ MiPTECountTableHeader_SIZEOF +
 	vaddr@ PERPAGETABLESHIFT >> MMPTECOUNTSPERTABLE % 1 << +
 	ptect!
 end
@@ -295,7 +311,7 @@ fn MmProcessPTECountDestroy { process -- }
 
 	while (ptect@)
 		auto nptect
-		ptect@ MmPTECountTableHeader_Next + @ nptect!
+		ptect@ MiPTECountTableHeader_Next + @ nptect!
 
 		ptect@ MmFree
 
@@ -327,17 +343,17 @@ fn MmProcessUninitialize { process -- ok }
 	process@ PsProcess_PagedArea + @ PsProcessPaged_VADTreeRoot + @ vad!
 
 	while (vad@)
-		MmVAD_Parent vad -=
+		MiVAD_Parent vad -=
 
 		vad@ // vad
 		process@ // processobject
-		MmVADUnmap
+		MiVADUnmap
 
 		process@ PsProcess_PagedArea + @ PsProcessPaged_VADTreeRoot + @ vad!
 	end
 
 	if (DEBUGCHECKS)
-		if (process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetSize + @)
+		if (process@ PsProcess_MmHeader + @ MiProcessHeader_WorkingSetSize + @)
 			"MmProcessUninitialize: unmapped all VADs yet working set size non-zero\n" KeCrash
 		end
 	end
@@ -345,19 +361,26 @@ fn MmProcessUninitialize { process -- ok }
 	process@ MmVADListUnlock
 
 	// lock the working set to avoid a race condition with the process swapper
-	// process@ MmWorkingSetLock drop
-	process@ MmWorkingSetListFree
-	// process@ MmWorkingSetUnlock
+	// process@ MiWorkingSetLock drop
+	process@ MiWorkingSetListFree
+	// process@ MiWorkingSetUnlock
 
 	process@ MmProcessPTECountDestroy
-	process@ MmProcessUnchargePageTables
+	process@ MiProcessUnchargePageTables
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
 	ipl@ KeProcessDetach
 end
 
-fn MmProcessSwapOut { process -- }
+fn MmProcessDelete { process -- }
+	fnsection "PAGE$text"
+
+	process@ MiPageDirectoryDestroy
+	process@ MiProcessHeaderDestroy
+end
+
+fn MiProcessSwapOut { process -- }
 	// invalidate and free the process's working set structures.
 	// lock the VAD list to synchronize against remote unmapping.
 
@@ -373,9 +396,9 @@ fn MmProcessSwapOut { process -- }
 	process@ KeThreadCurrent@ KeThread_Process + !
 
 	auto workingsetmin
-	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMinimum + @ workingsetmin!
+	process@ PsProcess_MmHeader + @ MiProcessHeader_WorkingSetMinimum + @ workingsetmin!
 
-	process@ MmWorkingSetSwapOut
+	process@ MiWorkingSetSwapOut
 
 	PsSystemProcess@ KeThreadCurrent@ KeThread_Process + !
 
@@ -389,39 +412,39 @@ fn MmProcessSwapOut { process -- }
 
 	// dereference the page directory so it can get swapped out.
 
-	process@ MmProcessHeaderDereference
-	process@ MmPageDirectoryDereference
+	process@ MiProcessHeaderDereference
+	process@ MiPageDirectoryDereference
 
 	0 workingsetmin@ - MmPhysicalCommitUsage KeInterlockedIncrement drop
 end
 
-fn MmProcessSwapIn { process -- }
+fn MiProcessSwapIn { process -- }
 	// make the page directory resident again if it was swapped out.
 
 	auto ok
 	TRYFOREVER // pri
 	process@ // process
-	MmPageDirectoryReference ok!
+	MiPageDirectoryReference ok!
 
 	if (ok@)
-		ok@ "MmProcessSwapIn: failed to reference page directory (%i)\n" KeCrash
+		ok@ "MiProcessSwapIn: failed to reference page directory (%i)\n" KeCrash
 	end
 
 	TRYFOREVER // pri
 	process@ // process
-	MmProcessHeaderReference ok!
+	MiProcessHeaderReference ok!
 
 	if (ok@)
-		ok@ "MmProcessSwapIn: failed to reference process header (%i)\n" KeCrash
+		ok@ "MiProcessSwapIn: failed to reference process header (%i)\n" KeCrash
 	end
 
 	auto workingsetmin
-	process@ PsProcess_MmHeader + @ MmProcessHeader_WorkingSetMinimum + @ workingsetmin!
+	process@ PsProcess_MmHeader + @ MiProcessHeader_WorkingSetMinimum + @ workingsetmin!
 
 	workingsetmin@ MmPhysicalCommitUsage KeInterlockedIncrement drop
 end
 
-fn MmProcessChargePageTables { startva endva process -- ok }
+fn MiProcessChargePageTables { startva endva process -- ok }
 	fnsection "PAGE$text"
 
 	// charge VM quota for page tables.
@@ -486,7 +509,7 @@ end
 	end 
 end
 
-fn MmProcessUnchargePageTables { process -- }
+fn MiProcessUnchargePageTables { process -- }
 	fnsection "PAGE$text"
 
 	// uncharge quota for all the page tables the process committed in its
@@ -511,6 +534,19 @@ end
 	memset
 
 	0 pagedarea@ PsProcessPaged_CommittedPageTablesCount + !
+end
+
+fn MmProcessQuery { query process -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
+		0 query@ OSProcessInformation_WorkingSetSize + !
+	end else
+		process@ PsProcess_MmHeader + @ MiProcessHeader_WorkingSetSize + @ query@ OSProcessInformation_WorkingSetSize + !
+	end
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn MmThreadInitialize { thread -- ok }
@@ -628,10 +664,10 @@ fn MmThreadUninitialize { thread -- ok }
 	MmUnmapViewProcess ok!
 end
 
-fn MmThreadGetPoolAddress { -- pooladdr }
+fn MiThreadGetPoolAddress { -- pooladdr }
 	if (DEBUGCHECKS)
 		if (KeDPCActive@)
-			"MmThreadGetPoolAddress: DPC active\n" KeCrash
+			"MiThreadGetPoolAddress: DPC active\n" KeCrash
 		end
 	end
 

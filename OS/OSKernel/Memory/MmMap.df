@@ -24,7 +24,9 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn MmFilePrepareForMap { prot endofview offset fileobject -- ok }
+#include "MmInternal.h"
+
+fn MiFilePrepareForMap { prot endofview offset fileobject -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
@@ -105,7 +107,7 @@ fn MmFilePrepareForMap { prot endofview offset fileobject -- ok }
 	end
 end
 
-fn MmFileUnprepareForMap { fileobject -- }
+fn MiFileUnprepareForMap { fileobject -- }
 	fnsection "PAGE$text"
 
 	auto fcb
@@ -117,7 +119,7 @@ fn MmFileUnprepareForMap { fileobject -- }
 
 		if (DEBUGCHECKS)
 			if (cacheblock@ ~~)
-				"MmFileUnprepareForMap: no cacheblock\n" KeCrash
+				"MiFileUnprepareForMap: no cacheblock\n" KeCrash
 			end
 		end
 
@@ -203,14 +205,14 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 	pageprotection@ PAGEACCESS_ALL & perm!
 
 	if (mappedobject@ ObObjectType MmSectionObjectType@ ==)
-		if (mappedobject@ MmSection_PageProtection + @ perm@ & perm@ ~=)
+		if (mappedobject@ MiSection_PageProtection + @ perm@ & perm@ ~=)
 			// section doesn't have required permissions
 			STATUS_PERMISSION_DENIED ok!
 
 			return
 		end
 
-		if (endofview@ mappedobject@ MmSection_AnonSize + @ >)
+		if (endofview@ mappedobject@ MiSection_AnonSize + @ >)
 			STATUS_INVALID_ARGUMENT ok!
 
 			return
@@ -225,7 +227,7 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		// startva. it must be done like this because kernel page tables are
 		// necessarily not dynamic.
 
-		length@ PAGESHIFT >> MmPoolSpaceReserve ok! startva!
+		length@ PAGESHIFT >> MiPoolSpaceReserve ok! startva!
 
 		if (ok@)
 			return
@@ -254,7 +256,7 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		endofview@ // endofview
 		sectionoffset@ // offset
 		mappedobject@ // fileobject
-		MmFilePrepareForMap ok!
+		MiFilePrepareForMap ok!
 
 		if (ok@)
 			if (locked@)
@@ -264,14 +266,14 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 			if (kernelmapping@)
 				length@ PAGESHIFT >> // pages
 				startva@ POOLSPACE - PAGESHIFT >> // offset
-				MmPoolSpaceRelease
+				MiPoolSpaceRelease
 			end
 
 			return
 		end
 	end
 
-	// from here on we need to call MmFileUnprepareForMap when we return with
+	// from here on we need to call MiFileUnprepareForMap when we return with
 	// an error...
 
 	length@ // viewsize
@@ -281,12 +283,12 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 	sectionoffset@ // sectionoffset
 	mappedobject@ // mappedobject
 	processobject@ // processobject
-	MmVADFindAndMapFreeRegion ok! realva!
+	MiVADFindAndMapFreeRegion ok! realva!
 
 	if (ok@)
 		if (mappedobject@ ObObjectType IOFileTypeObject@ ==)
 			mappedobject@ // fileobject
-			MmFileUnprepareForMap
+			MiFileUnprepareForMap
 		end
 
 		if (locked@)
@@ -296,7 +298,7 @@ fn MmMapViewProcessObject { length startva sectionoffset mappedobject processobj
 		if (kernelmapping@)
 			length@ PAGESHIFT >> // pages
 			startva@ POOLSPACE - PAGESHIFT >> // offset
-			MmPoolSpaceRelease
+			MiPoolSpaceRelease
 		end
 
 		return
@@ -414,7 +416,7 @@ fn MmUnmapViewProcess { length vaddr processobject -- ok }
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
-	processobject@ MmMapLock drop
+	processobject@ MiMapLock drop
 	processobject@ MmVADListLock drop
 
 	auto vad
@@ -423,11 +425,11 @@ fn MmUnmapViewProcess { length vaddr processobject -- ok }
 	length@ // length
 	1 // mustbestart
 	processobject@
-	MmVADFind ok! vad!
+	MiVADFind ok! vad!
 
 	if (ok@)
 		processobject@ MmVADListUnlock
-		processobject@ MmMapUnlock
+		processobject@ MiMapUnlock
 
 		KeThreadCurrent@ KeThreadAcceptKill drop
 
@@ -440,12 +442,12 @@ fn MmUnmapViewProcess { length vaddr processobject -- ok }
 
 	vad@ // vad
 	processobject@ // processobject
-	MmVADUnmap
+	MiVADUnmap
 
 	IPLLOW KeProcessDetach
 
 	processobject@ MmVADListUnlock
-	processobject@ MmMapUnlock
+	processobject@ MiMapUnlock
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
@@ -464,7 +466,7 @@ fn MmUnmapViewProcess { length vaddr processobject -- ok }
 
 		length@ PAGESHIFT >> // pages
 		vaddr@ POOLSPACE - PAGESHIFT >> // offset
-		MmPoolSpaceRelease
+		MiPoolSpaceRelease
 	end
 end
 
@@ -541,7 +543,7 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 	length@ // length
 	1 // mustbestart
 	processobject@
-	MmVADFind ok! vad!
+	MiVADFind ok! vad!
 
 	if (ok@)
 		processobject@ MmVADListUnlock
@@ -550,12 +552,12 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 	end
 
 	auto startva
-	vad@ MmVAD_StartVA + @ startva!
+	vad@ MiVAD_StartVA + @ startva!
 
 	auto endva
-	vad@ MmVAD_EndVA + @ endva!
+	vad@ MiVAD_EndVA + @ endva!
 
-	if (vad@ MmVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
+	if (vad@ MiVAD_Flags + @ MMVADFLAG_NOCOMMIT &)
 		// we'd need to traverse the page tables to update the PTEs; not
 		// implemented for now.
 
@@ -565,7 +567,7 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 	end
 
 	auto oldprot
-	vad@ MmVAD_PageProtection + @ oldprot!
+	vad@ MiVAD_PageProtection + @ oldprot!
 
 	if (oldprot@ pageprotection@ & pageprotection@ ~=)
 		processobject@ MmVADListUnlock
@@ -581,11 +583,11 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 			// no longer mapped COW, uncharge all VM quota except for what was
 			// actually COW'd.
 
-			vad@ MmVAD_ChargeVMQuota + @ vad@ MmVAD_COWCount + @ PAGESHIFT << - // charge
-			vad@ MmVAD_QuotaBlock + @ // quotablock
+			vad@ MiVAD_ChargeVMQuota + @ vad@ MiVAD_COWCount + @ PAGESHIFT << - // charge
+			vad@ MiVAD_QuotaBlock + @ // quotablock
 			MmQuotaBlockUnchargeVM
 
-			vad@ MmVAD_COWCount + @ PAGESHIFT << vad@ MmVAD_ChargeVMQuota + !
+			vad@ MiVAD_COWCount + @ PAGESHIFT << vad@ MiVAD_ChargeVMQuota + !
 		end
 	end
 
@@ -598,7 +600,7 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 	end
 #endif
 
-	pageprotection@ vad@ MmVAD_PageProtection + !
+	pageprotection@ vad@ MiVAD_PageProtection + !
 
 	1 // try
 	processobject@ // process
@@ -616,7 +618,7 @@ fn MmRemapViewProcess { pageprotection length vaddr processobject -- ok }
 	startva@ // startva
 	endva@ // endva
 	processobject@ // process
-	MmWorkingSetRemap
+	MiWorkingSetRemap
 
 	IPLLOW KeProcessDetach
 
@@ -697,7 +699,7 @@ fn MmFlushViewProcess { length vaddr processobject -- ok }
 	0 // length
 	0 // mustbestart
 	processobject@
-	MmVADFind ok! vad!
+	MiVADFind ok! vad!
 
 	if (ok@)
 		processobject@ MmVADListUnlock
@@ -705,7 +707,7 @@ fn MmFlushViewProcess { length vaddr processobject -- ok }
 		return
 	end
 
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+	if (vad@ MiVAD_PageProtection + @ PAGEACCESS_WRITE &)
 		PTE_W flags |=
 	end
 #endif
@@ -726,7 +728,7 @@ fn MmFlushViewProcess { length vaddr processobject -- ok }
 	vaddr@ // startva
 	vaddr@ length@ + // endva
 	processobject@ // process
-	MmWorkingSetRemap
+	MiWorkingSetRemap
 
 	IPLLOW KeProcessDetach
 

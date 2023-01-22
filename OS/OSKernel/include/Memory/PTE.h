@@ -1,9 +1,3 @@
-extern MmPTECreate { vaddr -- pteaddr ok }
-extern MmPTEDelete { deref pteaddr -- }
-
-extern MmPTEPin { vaddr -- ptpfdbe pteaddr }
-extern MmPTEUnpin { vaddr ptpfdbe -- }
-
 extern MmVirtualToPhysical { vaddr -- phyaddr }
 extern MmVirtualToPFDBE { vaddr -- pfdbe }
 extern MmVirtualtoPTEAddressUser { vaddr -- pteaddr }
@@ -11,30 +5,6 @@ extern MmVirtualtoPTEAddress { vaddr -- pteaddr }
 extern MmVirtualtoPTEAddressWithFail { vaddr -- pteaddr ok }
 
 extern MmVirtualAddressIsValid { vaddr -- isvalid }
-
-extern MmPTEInterpret { pteaddr -- phyaddr flags ok }
-
-extern MmPTEUpdateByVirtual { phyaddr flags vaddr -- oldphyaddr oldflags }
-
-extern MmPTEIsZero { pte -- iszero }
-
-extern MmPTEUpdate { phyaddr flags pteaddr -- oldphyaddr oldflags }
-extern MmPTESet { pte pteaddr -- }
-extern MmPTESetDirty { pteaddr -- }
-
-extern MmPTEDemandZeroDelete { pfdbe ptpfdbe -- }
-
-extern MmPTEInitializePageTable { vaddr pfdbe process -- }
-
-struct MmPTECountTableHeader
-	4 Next
-	4 Number
-endstruct
-
-const MMPTECOUNTTABLESIZE (32 MmAllocatedHeapBlock_SIZEOF - MmPTECountTableHeader_SIZEOF -)
-const MMPTECOUNTSPERTABLE (MMPTECOUNTTABLESIZE 2 /)
-
-extern MmProcessPTECountGet { pri vaddr process -- ptect ok }
 
 #ifdef XR17032
 

@@ -27,6 +27,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
 var MmPageFaultCount 0
 public MmPageFaultCount
 
@@ -119,7 +121,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		// fault. We still lock the system VAD list if necessary, but only
 		// later. Why? Well, it's because the user page tables are paged, but
 		// system ones arent. To synchronize the user page tables correctly,
-		// we need to hold this mutex across MmPTEPin and MmPTEUnpin calls,
+		// we need to hold this mutex across MiPTEPin and MiPTEUnpin calls,
 		// but these are never called for system faults, so we don't need to
 		// lock this mutex yet.
 		//
@@ -166,14 +168,14 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 
 			1 refaults +=
 
-			// Call MmSatisfyFault to handle the fault. It may return a status
+			// Call MiSatisfyFault to handle the fault. It may return a status
 			// of STATUS_REFAULT, which indicates we need to try again. This
 			// is needed for several synchronization-related reasons.
 
 			kernelmapping@ // kernelmapping
 			writing@ // writing
 			badaddr@ // vaddr
-			MmSatisfyFault signal!
+			MiSatisfyFault signal!
 		end
 
 		if (kernelmapping@ ~~)
@@ -268,7 +270,7 @@ fn MmThrottle { -- }
 	auto phdr
 	process@ PsProcess_MmHeader + @ phdr!
 
-	if (phdr@ MmProcessHeader_ModifiedPageCount + @ MMMODIFIEDPAGETHROTTLE >=)
+	if (phdr@ MiProcessHeader_ModifiedPageCount + @ MMMODIFIEDPAGETHROTTLE >=)
 		// The current process has generated more than its guaranteed
 		// count of modified pages.
 
@@ -296,11 +298,11 @@ fn MmThrottle { -- }
 		// modified page count to allow another round of modified page
 		// generation.
 
-		0 phdr@ MmProcessHeader_ModifiedPageCount + !
+		0 phdr@ MiProcessHeader_ModifiedPageCount + !
 	end
 end
 
-fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
+fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 	0 signal!
 
 	auto ok
@@ -330,7 +332,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 		// This is necessary because the page tables themselves are demand-
 		// -paged within a linear mapping.
 
-		vaddr@ MmPTEPin pteaddr! ptpfdbe!
+		vaddr@ MiPTEPin pteaddr! ptpfdbe!
 
 		if (ptpfdbe@ ~~)
 			-1 ok!
@@ -355,7 +357,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	if (ok@ ~~)
 		pteaddr@ // pteaddr
-		MmPTEInterpret ok! flags! phyaddr!
+		MiPTEInterpret ok! flags! phyaddr!
 
 		if (ok@ ~~)
 			// Lower IPL since the PTE is valid.
@@ -370,21 +372,21 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				// else we need to do.
 
 				if (ptpfdbe@)
-					vaddr@ ptpfdbe@ MmPTEUnpin
+					vaddr@ ptpfdbe@ MiPTEUnpin
 				end
 
 				return
 			end elseif (writing@)
 				// The PTE is not writable, and this is a write fault, so call
-				// MmWriteFault.
+				// MiWriteFault.
 
 				pteaddr@ // pteaddr
 				vaddr@ // vaddr
 				process@ // process
-				MmWriteFault signal!
+				MiWriteFault signal!
 
 				if (ptpfdbe@)
-					vaddr@ ptpfdbe@ MmPTEUnpin
+					vaddr@ ptpfdbe@ MiPTEUnpin
 				end
 
 				return
@@ -393,7 +395,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				// no work necessary. Just return.
 
 				if (ptpfdbe@)
-					vaddr@ ptpfdbe@ MmPTEUnpin
+					vaddr@ ptpfdbe@ MiPTEUnpin
 				end
 
 				return
@@ -404,10 +406,10 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 			pteaddr@@ flags!
 
-			if (flags@ MmPTEIsZero)
+			if (flags@ MiPTEIsZero)
 				// The PTE is zero, which means this is a shared mapping or
 				// a private mapping that has never been faulted on before.
-				// This requires the long path through MmNormalFault.
+				// This requires the long path through MiNormalFault.
 
 				ipl@ KeIPLLower
 			end else
@@ -446,7 +448,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					ipl@ KeIPLLower
 
 					if (ptpfdbe@)
-						vaddr@ ptpfdbe@ MmPTEUnpin
+						vaddr@ ptpfdbe@ MiPTEUnpin
 					end
 
 					OSSIGNAL_KILL signal!
@@ -462,7 +464,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					ipl@ KeIPLLower
 
 					if (ptpfdbe@)
-						vaddr@ ptpfdbe@ MmPTEUnpin
+						vaddr@ ptpfdbe@ MiPTEUnpin
 					end
 
 					STATUS_REFAULT signal!
@@ -477,7 +479,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 				// Allocate a working set entry to track this virtual page.
 
 				process@ // process
-				MmWorkingSetEntryReserve ok! wsleptr! wsli!
+				MiWorkingSetEntryReserve ok! wsleptr! wsli!
 
 				if (ok@)
 					// Failed to acquire a working set entry. Back out of the
@@ -486,7 +488,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					ipl@ KeIPLLower
 
 					if (ptpfdbe@)
-						vaddr@ ptpfdbe@ MmPTEUnpin
+						vaddr@ ptpfdbe@ MiPTEUnpin
 					end
 
 					OSSIGNAL_KILL signal!
@@ -494,7 +496,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					return
 				end
 
-				// Call MmAnonymousPageReferenceByPTE to crunch on the PTE and
+				// Call MiAnonymousPageReferenceByPTE to crunch on the PTE and
 				// hopefully give us a valid one.
 
 				if (kernelmapping@)
@@ -506,7 +508,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
 					0 // localpteaddr
-					MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+					MiAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 				end else
 					-1 // dzpte
 					MMEVICTFLAG_PRIVATE // evictflag
@@ -516,7 +518,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
 					-1 // localpteaddr
-					MmAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+					MiAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
 				end
 
 				if (ok@)
@@ -526,7 +528,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					wsli@ // wsli
 					wsleptr@ // wsleptr
 					process@ // process
-					MmWorkingSetEntryFree
+					MiWorkingSetEntryFree
 				end else
 					// We successfully made the PTE valid, so insert this
 					// virtual page into the working set.
@@ -534,13 +536,13 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 					vaddr@ PAGENUMBERMASK & // vaddr
 					wsleptr@ // wsleptr
 					process@ // process
-					MmWorkingSetEntryInsert
+					MiWorkingSetEntryInsert
 				end
 
 				ipl@ KeIPLLower
 
 				if (ptpfdbe@)
-					vaddr@ ptpfdbe@ MmPTEUnpin
+					vaddr@ ptpfdbe@ MiPTEUnpin
 				end
 
 				if (ok@)
@@ -584,11 +586,11 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 		// faulted it in while we didn't have the lock held and IPL was
 		// dropped.
 
-		if (pteaddr@@ MmPTEIsZero ~~)
+		if (pteaddr@@ MiPTEIsZero ~~)
 			// It's not zero, so REFAULT.
 
 			if (ptpfdbe@)
-				vaddr@ ptpfdbe@ MmPTEUnpin
+				vaddr@ ptpfdbe@ MiPTEUnpin
 			end
 
 			process@ MmVADListUnlock
@@ -605,10 +607,10 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	vaddr@ // vaddr
 	process@ // process
-	MmNormalFault signal!
+	MiNormalFault signal!
 
 	if (ptpfdbe@)
-		vaddr@ ptpfdbe@ MmPTEUnpin
+		vaddr@ ptpfdbe@ MiPTEUnpin
 	end
 
 	if (kernelmapping@)
@@ -628,7 +630,7 @@ fn MmSatisfyFault { kernelmapping writing vaddr -- signal }
 	end
 end
 
-fn MmFaultParameters { vaddr process -- offset object vad ok }
+fn MiFaultParameters { vaddr process -- offset object vad ok }
 	// Look up the VAD that maps the given virtual address and capture some
 	// important information out of it.
 
@@ -636,21 +638,21 @@ fn MmFaultParameters { vaddr process -- offset object vad ok }
 	0 // length
 	0 // mustbestart
 	process@ // processobject
-	MmVADFind ok! vad!
+	MiVADFind ok! vad!
 
 	if (ok@)
 		return
 	end
 
-	if (vaddr@ vad@ MmVAD_FurthestExtentMapped + @ >)
-		vaddr@ PAGENUMBERMASK & vad@ MmVAD_FurthestExtentMapped + !
+	if (vaddr@ vad@ MiVAD_FurthestExtentMapped + @ >)
+		vaddr@ PAGENUMBERMASK & vad@ MiVAD_FurthestExtentMapped + !
 	end
 
-	vad@ MmVAD_MappedObject + @ object!
-	vaddr@ vad@ MmVAD_StartVA + @ - vad@ MmVAD_OffsetInSection + @ + offset!
+	vad@ MiVAD_MappedObject + @ object!
+	vaddr@ vad@ MiVAD_StartVA + @ - vad@ MiVAD_OffsetInSection + @ + offset!
 end
 
-fn MmNormalFault { vaddr process -- signal }
+fn MiNormalFault { vaddr process -- signal }
 	0 signal!
 
 	auto offset
@@ -705,7 +707,7 @@ fn MmNormalFault { vaddr process -- signal }
 
 		vaddr@ // vaddr
 		process@ // process
-		MmFaultParameters ok! vad! object! offset!
+		MiFaultParameters ok! vad! object! offset!
 
 		if (ok@)
 			// No VAD found, cause a segfault.
@@ -715,7 +717,7 @@ fn MmNormalFault { vaddr process -- signal }
 			return
 		end
 
-		if (vad@ MmVAD_PageProtection + @ ~~)
+		if (vad@ MiVAD_PageProtection + @ ~~)
 			// The VAD maps a guard page, cause a segfault.
 
 			OSSIGNAL_SEGV signal!
@@ -723,21 +725,21 @@ fn MmNormalFault { vaddr process -- signal }
 			return
 		end
 
-		vad@ MmVAD_Flags + @ flags!
+		vad@ MiVAD_Flags + @ flags!
 
 		if (flags@ MMVADFLAG_FILE &)
 			object@ IOFile_FileControlBlock + @ capturedfcb!
 
 			if (capturedfcb@ IOFileControlBlock_FileType + @ OSFILETYPE_CHARDEVICE ==)
 				// This is a mapped character device, so do special processing
-				// for that in MmSatisfyCharFault.
+				// for that in MiSatisfyCharFault.
 
 				vaddr@ // vaddr
 				process@ // process
 				object@ // fileobject
 				offset@ // offset
 				vad@ // vad
-				MmSatisfyCharFault ok!
+				MiSatisfyCharFault ok!
 
 				if (ok@)
 					// Any error status here is converted to an OSSIGNAL_KILL.
@@ -755,7 +757,7 @@ fn MmNormalFault { vaddr process -- signal }
 		// table (and maybe create it if it doesn't exist).
 
 		vaddr@ // vaddr
-		MmPTECreate ok! pteaddr!
+		MiPTECreate ok! pteaddr!
 
 		if (ok@)
 			OSSIGNAL_KILL signal!
@@ -764,7 +766,7 @@ fn MmNormalFault { vaddr process -- signal }
 	end else
 		// This is a system fault. The system page tables are created at boot
 		// and shared among the user processes (to map the higher half), so we
-		// don't need to call MmPTECreate since they're permanent and already
+		// don't need to call MiPTECreate since they're permanent and already
 		// exist.
 
 		vaddr@ // vaddr
@@ -798,7 +800,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			MmPTEDelete
+			MiPTEDelete
 		end
 
 		OSSIGNAL_KILL signal!
@@ -816,7 +818,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			MmPTEDelete
+			MiPTEDelete
 		end
 
 		STATUS_REFAULT signal!
@@ -831,7 +833,7 @@ fn MmNormalFault { vaddr process -- signal }
 	// Allocate a working set entry to track this virtual page.
 
 	process@ // process
-	MmWorkingSetEntryReserve ok! wsleptr! wsli!
+	MiWorkingSetEntryReserve ok! wsleptr! wsli!
 
 	if (ok@)
 		// Failed to acquire a working set entry. Back out of the
@@ -842,7 +844,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			MmPTEDelete
+			MiPTEDelete
 		end
 
 		OSSIGNAL_KILL signal!
@@ -857,7 +859,7 @@ fn MmNormalFault { vaddr process -- signal }
 		process@ // process
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		MmSatisfyPrivatePageFault ok! phyaddr!
+		MiSatisfyPrivatePageFault ok! phyaddr!
 	end elseif (flags@ MMVADFLAG_FILE &)
 		// There's a file object, so this is a shared file page fault.
 
@@ -865,7 +867,7 @@ fn MmNormalFault { vaddr process -- signal }
 		capturedfcb@ // fcb
 		offset@ // offset
 		pteaddr@ // pteaddr
-		MmSatisfyFileFault ok! phyaddr!
+		MiSatisfyFileFault ok! phyaddr!
 	end else
 		// There's a section object, so this is a shared anon page fault.
 
@@ -874,7 +876,7 @@ fn MmNormalFault { vaddr process -- signal }
 		object@ // section
 		offset@ // offset
 		pteaddr@ // pteaddr
-		MmSatisfyAnonFault ok! phyaddr!
+		MiSatisfyAnonFault ok! phyaddr!
 	end
 
 	if (ok@)
@@ -884,7 +886,7 @@ fn MmNormalFault { vaddr process -- signal }
 		wsli@ // wsli
 		wsleptr@ // wsleptr
 		process@ // process
-		MmWorkingSetEntryFree
+		MiWorkingSetEntryFree
 	end else
 		// Make the PTE valid and insert this virtual page into the working
 		// set.
@@ -892,12 +894,12 @@ fn MmNormalFault { vaddr process -- signal }
 		phyaddr@ // phyaddr
 		PTE_V // flags
 		pteaddr@ // pteaddr
-		MmPTEUpdate drop drop
+		MiPTEUpdate drop drop
 
 		vaddr@ PAGENUMBERMASK & // vaddr
 		wsleptr@ // wsleptr
 		process@ // process
-		MmWorkingSetEntryInsert
+		MiWorkingSetEntryInsert
 	end
 
 	ipl@ KeIPLLower
@@ -909,7 +911,7 @@ fn MmNormalFault { vaddr process -- signal }
 		if (kernelmapping@ ~~)
 			1 // deref
 			pteaddr@ // pteaddr
-			MmPTEDelete
+			MiPTEDelete
 		end
 
 		if (ok@ STATUS_REFAULT ==)
@@ -922,7 +924,7 @@ fn MmNormalFault { vaddr process -- signal }
 	end
 end
 
-fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
+fn MiSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	// Satisfy a mapped character device fault. This is the codepath visited
 	// by i.e. framebuffer mappings that are accessed for the first time.
 
@@ -936,7 +938,7 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 
 	if (DEBUGCHECKS)
 		if (getpagefunc@ ~~)
-			"MmSatisfyCharFault: no GetPageAddress\n" KeCrash
+			"MiSatisfyCharFault: no GetPageAddress\n" KeCrash
 		end
 	end
 
@@ -950,7 +952,7 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 
 	if (DEBUGCHECKS)
 		if (ok@)
-			ok@ "MmSatisfyCharFault: failed to get page address (%i)\n" KeCrash
+			ok@ "MiSatisfyCharFault: failed to get page address (%i)\n" KeCrash
 		end
 	end
 
@@ -959,11 +961,11 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	auto flags
 	PTE_V flags!
 
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_WRITE &)
+	if (vad@ MiVAD_PageProtection + @ PAGEACCESS_WRITE &)
 		PTE_W flags |=
 	end
 
-	if (vad@ MmVAD_PageProtection + @ PAGEACCESS_NONCACHED &)
+	if (vad@ MiVAD_PageProtection + @ PAGEACCESS_NONCACHED &)
 		PTE_NC flags |=
 	end
 
@@ -974,7 +976,7 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	if (process@ PsSystemProcess@ ~=)
 		auto pteaddr
 		vaddr@ // vaddr
-		MmPTECreate ok! pteaddr!
+		MiPTECreate ok! pteaddr!
 
 		if (ok@)
 			return
@@ -987,10 +989,10 @@ fn MmSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	phyaddr@ // phyaddr
 	flags@ // flags
 	pteaddr@ // pteaddr
-	MmPTEUpdate drop drop
+	MiPTEUpdate drop drop
 end
 
-fn MmSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
+fn MiSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
 	// This is a shared file page fault. Call into the page cache to acquire
 	// a physical address for this file page frame.
 
@@ -1012,7 +1014,7 @@ fn MmSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
 		return
 	end
 
-	phyaddr@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
+	phyaddr@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
 
 	if (process@ PsSystemProcess@ ==)
 		// Shared pages are assumed to be from the viewcache.
@@ -1021,7 +1023,7 @@ fn MmSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
 	end
 end
 
-fn MmSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
+fn MiSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 	// This is a shared anonymous page fault. Call into the section object
 	// support code to acquire a physical address for this anon page frame.
 
@@ -1036,7 +1038,7 @@ fn MmSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 	pri@ // pri
 	offset@ // sectionoffset
 	section@ // sectionobject
-	MmSectionPageGet ok! drop phyaddr!
+	MiSectionPageGet ok! drop phyaddr!
 
 	if (ok@)
 		return
@@ -1049,8 +1051,8 @@ fn MmSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 	end
 end
 
-fn MmSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
-	// This is a private page fault. Call MmAnonymousPageReferenceByPTE.
+fn MiSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
+	// This is a private page fault. Call MiAnonymousPageReferenceByPTE.
 
 	SWAPPTE_DEMANDZERO // dzpte
 	MMEVICTFLAG_PRIVATE // evictflag
@@ -1060,10 +1062,10 @@ fn MmSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
 	vaddr@ // vaddr
 	pteaddr@ // pteaddr
 	0 // localpteaddr
-	MmAnonymousPageReferenceByPTE ok! phyaddr! drop
+	MiAnonymousPageReferenceByPTE ok! phyaddr! drop
 end
 
-fn MmWriteFault { pteaddr vaddr process -- signal }
+fn MiWriteFault { pteaddr vaddr process -- signal }
 	// A write fault has occurred to a PTE that was valid but did not allow
 	// writes.
 	//
@@ -1095,7 +1097,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 			0 // checked
 			pteaddr@ // pteaddr
-			MmDirtyFault signal!
+			MiDirtyFault signal!
 
 			return
 		end
@@ -1112,10 +1114,10 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	auto ok
 
 	pteaddr@ // pteaddr
-	MmPTEInterpret ok! drop phyaddr!
+	MiPTEInterpret ok! drop phyaddr!
 
 	if (ok@)
-		// The page became invalid between the checks in MmSatisfyFault and
+		// The page became invalid between the checks in MiSatisfyFault and
 		// now, so REFAULT.
 
 		ipl@ KeIPLLower
@@ -1130,16 +1132,16 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	end
 
 	auto pfdbe
-	phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+	phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
-	if (pfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
 		// Must be a dirty fault on a private page.
 		// Pass the PFDBE since we captured that already and call it at
 		// elevated IPL to stop the PTE from becoming invalid.
 
 		1 // checked
 		pteaddr@ // pteaddr
-		MmDirtyFault signal!
+		MiDirtyFault signal!
 
 		ipl@ KeIPLLower
 
@@ -1160,22 +1162,22 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 	vaddr@ // vaddr
 	process@ // process
-	MmFaultParameters ok! vad! drop drop
+	MiFaultParameters ok! vad! drop drop
 
 	if (DEBUGCHECKS)
 		if (ok@)
 			// shouldn't be possible since PTE was valid before and we've had
 			// the VAD list locked.
 
-			ok@ "MmWriteFault: failed to look up VAD (%i)\n" KeCrash
+			ok@ "MiWriteFault: failed to look up VAD (%i)\n" KeCrash
 		end
 
-		if (vad@ MmVAD_PageProtection + @ ~~)
-			"MmWriteFault: VAD was guard region\n" KeCrash
+		if (vad@ MiVAD_PageProtection + @ ~~)
+			"MiWriteFault: VAD was guard region\n" KeCrash
 		end
 	end
 
-	vad@ MmVAD_PageProtection + @ pageprot!
+	vad@ MiVAD_PageProtection + @ pageprot!
 
 	if (pageprot@ PAGEACCESS_WRITECOPY &)
 		// copy on write fault
@@ -1184,7 +1186,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 		pteaddr@ // pteaddr
 		vaddr@ // vaddr
 		process@ // process
-		MmCopyOnWriteFault signal!
+		MiCopyOnWriteFault signal!
 
 		if (process@ PsSystemProcess@ ==)
 			process@ MmVADListUnlock
@@ -1210,7 +1212,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 
 		0 // checked
 		pteaddr@ // pteaddr
-		MmDirtyFault signal!
+		MiDirtyFault signal!
 
 		return
 	end
@@ -1218,7 +1220,7 @@ fn MmWriteFault { pteaddr vaddr process -- signal }
 	// UNREACHABLE
 end
 
-fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
+fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 	auto ok
 	auto pfdbe
 
@@ -1239,7 +1241,7 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 
 		auto phyaddr
 		pteaddr@ // pteaddr
-		MmPTEInterpret ok! drop phyaddr!
+		MiPTEInterpret ok! drop phyaddr!
 
 		if (ok@)
 			// The PTE became invalid again, so REFAULT.
@@ -1249,7 +1251,7 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 			break
 		end
 
-		phyaddr@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
 		// COW, allocate a page frame and copy the old page frame into it.
 
@@ -1274,7 +1276,7 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 
 			pteaddr@ // pte
 			FREEFIRST // pri
-			MmAnonymousPageGet ok! cowaddr! cowpfdbe!
+			MiAnonymousPageGet ok! cowaddr! cowpfdbe!
 
 			ipl@ KeIPLLower
 
@@ -1285,11 +1287,11 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 			end
 
 			if (process@ PsSystemProcess@ ==)
-				SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MmPageFrameEntryAnonymous_SwapPTE + |=
+				SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MiPageFrameEntryAnonymous_SwapPTE + |=
 			end
 
-			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-			cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+			cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
+			cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
 			// We lowered IPL so we have to recheck everything...
 
@@ -1298,14 +1300,14 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 			continue
 		end
 
-		cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-		cowpfdbe@ MmPageFrameEntryEvictable_EvictionFlagsB + sb
+		cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
+		cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 
-		cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
-		cowpfdbe@ MmPageFrameEntryAnonymous_PrototypePTE + !
+		cowpfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
+		cowpfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + !
 
-		process@ cowpfdbe@ MmPageFrameEntryAnonymous_Process + !
-		vaddr@ cowpfdbe@ MmPageFrameEntryAnonymous_VirtualAddress + !
+		process@ cowpfdbe@ MiPageFrameEntryAnonymous_Process + !
+		vaddr@ cowpfdbe@ MiPageFrameEntryAnonymous_VirtualAddress + !
 
 		PAGESHIFT cowaddr <<=
 
@@ -1313,21 +1315,21 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 		// the copy.
 
 		auto copyaddr
-		cowaddr@ MmMapQuickPage copyaddr!
+		cowaddr@ MiMapQuickPage copyaddr!
 
 		copyaddr@ // dest
 		vaddr@ PAGENUMBERMASK & // src
 		PAGESIZE // size
 		KeSafeCopyIn drop
 
-		copyaddr@ MmUnmapQuickPage
+		copyaddr@ MiUnmapQuickPage
 
 		// Update the PTE to point to the new COW page.
 
 		cowaddr@ // phyaddr
 		PTE_V PTE_W | // flags
 		pteaddr@ // pteaddr
-		MmPTEUpdate drop drop
+		MiPTEUpdate drop drop
 
 		// We COW'd over top of the old page frame and no longer have it
 		// mapped, so dereference it.
@@ -1336,7 +1338,7 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 
 		ipl@ KeIPLLower
 
-		1 vad@ MmVAD_COWCount + +=
+		1 vad@ MiVAD_COWCount + +=
 
 		return
 	end
@@ -1347,13 +1349,13 @@ fn MmCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 		// Something weird happened but there's still a COW page hanging
 		// around so delete it.
 
-		cowpfdbe@ MmAnonymousPageDelete
+		cowpfdbe@ MiAnonymousPageDelete
 
 		cowpfdbe@ MmEvictablePageDereference drop
 	end
 end
 
-fn MmDirtyFault { checked pteaddr -- signal }
+fn MiDirtyFault { checked pteaddr -- signal }
 	auto ipl
 
 	if (checked@ ~~)
@@ -1361,7 +1363,7 @@ fn MmDirtyFault { checked pteaddr -- signal }
 
 		auto ok
 		pteaddr@ // pteaddr
-		MmPTEInterpret ok! drop drop
+		MiPTEInterpret ok! drop drop
 
 		if (ok@)
 			// The PTE became invalid again, so REFAULT.
@@ -1374,7 +1376,7 @@ fn MmDirtyFault { checked pteaddr -- signal }
 		end
 	end
 
-	pteaddr@ MmPTESetDirty
+	pteaddr@ MiPTESetDirty
 
 	if (checked@ ~~)
 		ipl@ KeIPLLower

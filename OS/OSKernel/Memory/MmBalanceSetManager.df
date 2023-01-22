@@ -26,6 +26,8 @@
 
 #include "<ll>/OSDLL/OS.h"
 
+#include "MmInternal.h"
+
 buffer MmSwapEvent KeEvent_SIZEOF
 public MmSwapEvent
 
@@ -35,13 +37,13 @@ const MMBALANCESETINTERVAL 1000
 
 var MmStackAge 0
 
-var MmSwapOutStacksPlease 0
-public MmSwapOutStacksPlease
+var MiSwapOutStacksPlease 0
+public MiSwapOutStacksPlease
 
-externptr MmOkToUnwire
+externptr MiOkToUnwire
 externptr ExFinishShutdown
 
-extern MmUnwireKernel { -- }
+extern MiUnwireKernel { -- }
 
 fn MmSwapWorkerInit { -- }
 	fnsection "INIT$text"
@@ -56,7 +58,7 @@ fn MmSwapWorkerInit { -- }
 
 	0 // context1
 	0 // context2
-	pointerof MmSwapWorker // startfunc
+	pointerof MiSwapWorker // startfunc
 	0 // creationflags
 	ACCESS_OWNER_ALL // permissions
 	"SwapWorker" // name
@@ -96,7 +98,7 @@ fn MmBalanceSetManager { -- }
 	8 alloc objecttable!
 
 	MmBalanceSetManagerTimer objecttable@!
-	MmEventLowMemory objecttable@ 4 + !
+	MiEventLowMemory objecttable@ 4 + !
 
 	auto stackperiod
 	0 stackperiod!
@@ -141,15 +143,15 @@ fn MmBalanceSetManager { -- }
 					"SystemInit died (%i)\n" KeCrash
 				end
 
-				if (MmOkToUnwire@)
-					MmUnwireKernel
-					0 MmOkToUnwire!
+				if (MiOkToUnwire@)
+					MiUnwireKernel
+					0 MiOkToUnwire!
 				end
 			end elseif (ExFinishShutdown@)
 				ExShutdownSystemFinish
 			end
 
-			MmManageWorkingSets drop
+			MiManageWorkingSets drop
 
 			auto stackscanperiod
 
@@ -164,8 +166,8 @@ fn MmBalanceSetManager { -- }
 			if (stackperiod@ stackscanperiod@ >=)
 				HALCPUInterruptDisable rs!
 
-				if (MmSwapOutStacksPlease@ ~~)
-					1 MmSwapOutStacksPlease!
+				if (MiSwapOutStacksPlease@ ~~)
+					1 MiSwapOutStacksPlease!
 					rs@ HALCPUInterruptRestore
 
 					0 // priboost
@@ -192,7 +194,7 @@ fn MmBalanceSetManager { -- }
 		end elseif (reason@ 1 ==)
 			// low memory event
 
-			MmManageWorkingSets drop
+			MiManageWorkingSets drop
 
 			0 // priboost
 			MmModifiedPageEvent // event
@@ -211,7 +213,7 @@ end
 var MmProcessSwapOutListHead 0
 public MmProcessSwapOutListHead
 
-fn MmSwapWorker { context1 context2 -- }
+fn MiSwapWorker { context1 context2 -- }
 	PRIORITY_HIGHREALTIME 1 - // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
@@ -234,7 +236,7 @@ fn MmSwapWorker { context1 context2 -- }
 
 		if (DEBUGCHECKS)
 			if (waitok@ z<)
-				waitok@ "MmSwapWorker: failed to wait on swap event (%i)\n" KeCrash
+				waitok@ "MiSwapWorker: failed to wait on swap event (%i)\n" KeCrash
 			end
 		end
 
@@ -242,27 +244,27 @@ fn MmSwapWorker { context1 context2 -- }
 			auto ipl
 			IPLDPC KeIPLRaise ipl!
 
-			if (MmSwapOutStacksPlease@)
-				0 MmSwapOutStacksPlease!
-				MmSwapOutStacks
+			if (MiSwapOutStacksPlease@)
+				0 MiSwapOutStacksPlease!
+				MiSwapOutStacks
 
 				ipl@ KeIPLLower
 
 				continue
 			end elseif (MmProcessSwapOutListHead@)
-				MmSwapOutProcesses
+				MiSwapOutProcesses
 
 				ipl@ KeIPLLower
 
 				continue
 			end elseif (KeProcessSwapInListHead@)
-				MmSwapInProcesses
+				MiSwapInProcesses
 
 				ipl@ KeIPLLower
 
 				continue
 			end elseif (KeThreadSwapInListHead@)
-				MmSwapInStacks
+				MiSwapInStacks
 
 				ipl@ KeIPLLower
 
@@ -276,7 +278,7 @@ fn MmSwapWorker { context1 context2 -- }
 	end
 end
 
-fn MmSwapOutStacks { -- }
+fn MiSwapOutStacks { -- }
 	// scans the list of blocked threads and makes the kernel stacks of those
 	// that have been blocked longer than MMSTACKAGE seconds non-resident.
 
@@ -301,7 +303,7 @@ fn MmSwapOutStacks { -- }
 						0 thread@ KeThread_KernelStackResidentB + sb
 
 						// yeet it.
-						thread@ MmKernelStackSwapOut
+						thread@ MiKernelStackSwapOut
 
 						auto process
 						thread@ KeThread_Process + @ process!
@@ -311,7 +313,7 @@ fn MmSwapOutStacks { -- }
 
 						if (DEBUGCHECKS)
 							if (process@ KeProcess_ResidentStackCountI + gi z<)
-								"MmSwapOutStacks: underflow\n" KeCrash
+								"MiSwapOutStacks: underflow\n" KeCrash
 							end
 						end
 
@@ -319,7 +321,7 @@ fn MmSwapOutStacks { -- }
 							if (DEBUGCHECKS)
 								if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
 									process@ KeProcess_MemoryStateB + gb
-									"MmSwapOutStacks: unexpected process state %d\n" Printf
+									"MiSwapOutStacks: unexpected process state %d\n" Printf
 								end
 							end
 
@@ -337,7 +339,7 @@ fn MmSwapOutStacks { -- }
 	end
 end
 
-fn MmSwapInStacks { -- }
+fn MiSwapInStacks { -- }
 	// called at IPLDPC
 
 	while (1)
@@ -356,13 +358,13 @@ fn MmSwapInStacks { -- }
 			thread@ KeThread_Process + @ process!
 
 			if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
-				process@ "MmSwapInStacks: process %x wasn't resident\n" KeCrash
+				process@ "MiSwapInStacks: process %x wasn't resident\n" KeCrash
 			end
 		end
 
 		IPLLOW KeIPLLower
 
-		thread@ MmKernelStackSwapIn
+		thread@ MiKernelStackSwapIn
 
 		IPLDPC KeIPLRaise drop
 
@@ -372,7 +374,7 @@ fn MmSwapInStacks { -- }
 	end
 end
 
-fn MmSwapInProcesses { -- }
+fn MiSwapInProcesses { -- }
 	// called at IPLDPC
 
 	while (1)
@@ -388,15 +390,15 @@ fn MmSwapInProcesses { -- }
 
 		IPLLOW KeIPLLower
 
-		process@ MmProcessSwapIn
+		process@ MiProcessSwapIn
 
 		IPLDPC KeIPLRaise drop
 
-		process@ MmSwapReadyDeferred
+		process@ MiSwapReadyDeferred
 	end
 end
 
-fn MmSwapOutProcesses { -- }
+fn MiSwapOutProcesses { -- }
 	// called at IPLDPC
 
 	while (1)
@@ -414,20 +416,20 @@ fn MmSwapOutProcesses { -- }
 			// threads were added to the deferred list while the process
 			// was pending swapout. don't swap it out.
 
-			process@ MmSwapReadyDeferred
+			process@ MiSwapReadyDeferred
 		end else
 			PROCESSSTATE_OUTSWAPPED process@ KeProcess_MemoryStateB + sb
 
 			IPLLOW KeIPLLower
 
-			process@ MmProcessSwapOut
+			process@ MiProcessSwapOut
 
 			IPLDPC KeIPLRaise drop
 		end
 	end
 end
 
-fn MmSwapReadyDeferred { process -- }
+fn MiSwapReadyDeferred { process -- }
 	PROCESSSTATE_RESIDENT process@ KeProcess_MemoryStateB + sb
 
 	while (1)

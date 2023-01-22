@@ -28,6 +28,8 @@
 
 #include "<inc>/IPC.h"
 
+#include "MmInternal.h"
+
 fn MmMDLInitialize { mode length vaddr mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
@@ -53,7 +55,7 @@ fn MmMDLInitialize { mode length vaddr mdl -- }
 	0 mdl@ MmMDLHeader_IOListPrev + !
 
 	KeThreadCurrent@ // thread
-	pointerof MmMDLCompleteAPC // specialfunc
+	pointerof MiMDLCompleteAPC // specialfunc
 	0 // normalfunc
 	mdl@ MmMDLHeader_CompletionAPC + // apc
 	KeAPCInitialize
@@ -256,7 +258,7 @@ fn MmMDLFill { mdl -- }
 
 		auto pfdbe
 		pte@ // pteaddr
-		MmPTEInterpret ok! drop pfdbe!
+		MiPTEInterpret ok! drop pfdbe!
 
 		if (DEBUGCHECKS)
 			if (ok@)
@@ -264,7 +266,7 @@ fn MmMDLFill { mdl -- }
 			end
 		end
 
-		pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+		pfdbe@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 		pfdbe@ mdlpos@!
 
 		4 mdlpos +=
@@ -391,7 +393,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	// here if we probe for writing. it is fine to keep this mutex locked
 	// during pagefaults we incur later because it can be locked recursively.
 
-	process@ MmMapLock ok!
+	process@ MiMapLock ok!
 
 	if (ok@)
 		return
@@ -405,7 +407,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		process@ MmVADListLock ok!
 
 		if (ok@)
-			process@ MmMapUnlock
+			process@ MiMapUnlock
 
 			return
 		end
@@ -413,12 +415,12 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		mdl@ MmMDLHeader_VirtualAddress + @ // startva
 		mdl@ MmMDLHeader_VirtualAddress + @ mdl@ MmMDLHeader_Length + @ + // endva
 		process@ // process
-		MmVADListCheckRange ok!
+		MiVADListCheckRange ok!
 
 		process@ MmVADListUnlock
 
 		if (ok@)
-			process@ MmMapUnlock
+			process@ MiMapUnlock
 
 			return
 		end
@@ -429,7 +431,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	MmMDLChargePinnedPages ok!
 
 	if (ok@)
-		process@ MmMapUnlock
+		process@ MiMapUnlock
 
 		return
 	end
@@ -464,12 +466,12 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			buffer@ KeSafeProbeWrite ok!
 
 			if (ok@)
-				process@ MmMapUnlock
+				process@ MiMapUnlock
 
 				if (ptpfdbe@)
 					pinnedvaddr@ // vaddr
 					ptpfdbe@ // ptpfdbe
-					MmPTEUnpin
+					MiPTEUnpin
 				end
 
 				mdl@ MmMDLUnpin
@@ -485,12 +487,12 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			buffer@ KeSafeGetByte ok! drop
 
 			if (ok@)
-				process@ MmMapUnlock
+				process@ MiMapUnlock
 
 				if (ptpfdbe@)
 					pinnedvaddr@ // vaddr
 					ptpfdbe@ // ptpfdbe
-					MmPTEUnpin
+					MiPTEUnpin
 				end
 
 				mdl@ MmMDLUnpin
@@ -502,10 +504,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				if (ptpfdbe@)
 					pinnedvaddr@ // vaddr
 					ptpfdbe@ // ptpfdbe
-					MmPTEUnpin
+					MiPTEUnpin
 				end
 
-				buffer@ MmPTEPin pte! ptpfdbe!
+				buffer@ MiPTEPin pte! ptpfdbe!
 
 				if (ptpfdbe@ ~~)
 					continue
@@ -519,7 +521,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 			auto pfdbe
 			pte@ // pteaddr
-			MmPTEInterpret ok! drop pfdbe!
+			MiPTEInterpret ok! drop pfdbe!
 
 			if (ok@)
 				// not resident, loop, re-poke, and try again.
@@ -528,7 +530,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				continue
 			end
 
-			pfdbe@ PAGESHIFT >> MmPageFrameEntry_SIZEOF * MmPageFrameDatabase@ + pfdbe!
+			pfdbe@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
 			// we got a pfdbe, time to pin it and record it in our MDL.
 
@@ -561,10 +563,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	if (ptpfdbe@)
 		pinnedvaddr@ // vaddr
 		ptpfdbe@ // ptpfdbe
-		MmPTEUnpin
+		MiPTEUnpin
 	end
 
-	process@ MmMapUnlock
+	process@ MiMapUnlock
 end
 
 fn MmMDLUnpin { mdl -- }
@@ -640,7 +642,7 @@ fn MmMDLMap { mdl -- ok }
 	mdl@ MmMDLHeader_Pages + @ pages!
 
 	auto offset
-	pages@ MmPoolSpaceReserve ok! offset!
+	pages@ MiPoolSpaceReserve ok! offset!
 
 	if (ok@)
 		return
@@ -658,12 +660,12 @@ fn MmMDLMap { mdl -- ok }
 
 	while (pages@)
 		auto phyaddr
-		mdlpos@@ MmPageFrameDatabase@ - MmPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
+		mdlpos@@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
 
 		phyaddr@ // phyaddr
 		PTE_W PTE_V | // flags
 		vaddr@ // vaddr
-		MmPTEUpdateByVirtual drop drop
+		MiPTEUpdateByVirtual drop drop
 
 		PAGESIZE vaddr +=
 		4 mdlpos +=
@@ -703,7 +705,7 @@ fn MmMDLUnmap { mdl -- }
 		0 // phyaddr
 		0 // flags
 		vaddr@ // vaddr
-		MmPTEUpdateByVirtual drop drop
+		MiPTEUpdateByVirtual drop drop
 
 		PAGESIZE vaddr +=
 		4 mdlpos +=
@@ -712,7 +714,7 @@ fn MmMDLUnmap { mdl -- }
 
 	mdl@ MmMDLHeader_Pages + @ // pages
 	mdl@ MmMDLHeader_MappedAddress + @ POOLSPACE - PAGESHIFT >> // offset
-	MmPoolSpaceRelease
+	MiPoolSpaceRelease
 end
 
 fn MmMDLComplete { status priboost mdl -- }
@@ -786,7 +788,7 @@ fn MmMDLComplete { status priboost mdl -- }
 	end
 
 	if (enqueueapc@ ~~)
-		mdl@ MmMDLFinishEitherContext
+		mdl@ MiMDLFinishEitherContext
 	end else
 		mdl@ // context1
 		0 // context2
@@ -796,7 +798,7 @@ fn MmMDLComplete { status priboost mdl -- }
 	end
 end
 
-fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc -- }
+fn (KeAPCFunctionSpecial) MiMDLCompleteAPC { normalfunc context1 context2 apc -- }
 	auto mdl
 	context1@@ mdl!
 
@@ -867,10 +869,10 @@ fn (KeAPCFunctionSpecial) MmMDLCompleteAPC { normalfunc context1 context2 apc --
 		fileobject@ ObObjectDereferenceByPointer drop
 	end
 
-	mdl@ MmMDLFinishEitherContext
+	mdl@ MiMDLFinishEitherContext
 end
 
-fn MmMDLFinishEitherContext { mdl -- }
+fn MiMDLFinishEitherContext { mdl -- }
 	auto event
 	mdl@ MmMDLHeader_Event + @ event!
 

@@ -41,6 +41,9 @@ extern OSTimerReadState { timerhandle -- signaled ok }
 
 extern OSGetStatistics { statistics -- ok }
 
+extern OSIsComputerOn { -- ison ok }
+extern OSIsComputerOnFire { -- isonfire ok }
+
 // Ob
 extern OSObjectOpen { flags access initialobjecthandle path -- handle ok }
 extern OSQuery { handle query -- ok }

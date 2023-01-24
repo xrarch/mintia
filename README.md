@@ -81,7 +81,7 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 
 ## TODO
 
+- [ ] Window system.
 - [ ] FAT12/16/32 driver.
-- [ ] Mac OS 9-lookalike window system.
 - [ ] Self-hosting with a fully native toolchain.
 - [ ] Networking.

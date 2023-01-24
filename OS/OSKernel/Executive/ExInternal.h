@@ -3,6 +3,10 @@ extern ExiSemaphoreInit { -- }
 extern ExiMutexInit { -- }
 extern ExiTimerInit { -- }
 
+
+// handle table stuff
+
+
 const EXTENDBYENTRIES 16
 
 struct ExiHandleTableHeader
@@ -19,3 +23,13 @@ struct ExiHandleTableHeader
 
 	4 Table
 endstruct
+
+
+// rwlock stuff
+
+
+const EXBOOSTRWSTARVE        6
+const EXBOOSTEXCLUSIVEWAITER 2
+const EXBOOSTSHAREDWAITER    1
+
+const EXBOOSTTIMEOUT 300

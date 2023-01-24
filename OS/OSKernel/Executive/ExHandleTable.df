@@ -24,6 +24,8 @@
 
 #include "<inc>/HALDebug.h"
 
+#include "ExInternal.h"
+
 fn ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 	fnsection "PAGE$text"
 
@@ -31,7 +33,7 @@ fn ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 	4 entrysizelog@ << entrysize!
 
 	if (quotablock@)
-		ExHandleTableHeader_SIZEOF MmChargeBytesGet // charge
+		ExiHandleTableHeader_SIZEOF MmChargeBytesGet // charge
 		quotablock@ // quotablock
 		MmQuotaBlockCharge ok!
 
@@ -42,7 +44,7 @@ fn ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 		quotablock@ MmQuotaBlockReference
 	end
 
-	ExHandleTableHeader_SIZEOF // bytes
+	ExiHandleTableHeader_SIZEOF // bytes
 	'HnTb' // tag
 	CANBLOCK // flags
 	MmAllocWithTag ok! handletable!
@@ -51,7 +53,7 @@ fn ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 		// allocation failed
 
 		if (quotablock@)
-			ExHandleTableHeader_SIZEOF MmChargeBytesGet // charge
+			ExiHandleTableHeader_SIZEOF MmChargeBytesGet // charge
 			quotablock@ // quotablock
 			MmQuotaBlockUncharge
 
@@ -62,21 +64,21 @@ fn ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 	end
 
 	"ExHandleTableRwLock" // name
-	handletable@ ExHandleTableHeader_RwLock + // mutex
+	handletable@ ExiHandleTableHeader_RwLock + // mutex
 	ExRwLockInitialize
 
-	entrysizelog@ handletable@ ExHandleTableHeader_EntrySizeLog + !
+	entrysizelog@ handletable@ ExiHandleTableHeader_EntrySizeLog + !
 
-	quotablock@ handletable@ ExHandleTableHeader_QuotaBlock + !
+	quotablock@ handletable@ ExiHandleTableHeader_QuotaBlock + !
 
-	0 handletable@ ExHandleTableHeader_Entries + !
-	0 handletable@ ExHandleTableHeader_FreeEntries + !
+	0 handletable@ ExiHandleTableHeader_Entries + !
+	0 handletable@ ExiHandleTableHeader_FreeEntries + !
 
-	context@ handletable@ ExHandleTableHeader_Context + !
+	context@ handletable@ ExiHandleTableHeader_Context + !
 
-	-1 handletable@ ExHandleTableHeader_FreeListHead + !
+	-1 handletable@ ExiHandleTableHeader_FreeListHead + !
 
-	0 handletable@ ExHandleTableHeader_Table + !
+	0 handletable@ ExiHandleTableHeader_Table + !
 end
 
 fn ExHandleTableDelete { func handletable -- }
@@ -97,7 +99,7 @@ fn ExHandleTableDelete { func handletable -- }
 
 		0 i!
 
-		handletable@ ExHandleTableHeader_Entries + @ entries!
+		handletable@ ExiHandleTableHeader_Entries + @ entries!
 
 		while (i@ entries@ <)
 			i@
@@ -122,12 +124,12 @@ fn ExHandleTableDelete { func handletable -- }
 	// deallocate handle table structures
 
 	auto quotablock
-	handletable@ ExHandleTableHeader_QuotaBlock + @ quotablock!
+	handletable@ ExiHandleTableHeader_QuotaBlock + @ quotablock!
 
 	auto charge
 
 	auto tab
-	handletable@ ExHandleTableHeader_Table + @ tab!
+	handletable@ ExiHandleTableHeader_Table + @ tab!
 
 	if (tab@)
 		tab@ MmBlockChargeGet charge!
@@ -143,7 +145,7 @@ fn ExHandleTableDelete { func handletable -- }
 
 	handletable@ MmBlockChargeGet charge!
 
-	handletable@ ExHandleTableHeader_RwLock + ExRwLockUninitialize
+	handletable@ ExiHandleTableHeader_RwLock + ExRwLockUninitialize
 
 	handletable@ MmFree
 
@@ -161,7 +163,7 @@ fn ExHandleTableLockUnalertable { handletable -- }
 
 	0 // alertable
 	0 // nowait
-	handletable@ ExHandleTableHeader_RwLock + // rwlock
+	handletable@ ExiHandleTableHeader_RwLock + // rwlock
 	ExRwLockAcquireExclusive drop
 end
 
@@ -171,7 +173,7 @@ fn ExHandleTableLockSharedUnalertable { handletable -- }
 	0 // alertable
 	0 // nowait
 	0 // canstarve
-	handletable@ ExHandleTableHeader_RwLock + // rwlock
+	handletable@ ExiHandleTableHeader_RwLock + // rwlock
 	ExRwLockAcquireShared drop
 end
 
@@ -180,7 +182,7 @@ fn ExHandleTableLock { handletable -- ok }
 
 	1 // alertable
 	0 // nowait
-	handletable@ ExHandleTableHeader_RwLock + // rwlock
+	handletable@ ExiHandleTableHeader_RwLock + // rwlock
 	ExRwLockAcquireExclusive ok!
 end
 
@@ -190,12 +192,12 @@ fn ExHandleTableLockShared { handletable -- ok }
 	1 // alertable
 	0 // nowait
 	0 // canstarve
-	handletable@ ExHandleTableHeader_RwLock + // rwlock
+	handletable@ ExiHandleTableHeader_RwLock + // rwlock
 	ExRwLockAcquireShared ok!
 end
 
 fn ExHandleTableUnlock { handletable -- }
-	handletable@ ExHandleTableHeader_RwLock + ExRwLockRelease
+	handletable@ ExiHandleTableHeader_RwLock + ExRwLockRelease
 end
 
 fn ExHandleDelete { handle handletable locked -- entryptr entryvalue ok }
@@ -226,10 +228,10 @@ fn ExHandleDelete { handle handletable locked -- entryptr entryvalue ok }
 
 	entryptr@@ entryvalue!
 
-	handletable@ ExHandleTableHeader_FreeListHead + @ 1 << 1 | entryptr@!
-	handle@ handletable@ ExHandleTableHeader_FreeListHead + !
+	handletable@ ExiHandleTableHeader_FreeListHead + @ 1 << 1 | entryptr@!
+	handle@ handletable@ ExiHandleTableHeader_FreeListHead + !
 
-	1 handletable@ ExHandleTableHeader_FreeEntries + +=
+	1 handletable@ ExiHandleTableHeader_FreeEntries + +=
 
 	if (locked@ ~~)
 		handletable@ ExHandleTableUnlock
@@ -257,23 +259,23 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 	end
 
 	auto logsize
-	handletable@ ExHandleTableHeader_EntrySizeLog + @ 2 + logsize!
+	handletable@ ExiHandleTableHeader_EntrySizeLog + @ 2 + logsize!
 
-	handletable@ ExHandleTableHeader_FreeListHead + @ handle!
+	handletable@ ExiHandleTableHeader_FreeListHead + @ handle!
 
 	if (handle@ -1 ~=)
 		// yoink free entry
 
 		// FreeListHead is a handle number
-		handletable@ ExHandleTableHeader_Table + @ handle@ logsize@ << + entryptr!
+		handletable@ ExiHandleTableHeader_Table + @ handle@ logsize@ << + entryptr!
 
 		// reuse logsize here
 		entryptr@@ logsize!
 
 		if (logsize@ -1 ==)
-			-1 handletable@ ExHandleTableHeader_FreeListHead + !
+			-1 handletable@ ExiHandleTableHeader_FreeListHead + !
 		end else
-			logsize@ 1 >> handletable@ ExHandleTableHeader_FreeListHead + !
+			logsize@ 1 >> handletable@ ExiHandleTableHeader_FreeListHead + !
 		end
 
 		entryvalue@ entryptr@!
@@ -286,13 +288,13 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 	end
 
 	auto quotablock
-	handletable@ ExHandleTableHeader_QuotaBlock + @ quotablock!
+	handletable@ ExiHandleTableHeader_QuotaBlock + @ quotablock!
 
 	auto entries
-	handletable@ ExHandleTableHeader_Entries + @ entries!
+	handletable@ ExiHandleTableHeader_Entries + @ entries!
 
 	auto tab
-	handletable@ ExHandleTableHeader_Table + @ tab!
+	handletable@ ExiHandleTableHeader_Table + @ tab!
 
 	auto tabsize
 
@@ -342,7 +344,7 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			return
 		end
 
-		tab@ handletable@ ExHandleTableHeader_Table + !
+		tab@ handletable@ ExiHandleTableHeader_Table + !
 
 		EXTENDBYENTRIES entries!
 	end else
@@ -416,12 +418,12 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 
 		newtab@ tab!
 
-		tab@ handletable@ ExHandleTableHeader_Table + !
+		tab@ handletable@ ExiHandleTableHeader_Table + !
 	end
 
-	EXTENDBYENTRIES 1 - handletable@ ExHandleTableHeader_FreeEntries + !
+	EXTENDBYENTRIES 1 - handletable@ ExiHandleTableHeader_FreeEntries + !
 
-	entries@ handletable@ ExHandleTableHeader_Entries + !
+	entries@ handletable@ ExiHandleTableHeader_Entries + !
 
 	auto entrysize
 	1 logsize@ << entrysize!
@@ -449,7 +451,7 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 		1 count -=
 	end
 
-	last@ handletable@ ExHandleTableHeader_FreeListHead + !
+	last@ handletable@ ExiHandleTableHeader_FreeListHead + !
 
 	// return first free handle
 
@@ -475,10 +477,10 @@ fn ExHandleLookup { handle handletable locked -- entryptr ok }
 	end
 
 	auto logsize
-	handletable@ ExHandleTableHeader_EntrySizeLog + @ 2 + logsize!
+	handletable@ ExiHandleTableHeader_EntrySizeLog + @ 2 + logsize!
 
 	auto entries
-	handletable@ ExHandleTableHeader_Entries + @ entries!
+	handletable@ ExiHandleTableHeader_Entries + @ entries!
 
 	if (handle@ entries@ >=)
 		if (locked@ ~~)
@@ -491,7 +493,7 @@ fn ExHandleLookup { handle handletable locked -- entryptr ok }
 	end
 
 	auto tab
-	handletable@ ExHandleTableHeader_Table + @ tab!
+	handletable@ ExiHandleTableHeader_Table + @ tab!
 
 	if (DEBUGCHECKS)
 		if (tab@ ~~)
@@ -548,6 +550,12 @@ fn ExHandleTableLookupAndReferenceObject { handle handletable locked -- object o
 	if (locked@ ~~)
 		handletable@ ExHandleTableUnlock
 	end
+end
+
+fn ExHandleTableGetContext { handletable -- context }
+	fnsection "PAGE$text"
+
+	handletable@ ExiHandleTableHeader_Context + @ context!
 end
 
 fn private ExiConditionallyReferenceObject { object -- ok }

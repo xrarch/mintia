@@ -1,22 +1,5 @@
 fnptr ExHandleEnumFunction { entryptr handle handletable -- ok }
 
-const EXTENDBYENTRIES 16
-
-struct ExHandleTableHeader
-	ExRwLock_SIZEOF RwLock
-	4 EntrySizeLog
-	4 QuotaBlock
-
-	4 Context
-
-	4 Entries
-	4 FreeEntries
-
-	4 FreeListHead
-
-	4 Table
-endstruct
-
 extern ExHandleTableDelete { func handletable -- }
 extern ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 
@@ -31,3 +14,5 @@ extern ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 extern ExHandleLookup { handle handletable locked -- entryptr ok }
 
 extern ExHandleTableLookupAndReferenceObject { handle handletable locked -- object ok }
+
+extern ExHandleTableGetContext { handletable -- context }

@@ -71,8 +71,6 @@ fnptr ObTypeSetSecurityFunction { uid gid permissions object -- ok }
 
 const OBFLAGS_PERMANENT 1
 
-const OBHANDLEENTRYSIZELOG 1 // 4<<1 = 8 bytes
-
 externptr ObTypeObjectType
 externptr ObTypeDirectoryType
 externptr ObRootDirectoryObject
@@ -84,6 +82,8 @@ extern ObInitPhase0 { -- }
 extern ObInitPhase1 { -- }
 
 extern ObHandleDestroyFunction { entryptr handle handletable -- ok }
+
+extern ObObjectTableCreate { quotablock process -- handletable ok }
 
 extern ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type -- object ok }
 extern ObObjectFree { object -- ok }

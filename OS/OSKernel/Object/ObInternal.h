@@ -28,5 +28,7 @@ struct ObiObjectTableEntry
 	4 Access
 endstruct
 
+const OBHANDLEENTRYSIZELOG 1 // 4<<1 = 8 bytes
+
 extern ObiObjectHandleCountIncrement { object -- oldcount }
 extern ObiObjectHandleCountDecrement { object -- oldcount }

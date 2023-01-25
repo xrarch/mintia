@@ -118,7 +118,6 @@ extern OSProcessQuery { processhandle query -- ok }
 extern OSProcessQueryByPID { pid query -- ok }
 extern OSProcessReadStatus { processhandle -- status ok }
 extern OSProcessSetConsoleGroup { filehandle processhandle -- ok }
-extern OSProcessClearConsoleGroup { processhandle -- ok }
 extern OSProcessBasePrioritySet { priority processhandle -- ok }
 
 extern OSProcessSignalActivation { activationstatus -- ok }

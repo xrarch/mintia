@@ -175,44 +175,43 @@ fn IOiWritebehindWorker { context1 context2 -- }
 			end
 		end
 
-		while (1)
-			auto cacheblock
+		auto cacheblock
+		auto ncacheblock
 
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
+		// capture the entire current dirty cacheblock list.
 
-			IOiCacheInfoBlockDirtyListHead@ cacheblock!
+		auto rs
+		HALCPUInterruptDisable rs!
 
-			if (cacheblock@ ~~)
-				// no more cacheblocks to flush, break out
+		IOiCacheInfoBlockDirtyListHead@ cacheblock!
+		0 IOiCacheInfoBlockDirtyListHead!
+		0 IOiCacheInfoBlockDirtyListTail!
 
-				ipl@ KeIPLLower
+		rs@ HALCPUInterruptRestore
 
-				break
-			end
+		while (cacheblock@)
+			// capture the next link since it may stop existing soon.
+			cacheblock@ IOiCacheInfoBlock_Next + @ ncacheblock!
 
+			// set the modified page count to zero. this allows the cacheblock
+			// to be re-enqueued on the list, which is why we needed to
+			// capture the next link.
 			0 cacheblock@ IOiCacheInfoBlock_ModifiedPageCount + !
 
-			auto n
-			cacheblock@ IOiCacheInfoBlock_Next + @ n!
-
-			n@ IOiCacheInfoBlockDirtyListHead!
-
-			if (n@ ~~)
-				0 IOiCacheInfoBlockDirtyListTail!
-			end else
-				0 n@ IOiCacheInfoBlock_Prev + !
-			end
-
-			1 IOCacheInfoBlockDirtyCount -=
-
-			ipl@ KeIPLLower
-
-			// flush the cacheblock
+			// flush the cacheblock.
 			cacheblock@ IOCacheInfoBlockFlush drop
 
-			// dereference the cacheblock since we don't need it anymore
+			// dereference the cacheblock since we don't need it anymore.
 			cacheblock@ IOiCacheInfoBlockDereference drop
+
+			// decrement the dirty count.
+
+			HALCPUInterruptDisable rs!
+			1 IOCacheInfoBlockDirtyCount -=
+			rs@ HALCPUInterruptRestore
+
+			// move on to the next cacheblock.
+			ncacheblock@ cacheblock!
 		end
 	end
 end

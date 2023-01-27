@@ -5,10 +5,10 @@ struct KeTimer
 	4 Prev
 	4 Enqueued
 	KeTime_SIZEOF ExpiryTime
-	KeDPC_SIZEOF DPC
+	4 DPC
 endstruct
 
-extern KeTimerInitialize { name function timer -- }
+extern KeTimerInitialize { name dpc timer -- }
 extern KeTimerDequeue { timer -- ok }
 extern KeTimerEnqueue { context1 context2 interval timer -- ok }
 extern KeTimerReset { timer -- signaled }

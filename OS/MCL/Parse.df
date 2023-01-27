@@ -14,7 +14,43 @@ fn MclpParseContextInitialize { ctx -- }
 	MclpParseContext_SIZEOF // sz
 	0 // word
 	memset
+
+	LEX_NEWSTATEMENT ctx@ MclpParseContext_LexFlags + !
 end
+
+fn MclpParseContextUninitialize { ctx -- }
+	if (ctx@ MclpParseContext_LexBuffer + @)
+		if (ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE &)
+			// free buffer
+
+			ctx@ MclpParseContext_LexBuffer + @ OSHeapFree
+		end else
+			// unmap buffer
+
+			ctx@ MclpParseContext_LexInputLength + @ // length
+			ctx@ MclpParseContext_LexBuffer + @ // vaddr
+			OSCURRENTPROCESS // processhandle
+			OSUnmapView drop
+		end
+	end
+end
+
+fn MclpQueryFileLength { ctx -- ok }
+	auto query
+	OSFileInformation_SIZEOF alloc query!
+
+	ctx@ MclpParseContext_StreamHandle + @ OSStreamGetFileHandle // filehandle
+	query@ // query
+	OSFileQuery ok!
+
+	if (ok@)
+		return
+	end
+
+	query@ OSFileInformation_Size + @ ctx@ MclpParseContext_LexInputLength + !
+end
+
+extern MclpLexNextCharacter { ctx -- lastpos char ok }
 
 fn MclpParseFile { interactive streamhandle machine -- rootblock ok }
 	auto ctx
@@ -30,20 +66,29 @@ fn MclpParseFile { interactive streamhandle machine -- rootblock ok }
 
 	streamhandle@ ctx@ MclpParseContext_StreamHandle + !
 
-	auto lexbuf
-	LEXBUFFERSIZE OSHeapAllocate ok! lexbuf!
-
-	if (ok@)
-		return
-	end
-
-	lexbuf@ ctx@ MclpParseContext_LexBuffer + !
+	0 ctx@ MclpParseContext_LexBuffer + !
+	0 ctx@ MclpParseContext_LexOffset + !
+	0 ctx@ MclpParseContext_LexValidLength + !
+	1 ctx@ MclpParseContext_LexLineNumber + !
 
 	machine@ ctx@ MclpParseContext_Machine + !
+
+	if (interactive@)
+		// endless input (at least until EOF)
+		-1 ctx@ MclpParseContext_LexInputLength + !
+	end else
+		ctx@ MclpQueryFileLength ok!
+
+		if (ok@)
+			return
+		end
+	end
 
 	0 // endtoken
 	ctx@ // ctx
 	MclpParseBlock ok! rootblock!
+
+	ctx@ MclpParseContextUninitialize
 end
 
 fn MclpParseBlock { endtoken ctx -- block ok }
@@ -53,20 +98,24 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 	PARSE_ROOTBLOCK ~ ctx@ MclpParseContext_ParseFlags + &=
 
 	while (1)
-		auto eof
-		auto count
-		ctx@ MclpParseContext_LexBuffer + @ // buf
-		LEXBUFFERSIZE 1 - // max
+		// token isn't gonna be greater than the lex buffer size
+		auto tokbuf
+		TOKBUFFERSIZE alloc tokbuf!
+
+		auto toklen
+		0 // peek
+		tokbuf@ // tokbuf
 		ctx@ // ctx
-		MclpInteractiveReadLine ok! count!
+		MclpLexNextToken ok! toklen!
 
 		if (ok@)
 			ok@ OSStatusGetName "%s\n" Printf
 			return
 		end
 
-		count@
-		ctx@ MclpParseContext_LexBuffer + @ "%s (%d)\n" Printf
+		tokbuf@
+		toklen@
+		"%d: %s\n" Printf
 	end
 
 	0 ok!

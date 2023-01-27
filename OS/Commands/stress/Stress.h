@@ -15,6 +15,7 @@ extern InfiniteLoopTest { -- ok }
 extern CacheFloodTest { -- ok }
 extern AsyncIOTest { -- ok }
 extern OpenCloseTest { -- ok }
+extern NullSysTest { -- ok }
 
 externptr ArgTable
 externptr ArgCount

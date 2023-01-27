@@ -9,10 +9,244 @@
 
 #include "Mcl.h"
 
-fn MclpLexNextCharacter { ctx -- lastpos char ok }
+fn MclpLexFillBuffer { ctx -- ok }
+	auto lexbuf
 
+	if (ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE &)
+		ctx@ MclpParseContext_LexBuffer + @ lexbuf!
+
+		if (lexbuf@ ~~)
+			// allocate lex buffer
+
+			LEXBUFFERSIZE OSHeapAllocate ok! lexbuf!
+
+			if (ok@)
+				return
+			end
+
+			lexbuf@ ctx@ MclpParseContext_LexBuffer + !
+		end
+
+		if (LEXBUFFERSIZE 1 - ctx@ MclpParseContext_LexValidLength + @ - ~~)
+			// no room to fill up... the lex buffer is 1024 bytes so this
+			// ought not happen in an interactive session, so just return
+			// EOF.
+			STATUS_END_OF_FILE ok!
+			return
+		end
+
+		if (ctx@ MclpParseContext_LexFlags + @ LEX_NEWSTATEMENT &)
+			0 ctx@ MclpParseContext_LexOffset + !
+			0 ctx@ MclpParseContext_LexValidLength + !
+			LEX_NEWSTATEMENT ~ ctx@ MclpParseContext_LexFlags + &=
+		end else
+			"more? " Printf
+			OSFlushLine
+		end
+
+		// refill from user input
+
+		auto count
+		lexbuf@ ctx@ MclpParseContext_LexValidLength + @ + // buf
+		LEXBUFFERSIZE 1 - ctx@ MclpParseContext_LexValidLength + @ - // max
+		ctx@ // ctx
+		MclpInteractiveReadLine ok! count!
+
+		if (ok@)
+			return
+		end
+
+		count@ ctx@ MclpParseContext_LexValidLength + +=
+	end else
+		// just mmap the entire file
+
+		if (ctx@ MclpParseContext_LexBuffer + @)
+			"MclpLexFillBuffer: lexbuffer already exists\n" OSAbort
+		end
+
+		ctx@ MclpParseContext_LexInputLength + @ // length
+		USERMAP // startva
+		0 // sectionoffset
+		ctx@ MclpParseContext_StreamHandle + @ OSStreamGetFileHandle // mappedhandle
+		OSCURRENTPROCESS // processhandle
+		PAGEACCESS_READ // pageprotection
+		0 // flags
+		OSMapView ok! lexbuf!
+
+		if (ok@)
+			return
+		end
+
+		lexbuf@ ctx@ MclpParseContext_LexBuffer + !
+		ctx@ MclpParseContext_LexInputLength + @ ctx@ MclpParseContext_LexValidLength + !
+	end
 end
 
-fn MclpLexNextToken { peek tokbuf ctx -- ok }
-	
+fn MclpLexNextCharacter { ctx -- lastpos char ok }
+	if (ctx@ MclpParseContext_LexOffset + @
+		ctx@ MclpParseContext_LexValidLength + @ >=)
+		if (ctx@ MclpParseContext_LexOffset + @
+			ctx@ MclpParseContext_LexInputLength + @ >=)
+			STATUS_END_OF_FILE ok!
+			return
+		end
+
+		// refill the buffer
+
+		ctx@ MclpLexFillBuffer ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 ok!
+
+	ctx@ MclpParseContext_LexOffset + @ lastpos!
+
+	ctx@ MclpParseContext_LexBuffer + @
+	ctx@ MclpParseContext_LexOffset + @ + gb char!
+
+	1 ctx@ MclpParseContext_LexOffset + +=
+
+	if (char@ '\n' ==)
+		1 ctx@ MclpParseContext_LexLineNumber + +=
+		LEX_NEWSTATEMENT ctx@ MclpParseContext_LexFlags + |=
+	end
+end
+
+const LEXSTATE_NORMAL    1
+const LEXSTATE_STRING    2
+const LEXSTATE_COMMENT   3
+
+fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
+	auto firstpos
+	0 firstpos!
+
+	0 toklen!
+
+	auto ignorewhitespace
+	1 ignorewhitespace!
+
+	auto isbackslash
+	0 isbackslash!
+
+	auto firstnl
+	1 firstnl!
+
+	auto state
+	LEXSTATE_NORMAL state!
+
+	while (1)
+		auto char
+		auto lastpos
+
+		ctx@ MclpLexNextCharacter ok! char! lastpos!
+
+		if (ok@)
+			break
+		end
+
+		if (peek@)
+			LEX_NEWSTATEMENT ~ ctx@ MclpParseContext_LexFlags + &=
+		end
+
+		if (isbackslash@)
+			0 isbackslash!
+
+			if (char@ '\n' ==)
+				LEX_NEWSTATEMENT ~ ctx@ MclpParseContext_LexFlags + &=
+
+				if (firstnl@)
+					0 firstnl!
+					continue
+				end
+			end
+
+			if (toklen@ TOKBUFFERSIZE 1 - >=)
+				STATUS_END_OF_FILE ok!
+				break
+			end
+
+			char@ tokbuf@ sb
+			1 tokbuf +=
+			1 toklen +=
+
+			continue
+		end
+
+		if (state@ LEXSTATE_NORMAL ==)
+			if (char@ '\n' ==)
+				break
+			end
+
+			if (char@ ' ' == char@ '\t' == ||)
+				if (ignorewhitespace@)
+					continue
+				end else
+					break
+				end
+			end
+
+			if (peek@)
+				if (firstpos@ ~~)
+					lastpos@ firstpos!
+				end
+			end
+
+			if (char@ 92 ==) // backslash
+				1 isbackslash!
+				continue
+			end
+
+			0 ignorewhitespace!
+
+			if (char@ 34 ==) // doublequote (this could be an ascii literal but it messes up syntax highlighting on my editor)
+				LEXSTATE_STRING state!
+				continue
+			end
+
+			if (char@ '#' ==)
+				LEXSTATE_COMMENT state!
+				continue
+			end
+
+			if (toklen@ TOKBUFFERSIZE 1 - >=)
+				STATUS_END_OF_FILE ok!
+				break
+			end
+
+			char@ tokbuf@ sb
+			1 tokbuf +=
+			1 toklen +=
+		end elseif (state@ LEXSTATE_STRING ==)
+			if (char@ 34 ==) // doublequote
+				LEXSTATE_NORMAL state!
+				continue
+			end
+
+			if (char@ '\n' ==)
+				LEX_NEWSTATEMENT ~ ctx@ MclpParseContext_LexFlags + &=
+			end
+
+			if (toklen@ TOKBUFFERSIZE 1 - >=)
+				STATUS_END_OF_FILE ok!
+				break
+			end
+
+			char@ tokbuf@ sb
+			1 tokbuf +=
+			1 toklen +=
+		end elseif (state@ LEXSTATE_COMMENT ==)
+			if (char@ '\n' ==)
+				break
+			end
+		end
+	end
+
+	0 tokbuf@ sb
+
+	if (peek@ firstpos@ &&)
+		firstpos@ ctx@ MclpParseContext_LexOffset + !
+	end
 end

@@ -55,7 +55,7 @@ fn IOiFilesystemSyncWorker { context1 context2 -- }
 	KeDispatchWaitBlockTableInitialize
 
 	"IOiFilesystemSyncTimer" // name
-	0 // function
+	0 // dpc
 	IOiFilesystemSyncTimer // timer
 	KeTimerInitialize
 
@@ -161,7 +161,7 @@ fn IOiWritebehindWorker { context1 context2 -- }
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAITANY // waittype
-		60000 // timeout
+		OSWAIT_TIMEOUTINFINITE // timeout
 		2 // objectcount
 		objecttable@ // objecttable
 		0 // waitblocktable
@@ -175,17 +175,7 @@ fn IOiWritebehindWorker { context1 context2 -- }
 			end
 		end
 
-		auto modcount
-
-		auto rs
-		HALCPUInterruptDisable rs!
-
-		IOCacheInfoBlockDirtyCount@ modcount!
-		0 IOCacheInfoBlockDirtyCount!
-
-		rs@ HALCPUInterruptRestore
-
-		while (modcount@)
+		while (1)
 			auto cacheblock
 
 			auto ipl
@@ -194,7 +184,10 @@ fn IOiWritebehindWorker { context1 context2 -- }
 			IOiCacheInfoBlockDirtyListHead@ cacheblock!
 
 			if (cacheblock@ ~~)
+				// no more cacheblocks to flush, break out
+
 				ipl@ KeIPLLower
+
 				break
 			end
 
@@ -211,13 +204,15 @@ fn IOiWritebehindWorker { context1 context2 -- }
 				0 n@ IOiCacheInfoBlock_Prev + !
 			end
 
+			1 IOCacheInfoBlockDirtyCount -=
+
 			ipl@ KeIPLLower
 
+			// flush the cacheblock
 			cacheblock@ IOCacheInfoBlockFlush drop
 
+			// dereference the cacheblock since we don't need it anymore
 			cacheblock@ IOiCacheInfoBlockDereference drop
-
-			1 modcount -=
 		end
 	end
 end

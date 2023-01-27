@@ -81,7 +81,6 @@
 .extern OSProcessQueryByPID
 .extern OSProcessReadStatus
 .extern OSProcessSetConsoleGroup
-.extern OSProcessClearConsoleGroup
 .extern OSProcessBasePrioritySet
 .extern OSProcessSignalActivation
 .extern OSProcessWaitForActivation
@@ -114,7 +113,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 109
+	.dl 108
 
 OSCallTable:
 .global OSCallTable
@@ -198,36 +197,35 @@ OSCallTable:
 	.dl OSTOSProcessQueryByPID                           ;77
 	.dl OSTOSProcessReadStatus                           ;78
 	.dl OSTOSProcessSetConsoleGroup                      ;79
-	.dl OSTOSProcessClearConsoleGroup                    ;80
-	.dl OSTOSProcessBasePrioritySet                      ;81
-	.dl OSTOSProcessSignalActivation                     ;82
-	.dl OSTOSProcessWaitForActivation                    ;83
-	.dl OSTOSProcessExit                                 ;84
-	.dl OSTOSProcessCountQuery                           ;85
-	.dl OSTOSProcessQueryAll                             ;86
-	.dl OSTOSSetQuota                                    ;87
-	.dl OSTOSQuotaQuery                                  ;88
-	.dl OSTOSThreadSetFilePermissions                    ;89
-	.dl OSTOSThreadSleep                                 ;90
-	.dl OSTOSThreadCreate                                ;91
-	.dl OSTOSThreadTerminate                             ;92
-	.dl OSTOSThreadSuspend                               ;93
-	.dl OSTOSThreadResume                                ;94
-	.dl OSTOSThreadReadStatus                            ;95
-	.dl OSTOSThreadQuery                                 ;96
-	.dl OSTOSThreadSignal                                ;97
-	.dl OSTOSThreadMaskSignal                            ;98
-	.dl OSTOSThreadUnmaskSignal                          ;99
-	.dl OSTOSSetSystemConsole                            ;100
-	.dl OSTOSConsoleSignal                               ;101
-	.dl OSTOSCheckPermission                             ;102
-	.dl OSTOSGrantPermission                             ;103
-	.dl OSTOSPortCreate                                  ;104
-	.dl OSTOSPortConnect                                 ;105
-	.dl OSTOSPortAccept                                  ;106
-	.dl OSTOSPortSendAndWaitReceive                      ;107
-	.dl OSTOSPortSendAndWaitReply                        ;108
-	.dl OSTOSPortOpenProcessByClientID                   ;109
+	.dl OSTOSProcessBasePrioritySet                      ;80
+	.dl OSTOSProcessSignalActivation                     ;81
+	.dl OSTOSProcessWaitForActivation                    ;82
+	.dl OSTOSProcessExit                                 ;83
+	.dl OSTOSProcessCountQuery                           ;84
+	.dl OSTOSProcessQueryAll                             ;85
+	.dl OSTOSSetQuota                                    ;86
+	.dl OSTOSQuotaQuery                                  ;87
+	.dl OSTOSThreadSetFilePermissions                    ;88
+	.dl OSTOSThreadSleep                                 ;89
+	.dl OSTOSThreadCreate                                ;90
+	.dl OSTOSThreadTerminate                             ;91
+	.dl OSTOSThreadSuspend                               ;92
+	.dl OSTOSThreadResume                                ;93
+	.dl OSTOSThreadReadStatus                            ;94
+	.dl OSTOSThreadQuery                                 ;95
+	.dl OSTOSThreadSignal                                ;96
+	.dl OSTOSThreadMaskSignal                            ;97
+	.dl OSTOSThreadUnmaskSignal                          ;98
+	.dl OSTOSSetSystemConsole                            ;99
+	.dl OSTOSConsoleSignal                               ;100
+	.dl OSTOSCheckPermission                             ;101
+	.dl OSTOSGrantPermission                             ;102
+	.dl OSTOSPortCreate                                  ;103
+	.dl OSTOSPortConnect                                 ;104
+	.dl OSTOSPortAccept                                  ;105
+	.dl OSTOSPortSendAndWaitReceive                      ;106
+	.dl OSTOSPortSendAndWaitReply                        ;107
+	.dl OSTOSPortOpenProcessByClientID                   ;108
 
 
 OSTOSConsolePutCharacter:
@@ -2150,24 +2148,6 @@ OSTOSProcessSetConsoleGroup:
 	mov  a1, [t0]
 
 	call OSProcessSetConsoleGroup
-
-
-	mov  t0, s17
-	add  t0, 4 ;t1
-	mov  [t0], a0
-
-	pop  fp
-	ret
-
-OSTOSProcessClearConsoleGroup:
-	push fp
-	mov  fp, sp
-
-	mov  t0, s17
-	add  t0, 4 ;t1
-	mov  a0, [t0]
-
-	call OSProcessClearConsoleGroup
 
 
 	mov  t0, s17

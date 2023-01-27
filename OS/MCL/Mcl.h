@@ -17,13 +17,6 @@ struct MclpMachine
 	4 HistoryListTail
 endstruct
 
-struct MclpValue
-	4 Type
-	4 RefCount
-
-	4 Context
-endstruct
-
 struct MclpSymbol
 	4 SymbolTable
 
@@ -39,22 +32,17 @@ struct MclpSymbol
 	0 Name
 endstruct
 
-struct MclpTypeOperations
-	4 Create
-	4 Free
-endstruct
-
-struct MclpType
-	4 Name
-
-	MclpTypeOperations_SIZEOF Ops
-endstruct
-
 const LEXBUFFERSIZE 1024
+const TOKBUFFERSIZE 512
 
 struct MclpParseContext
 	4 LexFlags
 	4 LexBuffer
+	4 LexOffset
+	4 LexValidLength
+	4 LexInputLength
+	4 LexLineNumber
+
 	4 StreamHandle
 
 	4 ParseFlags
@@ -62,7 +50,9 @@ struct MclpParseContext
 	4 Machine
 endstruct
 
-const LEX_INTERACTIVE 1
+const LEX_INTERACTIVE  1
+const LEX_NEWSTATEMENT 2
+
 const PARSE_ROOTBLOCK 1
 
 extern MclpMachineLock { machine -- }
@@ -73,3 +63,4 @@ extern MclpParseFile { interactive streamhandle machine -- rootblock ok }
 extern MclpSymbolTableInitialize { symboltable -- }
 
 extern MclpInteractiveReadLine { buf max ctx -- count ok }
+extern MclpLexNextToken { peek tokbuf ctx -- toklen ok }

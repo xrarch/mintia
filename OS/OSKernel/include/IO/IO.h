@@ -128,6 +128,8 @@ extern IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 
 extern IOFileGetFileControlBlock { fileobject -- fcb }
 
+extern IOFileControlBlockDestroyCache { fcb -- }
+
 extern IOFileGetContext { fileobject -- context }
 extern IOFileSetContext { context fileobject -- }
 

@@ -31,6 +31,7 @@ export DFC := $(SDK)/dragonc.sh
 export LNK := $(SDK)/link.sh
 export ASM := $(SDK)/asm.sh
 export FST := $(SDK)/fstool.sh
+export APT := $(SDK)/apttool.sh
 
 export KERNINCDIR   := $(REPO)/OS/OSKernel/include/
 export HALINCDIR    := $(REPO)/OS/HAL/include/:$(REPO)/OS/HAL/$(PLATFORM)/include/
@@ -71,15 +72,16 @@ export MCLBIN   := $(BUILDROOT)/$(SYSROOT)/mcl.dll.$(ARCHITECTURE).$(CHKFRE)
 ifndef SMALLDIST
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE).img
 	export DISTIMGSZ  := 112640 # 52MB
-	export DISKLABEL  := $(REPO)/build/default.disklabel
+	export DISKLABEL  := mintia-dist
 else
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE)-small.img
 	export DISTIMGSZ  := 20480 # 10MB
-	export DISKLABEL  := $(REPO)/build/small.disklabel
+	export DISKLABEL  := mintia-small
 	TEXTSUFFIX := .small
 endif
 
 export FSTOOL := $(FST) $(DISTIMAGE) offset=4
+export APTOOL := $(APT) $(DISTIMAGE)
 
 export ARCHITECTURE
 
@@ -104,7 +106,7 @@ update:
 
 $(DISTIMAGE):
 	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null
-	dd if=$(DISKLABEL) of=$(DISTIMAGE) bs=512 count=1 seek=0 conv=notrunc
+	$(APTOOL) f $(DISKLABEL) boot -1
 	$(FSTOOL) f
 	rm -f OS/OSLoader/$(PLATFORM)/bootcode/.new
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)

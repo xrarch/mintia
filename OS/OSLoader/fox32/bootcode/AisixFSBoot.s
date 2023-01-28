@@ -1,5 +1,4 @@
-;this file defines block 4 of a MINTIA partition as specified by our boot
-;descriptor to be the start of the boot program.
+;this file defines block 4 of a MINTIA partition.
 ;
 ;it is very dumb and only understands how to load /OSLoader.bin from an
 ;AisixFS volume. assumes OSLoader.bin is inode number 2.
@@ -154,7 +153,7 @@ AisixFSBoot:
 ReadBlock:
 	add a0, 4
 	mov t0, 0x80002000
-	mov t1, 0x80003001 ; hardcoded as disk 1
+	mov t1, 0x80003000 ; hardcoded as disk 0
 	out t0, a1
 	out t1, a0
 	ret

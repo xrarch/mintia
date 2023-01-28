@@ -21,8 +21,8 @@ struct AFSSuperblock
 	4 VolSize
 endstruct
 
-const AFSFCBBUCKETS 32 // must be a power of two
-const AFSFCBSHIFT 5 // 1<<AFSFCBSHIFT must equal AFSFCBBUCKETS
+const AFSFCBSHIFT 5
+const AFSFCBBUCKETS (1 AFSFCBSHIFT <<)
 const AFSFCBMASK (AFSFCBBUCKETS 1 -)
 
 struct AFSData

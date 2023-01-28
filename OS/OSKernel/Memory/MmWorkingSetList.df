@@ -849,15 +849,16 @@ end
 
 fn MiWorkingSetEntryRemove { wsleptr process -- }
 	// remove the specified entry from the working set. deletes the PTE unless
-	// COW.
-
-	// unmap it from the process's pagemap, and decrement its refcount.
-	// if COW, set transition PTE pointers.
-	// if file, clear any associated dirty PTE pointer.
-
-	// DOES remove the valid bit, but does NOT free the entry; caller must do
-	// that if it wants that to happen.
-
+	// the page frame is private.
+	//
+	// unmap it from the process's pagemap, and decrement the page frame's
+	// refcount.
+	// if private, set the PTE to TRANSITION.
+	// if shared, set the PTE to zero and delete it.
+	//
+	// DOES clear the WSLE valid bit, but does NOT free the WSLE; caller must
+	// do that if he wants that to happen.
+	//
 	// decrements the working set size.
 
 	if (DEBUGCHECKS)
@@ -873,14 +874,11 @@ fn MiWorkingSetEntryRemove { wsleptr process -- }
 	auto ok
 
 	if (process@ PsSystemProcess@ ==)
-		vaddr@ // vaddr
-		MmVirtualtoPTEAddress pteaddr!
+		vaddr@ MmVirtualtoPTEAddress pteaddr!
 	end elseif (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
-		vaddr@ // vaddr
-		MmVirtualtoPTEAddress pteaddr!
+		vaddr@ MmVirtualtoPTEAddress pteaddr!
 	end else
-		vaddr@ // vaddr
-		MmVirtualtoPTEAddressUser pteaddr!
+		vaddr@ MmVirtualtoPTEAddressUser pteaddr!
 	end
 
 	auto phyaddr
@@ -932,17 +930,24 @@ fn MiWorkingSetEntryRemove { wsleptr process -- }
 			MiPTESet
 		end
 	end else
+		// shared page. set the PTE to zero and delete the PTE.
+
 		0 // phyaddr
 		0 // flags
 		pteaddr@ // pteaddr
 		MiPTEUpdate drop drop
 
 		if (process@ PsSystemProcess@ ~=)
+			// system working set, don't delete the PTE since the page tables
+			// are eternal anyway.
+
 			1 // deref
 			pteaddr@ // pteaddr
 			MiPTEDelete
 		end else
-			// shared system pages are assumed to have been in the viewcache
+			// shared system pages are assumed to have been in the viewcache,
+			// so decrement the count of viewcache pages.
+
 			1 MmViewCachePageCount -=
 		end
 	end
@@ -993,10 +998,10 @@ fn MiWorkingSetEntryFree { wsli wsleptr process -- }
 	wsli@ process@ PsProcess_MmHeader + @ MiProcessHeader_WorkingSetFreeListHead + !
 end
 
-// this function is called by the balance set manager thread when free/standby
-// memory is low.
-
 fn MiManageWorkingSets { -- success }
+	// this function is called by the balance set manager thread when the free
+	// and evictable (standby) lists are running dry.
+
 	while (1)
 		auto pagecount
 		auto dire

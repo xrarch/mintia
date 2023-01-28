@@ -104,7 +104,7 @@ update:
 	$(FSTOOL) ud / TextManifest
 	$(FSTOOL) ud / TextManifestSuffixed $(TEXTSUFFIX)
 
-$(DISTIMAGE):
+$(DISTIMAGE): | $(REPO)/build
 	dd if=/dev/zero of=$(DISTIMAGE) bs=512 count=$(DISTIMGSZ) 2>/dev/null
 	$(APTOOL) f $(DISKLABEL) boot -1
 	$(FSTOOL) f
@@ -147,6 +147,9 @@ $(BUILDROOT)/$(DRIVERROOT):
 
 $(BUILDROOT)/$(BINROOT):
 	mkdir -p $(BUILDROOT)/$(BINROOT)
+
+$(REPO)/build:
+	mkdir -p $(REPO)/build
 
 cleanupall:
 	for platform in $(PLATFORMS); do \

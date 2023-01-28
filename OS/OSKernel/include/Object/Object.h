@@ -1,53 +1,3 @@
-// An object may be allocated from either paged or nonpaged pool depending on
-// what is specified in its type object. It is allocated in two pieces: one is
-// an inline allocation from the specified pool, containing the appropriate
-// header, the object's name, and the object's body. The other piece contains
-// the header for the opposite pool. This attempts to maximize what can be
-// placed in paged pool.
-//
-//
-// Inline allocation layout:
-//
-// Ob[HeapType]Header
-// Object Name (w/ null terminator and padding)
-// ObCommonHeader (contains pointer to opposite header)
-//  <-- object pointer
-// Object Body
-
-struct ObCommonHeader
-	4 PagedHeader
-	4 NonpagedHeader
-	4 Name
-endstruct
-
-struct ObNonpagedHeader
-	4 TypeObject
-
-	4 HandleCount  // overlaid with object pointer in deferred deletion
-	4 PointerCount // overlaid with Next link in deferred deletion
-
-	4 QuotaBlock
-endstruct
-
-struct ObPagedHeader
-	4 TypeListNext
-	4 TypeListPrev
-
-	4 DirectoryListNext
-	4 DirectoryListPrev
-
-	4 DirectoryObject
-
-	4 Flags
-
-	4 UID
-	4 GID
-	4 Permissions
-
-	4 PagedQuotaCharge
-	4 NonpagedQuotaCharge
-endstruct
-
 struct ObTypeInitializer
 	4 Name
 	4 Tag
@@ -107,11 +57,18 @@ extern ObObjectReferenceByPointer { object -- oldcount }
 extern ObObjectDereferenceByPointerCapturedHeader { object npheader -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
 
+extern ObConditionallyReferenceObject { object -- ok }
+
 extern ObObjectReferences { object -- refs }
 extern ObObjectNonpagedHeader { object -- npheader }
 extern ObObjectPagedHeader { object -- pheader }
 extern ObObjectName { object -- name }
 extern ObObjectType { object -- type }
+extern ObObjectUIDGID { object -- uid gid }
+extern ObObjectPermissions { object -- permissions }
+extern ObObjectQuotaBlock { object -- quotablock }
+
+extern ObReaperPop { -- object }
 
 extern ObObjectQueryObject { object query -- ok }
 extern ObObjectQuery { objecthandle query -- ok }

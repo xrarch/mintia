@@ -107,6 +107,7 @@ extern ObObjectReferenceByPointer { object -- oldcount }
 extern ObObjectDereferenceByPointerCapturedHeader { object npheader -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
 
+extern ObObjectReferences { object -- refs }
 extern ObObjectNonpagedHeader { object -- npheader }
 extern ObObjectPagedHeader { object -- pheader }
 extern ObObjectName { object -- name }

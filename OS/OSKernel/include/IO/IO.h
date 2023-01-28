@@ -41,30 +41,34 @@ struct IOFile
 	4 OpenedPath
 endstruct
 
-// sort of like a unix vnode
-struct IOFileControlBlock
+struct IOFileControlBlockPaged
 	4 Flags
-	4 CacheInfoBlock
-	4 References
 	4 FileType
 	4 DeviceObject // or parent mountpoint
-	4 DispatchTable
-	4 SizeInBytes
 	4 FSContext
 	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
-
-	ExRwLock_SIZEOF RwLock
-
-	4 AsyncIOCount
-	KeEvent_SIZEOF AsyncIOEvent
 
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
 	KeTime_SIZEOF ChangeTime
 endstruct
 
-const IOFCBFLAG_DELETELASTREFERENCE 1
-const IOFCBFLAG_SYSTEMFILE          2
+// sort of like a unix vnode
+struct IOFileControlBlock
+	4 Paged
+
+	ExRwLock_SIZEOF RwLock
+
+	KeEvent_SIZEOF AsyncIOEvent
+	4 AsyncIOCount
+
+	4 CacheInfoBlock
+	4 DispatchTable
+	4 SizeInBytes
+endstruct
+
+const IOFCBFLAG_PAGED      1
+const IOFCBFLAG_SYSTEMFILE 2
 
 const IOPOKE_WRITE 1
 const IOPOKE_READ  2
@@ -84,9 +88,10 @@ const IOCACHEZEROMAX (512 1024 *)
 // arbitrary value estimating the amount of context an FCB requires from the
 // filesystem driver.
 
-const IOAVERAGEFCBCONTEXT 128
+const IOAVERAGEFCBCONTEXTNP    16
+const IOAVERAGEFCBCONTEXTPAGED 96
 
-extern IOFileControlBlockGetReferences { fcb -- references }
+extern IOFileControlBlockGetFlags { fcb -- flags }
 extern IOFileControlBlockGetContext { fcb -- context }
 extern IOFileControlBlockSetContext { context fcb -- }
 extern IOFileControlBlockGetMount { fcb -- mount }
@@ -96,7 +101,6 @@ extern IOFileControlBlockGetSize { fcb -- size }
 extern IOFileControlBlockSetSize { size fcb -- }
 extern IOFileControlBlockGetCacheInfoBlock { fcb -- cacheblock }
 extern IOFileControlBlockIsPinned { fcb -- pinned }
-extern IOFileControlBlockZeroReference { fcb -- }
 
 extern IOFileControlBlockSetAccessTime { time fcb -- }
 extern IOFileControlBlockSetModifyTime { time fcb -- }
@@ -106,24 +110,17 @@ extern IOFileControlBlockGetAccessTime { fcb -- time }
 extern IOFileControlBlockGetModifyTime { fcb -- time }
 extern IOFileControlBlockGetChangeTime { fcb -- time }
 
-extern IOFileControlBlockIsDoomed { fcb -- doomed }
-
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
 extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 extern IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }
-extern IOFileControlBlockReference { fcb -- oldcount }
-extern IOFileControlBlockDereference { fcb -- oldcount }
 extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 
 extern IOFileControlBlockFlush { fcb -- ok }
-
-extern IOFileControlBlockDeleteLastReference { fcb -- }
-extern IOFileControlBlockRescue { fcb -- }
 
 extern IOFileControlBlockTruncate { newsize growing keeplocked zero flags fcb -- oldsize ok }
 

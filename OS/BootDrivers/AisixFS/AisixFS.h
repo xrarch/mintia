@@ -40,6 +40,7 @@ struct AFSData
 	KeMutex_SIZEOF FreeBlockBitmapMutex
 	KeMutex_SIZEOF INodeAllocationMutex
 	KeMutex_SIZEOF RenameMutex
+	KeMutex_SIZEOF FCBCacheMutex
 
 	4 WritableFiles
 
@@ -48,8 +49,12 @@ struct AFSData
 	4 ReclaimableListHead
 	4 ReclaimableListTail
 
-	(AFSFCBBUCKETS KeMutex_SIZEOF *) FCBCacheMutexes
 	(AFSFCBBUCKETS 8 *) FCBBucketListHeads
+endstruct
+
+struct AFSFCBDataNonpaged
+	4 LastFATLinkBlkOff
+	4 LastFATLinkValue
 endstruct
 
 struct AFSFCBData
@@ -66,11 +71,16 @@ struct AFSFCBData
 	4 Permissions
 	4 IParent
 
-	4 LastFATLinkBlkOff
-	4 LastFATLinkValue
+	4 InitialFlags
+	4 References
+
+	4 Flags
+
+	4 Nonpaged
 endstruct
 
 const AFSFILECONTEXT_UPDATEONCLOSE 1
+const AFSFILEFLAG_DELETE 1
 
 struct AFSDirEnt
 	4 INum
@@ -96,8 +106,6 @@ extern AFSMountDereference { mount -- oldcount }
 
 extern AFSINodeReclaim { preferredcount mount -- actualcount }
 
-extern AFSFCBZeroReferences { fcb -- tryagain }
-
 extern AFSFCBMetadataUnpin { fcb -- ok }
 extern AFSFCBMetadataPin { fcb -- ok }
 
@@ -109,17 +117,16 @@ extern AFSINodeUpdateModificationTime { fcb -- }
 extern AFSINodeAllocate { mount -- inum inode bcb ok }
 extern AFSINodeFree { inum mount -- }
 
-extern AFSFCBRemove { fcb buckethead -- }
-extern AFSFCBInsert { fcb buckethead -- }
+extern AFSFCBReference { fcb -- }
+extern AFSFCBDereference { fcb -- }
 
-extern AFSDelete { fcb -- }
 extern AFSFCBDelete { fcb -- }
 
-extern AFSFCBCacheLockBucket { bucket mount -- ok }
-extern AFSFCBCacheUnlockBucket { bucket mount -- }
+extern AFSFCBCacheLock { alertable mount -- ok }
+extern AFSFCBCacheUnlock { mount -- }
 
 extern AFSFCBCacheFlush { destroy mount -- ok }
-extern AFSFCBRead { inum mount -- fcb ok }
+extern AFSFCBRead { flags inum mount -- fcb ok }
 
 extern AFSBlockBitmapInitialize { mount -- ok }
 extern AFSBlockBitmapUninitialize { mount -- }

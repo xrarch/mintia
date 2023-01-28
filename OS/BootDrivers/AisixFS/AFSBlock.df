@@ -581,6 +581,12 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
 
+	auto fcbnp
+	fcbdata@ AFSFCBData_Nonpaged + @ fcbnp!
+
+	auto firstlink
+	fcbdata@ AFSFCBData_FirstFATLink + @ firstlink!
+
 	auto fcbblocks
 	fcb@ IOFileControlBlockGetSize AFSBLOCKOFFMASK + AFSBLOCKSHIFT >> fcbblocks!
 
@@ -591,7 +597,7 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	if (blkoff@ 0 ==)
 		// bit of a fast path
 
-		fcbdata@ AFSFCBData_FirstFATLink + @ blkno!
+		firstlink@ blkno!
 
 		return
 	end
@@ -600,17 +606,17 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	HALCPUInterruptDisable rs!
 
 	auto lastlookup
-	fcbdata@ AFSFCBData_LastFATLinkBlkOff + @ lastlookup!
+	fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + @ lastlookup!
 
 	auto walkcount
 	auto walkstart
 
 	if (blkoff@ lastlookup@ >=)
 		blkoff@ lastlookup@ - walkcount!
-		fcbdata@ AFSFCBData_LastFATLinkValue + @ walkstart!
+		fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + @ walkstart!
 	end else
 		blkoff@ walkcount!
-		fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
+		firstlink@ walkstart!
 	end
 
 	rs@ HALCPUInterruptRestore
@@ -634,8 +640,8 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	HALCPUInterruptDisable rs!
 
 	if (blkoff@ lastlookup@ >= blkoff@ 8 >= ||)
-		blkoff@ fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
-		blkno@ fcbdata@ AFSFCBData_LastFATLinkValue + !
+		blkoff@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + !
+		blkno@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
 	end
 
 	rs@ HALCPUInterruptRestore
@@ -645,8 +651,8 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
 
-	auto lastlookup
-	fcbdata@ AFSFCBData_LastFATLinkBlkOff + @ lastlookup!
+	auto fcbnp
+	fcbdata@ AFSFCBData_Nonpaged + @ fcbnp!
 
 	auto walkcount
 	auto walkstart
@@ -659,7 +665,7 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 		if (newblocks@)
 			newblocks@ 1 - walkcount!
 		end else
-			newblocks@ walkcount!
+			0 walkcount!
 		end
 
 		fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
@@ -668,13 +674,7 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 
 		if (oldblocks@)
 			oldblocks@ 1 - walkcount!
-
-			if (walkcount@ lastlookup@ >=)
-				walkcount@ lastlookup@ - walkcount!
-				fcbdata@ AFSFCBData_LastFATLinkValue + @ walkstart!
-			end else
-				fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
-			end
+			fcbdata@ AFSFCBData_FirstFATLink + @ walkstart!
 		end else
 			-1 walkcount!
 		end
@@ -700,6 +700,8 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 		walkstart@ blkno!
 	end
 
+	auto rs
+
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	if (newblocks@ oldblocks@ <)
@@ -723,8 +725,10 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 			0xFFFFFFFF fcbdata@ AFSFCBData_FirstFATLink + !
 		end
 
-		0 fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
-		fcbdata@ AFSFCBData_FirstFATLink + @ fcbdata@ AFSFCBData_LastFATLinkValue + !
+		HALCPUInterruptDisable rs!
+		0 fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + !
+		fcbdata@ AFSFCBData_FirstFATLink + @ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
+		rs@ HALCPUInterruptRestore
 	end else
 		auto startblock
 
@@ -748,9 +752,13 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 
 			startblock@ fcbdata@ AFSFCBData_FirstFATLink + !
 
-			if (lastlookup@ 0 ==)
-				startblock@ fcbdata@ AFSFCBData_LastFATLinkValue + !
+			HALCPUInterruptDisable rs!
+
+			if (fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + @ ~~)
+				startblock@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
 			end
+
+			rs@ HALCPUInterruptRestore
 		end
 
 		if (zero@)

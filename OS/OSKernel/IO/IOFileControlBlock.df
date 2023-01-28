@@ -31,16 +31,33 @@
 fn IOiFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	fnsection "PAGE$text"
 
-	devobj@ fcb@ IOFileControlBlock_DeviceObject + !
-	filetype@ fcb@ IOFileControlBlock_FileType + !
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
 
-	flags@ fcb@ IOFileControlBlock_Flags + !
+	devobj@ fcbp@ IOFileControlBlockPaged_DeviceObject + !
+	filetype@ fcbp@ IOFileControlBlockPaged_FileType + !
+
+	flags@ fcbp@ IOFileControlBlockPaged_Flags + !
 	0 fcb@ IOFileControlBlock_CacheInfoBlock + !
-	0 fcb@ IOFileControlBlock_References + !
 	0 fcb@ IOFileControlBlock_SizeInBytes + !
 	dispatchtable@ fcb@ IOFileControlBlock_DispatchTable + !
-	0 fcb@ IOFileControlBlock_FSContext + !
-	0 fcb@ IOFileControlBlock_Mount + !
+	0 fcbp@ IOFileControlBlockPaged_FSContext + !
+	0 fcbp@ IOFileControlBlockPaged_Mount + !
+
+	fcbp@ IOFileControlBlockPaged_AccessTime + // ptr
+	KeTime_SIZEOF // size
+	0 // word
+	memset
+
+	fcbp@ IOFileControlBlockPaged_ModifyTime + // ptr
+	KeTime_SIZEOF // size
+	0 // word
+	memset
+
+	fcbp@ IOFileControlBlockPaged_ChangeTime + // ptr
+	KeTime_SIZEOF // size
+	0 // word
+	memset
 
 	0 fcb@ IOFileControlBlock_AsyncIOCount + !
 
@@ -53,21 +70,6 @@ fn IOiFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
 	"FCBRwLock" // name
 	fcb@ IOFileControlBlock_RwLock + // rwlock
 	ExRwLockInitialize
-
-	fcb@ IOFileControlBlock_AccessTime + // ptr
-	KeTime_SIZEOF // size
-	0 // word
-	memset
-
-	fcb@ IOFileControlBlock_ModifyTime + // ptr
-	KeTime_SIZEOF // size
-	0 // word
-	memset
-
-	fcb@ IOFileControlBlock_ChangeTime + // ptr
-	KeTime_SIZEOF // size
-	0 // word
-	memset
 end
 
 fn IOFileControlBlockIncrementReclaimable { -- }
@@ -110,6 +112,28 @@ fn IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
 	if (ok@)
 		return
 	end
+
+	auto fcbp
+
+	if (flags@ IOFCBFLAG_PAGED &)
+		IOFileControlBlockPaged_SIZEOF // bytes
+		'IOFp' // tag
+		PAGED // flags
+		MmAllocWithTag ok! fcbp!
+	end else
+		IOFileControlBlockPaged_SIZEOF // bytes
+		'IOFn' // tag
+		CANBLOCK // flags
+		MmAllocWithTag ok! fcbp!
+	end
+
+	if (ok@)
+		fcb@ MmFree
+
+		return
+	end
+
+	fcbp@ fcb@ IOFileControlBlock_Paged + !
 
 	dispatchtable@ // dispatchtable
 	devobj@ // devobj
@@ -171,6 +195,7 @@ fn IOFileControlBlockDelete { writeout fcb -- ok }
 		return
 	end
 
+	fcb@ IOFileControlBlock_Paged + @ MmFree
 	fcb@ MmFree
 end
 
@@ -204,131 +229,6 @@ fn IOFileControlBlockUnlock { fcb -- }
 	fcb@ IOFileControlBlock_RwLock + ExRwLockRelease
 end
 
-fn IOFileControlBlockDeleteLastReference { fcb -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-	IOFCBFLAG_DELETELASTREFERENCE fcb@ IOFileControlBlock_Flags + |=
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOFileControlBlockRescue { fcb -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-	IOFCBFLAG_DELETELASTREFERENCE ~ fcb@ IOFileControlBlock_Flags + &=
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOFileControlBlockReference { fcb -- oldcount }
-	// should be called by filesystem driver in its parse method.
-	// the circumstances in which this is called, and the interactions it has
-	// with the filesystem driver's reclamation structures, should be very
-	// well understood.
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	fcb@ IOFileControlBlock_References + @ oldcount!
-	oldcount@ 1 + fcb@ IOFileControlBlock_References + !
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn IOFileControlBlockDereference { fcb -- oldcount }
-	// should be called by filesystem driver in its delete method.
-
-	while (1)
-		auto rs
-		HALCPUInterruptDisable rs!
-
-		fcb@ IOFileControlBlock_References + @ oldcount!
-
-		if (DEBUGCHECKS)
-			if (oldcount@ 0 ==)
-				"IOFileControlBlockDereference: refcount underflow\n" KeCrash
-			end
-		end
-
-		if (oldcount@ 1 ==)
-			if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_DELETELASTREFERENCE &)
-				rs@ HALCPUInterruptRestore
-
-				// this FCB was marked for deferred deletion, so instead of
-				// reclaiming it or whatever else, we need to call the
-				// filesystem driver so that it can delete the file on disk.
-				//
-				// assumes that the filesystem already guaranteed that the
-				// refcount on this FCB can never be incremented again, by
-				// removing its name from the directory tree or through some
-				// other mechanism.
-
-				KeThreadCurrent@ KeThreadIgnoreKill drop
-
-				auto cacheblock
-				fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-				if (cacheblock@)
-					0 // writeout
-					cacheblock@ // cacheblock
-					IOiCacheInfoBlockDestroy drop
-
-					0 fcb@ IOFileControlBlock_CacheInfoBlock + !
-				end
-
-				fcb@ // fcb
-				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Delete + @
-				IODispatchDeleteFunction
-
-				KeThreadCurrent@ KeThreadAcceptKill drop
-
-				0 // writeout
-				fcb@ // fcb
-				IOFileControlBlockDelete drop
-
-				return
-			end elseif (fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ZeroFCBReferences + @)
-				rs@ HALCPUInterruptRestore
-
-				// the filesystem driver wants to know when an FCB reaches zero
-				// references, so instead of directly setting the refcount to
-				// 0, leave it biased and call into this function to do some
-				// work. if it asks us to try again, we loop back to the start
-				// of this function. it will do this if it fails to set the
-				// refcount to zero by itself for some reason, such as the
-				// refcount being incremented inbetween now and when it locks
-				// its own structures.
-
-				auto tryagain
-
-				KeThreadCurrent@ KeThreadIgnoreKill drop
-
-				fcb@ // fcb
-				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_ZeroFCBReferences + @
-				IODispatchZeroFCBReferencesFunction tryagain!
-
-				KeThreadCurrent@ KeThreadAcceptKill drop
-
-				if (tryagain@)
-					continue
-				end
-
-				return
-			end else
-				oldcount@ 1 - fcb@ IOFileControlBlock_References + !
-
-				rs@ HALCPUInterruptRestore
-
-				return
-			end
-		end else
-			oldcount@ 1 - fcb@ IOFileControlBlock_References + !
-
-			rs@ HALCPUInterruptRestore
-
-			return
-		end
-	end
-end
-
 fn IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 	fnsection "PAGE$text"
 
@@ -360,7 +260,7 @@ end
 fn IOFileControlBlockTruncate { newsize growing keeplocked zero flags fcb -- oldsize ok }
 	fnsection "PAGE$text"
 
-	if (fcb@ IOFileControlBlock_FileType + @ OSFILETYPE_DIRECTORY ==)
+	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
 		STATUS_IS_A_DIRECTORY ok!
 		return
 	end
@@ -448,32 +348,32 @@ end
 // millions of getters and setters so we don't break every driver whenever we
 // change the struct
 
-fn IOFileControlBlockGetReferences { fcb -- references }
-	fcb@ IOFileControlBlock_References + @ references!
-end
-
 fn IOFileControlBlockGetContext { fcb -- context }
-	fcb@ IOFileControlBlock_FSContext + @ context!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ context!
 end
 
 fn IOFileControlBlockSetContext { context fcb -- }
-	context@ fcb@ IOFileControlBlock_FSContext + !
+	context@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + !
 end
 
 fn IOFileControlBlockGetMount { fcb -- mount }
-	fcb@ IOFileControlBlock_DeviceObject + @ mount!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_DeviceObject + @ mount!
 end
 
 fn IOFileControlBlockGetDeviceObject { fcb -- devobj }
-	fcb@ IOFileControlBlock_DeviceObject + @ devobj!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_DeviceObject + @ devobj!
 end
 
 fn IOFileControlBlockGetType { fcb -- filetype }
-	fcb@ IOFileControlBlock_FileType + @ filetype!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ filetype!
 end
 
 fn IOFileControlBlockGetSize { fcb -- size }
 	fcb@ IOFileControlBlock_SizeInBytes + @ size!
+end
+
+fn IOFileControlBlockGetFlags { fcb -- flags }
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Flags + @ flags!
 end
 
 fn IOFileControlBlockSetSize { size fcb -- }
@@ -485,46 +385,41 @@ fn IOFileControlBlockGetCacheInfoBlock { fcb -- cacheblock }
 end
 
 fn IOFileControlBlockSetAccessTime { time fcb -- }
-	time@ KeTime_SecPart + @ fcb@ IOFileControlBlock_AccessTime + KeTime_SecPart + !
-	time@ KeTime_MsPart + @ fcb@ IOFileControlBlock_AccessTime + KeTime_MsPart + !
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
+
+	time@ KeTime_SecPart + @ fcbp@ IOFileControlBlockPaged_AccessTime + KeTime_SecPart + !
+	time@ KeTime_MsPart + @ fcbp@ IOFileControlBlockPaged_AccessTime + KeTime_MsPart + !
 end
 
 fn IOFileControlBlockSetModifyTime { time fcb -- }
-	time@ KeTime_SecPart + @ fcb@ IOFileControlBlock_ModifyTime + KeTime_SecPart + !
-	time@ KeTime_MsPart + @ fcb@ IOFileControlBlock_ModifyTime + KeTime_MsPart + !
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
+
+	time@ KeTime_SecPart + @ fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_SecPart + !
+	time@ KeTime_MsPart + @ fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_MsPart + !
 end
 
 fn IOFileControlBlockSetChangeTime { time fcb -- }
-	time@ KeTime_SecPart + @ fcb@ IOFileControlBlock_ChangeTime + KeTime_SecPart + !
-	time@ KeTime_MsPart + @ fcb@ IOFileControlBlock_ChangeTime + KeTime_MsPart + !
-end
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
 
-fn IOFileControlBlockZeroReference { fcb -- }
-	if (DEBUGCHECKS)
-		if (fcb@ IOFileControlBlock_References + @ 1 ~=)
-			"IOFileControlBlockZeroReference\n" KeCrash
-		end
-	end
-
-	0 fcb@ IOFileControlBlock_References + !
+	time@ KeTime_SecPart + @ fcbp@ IOFileControlBlockPaged_ChangeTime + KeTime_SecPart + !
+	time@ KeTime_MsPart + @ fcbp@ IOFileControlBlockPaged_ChangeTime + KeTime_MsPart + !
 end
 
 fn IOFileControlBlockGetAccessTime { fcb -- time }
-	fcb@ IOFileControlBlock_AccessTime + time!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_AccessTime + time!
 end
 
 fn IOFileControlBlockGetModifyTime { fcb -- time }
-	fcb@ IOFileControlBlock_ModifyTime + time!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime + time!
 end
 
 fn IOFileControlBlockGetChangeTime { fcb -- time }
-	fcb@ IOFileControlBlock_ChangeTime + time!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ChangeTime + time!
 end
 
 fn IOFileControlBlockGetSizeof { -- sizeof }
 	IOFileControlBlock_SIZEOF sizeof!
-end
-
-fn IOFileControlBlockIsDoomed { fcb -- doomed }
-	fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_DELETELASTREFERENCE & doomed!
 end

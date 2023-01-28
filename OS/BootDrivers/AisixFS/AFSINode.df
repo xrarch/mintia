@@ -268,43 +268,17 @@ fn AFSINodeUpdate { fcb -- }
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
-fn AFSFCBCacheLockBucket { bucket mount -- ok }
-	if (DEBUGCHECKS)
-		if (bucket@ AFSFCBBUCKETS >=)
-			"AFSFCBCacheLockBucket: bucket >= AFSFCBBUCKETS\n" KeCrash
-		end
-	end
-
+fn AFSFCBCacheLock { alertable mount -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * + // object
+	mount@ IOMountGetContext AFSData_FCBCacheMutex + // object
 	KeThreadWaitForObject ok!
 end
 
-fn AFSFCBCacheLockBucketUnalertable { bucket mount -- }
-	if (DEBUGCHECKS)
-		if (bucket@ AFSFCBBUCKETS >=)
-			"AFSFCBCacheLockBucketUnalertable: bucket >= AFSFCBBUCKETS\n" KeCrash
-		end
-	end
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * + // object
-	KeThreadWaitForObject drop
-end
-
-fn AFSFCBCacheUnlockBucket { bucket mount -- }
-	if (DEBUGCHECKS)
-		if (bucket@ AFSFCBBUCKETS >=)
-			"AFSFCBCacheUnlockBucket: bucket >= AFSFCBBUCKETS\n" KeCrash
-		end
-	end
-
+fn AFSFCBCacheUnlock { mount -- }
 	0 // abandon
-	mount@ IOMountGetContext AFSData_FCBCacheMutexes + bucket@ KeMutex_SIZEOF * + // mutex
+	mount@ IOMountGetContext AFSData_FCBCacheMutex + // mutex
 	KeMutexRelease drop
 end
 
@@ -355,65 +329,6 @@ fn AFSFCBInsert { fcb buckethead -- }
 	fcb@ buckethead@!
 end
 
-fn AFSFCBInsertReclaimable { fcb afsdata -- }
-	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto t
-	afsdata@ AFSData_ReclaimableListTail + @ t!
-
-	if (t@ ~~)
-		0 fcbdata@ AFSFCBData_ReclaimNext + !
-		0 fcbdata@ AFSFCBData_ReclaimPrev + !
-
-		fcb@ afsdata@ AFSData_ReclaimableListHead + !
-		fcb@ afsdata@ AFSData_ReclaimableListTail + !
-	end else
-		0 fcbdata@ AFSFCBData_ReclaimNext + !
-
-		t@ fcbdata@ AFSFCBData_ReclaimPrev + !
-		fcb@ t@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
-		fcb@ afsdata@ AFSData_ReclaimableListTail + !
-	end
-
-	rs@ HALCPUInterruptRestore
-
-	IOFileControlBlockIncrementReclaimable
-end
-
-fn AFSFCBRemoveReclaimable { fcb afsdata -- }
-	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto ls
-	fcbdata@ AFSFCBData_ReclaimPrev + @ ls!
-
-	auto ns
-	fcbdata@ AFSFCBData_ReclaimNext + @ ns!
-
-	if (ls@)
-		ns@ ls@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
-	end else
-		ns@ afsdata@ AFSData_ReclaimableListHead + !
-	end
-
-	if (ns@)
-		ls@ ns@ IOFileControlBlockGetContext AFSFCBData_ReclaimPrev + !
-	end else
-		ls@ afsdata@ AFSData_ReclaimableListTail + !
-	end
-
-	rs@ HALCPUInterruptRestore
-
-	IOFileControlBlockDecrementReclaimable
-end
-
 fn AFSMountReference { mount -- oldcount }
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
@@ -459,14 +374,12 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
+	0 mount@ AFSFCBCacheLock drop
+
 	auto i
 	0 i!
 
 	while (i@ AFSFCBBUCKETS <)
-		i@ // bucket
-		mount@ // mount
-		AFSFCBCacheLockBucket drop
-
 		auto buckethead
 		afsdata@ AFSData_FCBBucketListHeads + i@ 3 << + buckethead!
 
@@ -482,16 +395,12 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 
 			if (destroy@)
 				if (DEBUGCHECKS)
-					if (fcb@ IOFileControlBlockGetReferences)
+					if (fcbdata@ AFSFCBData_References + @)
 						"AFSFCBCacheFlush: destroy: fcb refcount > 0\n" KeCrash
 					end
 				end
 
-				fcb@ // fcb
-				afsdata@ // afsdata
-				AFSFCBRemoveReclaimable
-
-				fcb@ IOFileControlBlockReference drop
+				fcb@ AFSFCBReferenceLockHeld
 
 				1 // writeout
 				fcb@ // fcb
@@ -516,10 +425,6 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 			nextfcb@ fcb!
 		end
 
-		i@ // bucket
-		mount@ // mount
-		AFSFCBCacheUnlockBucket
-
 		if (ok@)
 			break
 		end
@@ -527,10 +432,12 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 		1 i +=
 	end
 
+	mount@ AFSFCBCacheUnlock
+
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
-fn (IODispatchDeleteFunction) AFSDelete { fcb -- }
+fn AFSDelete { fcb -- }
 	// called by IOFileControlBlockDereference when it is removing the last
 	// reference from the FCB and the DeleteLastReference flag is set.
 
@@ -566,17 +473,9 @@ fn (IODispatchDeleteFunction) AFSDelete { fcb -- }
 		end
 	end
 
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheLockBucket drop
-
 	fcb@ // fcb
 	buckethead@ // buckethead
 	AFSFCBRemove
-
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheUnlockBucket
 
 	auto ok
 	auto bcb
@@ -598,6 +497,7 @@ fn (IODispatchDeleteFunction) AFSDelete { fcb -- }
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop
 
+	fcbdata@ AFSFCBData_Nonpaged + @ MmFree
 	fcbdata@ MmFree
 end
 
@@ -610,8 +510,7 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount mount -- actua
 
 	0 actualcount!
 
-	auto lockedbucket
-	-1 lockedbucket!
+	0 mount@ AFSFCBCacheLock drop
 
 	while (actualcount@ preferredcount@ <)
 		auto fcb
@@ -625,63 +524,20 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount mount -- actua
 		// proceed with reclaiming it, otherwise we have to restart and try a
 		// new one.
 
-		auto rs
-		HALCPUInterruptDisable rs!
-
 		afsdata@ AFSData_ReclaimableListHead + @ fcb!
 
 		if (fcb@ ~~)
-			rs@ HALCPUInterruptRestore
-
 			break
 		end
 
 		fcb@ IOFileControlBlockGetContext fcbdata!
 		fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
 
-		rs@ HALCPUInterruptRestore
-
-		if (lockedbucket@ bucket@ ~=)
-			if (lockedbucket@ -1 ~=)
-				lockedbucket@ // bucket
-				mount@ // mount
-				AFSFCBCacheUnlockBucket
-			end
-
-			bucket@ // bucket
-			mount@ // mount
-			AFSFCBCacheLockBucket drop
-
-			bucket@ lockedbucket!
-
-			HALCPUInterruptDisable rs!
-
-			afsdata@ AFSData_ReclaimableListHead + @ fcb!
-
-			if (fcb@ ~~)
-				rs@ HALCPUInterruptRestore
-
-				break
-			end
-
-			fcb@ IOFileControlBlockGetContext fcbdata!
-			fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
-
-			rs@ HALCPUInterruptRestore
-
-			if (bucket@ lockedbucket@ ~=)
-				// the list changed state, so try again.
-				continue
-			end
-		end
-
 		// we have selected an FCB and locked the appropriate cache bucket.
 
 		// first, remove it from the reclaimable list.
 
-		fcb@ // fcb
-		afsdata@ // afsdata
-		AFSFCBRemoveReclaimable
+		fcb@ AFSFCBReferenceLockHeld
 
 		// next, remove it from the cache bucket.
 
@@ -702,11 +558,7 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount mount -- actua
 		1 actualcount +=
 	end
 
-	if (lockedbucket@ -1 ~=)
-		lockedbucket@ // bucket
-		mount@ // mount
-		AFSFCBCacheUnlockBucket
-	end
+	mount@ AFSFCBCacheUnlock
 end
 
 fn AFSFCBDelete { fcb -- }
@@ -730,39 +582,33 @@ fn AFSFCBDelete { fcb -- }
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheLockBucket drop
+	0 mount@ AFSFCBCacheLock drop
 
 	fcb@ // fcb
 	buckethead@ // buckethead
 	AFSFCBRemove
 
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheUnlockBucket
+	mount@ AFSFCBCacheUnlock
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
+	fcbdata@ AFSFCBData_Nonpaged + @ MmFree
 	fcbdata@ MmFree
 end
 
-fn AFSFCBZeroReferences { fcb -- tryagain }
-	// this is called when an FCB reaches zero references. the refcount is
-	// still biased by one and it is our responsibility to set it to zero.
-	// this gives us an opportunity to place the FCB on our reclamation
-	// structures. this requires locking the bucket mutex in order to maintain
-	// the proper synchronization.
-	//
-	// if we discover, between being called and locking the bucket mutex, that
-	// the FCB has once again reached >1 references, we return 1 in tryagain
-	// to the caller to indicate that he should try the deref operation again.
-	// it will be repeated until it succeeds.
+fn AFSFCBReference { fcb -- }
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
 
-	0 tryagain!
+	0 mount@ AFSFCBCacheLock drop
 
-	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ AFSFCBReferenceLockHeld
+
+	mount@ AFSFCBCacheUnlock
+end
+
+fn AFSFCBReferenceLockHeld { fcb -- }
+	// assumes the FCB cache lock is held
 
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
@@ -770,35 +616,95 @@ fn AFSFCBZeroReferences { fcb -- tryagain }
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
 
-	auto bucket
-	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
 
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheLockBucket drop
+	auto oldcount
+	fcbdata@ AFSFCBData_References + @ oldcount!
 
-	if (fcb@ IOFileControlBlockGetReferences 1 >)
-		bucket@ // bucket
-		mount@ // mount
-		AFSFCBCacheUnlockBucket
+	oldcount@ 1 + fcbdata@ AFSFCBData_References + !
 
-		1 tryagain!
+	if (oldcount@ ~~)
+		// remove from reclaimable list
 
-		return
+		auto ls
+		fcbdata@ AFSFCBData_ReclaimPrev + @ ls!
+
+		auto ns
+		fcbdata@ AFSFCBData_ReclaimNext + @ ns!
+
+		if (ls@)
+			ns@ ls@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
+		end else
+			ns@ afsdata@ AFSData_ReclaimableListHead + !
+		end
+
+		if (ns@)
+			ls@ ns@ IOFileControlBlockGetContext AFSFCBData_ReclaimPrev + !
+		end else
+			ls@ afsdata@ AFSData_ReclaimableListTail + !
+		end
+
+		IOFileControlBlockDecrementReclaimable
 	end
-
-	fcb@ // fcb
-	afsdata@ // afsdata
-	AFSFCBInsertReclaimable
-
-	fcb@ IOFileControlBlockZeroReference
-
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheUnlockBucket
 end
 
-fn AFSFCBRead { inum mount -- fcb ok }
+fn AFSFCBDereference { fcb -- }
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
+
+	0 mount@ AFSFCBCacheLock drop
+
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	auto oldcount
+	fcbdata@ AFSFCBData_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ ~~)
+			"AFSFCBDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - fcbdata@ AFSFCBData_References + !
+
+	if (oldcount@ 1 ==)
+		if (fcbdata@ AFSFCBData_Flags + @ AFSFILEFLAG_DELETE &)
+			// delete the FCB
+
+			fcb@ AFSDelete
+		end else
+			// insert into reclaimable list
+
+			auto t
+			afsdata@ AFSData_ReclaimableListTail + @ t!
+
+			if (t@ ~~)
+				0 fcbdata@ AFSFCBData_ReclaimNext + !
+				0 fcbdata@ AFSFCBData_ReclaimPrev + !
+
+				fcb@ afsdata@ AFSData_ReclaimableListHead + !
+				fcb@ afsdata@ AFSData_ReclaimableListTail + !
+			end else
+				0 fcbdata@ AFSFCBData_ReclaimNext + !
+
+				t@ fcbdata@ AFSFCBData_ReclaimPrev + !
+				fcb@ t@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
+				fcb@ afsdata@ AFSData_ReclaimableListTail + !
+			end
+
+			IOFileControlBlockIncrementReclaimable
+		end
+	end
+
+	mount@ AFSFCBCacheUnlock
+end
+
+fn AFSFCBRead { flags inum mount -- fcb ok }
 	auto afsdata
 	mount@ IOMountGetContext afsdata!
 
@@ -823,9 +729,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 	IOFileControlBlockThrottle
 
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheLockBucket ok!
+	1 mount@ AFSFCBCacheLock ok!
 
 	if (ok@)
 		return
@@ -861,9 +765,7 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		AFSINodeRead ok! bcb! ptr!
 
 		if (ok@)
-			bucket@ // bucket
-			mount@ // mount
-			AFSFCBCacheUnlockBucket
+			mount@ AFSFCBCacheUnlock
 
 			return
 		end
@@ -880,16 +782,22 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			"AFSFCBRead: i=%d weird inode type %d\n" KeCrash
 		end
 
-		DriverAFSDispatch // dispatchtable
-		mount@ // devobj
-		filetype@ // filetype
-		0 // flags
-		IOFileControlBlockCreate ok! fcb!
+		if (flags@ OSFILEFLAG_PAGEFILE &)
+			DriverAFSDispatch // dispatchtable
+			mount@ // devobj
+			filetype@ // filetype
+			0 // flags
+			IOFileControlBlockCreate ok! fcb!
+		end else
+			DriverAFSDispatch // dispatchtable
+			mount@ // devobj
+			filetype@ // filetype
+			IOFCBFLAG_PAGED // flags
+			IOFileControlBlockCreate ok! fcb!
+		end
 
 		if (ok@)
-			bucket@ // bucket
-			mount@ // mount
-			AFSFCBCacheUnlockBucket
+			mount@ AFSFCBCacheUnlock
 
 			bcb@ VcBufferDecrementMapCount drop
 
@@ -898,24 +806,56 @@ fn AFSFCBRead { inum mount -- fcb ok }
 
 		// allocate a new fcbdata
 
-		AFSFCBData_SIZEOF // bytes
-		'AFCX' // tag
-		0 // flags
-		MmAllocWithTag ok! fcbdata!
+		if (flags@ OSFILEFLAG_PAGEFILE & ~~)
+			AFSFCBData_SIZEOF // bytes
+			'AFCp' // tag
+			PAGED // flags
+			MmAllocWithTag ok! fcbdata!
+		end else
+			AFSFCBData_SIZEOF // bytes
+			'AFCX' // tag
+			0 // flags
+			MmAllocWithTag ok! fcbdata!
+		end
 
 		if (ok@)
 			-1 // writeout
 			fcb@ // fcb
 			IOFileControlBlockDelete drop
 
-			bucket@ // bucket
-			mount@ // mount
-			AFSFCBCacheUnlockBucket
+			mount@ AFSFCBCacheUnlock
 
 			bcb@ VcBufferDecrementMapCount drop
 
 			return
 		end
+
+		auto fcbnp
+		AFSFCBDataNonpaged_SIZEOF // bytes
+		'AFCn' // tag
+		0 // flags
+		MmAllocWithTag ok! fcbnp!
+
+		if (ok@)
+			fcbdata@ MmFree
+
+			-1 // writeout
+			fcb@ // fcb
+			IOFileControlBlockDelete drop
+
+			mount@ AFSFCBCacheUnlock
+
+			bcb@ VcBufferDecrementMapCount drop
+
+			return
+		end
+
+		fcbnp@ fcbdata@ AFSFCBData_Nonpaged + !
+
+		1 fcbdata@ AFSFCBData_References + !
+		flags@ fcbdata@ AFSFCBData_InitialFlags + !
+
+		0 fcbdata@ AFSFCBData_Flags + !
 
 		0 fcbdata@ AFSFCBData_NextFCB + !
 		0 fcbdata@ AFSFCBData_PrevFCB + !
@@ -931,8 +871,8 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		ptr@ AFSINode_permissions + @ fcbdata@ AFSFCBData_Permissions + !
 		ptr@ AFSINode_iparent + @ fcbdata@ AFSFCBData_IParent + !
 
-		0 fcbdata@ AFSFCBData_LastFATLinkBlkOff + !
-		ptr@ AFSINode_startblock + @ fcbdata@ AFSFCBData_LastFATLinkValue + !
+		0 fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + !
+		ptr@ AFSINode_startblock + @ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
 
 		fcbdata@ fcb@ IOFileControlBlockSetContext
 
@@ -949,11 +889,23 @@ fn AFSFCBRead { inum mount -- fcb ok }
 		buckethead@ // buckethead
 		AFSFCBInsert
 
-		fcb@ IOFileControlBlockReference drop
-
 		// fcb@ "->0x%08x " Printf
 	end else
 		// found the FCB, it was in the cache already!
+
+		fcb@ IOFileControlBlockGetContext fcbdata!
+
+		if (flags@ OSFILEFLAG_PAGEFILE &)
+			if (fcbdata@ AFSFCBData_InitialFlags + @ OSFILEFLAG_PAGEFILE & ~~)
+				// fcbdata is in paged pool, so it won't work for the pagefile.
+
+				mount@ AFSFCBCacheUnlock
+
+				STATUS_FORBIDDEN_OPERATION ok!
+
+				return
+			end
+		end
 
 		// remove from hash list and reinsert on the recently-used end
 
@@ -967,23 +919,8 @@ fn AFSFCBRead { inum mount -- fcb ok }
 			AFSFCBInsert
 		end
 
-		auto oldcount
-		fcb@ IOFileControlBlockReference oldcount!
-
-		if (DEBUGCHECKS)
-			if (fcb@ IOFileControlBlockIsDoomed)
-				"AFSFCBRead: grabbed doomed inode\n" KeCrash
-			end
-		end
-
-		if (oldcount@ ~~)
-			fcb@ // fcb
-			afsdata@ // afsdata
-			AFSFCBRemoveReclaimable
-		end
+		fcb@ AFSFCBReferenceLockHeld
 	end
 
-	bucket@ // bucket
-	mount@ // mount
-	AFSFCBCacheUnlockBucket
+	mount@ AFSFCBCacheUnlock
 end

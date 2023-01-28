@@ -61,7 +61,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			end
 		end
 
-		initialfcb@ IOFileControlBlockReference drop
+		initialfcb@ AFSFCBReference
 
 		if (flags@ OSFILEFLAG_CREATE &)
 			initialfcb@ IOFileControlBlockLock ok!
@@ -70,7 +70,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 		end
 
 		if (ok@)
-			initialfcb@ IOFileControlBlockDereference drop
+			initialfcb@ AFSFCBDereference
 			return
 		end
 
@@ -107,7 +107,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					// no rights
 
 					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ IOFileControlBlockDereference drop
+					initialfcb@ AFSFCBDereference
 
 					return
 				end
@@ -127,7 +127,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 				if (len@ 59 >=)
 					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ IOFileControlBlockDereference drop
+					initialfcb@ AFSFCBDereference
 
 					STATUS_NAME_TOO_LONG ok!
 
@@ -156,12 +156,13 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					continue
 				end
 
+				0 // flags
 				iparent@ // inum
 				initialfcb@ IOFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
 
 				initialfcb@ IOFileControlBlockUnlock
-				initialfcb@ IOFileControlBlockDereference drop
+				initialfcb@ AFSFCBDereference
 
 				if (ok@)
 					return
@@ -171,7 +172,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					nextfcb@ IOFileControlBlockCacheCheck ok! drop
 
 					if (ok@)
-						nextfcb@ IOFileControlBlockDereference drop
+						nextfcb@ AFSFCBDereference
 
 						return
 					end
@@ -184,7 +185,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				end
 
 				if (ok@)
-					nextfcb@ IOFileControlBlockDereference drop
+					nextfcb@ AFSFCBDereference
 
 					return
 				end
@@ -225,21 +226,29 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				end
 
 				initialfcb@ IOFileControlBlockUnlock
-				initialfcb@ IOFileControlBlockDereference drop
+				initialfcb@ AFSFCBDereference
 
 				return
 			end
 
 			// found the entry!
 
-			dirent@ AFSDirEnt_INum + @ // inum
-			initialfcb@ IOFileControlBlockGetMount // mount
-			AFSFCBRead ok! nextfcb!
+			if (path@ gb 0 ==)
+				flags@ // flags
+				dirent@ AFSDirEnt_INum + @ // inum
+				initialfcb@ IOFileControlBlockGetMount // mount
+				AFSFCBRead ok! nextfcb!
+			end else
+				0 // flags
+				dirent@ AFSDirEnt_INum + @ // inum
+				initialfcb@ IOFileControlBlockGetMount // mount
+				AFSFCBRead ok! nextfcb!
+			end
 
 			bcb@ VcBufferDecrementMapCount drop
 
 			initialfcb@ IOFileControlBlockUnlock
-			initialfcb@ IOFileControlBlockDereference drop
+			initialfcb@ AFSFCBDereference
 
 			if (ok@)
 				return
@@ -247,7 +256,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 			if (path@ gb)
 				if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
-					nextfcb@ IOFileControlBlockDereference drop
+					nextfcb@ AFSFCBDereference
 
 					STATUS_NOT_A_DIRECTORY ok!
 
@@ -260,7 +269,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					nextfcb@ IOFileControlBlockCacheCheck ok! drop
 
 					if (ok@)
-						nextfcb@ IOFileControlBlockDereference drop
+						nextfcb@ AFSFCBDereference
 						return
 					end
 				end
@@ -272,7 +281,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 				end
 
 				if (ok@)
-					nextfcb@ IOFileControlBlockDereference drop
+					nextfcb@ AFSFCBDereference
 					return
 				end
 			end
@@ -284,13 +293,13 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			end
 		end
 	end else
-		initialfcb@ IOFileControlBlockReference drop
+		initialfcb@ AFSFCBReference
 	end
 
 	// at this point the FCB should be refed but unlocked
 
 	if (flags@ OSFILEFLAG_MUSTCREATE &)
-		initialfcb@ IOFileControlBlockDereference drop
+		initialfcb@ AFSFCBDereference
 
 		STATUS_ALREADY_EXISTS ok!
 
@@ -299,7 +308,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 	if (flags@ OSFILEFLAG_CREATEDIR &)
 		if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
-			initialfcb@ IOFileControlBlockDereference drop
+			initialfcb@ AFSFCBDereference
 
 			STATUS_ALREADY_EXISTS ok!
 
@@ -315,7 +324,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 	AFSCreateFileObject ok! object!
 
 	if (ok@)
-		initialfcb@ IOFileControlBlockDereference drop
+		initialfcb@ AFSFCBDereference
 	end
 end
 
@@ -454,6 +463,7 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 	// grab FCB for inode
 
 	auto fcb
+	flags@ // flags
 	inum@ // inum
 	mount@ // mount
 	AFSFCBRead ok! fcb!
@@ -507,7 +517,7 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	// the FCB may or may not stop existing after we deref it here, so don't
 	// touch it again.
 
-	fcb@ IOFileControlBlockDereference drop
+	fcb@ AFSFCBDereference
 
 	mount@ // mount
 	AFSMountDereference drop

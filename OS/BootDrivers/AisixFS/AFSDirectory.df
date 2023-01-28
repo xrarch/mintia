@@ -359,14 +359,14 @@ fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
 
 	0 iparent!
 
-	searchfcb@ IOFileControlBlockReference drop
+	searchfcb@ AFSFCBReference
 
 	0 ok!
 
 	while (searchfcb@ testfcb@ ~=)
 		if (fcbdata@ AFSFCBData_IParent + @ iparent@ ==)
 			// found the root directory. no cycles.
-			searchfcb@ IOFileControlBlockDereference drop
+			searchfcb@ AFSFCBDereference
 
 			return
 		end
@@ -374,11 +374,12 @@ fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
 		fcbdata@ AFSFCBData_IParent + @ iparent!
 
 		auto nextfcb
+		0 // flags
 		iparent@  // inum
 		mount@ // mount
 		AFSFCBRead ok! nextfcb!
 
-		searchfcb@ IOFileControlBlockDereference drop
+		searchfcb@ AFSFCBDereference
 
 		if (ok@)
 			return
@@ -388,7 +389,7 @@ fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
 		nextfcb@ searchfcb!
 	end
 
-	searchfcb@ IOFileControlBlockDereference drop
+	searchfcb@ AFSFCBDereference
 
 	STATUS_FORBIDDEN_OPERATION ok!
 end
@@ -419,6 +420,7 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	dirfcb@ IOFileControlBlockGetMount mount!
 
 	auto fcb
+	0 // flags
 	dirent@ AFSDirEnt_INum + @  // inum
 	mount@ // mount
 	AFSFCBRead ok! fcb!
@@ -429,9 +431,12 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_Flags + @ IOFCBFLAG_SYSTEMFILE &)
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	if (fcb@ IOFileControlBlockGetFlags IOFCBFLAG_SYSTEMFILE &)
 		bcb@ VcBufferDecrementMapCount drop
-		fcb@ IOFileControlBlockDereference drop
+		fcb@ AFSFCBDereference
 
 		STATUS_FORBIDDEN_OPERATION ok!
 
@@ -439,12 +444,12 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	end
 
 	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
-		if (fcb@ IOFileControlBlockGetReferences 1 >)
+		if (fcbdata@ AFSFCBData_References + @ 1 >)
 			// unlinking directories is forbidden if anyone could possibly
 			// add new entries to it afterwards.
 
 			bcb@ VcBufferDecrementMapCount drop
-			fcb@ IOFileControlBlockDereference drop
+			fcb@ AFSFCBDereference
 
 			STATUS_TRY_AGAIN_LATER ok!
 
@@ -459,7 +464,7 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 
 		if (ok@ STATUS_NOT_FOUND ~=)
 			bcb@ VcBufferDecrementMapCount drop
-			fcb@ IOFileControlBlockDereference drop
+			fcb@ AFSFCBDereference
 
 			if (ok@ ~~)
 				STATUS_IS_A_DIRECTORY ok!
@@ -475,8 +480,9 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop
 
-	fcb@ IOFileControlBlockDeleteLastReference
-	fcb@ IOFileControlBlockDereference drop
+	AFSFILEFLAG_DELETE fcbdata@ AFSFCBData_Flags + |=
+
+	fcb@ AFSFCBDereference
 
 	0 ok!
 end
@@ -519,7 +525,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 
 	if (srcfcb@ destfcb@ ==)
 		if (srcname@ destname@ strcmp)
-			srcbcb@ MmEvictablePageDereference drop
+			srcbcb@ VcBufferDecrementMapCount drop
 
 			0 ok!
 
@@ -550,6 +556,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 	end
 
 	auto filefcb
+	0 // flags
 	srcdirent@ AFSDirEnt_INum + @  // inum
 	mount@ // mount
 	AFSFCBRead ok! filefcb!
@@ -577,7 +584,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 
 			if (ok@)
 				srcbcb@ VcBufferDecrementMapCount drop
-				filefcb@ IOFileControlBlockDereference drop
+				filefcb@ AFSFCBDereference
 
 				return
 			end
@@ -591,7 +598,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 				mount@ AFSRenameUnlock
 
 				srcbcb@ VcBufferDecrementMapCount drop
-				filefcb@ IOFileControlBlockDereference drop
+				filefcb@ AFSFCBDereference
 
 				return
 			end
@@ -607,7 +614,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 			end
 
 			srcbcb@ VcBufferDecrementMapCount drop
-			filefcb@ IOFileControlBlockDereference drop
+			filefcb@ AFSFCBDereference
 
 			return
 		end
@@ -644,5 +651,5 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 	end
 
 	srcbcb@ VcBufferDecrementMapCount drop
-	filefcb@ IOFileControlBlockDereference drop
+	filefcb@ AFSFCBDereference
 end

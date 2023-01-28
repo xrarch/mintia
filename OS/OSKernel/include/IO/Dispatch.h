@@ -5,7 +5,6 @@ fnptr IODispatchReadFunction { timeout flags kflags offset mdl fcb -- ok }
 fnptr IODispatchWriteFunction { flags kflags offset mdl fcb -- ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
-fnptr IODispatchDeleteFunction { fcb -- }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchPokeFunction { poketype object -- }
 fnptr IODispatchSetSecurityFunction { uid gid permissions object -- ok }
@@ -16,7 +15,6 @@ fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
-fnptr IODispatchZeroFCBReferencesFunction { fcb -- tryagain }
 fnptr IODispatchCancelFunction { mdl -- }
 
 struct IODispatchTable
@@ -27,7 +25,7 @@ struct IODispatchTable
 	4 Write
 	4 Unlink
 	4 Parse
-	4 Delete
+	4 Reserved4
 	4 Flush
 	4 DeleteObject
 	4 Poke
@@ -39,7 +37,7 @@ struct IODispatchTable
 	4 ReadDirectory
 	4 GetPageAddress
 	4 DeleteDeviceObject
-	4 ZeroFCBReferences
+	4 Reserved5
 	4 Cancel
 	4 Reserved6
 	4 Reserved7

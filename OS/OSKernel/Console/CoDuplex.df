@@ -61,7 +61,7 @@ struct CoDuplex
 	4 Flags
 	4 InternalFlags
 
-	4 Headless
+	4 Disconnected
 
 	4 ServerFCB
 
@@ -283,7 +283,7 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 
 	flags@ duplex@ CoDuplex_Flags + !
 	pri@ duplex@ CoDuplex_Paged + !
-	0 duplex@ CoDuplex_Headless + !
+	0 duplex@ CoDuplex_Disconnected + !
 
 	0 duplex@ CoDuplex_ServerReadListHead + !
 	0 duplex@ CoDuplex_ServerReadListTail + !
@@ -373,7 +373,7 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 		return
 	end
 
-	1 serverfcb@ IOFileControlBlock_FSContext + !
+	1 serverfcb@ IOFileControlBlockSetContext
 
 	serverfcb@ duplex@ CoDuplex_ServerFCB + !
 
@@ -407,7 +407,6 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 
 	// bias refcounts for server fileobject
 	duplexobject@ ObObjectReferenceByPointer drop
-	serverfcb@ IOFileControlBlockReference drop
 
 	if (quotablock@)
 		quotablock@ MmQuotaBlockReference
@@ -1098,7 +1097,7 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 
 		if (done@ ~~)
 			if (timeout@)
-				if (duplex@ CoDuplex_Headless + @ ~~)
+				if (duplex@ CoDuplex_Disconnected + @ ~~)
 					// switch to user buffer.
 
 					buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
@@ -2339,7 +2338,7 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 	0 ok!
 
 	auto duplex
-	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
 
 	if (mdl@ MmMDLHeader_Length + @ ~~)
 		0 // status
@@ -2350,7 +2349,10 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_FSContext + @)
+	auto isserver
+	fcb@ IOFileControlBlockGetContext isserver!
+
+	if (isserver@)
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
 			STATUS_FORBIDDEN_OPERATION ok!
 			return
@@ -2383,7 +2385,7 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_FSContext + @)
+	if (isserver@)
 		while (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
 			if (timeout@ ~~)
 				0 mdl@ MmMDLHeader_Length + !
@@ -2455,7 +2457,7 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 	0 ok!
 
 	auto duplex
-	fcb@ IOFileControlBlock_DeviceObject + @ IODeviceGetExtension duplex!
+	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
 
 	if (mdl@ MmMDLHeader_Length + @ ~~)
 		0 // status
@@ -2466,7 +2468,10 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_FSContext + @ ~~)
+	auto isserver
+	fcb@ IOFileControlBlockGetContext isserver!
+
+	if (isserver@ ~~)
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
 			STATUS_FORBIDDEN_OPERATION ok!
 			return
@@ -2499,7 +2504,20 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_FSContext + @)
+	if (isserver@)
+		if (duplex@ CoDuplex_Disconnected + @)
+			ipl@ duplex@ CoDuplexUnlock
+
+			0 // status
+			0 // priboost
+			mdl@ // mdl
+			MmMDLComplete
+
+			0 ok!
+
+			return
+		end
+
 		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 			buf@ // buf
 			mdl@ // mdl
@@ -2512,7 +2530,7 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 			CoDuplexServerWriteCooked ok!
 		end
 	end else
-		if (duplex@ CoDuplex_Headless + @)
+		if (duplex@ CoDuplex_Disconnected + @)
 			ipl@ duplex@ CoDuplexUnlock
 
 			STATUS_CONSOLE_HUNG_UP ok!
@@ -2655,7 +2673,7 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 	object@ IOFile_FileControlBlock + @ fcb!
 
 	auto deviceobject
-	fcb@ IOFileControlBlock_DeviceObject + @ deviceobject!
+	fcb@ IOFileControlBlockGetDeviceObject deviceobject!
 
 	auto duplex
 	deviceobject@ IODeviceGetExtension duplex!
@@ -2664,14 +2682,14 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 	auto req
 	auto nreq
 
-	if (fcb@ IOFileControlBlock_FSContext + @)
+	if (fcb@ IOFileControlBlockGetContext)
 		// server fcb! mark duplex headless and satisfy any pending requests.
 
 		duplex@ // duplex
 		0 // alertable
 		CoDuplexLock drop ipl!
 
-		1 duplex@ CoDuplex_Headless + !
+		1 duplex@ CoDuplex_Disconnected + !
 
 		duplex@ CoDuplex_ClientWriteListHead + @ req!
 
@@ -2720,7 +2738,7 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 			deviceobject@ IODevice_ConsoleHeader + @ // console
 			CoConsoleSignal
 		end
-	end elseif (fcb@ IOFileControlBlock_References + @ 1 ==)
+	end elseif (deviceobject@ ObObjectReferences 2 ==)
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
 			// last client is being closed and this is a pipe, satisfy server
 			// write requests.
@@ -2728,6 +2746,8 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 			duplex@ // duplex
 			0 // alertable
 			CoDuplexLock drop ipl!
+
+			1 duplex@ CoDuplex_Disconnected + !
 
 			duplex@ CoDuplex_ServerWriteListHead + @ req!
 

@@ -80,6 +80,8 @@ struct AFSFCBData
 endstruct
 
 const AFSFILECONTEXT_UPDATEONCLOSE 1
+const AFSFILECONTEXT_WRITABLE      2
+
 const AFSFILEFLAG_DELETE 1
 
 struct AFSDirEnt

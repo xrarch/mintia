@@ -131,6 +131,9 @@ extern IOFileGetFileControlBlock { fileobject -- fcb }
 extern IOFileGetContext { fileobject -- context }
 extern IOFileSetContext { context fileobject -- }
 
+extern IOFileSetContextFlag { mask fileobject -- }
+extern IOFileClearContextFlag { mask fileobject -- }
+
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }
 

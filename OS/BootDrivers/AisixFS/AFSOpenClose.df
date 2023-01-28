@@ -32,75 +32,63 @@
 fn (IODispatchOpenFunction) AFSOpen { access fileobject -- ok }
 	0 ok!
 
-	auto mount
-	fileobject@ IOFileGetFileControlBlock IOFileControlBlockGetMount mount!
-
-	auto mountctx
-	mount@ IOMountGetContext mountctx!
-
-	if (access@ ACCESS_WRITE &)
-		auto rs
-		HALCPUInterruptDisable rs!
-
-		if (mount@ IOMountGetFlags OSMOUNT_READONLY &)
-			rs@ HALCPUInterruptRestore
-
-			STATUS_READONLY_FILESYSTEM ok!
-
-			return
-		end
-
-		1 mountctx@ AFSData_WritableFiles + +=
-
-		rs@ HALCPUInterruptRestore
-	end
-end
-
-fn (IODispatchCloseFunction) AFSClose { access fileobject -- ok }
-	0 ok!
-
 	auto fcb
 	fileobject@ IOFileGetFileControlBlock fcb!
 
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
 
-	auto mountctx
-	mount@ IOMountGetContext mountctx!
+	auto afsdata
+	mount@ IOMountGetContext afsdata!
 
-	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_PAGEFILE & ~~)
-		// keep the writable file count biased if there's a pagefile, since
-		// the system still has a reference out for this file.
+	if (access@ ACCESS_WRITE &)
+		if (fileobject@ IOFileGetContext AFSFILECONTEXT_WRITABLE & ~~)
+			// the access is write, and the file object hasn't been opened
+			// writable anymore, so we need to count it as a writable file,
+			// to prevent the mount from being downgraded to read-only until
+			// it is closed. we have to acquire the volume FCB shared to lock
+			// out mount flag changes, check the readonly flag to see if it's
+			// already readonly (and fail if so). then we lock the FCB itself,
+			// double check if it still hasn't been marked writable, and then
+			// count it and set the flag.
 
-		if (access@ ACCESS_WRITE &)
-			auto rs
-			HALCPUInterruptDisable rs!
+			auto volfcb
+			mount@ FSVolumeGetFCBByMount volfcb!
 
-			if (DEBUGCHECKS)
-				if (mountctx@ AFSData_WritableFiles + @ 0 ==)
-					"AFSClose: underflow\n" KeCrash
-				end
+			volfcb@ IOFileControlBlockLockShared ok!
+
+			if (ok@)
+				return
 			end
 
-			1 mountctx@ AFSData_WritableFiles + -=
+			if (mount@ IOMountGetFlags OSMOUNT_READONLY &)
+				volfcb@ IOFileControlBlockUnlock
 
-			rs@ HALCPUInterruptRestore
+				STATUS_READONLY_FILESYSTEM ok!
+
+				return
+			end
+
+			fcb@ IOFileControlBlockLock ok!
+
+			if (ok@)
+				volfcb@ IOFileControlBlockUnlock
+
+				return
+			end
+
+			if (fileobject@ IOFileGetContext AFSFILECONTEXT_WRITABLE & ~~)
+				1 afsdata@ AFSData_WritableFiles + KeInterlockedIncrement drop
+
+				AFSFILECONTEXT_WRITABLE fileobject@ IOFileSetContextFlag
+			end
+
+			fcb@ IOFileControlBlockUnlock
+			volfcb@ IOFileControlBlockUnlock
 		end
 	end
+end
 
-	if (fileobject@ IOFileGetContext AFSFILECONTEXT_UPDATEONCLOSE &)
-		fcb@ IOFileControlBlockLock ok!
-
-		if (ok@)
-			// failed to lock. pretend nothing happened and return.
-			0 ok!
-			return
-		end
-
-		fcb@ AFSINodeUpdate
-
-		fcb@ IOFileControlBlockUnlock
-
-		AFSFILECONTEXT_UPDATEONCLOSE ~ fileobject@ IOFileGetContext & fileobject@ IOFileSetContext
-	end
+fn (IODispatchCloseFunction) AFSClose { access fileobject -- ok }
+	0 ok!
 end

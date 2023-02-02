@@ -8,8 +8,6 @@ struct CoConsoleHeader
 	2 HeightI
 endstruct
 
-externptr CoCtrl
-
 extern CoConsoleByFileHandle { requiredaccess filehandle -- consoleobject ok }
 
 extern CoConsoleInitialize { header -- }

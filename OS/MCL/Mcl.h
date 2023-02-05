@@ -43,6 +43,7 @@ struct MclpParseContext
 	4 LexInputLength
 	4 LexLineNumber
 
+	4 FileName
 	4 StreamHandle
 
 	4 ParseFlags
@@ -53,14 +54,34 @@ endstruct
 const LEX_INTERACTIVE  1
 const LEX_NEWSTATEMENT 2
 
-const PARSE_ROOTBLOCK 1
+extern MclpLexInit { -- }
 
 extern MclpMachineLock { machine -- }
 extern MclpMachineUnlock { machine -- }
 
-extern MclpParseFile { interactive streamhandle machine -- rootblock ok }
+extern MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 
 extern MclpSymbolTableInitialize { symboltable -- }
 
 extern MclpInteractiveReadLine { buf max ctx -- count ok }
 extern MclpLexNextToken { peek tokbuf ctx -- toklen ok }
+
+extern MclpParseNodeCreate { type size -- node ok }
+
+extern MclpParseSubtreeFree { node -- }
+
+extern MclpParseDiagnostic { ... fmt ctx -- }
+
+const PARSENODE_BLOCK 1
+
+struct MclpParseNode
+	4 Type
+	4 Next
+endstruct
+
+struct MclpParseNodeBlock
+	MclpParseNode_SIZEOF Header
+
+	4 NodeListHead
+	4 NodeListTail
+endstruct

@@ -9,6 +9,26 @@
 
 #include "Mcl.h"
 
+const CHAR_NORMAL   0
+const CHAR_COALESCE 1
+const CHAR_SPLIT    2
+
+buffer MclpLexCharTreatment 256
+
+fn MclpLexInit { -- }
+	CHAR_COALESCE MclpLexCharTreatment '>' + sb
+	CHAR_COALESCE MclpLexCharTreatment '<' + sb
+	CHAR_COALESCE MclpLexCharTreatment '&' + sb
+	CHAR_COALESCE MclpLexCharTreatment '|' + sb
+	CHAR_COALESCE MclpLexCharTreatment '=' + sb
+
+	CHAR_SPLIT MclpLexCharTreatment '(' + sb
+	CHAR_SPLIT MclpLexCharTreatment ')' + sb
+	CHAR_SPLIT MclpLexCharTreatment '$' + sb
+	CHAR_SPLIT MclpLexCharTreatment '{' + sb
+	CHAR_SPLIT MclpLexCharTreatment '}' + sb
+end
+
 fn MclpLexFillBuffer { ctx -- ok }
 	auto lexbuf
 
@@ -119,14 +139,6 @@ const LEXSTATE_NORMAL    1
 const LEXSTATE_STRING    2
 const LEXSTATE_COMMENT   3
 
-//
-//
-//         NEXT TO WORK ON IS TOKEN COALESCING FOR >, &, =, ETC;
-//         TOKEN SEPARATION FOR PARENTHESES () AND SO ON, AS WELL AS
-//         %VARIABLE% EXPANSION (PREFERABLY IN THAT ORDER)
-//
-//
-
 fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 	auto firstpos
 	0 firstpos!
@@ -141,6 +153,9 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 
 	auto firstnl
 	1 firstnl!
+
+	auto coalescechar
+	0 coalescechar!
 
 	auto state
 	LEXSTATE_NORMAL state!
@@ -219,14 +234,41 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 				continue
 			end
 
-			if (toklen@ TOKBUFFERSIZE 1 - >=)
-				STATUS_END_OF_FILE ok!
+			if (char@ coalescechar@ ==)
+				char@ tokbuf@ sb
+				1 tokbuf +=
+				1 toklen +=
+
+				continue
+			end elseif (coalescechar@)
+				lastpos@ ctx@ MclpParseContext_LexOffset + !
+
 				break
+			end
+
+			if (char@ MclpLexCharTreatment + gb CHAR_COALESCE ==)
+				if (toklen@)
+					lastpos@ ctx@ MclpParseContext_LexOffset + !
+					break
+				end
+
+				char@ coalescechar!
+			end
+
+			if (char@ MclpLexCharTreatment + gb CHAR_SPLIT ==)
+				if (toklen@)
+					lastpos@ ctx@ MclpParseContext_LexOffset + !
+					break
+				end
 			end
 
 			char@ tokbuf@ sb
 			1 tokbuf +=
 			1 toklen +=
+
+			if (char@ MclpLexCharTreatment + gb CHAR_SPLIT ==)
+				break
+			end
 		end elseif (state@ LEXSTATE_STRING ==)
 			if (char@ 34 ==) // doublequote
 				LEXSTATE_NORMAL state!

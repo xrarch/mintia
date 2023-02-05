@@ -9,6 +9,18 @@
 
 #include "Mcl.h"
 
+fn MclpParseDiagnostic { ... fmt ctx -- }
+	ctx@ MclpParseContext_LexLineNumber + @
+	ctx@ MclpParseContext_FileName + @
+	"%s:%d: " Printf
+
+	argv // argvt
+	argc@ // argcn
+	fmt@ // fmt
+	OSGetStdErr // fd
+	VFPrintf
+end
+
 fn MclpParseContextInitialize { ctx -- }
 	ctx@ // ptr
 	MclpParseContext_SIZEOF // sz
@@ -16,6 +28,17 @@ fn MclpParseContextInitialize { ctx -- }
 	memset
 
 	LEX_NEWSTATEMENT ctx@ MclpParseContext_LexFlags + !
+end
+
+fn MclpParseNodeCreate { type size -- node ok }
+	size@ OSHeapAllocate ok! node!
+
+	if (ok@)
+		return
+	end
+
+	type@ node@ MclpParseNode_Type + !
+	0 node@ MclpParseNode_Next + !
 end
 
 fn MclpParseContextUninitialize { ctx -- }
@@ -52,7 +75,7 @@ end
 
 extern MclpLexNextCharacter { ctx -- lastpos char ok }
 
-fn MclpParseFile { interactive streamhandle machine -- rootblock ok }
+fn MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 	auto ctx
 	MclpParseContext_SIZEOF alloc ctx!
 
@@ -62,7 +85,11 @@ fn MclpParseFile { interactive streamhandle machine -- rootblock ok }
 		LEX_INTERACTIVE ctx@ MclpParseContext_LexFlags + |=
 	end
 
-	PARSE_ROOTBLOCK ctx@ MclpParseContext_ParseFlags + |=
+	if (filename@)
+		filename@ ctx@ MclpParseContext_FileName + !
+	end else
+		"????" ctx@ MclpParseContext_FileName + !
+	end
 
 	streamhandle@ ctx@ MclpParseContext_StreamHandle + !
 
@@ -91,17 +118,43 @@ fn MclpParseFile { interactive streamhandle machine -- rootblock ok }
 	ctx@ MclpParseContextUninitialize
 end
 
-fn MclpParseBlock { endtoken ctx -- block ok }
-	auto isrootblock
-	ctx@ MclpParseContext_ParseFlags + @ PARSE_ROOTBLOCK & isrootblock!
+fn MclpParseSubtreeFree { node -- }
+	if (node@ MclpParseNode_Type + @ PARSENODE_BLOCK ==)
+		auto subnode
+		node@ MclpParseNodeBlock_NodeListHead + @ subnode!
 
-	PARSE_ROOTBLOCK ~ ctx@ MclpParseContext_ParseFlags + &=
+		while (subnode@)
+			subnode@ MclpParseSubtreeFree
+
+			subnode@ MclpParseNode_Next + @ subnode!
+		end
+	end
+
+	node@ OSHeapFree
+end
+
+fn MclpParseBlock { endtoken ctx -- block ok }
+	PARSENODE_BLOCK // type
+	MclpParseNodeBlock_SIZEOF // size
+	MclpParseNodeCreate ok! block!
+
+	if (ok@)
+		return
+	end
+
+	auto hp
+	auto tp
+
+	block@ MclpParseNodeBlock_NodeListHead + hp!
+	block@ MclpParseNodeBlock_NodeListTail + tp!
+
+	0 hp@!
+	0 tp@!
+
+	auto tokbuf
+	TOKBUFFERSIZE alloc tokbuf!
 
 	while (1)
-		// token isn't gonna be greater than the lex buffer size
-		auto tokbuf
-		TOKBUFFERSIZE alloc tokbuf!
-
 		auto toklen
 		0 // peek
 		tokbuf@ // tokbuf
@@ -109,13 +162,43 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 		MclpLexNextToken ok! toklen!
 
 		if (ok@)
-			ok@ OSStatusGetName "%s\n" Printf
+			if (endtoken@ ~~)
+				if (ok@ STATUS_END_OF_FILE ==)
+					0 ok!
+				end
+			end
+
+			if (ok@)
+				block@ MclpParseSubtreeFree
+			end
+
 			return
 		end
 
-		tokbuf@
-		toklen@
-		"%d: %s\n" Printf
+		if (endtoken@)
+			if (tokbuf@ endtoken@ strcmp)
+				break
+			end
+		end
+
+		auto node
+		0 node!
+
+		if (node@)
+			// add to block list
+
+			if (hp@@ ~~)
+				node@ hp@!
+				node@ tp@!
+			end else
+				node@ tp@@ MclpParseNode_Next + !
+				node@ tp@!
+			end
+		end
+
+		if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
+			break
+		end
 	end
 
 	0 ok!

@@ -27,6 +27,7 @@ fn MclpLexInit { -- }
 	CHAR_SPLIT MclpLexCharTreatment '$' + sb
 	CHAR_SPLIT MclpLexCharTreatment '{' + sb
 	CHAR_SPLIT MclpLexCharTreatment '}' + sb
+	CHAR_SPLIT MclpLexCharTreatment '!' + sb
 end
 
 fn MclpLexFillBuffer { ctx -- ok }
@@ -139,7 +140,7 @@ const LEXSTATE_NORMAL    1
 const LEXSTATE_STRING    2
 const LEXSTATE_COMMENT   3
 
-fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
+fn MclpLexNextToken { peek tokbuf ctx -- tokflag toklen ok }
 	auto firstpos
 	0 firstpos!
 
@@ -156,6 +157,8 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 
 	auto coalescechar
 	0 coalescechar!
+
+	0 tokflag!
 
 	auto state
 	LEXSTATE_NORMAL state!
@@ -178,6 +181,8 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 			0 isbackslash!
 
 			if (char@ '\n' ==)
+				LEXTOK_NEWLINE tokflag |=
+
 				LEX_NEWSTATEMENT ~ ctx@ MclpParseContext_LexFlags + &=
 
 				if (firstnl@)
@@ -200,6 +205,7 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 
 		if (state@ LEXSTATE_NORMAL ==)
 			if (char@ '\n' ==)
+				LEXTOK_NEWLINE tokflag |=
 				break
 			end
 
@@ -211,10 +217,8 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 				end
 			end
 
-			if (peek@)
-				if (firstpos@ ~~)
-					lastpos@ firstpos!
-				end
+			if (firstpos@ ~~)
+				lastpos@ firstpos!
 			end
 
 			if (char@ 92 ==) // backslash
@@ -224,7 +228,8 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 
 			0 ignorewhitespace!
 
-			if (char@ 34 ==) // doublequote (this could be an ascii literal but it messes up syntax highlighting on my editor)
+			if (char@ 34 ==) // doublequote (34 could be an ascii literal but it messes up syntax highlighting on my editor)
+				LEXTOK_LITERAL tokflag |=
 				LEXSTATE_STRING state!
 				continue
 			end
@@ -267,6 +272,18 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 			1 toklen +=
 
 			if (char@ MclpLexCharTreatment + gb CHAR_SPLIT ==)
+				ctx@ MclpLexNextCharacter ok! char! lastpos!
+
+				if (ok@)
+					break
+				end
+
+				if (char@ '\n' ==)
+					LEXTOK_NEWLINE tokflag |=
+				end elseif (char@ ' ' ~= char@ '\t' ~= &&)
+					lastpos@ ctx@ MclpParseContext_LexOffset + !
+				end
+
 				break
 			end
 		end elseif (state@ LEXSTATE_STRING ==)
@@ -289,6 +306,7 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 			1 toklen +=
 		end elseif (state@ LEXSTATE_COMMENT ==)
 			if (char@ '\n' ==)
+				LEXTOK_NEWLINE tokflag |=
 				break
 			end
 		end
@@ -296,7 +314,15 @@ fn MclpLexNextToken { peek tokbuf ctx -- toklen ok }
 
 	0 tokbuf@ sb
 
-	if (peek@ firstpos@ &&)
-		firstpos@ ctx@ MclpParseContext_LexOffset + !
+	if (firstpos@)
+		if (peek@)
+			firstpos@ ctx@ MclpParseContext_LexOffset + !
+		end else
+			firstpos@ ctx@ MclpParseContext_LexLastOffset + !
+		end
 	end
+end
+
+fn MclpLexLastToken { ctx -- }
+	ctx@ MclpParseContext_LexLastOffset + @ ctx@ MclpParseContext_LexOffset + !
 end

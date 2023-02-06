@@ -9,10 +9,21 @@
 
 #include "Mcl.h"
 
-fn MclpParseDiagnostic { ... fmt ctx -- }
-	ctx@ MclpParseContext_LexLineNumber + @
-	ctx@ MclpParseContext_FileName + @
-	"%s:%d: " Printf
+fn MclpParseDiagnostic { ... fmt node ctx -- }
+	auto linenum
+	auto fname
+
+	if (node@)
+		node@ MclpParseNode_LineNumber + @ linenum!
+		node@ MclpParseNode_FileName + @ fname!
+	end else
+		ctx@ MclpParseContext_LexLineNumber + @ linenum!
+		ctx@ MclpParseContext_FileName + @ fname!
+	end
+
+	linenum@
+	fname@
+	"%s:%d: " OSGetStdErr FPrintf
 
 	argv // argvt
 	argc@ // argcn
@@ -30,12 +41,15 @@ fn MclpParseContextInitialize { ctx -- }
 	LEX_NEWSTATEMENT ctx@ MclpParseContext_LexFlags + !
 end
 
-fn MclpParseNodeCreate { type size -- node ok }
+fn MclpParseNodeCreate { type size ctx -- node ok }
 	size@ OSHeapAllocate ok! node!
 
 	if (ok@)
 		return
 	end
+
+	ctx@ MclpParseContext_LexLineNumber + @ node@ MclpParseNode_LineNumber + !
+	ctx@ MclpParseContext_FileName + @ node@ MclpParseNode_FileName + !
 
 	type@ node@ MclpParseNode_Type + !
 	0 node@ MclpParseNode_Next + !
@@ -94,6 +108,7 @@ fn MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 	streamhandle@ ctx@ MclpParseContext_StreamHandle + !
 
 	0 ctx@ MclpParseContext_LexBuffer + !
+	0 ctx@ MclpParseContext_LexLastOffset + !
 	0 ctx@ MclpParseContext_LexOffset + !
 	0 ctx@ MclpParseContext_LexValidLength + !
 	1 ctx@ MclpParseContext_LexLineNumber + !
@@ -119,15 +134,65 @@ fn MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 end
 
 fn MclpParseSubtreeFree { node -- }
+	auto subnode
+	auto nsubnode
+
 	if (node@ MclpParseNode_Type + @ PARSENODE_BLOCK ==)
-		auto subnode
 		node@ MclpParseNodeBlock_NodeListHead + @ subnode!
 
 		while (subnode@)
+			subnode@ MclpParseNode_Next + @ nsubnode!
+
 			subnode@ MclpParseSubtreeFree
 
-			subnode@ MclpParseNode_Next + @ subnode!
+			nsubnode@ subnode!
 		end
+	end elseif (node@ MclpParseNode_Type + @ PARSENODE_PIPELINE ==)
+		node@ MclpParseNodePipeline_CmdListHead + @ subnode!
+
+		while (subnode@)
+			subnode@ MclpParseNode_Next + @ nsubnode!
+
+			subnode@ MclpParseSubtreeFree
+
+			nsubnode@ subnode!
+		end
+
+		if (node@ MclpParseNodePipeline_StdInRedirectionPath + @)
+			node@ MclpParseNodePipeline_StdInRedirectionPath + @ MclpParseSubtreeFree
+		end
+
+		if (node@ MclpParseNodePipeline_StdOutRedirectionPath + @)
+			node@ MclpParseNodePipeline_StdOutRedirectionPath + @ MclpParseSubtreeFree
+		end
+
+		if (node@ MclpParseNodePipeline_StdErrRedirectionPath + @)
+			node@ MclpParseNodePipeline_StdErrRedirectionPath + @ MclpParseSubtreeFree
+		end
+	end elseif (node@ MclpParseNode_Type + @ PARSENODE_COMMAND ==)
+		node@ MclpParseNodeCommand_ArgListHead + @ subnode!
+
+		while (subnode@)
+			subnode@ MclpParseNode_Next + @ nsubnode!
+
+			subnode@ MclpParseSubtreeFree
+
+			nsubnode@ subnode!
+		end
+
+		node@ MclpParseNodeCommand_Name + @ MclpParseSubtreeFree
+	end elseif (node@ MclpParseNode_Type + @ PARSENODE_FUNCCALL ==)
+		node@ MclpParseNodeFunctionCall_ArgListHead + @ subnode!
+
+		while (subnode@)
+			subnode@ MclpParseNode_Next + @ nsubnode!
+
+			subnode@ MclpParseSubtreeFree
+
+			nsubnode@ subnode!
+		end
+
+		node@ MclpParseNodeFunctionCall_Name + @ MclpParseSubtreeFree
 	end
 
 	node@ OSHeapFree
@@ -136,6 +201,7 @@ end
 fn MclpParseBlock { endtoken ctx -- block ok }
 	PARSENODE_BLOCK // type
 	MclpParseNodeBlock_SIZEOF // size
+	ctx@ // ctx
 	MclpParseNodeCreate ok! block!
 
 	if (ok@)
@@ -155,11 +221,12 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 	TOKBUFFERSIZE alloc tokbuf!
 
 	while (1)
+		auto tokflag
 		auto toklen
 		0 // peek
 		tokbuf@ // tokbuf
 		ctx@ // ctx
-		MclpLexNextToken ok! toklen!
+		MclpLexNextToken ok! toklen! tokflag!
 
 		if (ok@)
 			if (endtoken@ ~~)
@@ -175,6 +242,12 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			return
 		end
 
+		if (DEBUGCHECKS)
+			if (toklen@ ~~)
+				"MclpParseBlock\n" OSAbort
+			end
+		end
+
 		if (endtoken@)
 			if (tokbuf@ endtoken@ strcmp)
 				break
@@ -183,6 +256,30 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 
 		auto node
 		0 node!
+
+		0 ok!
+
+		if (tokbuf@ "!" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
+			ctx@ MclpParseDirective ok! node!
+		end elseif (tokbuf@ "{" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
+			"}" // endtoken
+			ctx@ // ctx
+			MclpParseBlock ok! node!
+		end else
+			// command statement
+
+			ctx@ MclpLexLastToken
+
+			endtoken@ // endtoken
+			ctx@ // ctx
+			MclpParsePipeline ok! node!
+		end
+
+		if (ok@)
+			block@ MclpParseSubtreeFree
+
+			return
+		end
 
 		if (node@)
 			// add to block list
@@ -202,4 +299,115 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 	end
 
 	0 ok!
+end
+
+fn MclpParseDirective { ctx -- node ok }
+	0 ok!
+	0 node!
+end
+
+fn MclpParseFunctionCall { ctx -- node ok }
+	PARSENODE_FUNCCALL // type
+	MclpParseNodeFunctionCall_SIZEOF // size
+	ctx@ // ctx
+	MclpParseNodeCreate ok! node!
+
+	if (ok@)
+		return
+	end
+
+	auto hp
+	auto tp
+
+	node@ MclpParseNodeFunctionCall_ArgListHead + hp!
+	node@ MclpParseNodeFunctionCall_ArgListTail + tp!
+
+	0 hp@!
+	0 tp@!
+
+	while (1)
+
+	end
+end
+
+fn MclpParseExpression { endtoken ctx -- node ok }
+	auto tokbuf
+	TOKBUFFERSIZE alloc tokbuf!
+
+	0 // peek
+	tokbuf@ // tokbuf
+	ctx@ // ctx
+	MclpLexNextToken ok! drop drop
+
+	if (ok@)
+		return
+	end
+
+	if (endtoken@)
+		if (tokbuf@ endtoken@ strcmp)
+			ctx@ MclpLexLastToken
+
+			0 node!
+
+			return
+		end
+	end
+end
+
+fn MclpParsePipeline { endtoken ctx -- node ok }
+	PARSENODE_PIPELINE // type
+	MclpParseNodePipeline_SIZEOF // size
+	ctx@ // ctx
+	MclpParseNodeCreate ok! node!
+
+	if (ok@)
+		return
+	end
+
+	auto hp
+	auto tp
+
+	node@ MclpParseNodePipeline_CmdListHead + hp!
+	node@ MclpParseNodePipeline_CmdListTail + tp!
+
+	0 hp@!
+	0 tp@!
+
+	0 node@ MclpParseNodePipeline_StdInRedirectionPath + !
+	0 node@ MclpParseNodePipeline_StdOutRedirectionPath + !
+	0 node@ MclpParseNodePipeline_StdErrRedirectionPath + !
+
+	while (1)
+		// parse each fragment of the pipeline in sequence until we encounter
+		// either newline, EOF, redirection, or the endtoken.
+
+		auto whyreturn
+		auto cmdnode
+		endtoken@ // endtoken
+		ctx@ // ctx
+		MclpParseCommand ok! cmdnode! whyreturn!
+
+		if (ok@)
+			node@ MclpParseSubtreeFree
+
+			return
+		end
+
+		if (hp@@ ~~)
+			cmdnode@ hp@!
+			cmdnode@ tp@!
+		end else
+			cmdnode@ tp@@ MclpParseNode_Next + !
+			cmdnode@ tp@!
+		end
+	end
+end
+
+fn MclpParseIfStatement { ctx -- node ok }
+	0 node!
+	0 ok!
+end
+
+fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
+
 end

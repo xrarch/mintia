@@ -87,8 +87,6 @@ fn MclpQueryFileLength { ctx -- ok }
 	query@ OSFileInformation_Size + @ ctx@ MclpParseContext_LexInputLength + !
 end
 
-extern MclpLexNextCharacter { ctx -- lastpos char ok }
-
 fn MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 	auto ctx
 	MclpParseContext_SIZEOF alloc ctx!
@@ -218,7 +216,7 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 	0 tp@!
 
 	auto tokbuf
-	TOKBUFFERSIZE alloc tokbuf!
+	ctx@ MclpParseContext_TokBuffer + tokbuf!
 
 	while (1)
 		auto tokflag
@@ -248,7 +246,7 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			end
 		end
 
-		if (endtoken@)
+		if (endtoken@ tokflag@ LEXTOK_LITERAL & ~~ &&)
 			if (tokbuf@ endtoken@ strcmp)
 				break
 			end
@@ -306,51 +304,142 @@ fn MclpParseDirective { ctx -- node ok }
 	0 node!
 end
 
-fn MclpParseFunctionCall { ctx -- node ok }
-	PARSENODE_FUNCCALL // type
-	MclpParseNodeFunctionCall_SIZEOF // size
-	ctx@ // ctx
-	MclpParseNodeCreate ok! node!
-
-	if (ok@)
-		return
-	end
-
-	auto hp
-	auto tp
-
-	node@ MclpParseNodeFunctionCall_ArgListHead + hp!
-	node@ MclpParseNodeFunctionCall_ArgListTail + tp!
-
-	0 hp@!
-	0 tp@!
-
-	while (1)
-
-	end
+fn MclpParseIfStatement { ctx -- node ok }
+	0 node!
+	0 ok!
 end
 
-fn MclpParseExpression { endtoken ctx -- node ok }
+fn MclpParseExpression { endtoken ctx -- tokflag node ok }
 	auto tokbuf
-	TOKBUFFERSIZE alloc tokbuf!
+	ctx@ MclpParseContext_TokBuffer + tokbuf!
 
 	0 // peek
 	tokbuf@ // tokbuf
 	ctx@ // ctx
-	MclpLexNextToken ok! drop drop
+	MclpLexNextToken ok! drop tokflag!
 
 	if (ok@)
 		return
 	end
 
-	if (endtoken@)
+	if (endtoken@ tokflag@ LEXTOK_LITERAL & ~~ &&)
 		if (tokbuf@ endtoken@ strcmp)
-			ctx@ MclpLexLastToken
-
 			0 node!
 
 			return
 		end
+	end
+
+	auto toklen
+
+	if (tokbuf@ "$" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
+		// var ref
+
+		0 // peek
+		tokbuf@ // tokbuf
+		ctx@ // ctx
+		MclpLexNextToken ok! toklen! tokflag!
+
+		if (ok@)
+			return
+		end
+
+		PARSENODE_VARREF // type
+		MclpParseNodeVarRef_SIZEOF toklen@ + // size
+		ctx@ // ctx
+		MclpParseNodeCreate ok! node!
+
+		if (ok@)
+			return
+		end
+
+		node@ MclpParseNodeVarRef_Name + // dest
+		tokbuf@ // src
+		strcpy
+	end elseif (tokbuf@ "(" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
+		// func call
+
+		auto subnode
+		")" // endtoken
+		ctx@ // ctx
+		MclpParseExpression ok! subnode! tokflag!
+
+		if (ok@)
+			return
+		end
+
+		if (subnode@ ~~)
+			STATUS_SYNTAX_ERROR ok!
+
+			return
+		end
+
+		PARSENODE_FUNCCALL // type
+		MclpParseNodeFunctionCall_SIZEOF // size
+		ctx@ // ctx
+		MclpParseNodeCreate ok! node!
+
+		if (ok@)
+			subnode@ MclpParseSubtreeFree
+
+			return
+		end
+
+		subnode@ node@ MclpParseNodeFunctionCall_Name + !
+
+		auto hp
+		auto tp
+
+		node@ MclpParseNodeFunctionCall_ArgListHead + hp!
+		node@ MclpParseNodeFunctionCall_ArgListTail + tp!
+
+		0 hp@!
+		0 tp@!
+
+		0 node@ MclpParseNodeFunctionCall_ArgCount + !
+
+		while (1)
+			")" // endtoken
+			ctx@ // ctx
+			MclpParseExpression ok! subnode! tokflag!
+
+			if (ok@)
+				node@ MclpParseSubtreeFree
+
+				return
+			end
+
+			if (subnode@ ~~)
+				break
+			end
+
+			// add to arg list
+
+			if (hp@@ ~~)
+				subnode@ hp@!
+				subnode@ tp@!
+			end else
+				subnode@ tp@@ MclpParseNode_Next + !
+				subnode@ tp@!
+			end
+
+			1 node@ MclpParseNodeFunctionCall_ArgCount + +=
+		end
+	end else
+		// ident
+
+		PARSENODE_LITERAL // type
+		MclpParseNodeLiteral_SIZEOF toklen@ + // size
+		ctx@ // ctx
+		MclpParseNodeCreate ok! node!
+
+		if (ok@)
+			return
+		end
+
+		node@ MclpParseNodeLiteral_Word + // dest
+		tokbuf@ // src
+		strcpy
 	end
 end
 
@@ -403,11 +492,7 @@ fn MclpParsePipeline { endtoken ctx -- node ok }
 	end
 end
 
-fn MclpParseIfStatement { ctx -- node ok }
+fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
 	0 node!
 	0 ok!
-end
-
-fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
-
 end

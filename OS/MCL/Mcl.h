@@ -50,6 +50,8 @@ struct MclpParseContext
 	4 ParseFlags
 
 	4 Machine
+
+	TOKBUFFERSIZE TokBuffer
 endstruct
 
 const LEX_INTERACTIVE  1

@@ -1,7 +1,7 @@
 # MINTIA
 
 MINTIA is a custom operating system written in a custom programming language, as
-part of a 5+ years personal project to create a fully from-scratch RISC
+part of a half-decade personal project to create a fully from-scratch RISC
 workstation computer called [XR/station](https://github.com/xrarch/xremu).
 
 Its kernel design pays homage to the Windows NT operating system. In particular

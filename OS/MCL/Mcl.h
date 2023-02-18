@@ -74,6 +74,7 @@ extern MclpSymbolTableInitialize { symboltable -- }
 
 extern MclpInteractiveReadLine { buf max ctx -- count ok }
 extern MclpLexNextToken { peek tokbuf ctx -- tokflag toklen ok }
+extern MclpLexNextNonemptyToken { stopnl tokbuf ctx -- tokflag toklen ok }
 extern MclpLexLastToken { ctx -- }
 
 extern MclpParseNodeCreate { type size ctx -- node ok }

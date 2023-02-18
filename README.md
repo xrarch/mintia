@@ -27,7 +27,7 @@ fantasy computer and planned future ports to other architectures as well.
 As with all XR/station projects, the [sdk](http://github.com/xrarch/sdk) should
 be in a directory `../sdk` relative to this repository.
 
-Running `make` in this repository should then place an MINTIA distribution image
+Running `make` in this repository should then place a MINTIA distribution image
 at `build/mintia-XRstation-fre.img`. Windows users should use WSL as Cygwin
 seems to have problems with the SDK. Multi-core builds are encouraged with the
 `make -jN` argument, where N is the number of cores on your machine.

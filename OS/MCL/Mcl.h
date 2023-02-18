@@ -44,6 +44,8 @@ struct MclpParseContext
 	4 LexInputLength
 	4 LexLineNumber
 
+	4 Depth
+
 	4 FileName
 	4 StreamHandle
 

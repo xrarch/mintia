@@ -1,18 +1,19 @@
 # MINTIA
 
-MINTIA is an overengineered operating system written in a custom programming
-language as part of a long-running project to develop a retro RISC workstation
-computer called [XR/station](https://github.com/xrarch/xremu). Its overall
-design pays homage to the Windows NT and VMS operating systems, especially its
-object manager and virtual memory manager, with the capability to swap to disk
-not only user pages but also kernel stacks, page tables, and even its own kernel
-code and heap.
+MINTIA is a custom operating system written in a custom programming language, as
+part of a 5+ years personal project to create a fully from-scratch RISC
+workstation computer called [XR/station](https://github.com/xrarch/xremu).
 
-It aims to be something that might have come off of a weird workstation
+Its kernel design pays homage to the Windows NT operating system. In particular
+its virtual memory manager has been written to similar standards, with the
+capability to swap to disk not only user pages but also kernel stacks, page
+tables, and even ~50% of its own kernel code and heap.
+
+MINTIA aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
-a pretty strong system at the time. It also tries to be portable to other
-32-bit architectures, with a finished port to the [fox32](https://github.com/fox32-arch/fox32)
-CISC fantasy computer and planned future ports to other architectures as well.
+a pretty strong system at the time. It is also very portable to other
+32-bit architectures, with a finished port to the unrelated [fox32](https://github.com/fox32-arch/fox32)
+fantasy computer and planned future ports to other architectures as well.
 
 ![Running](https://raw.githubusercontent.com/xrarch/mintia/main/screenshot.png)
 
@@ -23,9 +24,16 @@ CISC fantasy computer and planned future ports to other architectures as well.
 
 ## Building
 
-As with all XR/station projects, the [sdk](http://github.com/xrarch/sdk) should be in a directory `../sdk` relative to this repository.
+As with all XR/station projects, the [sdk](http://github.com/xrarch/sdk) should
+be in a directory `../sdk` relative to this repository.
 
-Running `make` in this repository should then place an MINTIA distribution image at `build/mintia-XRstation-fre.img`. Windows users should use WSL as Cygwin seems to have problems with the SDK.
+Running `make` in this repository should then place an MINTIA distribution image
+at `build/mintia-XRstation-fre.img`. Windows users should use WSL as Cygwin
+seems to have problems with the SDK. Multi-core builds are encouraged with the
+`make -jN` argument, where N is the number of cores on your machine.
+
+To build for fox32, type `make PLATFORM=fox32` and the distribution image should
+be placed at `build/mintia-fox32-fre.img`.
 
 ## Testing
 

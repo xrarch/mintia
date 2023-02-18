@@ -61,6 +61,7 @@ const LEX_NEWSTATEMENT 2
 
 const LEXTOK_NEWLINE 1
 const LEXTOK_LITERAL 2
+const LEXTOK_EMPTY   4
 
 extern MclpLexInit { -- }
 

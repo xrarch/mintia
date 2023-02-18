@@ -7,7 +7,7 @@ extern ExiTimerInit { -- }
 // handle table stuff
 
 
-const EXTENDBYENTRIES 16
+const EXTENDBYENTRIES 32
 
 struct ExiHandleTableHeader
 	ExRwLock_SIZEOF RwLock

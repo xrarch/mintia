@@ -132,6 +132,10 @@ fn MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 end
 
 fn MclpParseSubtreeFree { node -- }
+	if (node@ ~~)
+		return
+	end
+
 	auto subnode
 	auto nsubnode
 
@@ -206,6 +210,9 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 		return
 	end
 
+	auto nodes
+	0 nodes!
+
 	1 ctx@ MclpParseContext_Depth + +=
 
 	auto hp
@@ -242,8 +249,12 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			break
 		end
 
-		if (toklen@ ~~)
-			continue
+		if (toklen@ ~~ tokflag@ LEXTOK_LITERAL & ~~ &&)
+			if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
+				break
+			end else
+				continue
+			end
 		end
 
 		if (endtoken@ tokflag@ LEXTOK_LITERAL & ~~ &&)
@@ -289,6 +300,8 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 				node@ tp@@ MclpParseNode_Next + !
 				node@ tp@!
 			end
+
+			1 nodes +=
 		end
 
 		if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
@@ -297,6 +310,13 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 	end
 
 	1 ctx@ MclpParseContext_Depth + -=
+
+	if (ok@ ~~)
+		if (nodes@ ~~)
+			block@ MclpParseSubtreeFree
+			0 block!
+		end
+	end
 end
 
 fn MclpParseDirective { ctx -- node ok }
@@ -600,16 +620,28 @@ fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
 	while (1)
 		// parse all of the arguments
 
+		auto toklen
 		0 // peek
 		tokbuf@ // tokbuf
 		ctx@ // ctx
-		MclpLexNextToken ok! drop tokflag!
+		MclpLexNextToken ok! toklen! tokflag!
 
 		if (ok@)
 			return
 		end
 
 		if (tokflag@ LEXTOK_LITERAL & ~~)
+			if (toklen@ ~~)
+				// stray comment or such
+
+				if (tokflag@ LEXTOK_NEWLINE &)
+					WHYRETURN_TERM whyreturn!
+					break
+				end
+
+				continue
+			end
+
 			if (tokbuf@ "|" strcmp)
 				WHYRETURN_PIPE whyreturn!
 			end elseif (tokbuf@ "<" strcmp)

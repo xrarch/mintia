@@ -195,6 +195,26 @@ fn MclpParseSubtreeFree { node -- }
 		end
 
 		node@ MclpParseNodeFunctionCall_Name + @ MclpParseSubtreeFree
+	end elseif (node@ MclpParseNode_Type + @ PARSENODE_COND ==
+				node@ MclpParseNode_Type + @ PARSENODE_WHILE == ||)
+
+		if (node@ MclpParseNodeConditionalBlock_Conditional + @)
+			node@ MclpParseNodeConditionalBlock_Conditional + @ MclpParseSubtreeFree
+		end
+
+		if (node@ MclpParseNodeConditionalBlock_Body + @)
+			node@ MclpParseNodeConditionalBlock_Body + @ MclpParseSubtreeFree
+		end
+	end elseif (node@ MclpParseNode_Type + @ PARSENODE_IF ==)
+		node@ MclpParseNodeIf_CondListHead + @ subnode!
+
+		while (subnode@)
+			subnode@ MclpParseNode_Next + @ nsubnode!
+
+			subnode@ MclpParseSubtreeFree
+
+			nsubnode@ subnode!
+		end
 	end
 
 	node@ OSHeapFree
@@ -322,9 +342,63 @@ end
 fn MclpParseDirective { ctx -- node ok }
 	0 ok!
 	0 node!
+
+	auto tokbuf
+	ctx@ MclpParseContext_TokBuffer + tokbuf!
+
+	1 ctx@ MclpParseContext_Depth + +=
+
+	auto tokflag
+	auto toklen
+
+	0 // stopnl
+	tokbuf@ // tokbuf
+	ctx@ // ctx
+	MclpLexNextNonemptyToken ok! toklen! tokflag!
+
+	if (ok@)
+		1 ctx@ MclpParseContext_Depth + -=
+
+		return
+	end
+
+	if (tokbuf@ "IF" strcmp)
+		ctx@ MclpParseIfStatement ok! node!
+	end elseif (tokbuf@ "WHILE" strcmp)
+		ctx@ MclpParseWhileStatement ok! node!
+	end elseif (tokbuf@ "SET" strcmp)
+		ctx@ MclpParseSetStatement ok! node!
+	end elseif (tokbuf@ "FUNC" strcmp)
+		ctx@ MclpParseFuncStatement ok! node!
+	end else
+		tokbuf@
+		"unknown directive '%s'\n" // fmt
+		0 // node
+		ctx@ // ctx
+		MclpParseDiagnostic
+
+		STATUS_SYNTAX_ERROR ok!
+	end
+
+	1 ctx@ MclpParseContext_Depth + -=
 end
 
 fn MclpParseIfStatement { ctx -- node ok }
+	0 node!
+	0 ok!
+end
+
+fn MclpParseWhileStatement { ctx -- node ok }
+	0 node!
+	0 ok!
+end
+
+fn MclpParseSetStatement { ctx -- node ok }
+	0 node!
+	0 ok!
+end
+
+fn MclpParseFuncStatement { ctx -- node ok }
 	0 node!
 	0 ok!
 end
@@ -403,6 +477,11 @@ fn MclpParseExpression { endtoken ctx -- tokflag node ok }
 
 		if (subnode@ ~~)
 			1 ctx@ MclpParseContext_Depth + -=
+
+			"expected a function name\n" // fmt
+			0 // node
+			ctx@ // ctx
+			MclpParseDiagnostic
 
 			STATUS_SYNTAX_ERROR ok!
 
@@ -513,6 +592,8 @@ fn MclpParsePipeline { endtoken ctx -- node ok }
 	0 node@ MclpParseNodePipeline_StdOutRedirectionPath + !
 	0 node@ MclpParseNodePipeline_StdErrRedirectionPath + !
 
+	0 node@ MclpParseNodePipeline_Flags + !
+
 	auto tokbuf
 	ctx@ MclpParseContext_TokBuffer + tokbuf!
 
@@ -563,7 +644,77 @@ fn MclpParsePipeline { endtoken ctx -- node ok }
 end
 
 fn MclpParseRedirection { node ctx -- ok }
-	0 ok!
+	auto tokbuf
+	ctx@ MclpParseContext_TokBuffer + tokbuf!
+
+	while (1)
+		auto toklen
+		auto tokflag
+
+		0 // stopnl
+		tokbuf@ // tokbuf
+		ctx@ // ctx
+		MclpLexNextNonemptyToken ok! toklen! tokflag!
+
+		if (ok@)
+			break
+		end
+
+		auto off
+
+		if (tokbuf@ "<" strcmp)
+			MclpParseNodePipeline_StdInRedirectionPath off!
+		end elseif (tokbuf@ gb '>' ==)
+			if (tokbuf@ ">" strcmp)
+				MclpParseNodePipeline_StdOutRedirectionPath off!
+				PIPELINEFLAG_OUTAPPEND ~ node@ MclpParseNodePipeline_Flags + &=
+			end elseif (tokbuf@ ">>" strcmp)
+				MclpParseNodePipeline_StdOutRedirectionPath off!
+				PIPELINEFLAG_OUTAPPEND node@ MclpParseNodePipeline_Flags + |=
+			end elseif (tokbuf@ ">>>" strcmp)
+				MclpParseNodePipeline_StdErrRedirectionPath off!
+				PIPELINEFLAG_ERRAPPEND ~ node@ MclpParseNodePipeline_Flags + &=
+			end elseif (tokbuf@ ">>>>" strcmp)
+				MclpParseNodePipeline_StdErrRedirectionPath off!
+				PIPELINEFLAG_ERRAPPEND node@ MclpParseNodePipeline_Flags + |=
+			end else
+				"unknown redirection\n" // fmt
+				0 // node
+				ctx@ // ctx
+				MclpParseDiagnostic
+
+				STATUS_SYNTAX_ERROR ok!
+				break
+			end
+		end else
+			"odd redirection\n" // fmt
+			0 // node
+			ctx@ // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+			break
+		end
+
+		auto redirnode
+		0 // endtoken
+		ctx@ // ctx
+		MclpParseExpression ok! redirnode! tokflag!
+
+		if (ok@)
+			break
+		end
+
+		if (node@ off@ + @)
+			node@ off@ + @ MclpParseSubtreeFree
+		end
+
+		redirnode@ node@ off@ + !
+
+		if (tokflag@ LEXTOK_NEWLINE &)
+			break
+		end
+	end
 end
 
 fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
@@ -641,15 +792,7 @@ fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
 			end elseif (tokbuf@ "<" strcmp)
 				WHYRETURN_REDIRECT whyreturn!
 			end elseif (tokbuf@ gb '>' ==)
-				if (tokbuf@ ">" strcmp)
-					WHYRETURN_REDIRECT whyreturn!
-				end elseif (tokbuf@ ">>" strcmp)
-					WHYRETURN_REDIRECT whyreturn!
-				end elseif (tokbuf@ ">>>" strcmp)
-					WHYRETURN_REDIRECT whyreturn!
-				end elseif (tokbuf@ ">>>>" strcmp)
-					WHYRETURN_REDIRECT whyreturn!
-				end
+				WHYRETURN_REDIRECT whyreturn!
 			end
 
 			if (whyreturn@)

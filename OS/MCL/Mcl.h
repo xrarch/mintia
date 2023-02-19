@@ -4,18 +4,23 @@ struct MclpSymbolTable
 	4 Count
 	4 ListHead
 
+	4 UpperScope
+
 	(SYMBOLHASHTABLESIZE 4 *) BucketHeads
 endstruct
 
 struct MclpMachine
 	OSFastMutex_SIZEOF Mutex
 
-	MclpSymbolTable_SIZEOF SymbolTable
+	MclpSymbolTable_SIZEOF RootSymbolTable
 
 	4 HistoryCount
 	4 HistoryListHead
 	4 HistoryListTail
 endstruct
+
+const SYMTYPE_FUNCTION 1
+const SYMTYPE_VARIABLE 2
 
 struct MclpSymbol
 	4 SymbolTable
@@ -24,9 +29,7 @@ struct MclpSymbol
 	4 BucketPrev
 	4 BucketIndex
 
-	4 GlobalNext
-	4 GlobalPrev
-
+	4 Type
 	4 Value
 
 	0 Name
@@ -70,7 +73,7 @@ extern MclpMachineUnlock { machine -- }
 
 extern MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 
-extern MclpSymbolTableInitialize { symboltable -- }
+extern MclpSymbolTableInitialize { upperscope symboltable -- }
 
 extern MclpInteractiveReadLine { buf max ctx -- count ok }
 extern MclpLexNextToken { peek tokbuf ctx -- tokflag toklen ok }
@@ -89,6 +92,10 @@ const PARSENODE_PIPELINE   3
 const PARSENODE_COMMAND    4
 const PARSENODE_VARREF     5
 const PARSENODE_FUNCCALL   6
+const PARSENODE_IF         7
+const PARSENODE_COND       8
+const PARSENODE_WHILE      9
+const PARSENODE_FUNCDEF    10
 
 struct MclpParseNode
 	4 Type
@@ -110,6 +117,9 @@ struct MclpParseNodeLiteral
 	0 Word
 endstruct
 
+const PIPELINEFLAG_OUTAPPEND 1
+const PIPELINEFLAG_ERRAPPEND 2
+
 struct MclpParseNodePipeline
 	MclpParseNode_SIZEOF Header
 
@@ -121,6 +131,8 @@ struct MclpParseNodePipeline
 	4 StdInRedirectionPath
 	4 StdOutRedirectionPath
 	4 StdErrRedirectionPath
+
+	4 Flags
 endstruct
 
 struct MclpParseNodeCommand
@@ -149,4 +161,28 @@ struct MclpParseNodeFunctionCall
 	4 ArgListTail
 
 	4 Name
+endstruct
+
+struct MclpParseNodeIf
+	MclpParseNode_SIZEOF Header
+
+	4 CondListHead
+	4 CondListTail
+endstruct
+
+struct MclpParseNodeConditionalBlock
+	MclpParseNode_SIZEOF Header
+
+	4 Conditional
+	4 Body
+endstruct
+
+struct MclpParseNodeFuncDef
+	MclpParseNode_SIZEOF Header
+
+	4 Body
+	4 ArgCount
+	4 Name
+
+	0 ArgNames
 endstruct

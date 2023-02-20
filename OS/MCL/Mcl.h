@@ -96,6 +96,7 @@ const PARSENODE_IF         7
 const PARSENODE_COND       8
 const PARSENODE_WHILE      9
 const PARSENODE_FUNCDEF    10
+const PARSENODE_VARSET     11
 
 struct MclpParseNode
 	4 Type
@@ -149,7 +150,7 @@ endstruct
 struct MclpParseNodeVarRef
 	MclpParseNode_SIZEOF Header
 
-	0 Name
+	4 Name
 endstruct
 
 struct MclpParseNodeFunctionCall
@@ -168,6 +169,8 @@ struct MclpParseNodeIf
 
 	4 CondListHead
 	4 CondListTail
+
+	4 ElseBody
 endstruct
 
 struct MclpParseNodeConditionalBlock
@@ -182,7 +185,16 @@ struct MclpParseNodeFuncDef
 
 	4 Body
 	4 ArgCount
-	4 Name
+	
+	4 ArgNameListHead
+	4 ArgNameListTail
 
-	0 ArgNames
+	4 Name
+endstruct
+
+struct MclpParseNodeVarSet
+	MclpParseNode_SIZEOF Header
+
+	4 NewValue
+	4 Name
 endstruct

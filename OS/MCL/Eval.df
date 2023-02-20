@@ -1,0 +1,242 @@
+//
+// Implements the evaluator for the MINTIA Command Language.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+#include "<ll>/MCL/Mcl.h"
+
+#include "Mcl.h"
+
+const STATUS_RETURN -100000
+
+fnptr MclpEvaluateF { node machine -- value ok }
+
+table MclpEvaluateFunctions
+	0
+	pointerof MclpEvaluateBlock
+	pointerof MclpEvaluateLiteral
+	pointerof MclpEvaluatePipeline
+	pointerof MclpEvaluateCommand
+	pointerof MclpEvaluateVarRef
+	pointerof MclpEvaluateFuncCall
+	pointerof MclpEvaluateIf
+	0
+	pointerof MclpEvaluateWhile
+	pointerof MclpEvaluateFuncDef
+	pointerof MclpEvaluateVarSet
+	0
+	0
+	0
+endtable
+
+fn MclpFreeValue { value -- }
+	value@ OSHeapFree
+end
+
+fn MclpEvaluateNode { node machine -- value ok }
+	if (node@ ~~)
+		0 ok!
+		0 value!
+		return
+	end
+
+	auto func
+	[node@ MclpParseNode_Type + @]MclpEvaluateFunctions@ func!
+
+	node@ MclpParseNode_Type + @ "%d\n" Printf
+
+	node@ // node
+	machine@ // machine
+	func@ MclpEvaluateF ok! value!
+end
+
+fn MclpEvaluateBlock { node machine -- value ok }
+	0 value!
+	0 ok!
+
+	auto subnode
+	node@ MclpParseNodeBlock_NodeListHead + @ subnode!
+
+	while (subnode@)
+		if (subnode@ MclpParseNode_Type + @ PARSENODE_BREAK ==)
+			break
+		end elseif (subnode@ MclpParseNode_Type + @ PARSENODE_CONTINUE ==)
+			node@ MclpParseNodeBlock_NodeListHead + @ subnode!
+			continue
+		end elseif (subnode@ MclpParseNode_Type + @ PARSENODE_RETURN ==)
+			STATUS_RETURN ok!
+			break
+		end
+
+		if (value@)
+			value@ MclpFreeValue
+			0 value!
+		end
+
+		subnode@ // node
+		machine@ // machine
+		MclpEvaluateNode ok! value!
+
+		if (ok@)
+			if (ok@ STATUS_RETURN ==)
+				if (node@ MclpParseNodeBlock_IsRootBlock + @)
+					0 ok!
+				end
+			end
+
+			return
+		end
+
+		subnode@ MclpParseNode_Next + @ subnode!
+	end
+end
+
+fn MclpEvaluateLiteral { node machine -- value ok }
+	node@ MclpParseNodeLiteral_Length + @ 1 + OSHeapAllocate ok! value!
+
+	if (ok@)
+		return
+	end
+
+	value@ // dest
+	node@ MclpParseNodeLiteral_Word + // src
+	strcpy
+end
+
+fn MclpEvaluatePipeline { node machine -- value ok }
+	0 value!
+	0 ok!
+end
+
+fn MclpEvaluateCommand { node machine -- value ok }
+	0 value!
+	0 ok!
+end
+
+fn MclpEvaluateVarRef { node machine -- value ok }
+	0 value!
+	0 ok!
+end
+
+fn MclpEvaluateFuncCall { node machine -- value ok }
+	0 value!
+	0 ok!
+end
+
+fn MclpEvaluateIf { node machine -- value ok }
+	0 value!
+	0 ok!
+
+	auto condblock
+	node@ MclpParseNodeIf_CondListHead + @ condblock!
+
+	while (condblock@)
+		if (value@)
+			value@ MclpFreeValue
+			0 value!
+		end
+
+		auto executed
+		condblock@ // node
+		machine@ // machine
+		MclpEvaluateConditionBlock ok! value! executed!
+
+		if (ok@)
+			return
+		end
+
+		if (executed@)
+			return
+		end
+
+		condblock@ MclpParseNode_Next + @ condblock!
+	end
+
+	if (value@)
+		value@ MclpFreeValue
+		0 value!
+	end
+
+	node@ MclpParseNodeIf_ElseBody + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! value!
+end
+
+fn MclpEvaluateConditionBlock { node machine -- executed value ok }
+	node@ MclpParseNodeConditionalBlock_Conditional + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! value!
+
+	if (ok@)
+		return
+	end
+
+	value@ MclpEvaluateValueTruthiness executed!
+
+	if (executed@ ~~)
+		return
+	end
+
+	node@ MclpParseNodeConditionalBlock_Body + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! value!
+end
+
+fn MclpEvaluateValueTruthiness { value -- tru }
+	if (value@ gb '0' >= value@ gb '9' <= &&)
+		if (value@ atoi)
+			1 tru!
+			return
+		end
+
+		0 tru!
+		return
+	end
+
+	if (value@ "false" strcmp)
+		0 tru!
+		return
+	end
+
+	if (value@ "FALSE" strcmp)
+		0 tru!
+		return
+	end
+
+	1 tru!
+end
+
+fn MclpEvaluateWhile { node machine -- value ok }
+	0 value!
+	0 ok!
+
+	auto executed
+	1 executed!
+
+	while (executed@)
+		if (value@)
+			value@ MclpFreeValue
+			0 value!
+		end
+
+		node@ // node
+		machine@ // machine
+		MclpEvaluateConditionBlock ok! value! executed!
+
+		if (ok@)
+			return
+		end
+	end
+end
+
+fn MclpEvaluateFuncDef { node machine -- value ok }
+	0 value!
+	0 ok!
+end
+
+fn MclpEvaluateVarSet { node machine -- value ok }
+	0 value!
+	0 ok!
+end

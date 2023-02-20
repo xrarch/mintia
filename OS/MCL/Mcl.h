@@ -86,6 +86,8 @@ extern MclpParseSubtreeFree { node -- }
 
 extern MclpParseDiagnostic { ... fmt node ctx -- }
 
+extern MclpEvaluateNode { node machine -- value ok }
+
 const PARSENODE_BLOCK      1
 const PARSENODE_LITERAL    2
 const PARSENODE_PIPELINE   3
@@ -97,6 +99,9 @@ const PARSENODE_COND       8
 const PARSENODE_WHILE      9
 const PARSENODE_FUNCDEF    10
 const PARSENODE_VARSET     11
+const PARSENODE_RETURN     12
+const PARSENODE_CONTINUE   13
+const PARSENODE_BREAK      14
 
 struct MclpParseNode
 	4 Type
@@ -108,12 +113,16 @@ endstruct
 struct MclpParseNodeBlock
 	MclpParseNode_SIZEOF Header
 
+	4 IsRootBlock
+
 	4 NodeListHead
 	4 NodeListTail
 endstruct
 
 struct MclpParseNodeLiteral
 	MclpParseNode_SIZEOF Header
+
+	4 Length
 
 	0 Word
 endstruct

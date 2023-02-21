@@ -20,6 +20,7 @@ extern CoConsoleInsertProcess { process consoleobject -- ok }
 extern CoConsoleIOControl { arg2 arg1 access console lastmode -- ret ok }
 
 extern CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
+extern CoDuplexCreate { flags name permissions -- duplexhandle filehandle ok }
 
 extern CoDuplexInputCharacter { c duplex -- ok }
 extern CoDuplexReadTransmitCharacter { duplex -- c ok }

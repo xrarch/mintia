@@ -149,6 +149,8 @@ extern OSSetSystemConsole { filehandle -- ok }
 
 extern OSConsoleSignal { signal filehandle -- ok }
 
+extern OSDuplexCreate { flags name permissions -- duplexhandle filehandle ok }
+
 // Se
 extern OSCheckPermission { permission processhandle -- ok }
 extern OSGrantPermission { permission processhandle -- ok }

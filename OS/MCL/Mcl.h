@@ -14,6 +14,7 @@ struct MclpMachine
 
 	4 CurrentScope
 	4 CurrentNode
+	4 CaptureDepth
 
 	4 HistoryCount
 	4 HistoryListHead
@@ -104,6 +105,8 @@ extern MclpParseSubtreeFree { node -- }
 extern MclpParseDiagnostic { ... fmt node ctx -- }
 
 extern MclpEvaluateNode { node machine -- value ok }
+
+extern MclpEvaluatePipeline { node machine -- value ok }
 
 extern MclpFreeValue { value -- }
 

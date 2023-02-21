@@ -22,7 +22,7 @@ table MclpEvaluateFunctions
 	pointerof MclpEvaluateBlock
 	pointerof MclpEvaluateLiteral
 	pointerof MclpEvaluatePipeline
-	pointerof MclpEvaluateCommand
+	0
 	pointerof MclpEvaluateVarRef
 	pointerof MclpEvaluateFuncCall
 	pointerof MclpEvaluateIf
@@ -140,16 +140,6 @@ fn MclpEvaluateLiteral { node machine -- value ok }
 	strcpy
 end
 
-fn MclpEvaluatePipeline { node machine -- value ok }
-	0 value!
-	0 ok!
-end
-
-fn MclpEvaluateCommand { node machine -- value ok }
-	0 value!
-	0 ok!
-end
-
 fn MclpEvaluateVarRef { node machine -- value ok }
 	node@ MclpParseNodeVarRef_Name + @ // node
 	machine@ // machine
@@ -199,7 +189,10 @@ fn MclpEvaluateVarRef { node machine -- value ok }
 
 	value@ // dest
 	symbol@ MclpSymbol_Value + @ // src
-	strcpy
+	symbol@ MclpSymbol_ValueLength + @ // sz
+	memcpy
+
+	0 value@ symbol@ MclpSymbol_ValueLength + @ + sb
 end
 
 fn MclpEvaluateFuncCall { node machine -- value ok }
@@ -329,6 +322,10 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 			func@ MclpParseNodeFuncDef_Body + @ // node
 			machine@ // machine
 			MclpEvaluateNode ok! value!
+
+			if (ok@ STATUS_FUNCTION_RETURN ==)
+				0 ok!
+			end
 		end
 
 		localscope@ MclpSymbolTableUninitialize
@@ -340,34 +337,40 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 		// function.
 
 		auto arglist
-		node@ MclpParseNodeFunctionCall_ArgCount + @ 2 << OSHeapAllocate ok! arglist!
-
-		if (ok@)
-			return
-		end
-
-		node@ MclpParseNodeFunctionCall_ArgListHead + @ argnode!
-
 		auto argptr
-		arglist@ argptr!
-
 		auto cnt
-		0 cnt!
 
-		while (argnode@)
-			argnode@ // node
-			machine@ // machine
-			MclpEvaluateNode ok! argval!
+		if (node@ MclpParseNodeFunctionCall_ArgCount + @)
+			node@ MclpParseNodeFunctionCall_ArgCount + @ 2 << OSHeapAllocate ok! arglist!
 
 			if (ok@)
-				break
+				return
 			end
 
-			argval@ argptr@!
+			node@ MclpParseNodeFunctionCall_ArgListHead + @ argnode!
 
-			4 argptr +=
-			1 cnt +=
-			argnode@ MclpParseNode_Next + @ argnode!
+			arglist@ argptr!
+
+			0 cnt!
+
+			while (argnode@)
+				argnode@ // node
+				machine@ // machine
+				MclpEvaluateNode ok! argval!
+
+				if (ok@)
+					break
+				end
+
+				argval@ argptr@!
+
+				4 argptr +=
+				1 cnt +=
+				argnode@ MclpParseNode_Next + @ argnode!
+			end
+		end else
+			0 arglist!
+			0 ok!
 		end
 
 		if (ok@ ~~)
@@ -381,16 +384,18 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 			func@ MclBuiltinF ok! value!
 		end
 
-		arglist@ argptr!
+		if (arglist@)
+			arglist@ argptr!
 
-		while (cnt@)
-			argptr@@ MclpFreeValue
+			while (cnt@)
+				argptr@@ MclpFreeValue
 
-			4 argptr +=
-			1 cnt -=
+				4 argptr +=
+				1 cnt -=
+			end
+
+			arglist@ OSHeapFree
 		end
-
-		arglist@ OSHeapFree
 	end
 end
 

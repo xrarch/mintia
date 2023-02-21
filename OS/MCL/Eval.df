@@ -9,9 +9,13 @@
 
 #include "Mcl.h"
 
-const STATUS_RETURN -100000
+const STATUS_FUNCTION_RETURN -100000
+const STATUS_LOOP_CONTINUE   -100001
+const STATUS_LOOP_BREAK      -100002
 
 fnptr MclpEvaluateF { node machine -- value ok }
+
+datasection "text"
 
 table MclpEvaluateFunctions
 	0
@@ -31,8 +35,20 @@ table MclpEvaluateFunctions
 	0
 endtable
 
+datasection "data"
+
 fn MclpFreeValue { value -- }
-	value@ OSHeapFree
+	if (value@)
+		value@ OSHeapFree
+	end
+end
+
+fn MclpRegisterBuiltin { func name machine -- ok }
+	func@ // value
+	SYMTYPE_BUILTIN // type
+	name@ // name
+	machine@ MclpMachine_RootSymbolTable + // symboltable
+	MclpSymbolSet ok! drop
 end
 
 fn MclpEvaluateNode { node machine -- value ok }
@@ -45,7 +61,7 @@ fn MclpEvaluateNode { node machine -- value ok }
 	auto func
 	[node@ MclpParseNode_Type + @]MclpEvaluateFunctions@ func!
 
-	node@ MclpParseNode_Type + @ "%d\n" Printf
+	//node@ MclpParseNode_Type + @ "%d\n" Printf
 
 	node@ // node
 	machine@ // machine
@@ -59,14 +75,24 @@ fn MclpEvaluateBlock { node machine -- value ok }
 	auto subnode
 	node@ MclpParseNodeBlock_NodeListHead + @ subnode!
 
+	auto query
+	OSHeapInformation_SIZEOF alloc query!
+
 	while (subnode@)
 		if (subnode@ MclpParseNode_Type + @ PARSENODE_BREAK ==)
-			break
+			STATUS_LOOP_BREAK ok!
 		end elseif (subnode@ MclpParseNode_Type + @ PARSENODE_CONTINUE ==)
-			node@ MclpParseNodeBlock_NodeListHead + @ subnode!
-			continue
+			if (value@)
+				value@ MclpFreeValue
+				0 value!
+			end
+
+			STATUS_LOOP_CONTINUE ok!
 		end elseif (subnode@ MclpParseNode_Type + @ PARSENODE_RETURN ==)
-			STATUS_RETURN ok!
+			STATUS_FUNCTION_RETURN ok!
+		end
+
+		if (ok@)
 			break
 		end
 
@@ -75,13 +101,22 @@ fn MclpEvaluateBlock { node machine -- value ok }
 			0 value!
 		end
 
+//		query@ OSHeapQuery
+
+//		query@ OSHeapInformation_UsedExternally + @
+//		query@ OSHeapInformation_UsedInternally + @ "%d/%d\n" Printf
+
 		subnode@ // node
 		machine@ // machine
 		MclpEvaluateNode ok! value!
 
 		if (ok@)
-			if (ok@ STATUS_RETURN ==)
-				if (node@ MclpParseNodeBlock_IsRootBlock + @)
+			if (node@ MclpParseNodeBlock_IsRootBlock + @)
+				if (ok@ STATUS_FUNCTION_RETURN ==)
+					0 ok!
+				end elseif (ok@ STATUS_LOOP_BREAK ==)
+					0 ok!
+				end elseif (ok@ STATUS_LOOP_CONTINUE ==)
 					0 ok!
 				end
 			end
@@ -116,13 +151,247 @@ fn MclpEvaluateCommand { node machine -- value ok }
 end
 
 fn MclpEvaluateVarRef { node machine -- value ok }
-	0 value!
-	0 ok!
+	node@ MclpParseNodeVarRef_Name + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! value!
+
+	if (ok@)
+		return
+	end
+
+	auto symbol
+	value@ // name
+	machine@ MclpMachine_CurrentScope + @ // symboltable
+	MclpSymbolLookupFullScope ok! symbol!
+
+	value@ MclpFreeValue
+
+	if (ok@)
+		if (ok@ -1 ==)
+			1 OSHeapAllocate ok! value!
+
+			if (ok@)
+				return
+			end
+
+			0 value@ sb
+		end
+
+		return
+	end
+
+	if (symbol@ MclpSymbol_Type + @ SYMTYPE_VARIABLE ~=)
+		"unexpected symbol type\n" // fmt
+		node@ // node
+		0 // ctx
+		MclpParseDiagnostic
+
+		STATUS_SYNTAX_ERROR ok!
+
+		return
+	end
+
+	symbol@ MclpSymbol_ValueLength + @ 1 + OSHeapAllocate ok! value!
+
+	if (ok@)
+		return
+	end
+
+	value@ // dest
+	symbol@ MclpSymbol_Value + @ // src
+	strcpy
 end
 
 fn MclpEvaluateFuncCall { node machine -- value ok }
 	0 value!
-	0 ok!
+
+	auto nameval
+	node@ MclpParseNodeFunctionCall_Name + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! nameval!
+
+	if (ok@)
+		return
+	end
+
+	auto symbol
+	nameval@ // name
+	machine@ MclpMachine_CurrentScope + @ // symboltable
+	MclpSymbolLookupFullScope ok! symbol!
+
+	nameval@ MclpFreeValue
+
+	if (ok@)
+		if (ok@ -1 ==)
+			"undefined function\n" // fmt
+			node@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+		end
+
+		return
+	end
+
+	if (symbol@ MclpSymbol_Type + @ SYMTYPE_FUNCTION ~=
+		symbol@ MclpSymbol_Type + @ SYMTYPE_BUILTIN ~= &&)
+		"unexpected symbol type\n" // fmt
+		node@ // node
+		0 // ctx
+		MclpParseDiagnostic
+
+		STATUS_SYNTAX_ERROR ok!
+
+		return
+	end
+
+	auto argval
+	auto argnode
+
+	auto func
+	symbol@ MclpSymbol_Value + @ func!
+
+	if (symbol@ MclpSymbol_Type + @ SYMTYPE_FUNCTION ==)
+		if (func@ MclpParseNodeFuncDef_ArgCount + @ node@ MclpParseNodeFunctionCall_ArgCount + @ ~=)
+			"argument count mismatch\n" // fmt
+			node@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+
+			return
+		end
+
+		// user-defined. construct local scope for function.
+
+		auto oldscope
+		machine@ MclpMachine_CurrentScope + @ oldscope!
+
+		auto localscope
+		MclpSymbolTable_SIZEOF OSHeapAllocate ok! localscope!
+
+		if (ok@)
+			return
+		end
+
+		machine@ MclpMachine_RootSymbolTable + // upperscope
+		localscope@ // symboltable
+		MclpSymbolTableInitialize
+
+		localscope@ machine@ MclpMachine_CurrentScope + !
+
+		auto argnamenode
+
+		func@ MclpParseNodeFuncDef_ArgNameListHead + @ argnamenode!
+		node@ MclpParseNodeFunctionCall_ArgListHead + @ argnode!
+
+		while (argnode@)
+			// create argument variable
+
+			auto argnameval
+			argnamenode@ // node
+			machine@ // machine
+			MclpEvaluateNode ok! argnameval!
+
+			if (ok@)
+				break
+			end
+
+			argnode@ // node
+			machine@ // machine
+			MclpEvaluateNode ok! argval!
+
+			if (ok@)
+				argnameval@ MclpFreeValue
+				break
+			end
+
+			argval@ // value
+			SYMTYPE_VARIABLE // type
+			argnameval@ // name
+			localscope@ // symboltable
+			MclpSymbolCreate ok! drop
+
+			argnameval@ MclpFreeValue
+
+			if (ok@)
+				argval@ MclpFreeValue
+				break
+			end
+
+			argnamenode@ MclpParseNode_Next + @ argnamenode!
+			argnode@ MclpParseNode_Next + @ argnode!
+		end
+
+		if (ok@ ~~)
+			func@ MclpParseNodeFuncDef_Body + @ // node
+			machine@ // machine
+			MclpEvaluateNode ok! value!
+		end
+
+		localscope@ MclpSymbolTableUninitialize
+		localscope@ OSHeapFree
+
+		oldscope@ machine@ MclpMachine_CurrentScope + !
+	end else
+		// built-in. construct list of arguments and pass to built-in
+		// function.
+
+		auto arglist
+		node@ MclpParseNodeFunctionCall_ArgCount + @ 2 << OSHeapAllocate ok! arglist!
+
+		if (ok@)
+			return
+		end
+
+		node@ MclpParseNodeFunctionCall_ArgListHead + @ argnode!
+
+		auto argptr
+		arglist@ argptr!
+
+		auto cnt
+		0 cnt!
+
+		while (argnode@)
+			argnode@ // node
+			machine@ // machine
+			MclpEvaluateNode ok! argval!
+
+			if (ok@)
+				break
+			end
+
+			argval@ argptr@!
+
+			4 argptr +=
+			1 cnt +=
+			argnode@ MclpParseNode_Next + @ argnode!
+		end
+
+		if (ok@ ~~)
+			// call builtin
+
+			node@ machine@ MclpMachine_CurrentNode + !
+
+			arglist@ // argvt
+			node@ MclpParseNodeFunctionCall_ArgCount + @ // argcn
+			machine@ // machine
+			func@ MclBuiltinF ok! value!
+		end
+
+		arglist@ argptr!
+
+		while (cnt@)
+			argptr@@ MclpFreeValue
+
+			4 argptr +=
+			1 cnt -=
+		end
+
+		arglist@ OSHeapFree
+	end
 end
 
 fn MclpEvaluateIf { node machine -- value ok }
@@ -175,6 +444,9 @@ fn MclpEvaluateConditionBlock { node machine -- executed value ok }
 
 	value@ MclpEvaluateValueTruthiness executed!
 
+	value@ MclpFreeValue
+	0 value!
+
 	if (executed@ ~~)
 		return
 	end
@@ -185,6 +457,11 @@ fn MclpEvaluateConditionBlock { node machine -- executed value ok }
 end
 
 fn MclpEvaluateValueTruthiness { value -- tru }
+	if (value@ ~~)
+		0 tru!
+		return
+	end
+
 	if (value@ gb '0' >= value@ gb '9' <= &&)
 		if (value@ atoi)
 			1 tru!
@@ -226,6 +503,14 @@ fn MclpEvaluateWhile { node machine -- value ok }
 		MclpEvaluateConditionBlock ok! value! executed!
 
 		if (ok@)
+			if (ok@ STATUS_LOOP_CONTINUE ==)
+				0 ok!
+				1 executed!
+				continue
+			end elseif (ok@ STATUS_LOOP_BREAK ==)
+				0 ok!
+			end
+
 			return
 		end
 	end
@@ -233,10 +518,92 @@ end
 
 fn MclpEvaluateFuncDef { node machine -- value ok }
 	0 value!
-	0 ok!
+
+	auto nameval
+	node@ MclpParseNodeFuncDef_Name + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! nameval!
+
+	if (ok@)
+		return
+	end
+
+	node@ // value
+	SYMTYPE_FUNCTION // type
+	nameval@ // name
+	machine@ MclpMachine_CurrentScope + @ // symboltable
+	MclpSymbolSet ok! drop
+
+	nameval@ MclpFreeValue
+
+	if (ok@)
+		if (ok@ -1 ==)
+			"symbol has incorrect type\n" // fmt
+			node@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+		end
+
+		return
+	end
 end
 
 fn MclpEvaluateVarSet { node machine -- value ok }
+	auto nameval
+	node@ MclpParseNodeVarSet_Name + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! nameval!
+
+	if (ok@)
+		return
+	end
+
+	node@ MclpParseNodeVarSet_NewValue + @ // node
+	machine@ // machine
+	MclpEvaluateNode ok! value!
+
+	if (ok@)
+		nameval@ MclpFreeValue
+
+		return
+	end
+
+	if (value@ ~~)
+		1 OSHeapAllocate ok! value!
+
+		if (ok@)
+			nameval@ MclpFreeValue
+
+			return
+		end
+
+		0 value@ sb
+	end
+
+	value@ // value
+	SYMTYPE_VARIABLE // type
+	nameval@ // name
+	machine@ MclpMachine_CurrentScope + @ // symboltable
+	MclpSymbolSet ok! drop
+
+	nameval@ MclpFreeValue
+
+	if (ok@)
+		value@ MclpFreeValue
+
+		if (ok@ -1 ==)
+			"symbol has incorrect type\n" // fmt
+			node@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+		end
+
+		return
+	end
+
 	0 value!
-	0 ok!
 end

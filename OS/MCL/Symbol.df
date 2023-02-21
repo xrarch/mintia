@@ -27,6 +27,218 @@ fn MclpSymbolTableUninitialize { symboltable -- }
 	end
 end
 
+fn MclpSymbolNameHash { name -- hash }
+	0 hash!
+
+	while (name@ gb)
+		name@ gb hash +=
+		hash@ 10 << hash +=
+		hash@ 6 >> hash@ ^ hash!
+
+		1 name +=
+	end
+
+	hash@ 3 << hash +=
+	hash@ 11 >> hash@ ^ hash!
+	hash@ 15 << hash +=
+
+	hash@ 24 >> 0xFF & hash@ ^ hash!
+	hash@ 16 >> 0xFF & hash@ ^ hash!
+	hash@ 8 >> 0xFF & hash@ ^ hash!
+
+	hash@ SYMBOLHASHTABLESIZE % hash!
+end
+
+fn MclpSymbolLookupFullScope { name symboltable -- symbol ok }
+	while (symboltable@)
+		name@ symboltable@ MclpSymbolLookup ok! symbol!
+
+		if (ok@ ~~)
+			return
+		end elseif (ok@ -1 ~=)
+			return
+		end
+
+		symboltable@ MclpSymbolTable_UpperScope + @ symboltable!
+	end
+end
+
+fn MclpSymbolLookup { name symboltable -- symbol ok }
+	if (name@ ~~)
+		-1 ok!
+		return
+	end
+
+	auto bucketindex
+	name@ MclpSymbolNameHash bucketindex!
+
+	auto buckethead
+	symboltable@ MclpSymbolTable_BucketHeads +
+	bucketindex@ 2 << + buckethead!
+
+	buckethead@@ symbol!
+
+	-1 ok!
+
+	while (symbol@)
+		if (symbol@ MclpSymbol_Name + name@ strcmp)
+			0 ok!
+			break
+		end
+
+		symbol@ MclpSymbol_BucketNext + @ symbol!
+	end
+end
+
+fn MclpSymbolSet { value type name symboltable -- symbol ok }
+	if (value@ ~~)
+		-1 ok!
+		return
+	end
+
+	name@ // name
+	symboltable@ // symboltable
+	MclpSymbolLookupFullScope ok! symbol!
+
+	if (ok@)
+		// create symbol
+
+		value@ // value
+		type@ // type
+		name@ // name
+		symboltable@ // symboltable
+		MclpSymbolCreate ok! symbol!
+
+		return
+	end elseif (symbol@ MclpSymbol_Type + @ type@ ~=)
+		-1 ok!
+		return
+	end elseif (symbol@ MclpSymbol_Type + @ SYMTYPE_VARIABLE ==)
+		symbol@ MclpSymbol_Value + @ MclpFreeValue
+		value@ strlen symbol@ MclpSymbol_ValueLength + !
+	end
+
+	value@ symbol@ MclpSymbol_Value + !
+end
+
+fn MclpSymbolCreate { value type name symboltable -- symbol ok }
+	if (name@ ~~)
+		0 ok!
+		return
+	end
+
+	if (value@ ~~)
+		0 ok!
+		return
+	end
+
+	MclpSymbol_SIZEOF name@ strlen + 1 +
+	OSHeapAllocate ok! symbol!
+
+	if (ok@)
+		return
+	end
+
+	auto bucketindex
+	name@ MclpSymbolNameHash bucketindex!
+
+	bucketindex@ symbol@ MclpSymbol_BucketIndex + !
+
+	symboltable@ symbol@ MclpSymbol_SymbolTable + !
+
+	type@ symbol@ MclpSymbol_Type + !
+	value@ symbol@ MclpSymbol_Value + !
+
+	symbol@ MclpSymbol_Name + // dest
+	name@ // src
+	strcpy
+
+	if (type@ SYMTYPE_VARIABLE ==)
+		value@ strlen symbol@ MclpSymbol_ValueLength + !
+	end
+
+	// insert in global list
+
+	auto h
+	symboltable@ MclpSymbolTable_ListHead + @ h!
+
+	h@ symbol@ MclpSymbol_GlobalNext + !
+	0 symbol@ MclpSymbol_GlobalPrev + !
+
+	if (h@)
+		symbol@ h@ MclpSymbol_GlobalPrev + !
+	end
+
+	symbol@ symboltable@ MclpSymbolTable_ListHead + !
+
+	1 symboltable@ MclpSymbolTable_Count + +=
+
+	// insert in hash bucket
+
+	auto buckethead
+	symboltable@ MclpSymbolTable_BucketHeads +
+	bucketindex@ 2 << + buckethead!
+
+	buckethead@@ h!
+
+	h@ symbol@ MclpSymbol_BucketNext + !
+	0 symbol@ MclpSymbol_BucketPrev + !
+
+	if (h@)
+		symbol@ h@ MclpSymbol_BucketPrev + !
+	end
+
+	symbol@ buckethead@!
+end
+
 fn MclpSymbolFree { symbol -- }
-	
+	if (symbol@ MclpSymbol_Type + @ SYMTYPE_VARIABLE ==)
+		symbol@ MclpSymbol_Value + @ MclpFreeValue
+	end
+
+	auto symboltable
+	symbol@ MclpSymbol_SymbolTable + @ symboltable!
+
+	// remove from global list
+
+	auto n
+	symbol@ MclpSymbol_GlobalNext + @ n!
+
+	if (n@)
+		symbol@ MclpSymbol_GlobalPrev + @ n@ MclpSymbol_GlobalPrev + !
+	end
+
+	symbol@ MclpSymbol_GlobalPrev + @ n!
+
+	if (n@)
+		symbol@ MclpSymbol_GlobalNext + @ n@ MclpSymbol_GlobalNext + !
+	end else // no prev means we were the head
+		symbol@ MclpSymbol_GlobalNext + @ symboltable@ MclpSymbolTable_ListHead + !
+	end
+
+	1 symboltable@ MclpSymbolTable_Count + -=
+
+	// remove from hash bucket
+
+	auto buckethead
+	symboltable@ MclpSymbolTable_BucketHeads +
+	symbol@ MclpSymbol_BucketIndex + @ 2 << + buckethead!
+
+	symbol@ MclpSymbol_BucketNext + @ n!
+
+	if (n@)
+		symbol@ MclpSymbol_BucketPrev + @ n@ MclpSymbol_BucketPrev + !
+	end else // no next means we were the tail
+		// symbol@ MclpSymbol_BucketPrev + @ buckethead@ 4 + !
+	end
+
+	symbol@ MclpSymbol_BucketPrev + @ n!
+
+	if (n@)
+		symbol@ MclpSymbol_BucketNext + @ n@ MclpSymbol_BucketNext + !
+	end else // no prev means we were the head
+		symbol@ MclpSymbol_BucketNext + @ buckethead@!
+	end
+
+	symbol@ OSHeapFree
 end

@@ -10,9 +10,10 @@ struct MclpSymbolTable
 endstruct
 
 struct MclpMachine
-	OSFastMutex_SIZEOF Mutex
-
 	MclpSymbolTable_SIZEOF RootSymbolTable
+
+	4 CurrentScope
+	4 CurrentNode
 
 	4 HistoryCount
 	4 HistoryListHead
@@ -21,9 +22,13 @@ endstruct
 
 const SYMTYPE_FUNCTION 1
 const SYMTYPE_VARIABLE 2
+const SYMTYPE_BUILTIN  3
 
 struct MclpSymbol
 	4 SymbolTable
+
+	4 GlobalNext
+	4 GlobalPrev
 
 	4 BucketNext
 	4 BucketPrev
@@ -31,6 +36,7 @@ struct MclpSymbol
 
 	4 Type
 	4 Value
+	4 ValueLength
 
 	0 Name
 endstruct
@@ -68,12 +74,23 @@ const LEXTOK_EMPTY   4
 
 extern MclpLexInit { -- }
 
-extern MclpMachineLock { machine -- }
-extern MclpMachineUnlock { machine -- }
+extern MclpRegisterPrimitiveBuiltins { machine -- ok }
 
 extern MclpParseFile { filename interactive streamhandle machine -- rootblock ok }
 
 extern MclpSymbolTableInitialize { upperscope symboltable -- }
+
+extern MclpSymbolTableUninitialize { symboltable -- }
+
+extern MclpSymbolNameHash { name -- hash }
+
+extern MclpSymbolLookupFullScope { name symboltable -- symbol ok }
+extern MclpSymbolLookup { name symboltable -- symbol ok }
+extern MclpSymbolSet { value type name symboltable -- symbol ok }
+extern MclpSymbolCreate { value type name symboltable -- symbol ok }
+extern MclpSymbolFree { symbol -- }
+
+extern MclpRegisterBuiltin { func name machine -- ok }
 
 extern MclpInteractiveReadLine { buf max ctx -- count ok }
 extern MclpLexNextToken { peek tokbuf ctx -- tokflag toklen ok }
@@ -87,6 +104,10 @@ extern MclpParseSubtreeFree { node -- }
 extern MclpParseDiagnostic { ... fmt node ctx -- }
 
 extern MclpEvaluateNode { node machine -- value ok }
+
+extern MclpFreeValue { value -- }
+
+extern MclpEvaluateValueTruthiness { value -- tru }
 
 const PARSENODE_BLOCK      1
 const PARSENODE_LITERAL    2
@@ -129,6 +150,7 @@ endstruct
 
 const PIPELINEFLAG_OUTAPPEND 1
 const PIPELINEFLAG_ERRAPPEND 2
+const PIPELINEFLAG_ASYNC     4
 
 struct MclpParseNodePipeline
 	MclpParseNode_SIZEOF Header

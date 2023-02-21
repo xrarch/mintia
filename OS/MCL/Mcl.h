@@ -68,6 +68,7 @@ endstruct
 
 const LEX_INTERACTIVE  1
 const LEX_NEWSTATEMENT 2
+const LEX_NEWLINE      4
 
 const LEXTOK_NEWLINE 1
 const LEXTOK_LITERAL 2
@@ -93,7 +94,7 @@ extern MclpSymbolFree { symbol -- }
 
 extern MclpRegisterBuiltin { func name machine -- ok }
 
-extern MclpInteractiveReadLine { buf max ctx -- count ok }
+extern MclpInteractiveReadLine { buf max stream machine -- count ok }
 extern MclpLexNextToken { peek tokbuf ctx -- tokflag toklen ok }
 extern MclpLexNextNonemptyToken { stopnl tokbuf ctx -- tokflag toklen ok }
 extern MclpLexLastToken { ctx -- }

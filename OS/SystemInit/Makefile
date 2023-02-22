@@ -2,7 +2,7 @@ COMPONENTS := .
 
 OUTPUTFILE := $(SYSROOT)/SystemInit.exe
 
-DYLIBS := OSDLL.dll:$(OSDLLBIN)
+DYLIBS := OSDLL.dll:$(OSDLLBIN) mcl.dll:$(MCLBIN)
 
 INCDIR := ./
 

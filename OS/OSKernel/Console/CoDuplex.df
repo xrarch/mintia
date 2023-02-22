@@ -792,7 +792,7 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 			auto bufmask
 			bufsize@ 1 - bufmask!
 
-			if (rp@ bufmask@ ~ & rp@ bytecnt@ + bufmask@ ~ & ==)
+			if (rp@ bufmask@ ~ & rp@ bytecnt@ + 1 - bufmask@ ~ & ==)
 				// doesn't cross the boundary, do a single copy
 
 				buf@ // dest
@@ -998,7 +998,7 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 			auto bufmask
 			bufsize@ 1 - bufmask!
 
-			if (rp@ bufmask@ ~ & rp@ bytecnt@ + bufmask@ ~ & ==)
+			if (rp@ bufmask@ ~ & rp@ bytecnt@ + 1 - bufmask@ ~ & ==)
 				// doesn't cross the boundary, do a single copy
 
 				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
@@ -1149,10 +1149,6 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 		if (done@ ~~)
 			if (timeout@ duplex@ CoDuplex_Disconnected + @ ~~ &&)
 				// switch to user buffer.
-
-				buf@ bytecnt@ + header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - header@ CoDuplexBuffer_UserBufferLength + !
 
 				STATUS_OTHER_CONDITION ok!
 			end else
@@ -1948,6 +1944,9 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 	auto bytecnt
 	0 bytecnt!
 
+	auto done
+	0 done!
+
 	if (duplex@ CoDuplex_ServerWriteListHead + @)
 		// there's already a pending request, so add ours to the end and return.
 
@@ -1967,9 +1966,6 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 
 		auto header
 		duplex@ CoDuplex_ReceiveBuffer + header!
-
-		auto done
-		0 done!
 
 		auto rp
 
@@ -2071,23 +2067,23 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 				auto endp
 				index@ rp@ + endp!
 
-				if (index@ bufmask@ ~ & endp@ bufmask@ ~ & ==)
+				if (index@ bufmask@ ~ & endp@ 1 - bufmask@ ~ & ==)
 					// doesn't cross the boundary, do a single copy
 
 					bufp@ index@ bufmask@ & + // dest
-					buf@ // src
+					buf@ bytecnt@ + // src
 					rp@ // sz
 					memcpy
 				end else
 					// crosses the boundary, do two copies
 
 					bufp@ index@ bufmask@ & + // dest
-					buf@ // src
+					buf@ bytecnt@ + // src
 					bufsize@ index@ bufmask@ & - // sz
 					memcpy
 
 					bufp@ // dest
-					buf@ bufsize@ index@ bufmask@ & - + // src
+					buf@ bytecnt@ + bufsize@ index@ bufmask@ & - + // src
 					endp@ bufmask@ & // sz
 					memcpy
 				end
@@ -2120,10 +2116,10 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 				DONE_NORMAL done!
 			end
 		end
-	end
 
-	if (done@)
-		bytecnt@ mdl@ MmMDLHeader_Length + !
+		if (done@)
+			bytecnt@ mdl@ MmMDLHeader_Length + !
+		end
 	end
 end
 
@@ -2139,6 +2135,9 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 	auto bytecnt
 	0 bytecnt!
 
+	auto done
+	0 done!
+
 	if (duplex@ CoDuplex_ClientWriteListHead + @)
 		// there's already a pending request, so add ours to the end and return.
 
@@ -2152,9 +2151,6 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 		STATUS_OTHER_CONDITION ok!
 	end else
-		auto done
-		0 done!
-
 		auto txfunc
 		duplex@ CoDuplex_TXFunc + @ txfunc!
 
@@ -2297,7 +2293,7 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 					auto endp
 					index@ rp@ + endp!
 
-					if (index@ bufmask@ ~ & endp@ bufmask@ ~ & ==)
+					if (index@ bufmask@ ~ & endp@ 1 - bufmask@ ~ & ==)
 						// doesn't cross the boundary, do a single copy
 
 						bufp@ index@ bufmask@ & + // dest
@@ -2375,11 +2371,9 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 			CoDuplexEnqueueRequest
 
 			STATUS_OTHER_CONDITION ok!
+		end else
+			bytecnt@ mdl@ MmMDLHeader_Length + !
 		end
-	end
-
-	if (done@)
-		bytecnt@ mdl@ MmMDLHeader_Length + !
 	end
 end
 

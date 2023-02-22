@@ -107,7 +107,7 @@ extern MclpParseSubtreeFree { node -- }
 
 extern MclpParseDiagnostic { ... fmt node ctx -- }
 
-extern MclpEvaluateNode { node machine -- value ok }
+extern MclpEvaluateNode { capture node machine -- value ok }
 
 extern MclpEvaluatePipeline { node machine -- value ok }
 

@@ -130,10 +130,11 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 
 	// final command, check redirection cases
 
+	auto capturehandle
 	nextstdin@ // pipestdin
 	node@ // pipenode
 	machine@ // machine
-	MclpProcessRedirection ok! stderr! stdout! stdin!
+	MclpProcessRedirection ok! stderr! stdout! stdin! capturehandle!
 
 	if (ok@)
 		return
@@ -146,20 +147,39 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 	machine@ // machine
 	MclpSpawnCommand ok! phandle!
 
+	if (stdin@ OSNONE ~=)
+		stdin@ OSClose drop
+	end
+
+	if (stdout@ OSNONE ~=)
+		stdout@ OSClose drop
+	end
+
+	if (stderr@ OSNONE ~=)
+		stderr@ OSClose drop
+	end
+
 	if (ok@)
-		if (stdin@ OSNONE ~=)
-			stdin@ OSClose drop
-		end
-
-		if (stdout@ OSNONE ~=)
-			stdout@ OSClose drop
-		end
-
-		if (stderr@ OSNONE ~=)
-			stderr@ OSClose drop
+		if (capturehandle@ OSNONE ~=)
+			capturehandle@ OSClose drop
 		end
 
 		return
+	end
+
+	if (capturehandle@ OSNONE ~=)
+		capturehandle@ MclpBuildBufferFromStream ok! value!
+
+		if (ok@)
+			0 // alertable
+			OSWAIT_TIMEOUTINFINITE // timeout
+			phandle@ // objecthandle
+			OSWaitForObject drop
+
+			phandle@ OSClose drop
+
+			return
+		end
 	end
 
 	if (node@ MclpParseNodePipeline_Flags + @ PIPELINEFLAG_ASYNC & ~~)
@@ -217,14 +237,17 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 	end
 end
 
-fn MclpProcessRedirection { pipestdin pipenode machine -- stdin stdout stderr ok }
+fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin stdout stderr ok }
 	0 ok!
+
+	OSNONE capturehandle!
 
 	auto pathval
 
 	if (pipestdin@ OSNONE ~=)
 		pipestdin@ stdin!
 	end elseif (pipenode@ MclpParseNodePipeline_StdInRedirectionPath + @)
+		1 // capture
 		pipenode@ MclpParseNodePipeline_StdInRedirectionPath + @ // node
 		machine@ // machine
 		MclpEvaluateNode ok! pathval!
@@ -249,6 +272,7 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- stdin stdout stderr ok
 	end
 
 	if (pipenode@ MclpParseNodePipeline_StdOutRedirectionPath + @)
+		1 // capture
 		pipenode@ MclpParseNodePipeline_StdOutRedirectionPath + @ // node
 		machine@ // machine
 		MclpEvaluateNode ok! pathval!
@@ -283,11 +307,22 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- stdin stdout stderr ok
 			OSSEEK_END // mode
 			OSFileSeek drop drop
 		end
+	end elseif (machine@ MclpMachine_CaptureDepth + @)
+		MclpMakePipe ok! capturehandle! stdout!
+
+		if (ok@)
+			if (stdin@ OSNONE ~=)
+				stdin@ OSClose drop
+			end
+
+			return
+		end
 	end else
 		OSNONE stdout!
 	end
 
 	if (pipenode@ MclpParseNodePipeline_StdErrRedirectionPath + @)
+		1 // capture
 		pipenode@ MclpParseNodePipeline_StdErrRedirectionPath + @ // node
 		machine@ // machine
 		MclpEvaluateNode ok! pathval!
@@ -299,6 +334,10 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- stdin stdout stderr ok
 
 			if (stdout@ OSNONE ~=)
 				stdout@ OSClose drop
+			end
+
+			if (capturehandle@ OSNONE ~=)
+				capturehandle@ OSClose drop
 			end
 
 			return
@@ -319,6 +358,10 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- stdin stdout stderr ok
 
 			if (stdout@ OSNONE ~=)
 				stdout@ OSClose drop
+			end
+
+			if (capturehandle@ OSNONE ~=)
+				capturehandle@ OSClose drop
 			end
 
 			return
@@ -346,6 +389,7 @@ fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
 	stderr@ creationparams@ OSCreationParams_StdErr + !
 
 	auto nameval
+	1 // capture
 	node@ MclpParseNodeCommand_Name + @ // node
 	machine@ // machine
 	MclpEvaluateNode ok! nameval!
@@ -379,6 +423,7 @@ fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
 		0 cnt!
 
 		while (argnode@)
+			1 // capture
 			argnode@ // node
 			machine@ // machine
 			MclpEvaluateNode ok! argval!
@@ -439,5 +484,123 @@ fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
 		end
 
 		arglist@ OSHeapFree
+	end
+end
+
+struct BufferHeader
+	4 Next
+	4 Length
+endstruct
+
+const BUFMAX 16384
+
+fn MclpBuildBufferFromStream { capturehandle -- value ok }
+	auto bufsize
+	128 bufsize!
+
+	auto bufleft
+	0 bufleft!
+
+	auto totalsize
+	0 totalsize!
+
+	auto buflisthead
+	0 buflisthead!
+
+	auto bufcurrent
+	0 bufcurrent!
+
+	auto bufptr
+
+	while (1)
+		if (bufleft@ ~~)
+			auto newbuf
+			bufsize@ BufferHeader_SIZEOF + OSHeapAllocate ok! newbuf!
+
+			if (ok@)
+				break
+			end
+
+			if (buflisthead@ ~~)
+				newbuf@ buflisthead!
+			end
+
+			0 newbuf@ BufferHeader_Length + !
+			0 newbuf@ BufferHeader_Next + !
+
+			if (bufcurrent@)
+				newbuf@ bufcurrent@ BufferHeader_Next + !
+			end
+
+			newbuf@ BufferHeader_SIZEOF + bufptr!
+
+			newbuf@ bufcurrent!
+
+			bufsize@ bufleft!
+
+			1 bufsize <<=
+
+			if (bufsize@ BUFMAX >)
+				BUFMAX bufsize!
+			end
+		end
+
+		auto bytesread
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		bufleft@ // length
+		bufptr@ // buffer
+		capturehandle@ // filehandle
+		OSFileRead ok! bytesread!
+
+		if (ok@)
+			break
+		end
+
+		if (bytesread@ ~~)
+			break
+		end
+
+		bytesread@ totalsize +=
+		bytesread@ bufleft -=
+		bytesread@ bufptr +=
+		bytesread@ bufcurrent@ BufferHeader_Length + +=
+	end
+
+	if (ok@ ~~)
+		if (totalsize@)
+			totalsize@ 1 + OSHeapAllocate ok! value!
+			value@ bufptr!
+		end else
+			0 value!
+		end
+	end
+
+	buflisthead@ bufcurrent!
+
+	while (bufcurrent@)
+		auto nbuf
+		bufcurrent@ BufferHeader_Next + @ nbuf!
+
+		if (ok@ ~~)
+			if (totalsize@)
+				bufptr@ // dest
+				bufcurrent@ BufferHeader_SIZEOF + // src
+				bufcurrent@ BufferHeader_Length + @ // sz
+				memcpy
+
+				bufcurrent@ BufferHeader_Length + @ bufptr +=
+			end
+		end
+
+		bufcurrent@ OSHeapFree
+
+		nbuf@ bufcurrent!
+	end
+
+	if (ok@ ~~)
+		if (totalsize@)
+			0 value@ totalsize@ + sb
+		end
 	end
 end

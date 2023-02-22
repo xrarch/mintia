@@ -37,12 +37,6 @@ endtable
 
 datasection "data"
 
-fn MclpFreeValue { value -- }
-	if (value@)
-		value@ OSHeapFree
-	end
-end
-
 fn MclpRegisterBuiltin { func name machine -- ok }
 	func@ // value
 	SYMTYPE_BUILTIN // type
@@ -101,6 +95,10 @@ fn MclpEvaluateBlock { node machine -- value ok }
 		end
 
 		if (ok@)
+			if (node@ MclpParseNodeBlock_IsRootBlock + @)
+				0 ok!
+			end
+
 			break
 		end
 
@@ -138,15 +136,9 @@ fn MclpEvaluateBlock { node machine -- value ok }
 end
 
 fn MclpEvaluateLiteral { node machine -- value ok }
-	node@ MclpParseNodeLiteral_Length + @ 1 + OSHeapAllocate ok! value!
-
-	if (ok@)
-		return
-	end
-
-	value@ // dest
-	node@ MclpParseNodeLiteral_Word + // src
-	strcpy
+	node@ MclpParseNodeLiteral_Value + @ value!
+	value@ MclpRefValue
+	0 ok!
 end
 
 fn MclpEvaluateVarRef { node machine -- value ok }
@@ -160,7 +152,7 @@ fn MclpEvaluateVarRef { node machine -- value ok }
 	end
 
 	auto symbol
-	value@ // name
+	value@ MclpValueContents // name
 	machine@ MclpMachine_CurrentScope + @ // symboltable
 	MclpSymbolLookupFullScope ok! symbol!
 
@@ -168,19 +160,20 @@ fn MclpEvaluateVarRef { node machine -- value ok }
 
 	if (ok@)
 		if (ok@ -1 ==)
-			1 OSHeapAllocate ok! value!
+			0 // len
+			"" // contents
+			VALTYPE_INLINE // type
+			MclpValueNew ok! value!
 
 			if (ok@)
 				return
 			end
-
-			0 value@ sb
 		end
 
 		return
 	end
 
-	if (symbol@ MclpSymbol_Type + @ SYMTYPE_VARIABLE ~=)
+	if (symbol@ MclpSymbol_Type + @ SYMTYPE_VALUE ~=)
 		"unexpected symbol type\n" // fmt
 		node@ // node
 		0 // ctx
@@ -191,18 +184,8 @@ fn MclpEvaluateVarRef { node machine -- value ok }
 		return
 	end
 
-	symbol@ MclpSymbol_ValueLength + @ 1 + OSHeapAllocate ok! value!
-
-	if (ok@)
-		return
-	end
-
-	value@ // dest
-	symbol@ MclpSymbol_Value + @ // src
-	symbol@ MclpSymbol_ValueLength + @ // sz
-	memcpy
-
-	0 value@ symbol@ MclpSymbol_ValueLength + @ + sb
+	symbol@ MclpSymbol_Value + @ value!
+	value@ MclpRefValue
 end
 
 fn MclpEvaluateFuncCall { node machine -- value ok }
@@ -219,7 +202,7 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 	end
 
 	auto symbol
-	nameval@ // name
+	nameval@ MclpValueContents // name
 	machine@ MclpMachine_CurrentScope + @ // symboltable
 	MclpSymbolLookupFullScope ok! symbol!
 
@@ -325,19 +308,20 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 			end
 
 			if (argval@ ~~)
-				1 OSHeapAllocate ok! argval!
+				0 // len
+				"" // contents
+				VALTYPE_INLINE // type
+				MclpValueNew ok! argval!
 
 				if (ok@)
 					argnameval@ MclpFreeValue
 					break
 				end
-
-				0 argval@ sb
 			end
 
 			argval@ // value
-			SYMTYPE_VARIABLE // type
-			argnameval@ // name
+			SYMTYPE_VALUE // type
+			argnameval@ MclpValueContents // name
 			localscope@ // symboltable
 			MclpSymbolCreate ok! drop
 
@@ -376,7 +360,7 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 		auto cnt
 
 		if (node@ MclpParseNodeFunctionCall_ArgCount + @)
-			node@ MclpParseNodeFunctionCall_ArgCount + @ 2 << OSHeapAllocate ok! arglist!
+			node@ MclpParseNodeFunctionCall_ArgCount + @ 3 << OSHeapAllocate ok! arglist!
 
 			if (ok@)
 				return
@@ -399,16 +383,19 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 				end
 
 				if (argval@ ~~)
-					1 OSHeapAllocate ok! argval!
+					0 // len
+					"" // contents
+					VALTYPE_INLINE // type
+					MclpValueNew ok! argval!
 
 					if (ok@)
+						argnameval@ MclpFreeValue
 						break
 					end
-
-					0 argval@ sb
 				end
 
-				argval@ argptr@!
+				argval@ MclpValueContents argptr@!
+				argval@ argptr@ node@ MclpParseNodeFunctionCall_ArgCount + @ 2 << + !
 
 				4 argptr +=
 				1 cnt +=
@@ -431,7 +418,7 @@ fn MclpEvaluateFuncCall { node machine -- value ok }
 		end
 
 		if (arglist@)
-			arglist@ argptr!
+			arglist@ node@ MclpParseNodeFunctionCall_ArgCount + @ 2 << + argptr!
 
 			while (cnt@)
 				argptr@@ MclpFreeValue
@@ -516,6 +503,8 @@ fn MclpEvaluateValueTruthiness { value -- tru }
 		return
 	end
 
+	value@ MclpValueContents value!
+
 	if (value@ gb '0' >= value@ gb '9' <= &&)
 		if (value@ atoi)
 			1 tru!
@@ -585,7 +574,7 @@ fn MclpEvaluateFuncDef { node machine -- value ok }
 
 	node@ // value
 	SYMTYPE_FUNCTION // type
-	nameval@ // name
+	nameval@ MclpValueContents // name
 	machine@ MclpMachine_CurrentScope + @ // symboltable
 	MclpSymbolSet ok! drop
 
@@ -628,20 +617,21 @@ fn MclpEvaluateVarSet { node machine -- value ok }
 	end
 
 	if (value@ ~~)
-		1 OSHeapAllocate ok! value!
+		0 // len
+		"" // contents
+		VALTYPE_INLINE // type
+		MclpValueNew ok! value!
 
 		if (ok@)
 			nameval@ MclpFreeValue
 
 			return
 		end
-
-		0 value@ sb
 	end
 
 	value@ // value
-	SYMTYPE_VARIABLE // type
-	nameval@ // name
+	SYMTYPE_VALUE // type
+	nameval@ MclpValueContents // name
 	machine@ MclpMachine_CurrentScope + @ // symboltable
 	MclpSymbolSet ok! drop
 

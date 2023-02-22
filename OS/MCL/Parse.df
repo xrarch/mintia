@@ -53,6 +53,12 @@ fn MclpParseNodeCreate { type size ctx -- node ok }
 
 	type@ node@ MclpParseNode_Type + !
 	0 node@ MclpParseNode_Next + !
+
+	1 node@ MclpParseNode_RefCount + !
+end
+
+fn MclpParseNodeRef { node -- }
+	1 node@ MclpParseNode_RefCount + +=
 end
 
 fn MclpParseContextUninitialize { ctx -- }
@@ -134,6 +140,12 @@ end
 
 fn MclpParseSubtreeFree { node -- }
 	if (node@ ~~)
+		return
+	end
+
+	1 node@ MclpParseNode_RefCount + -=
+
+	if (node@ MclpParseNode_RefCount + @)
 		return
 	end
 
@@ -224,6 +236,10 @@ fn MclpParseSubtreeFree { node -- }
 		node@ MclpParseNodeVarSet_Name + @ MclpParseSubtreeFree
 	end elseif (node@ MclpParseNode_Type + @ PARSENODE_VARREF ==)
 		node@ MclpParseNodeVarRef_Name + @ MclpParseSubtreeFree
+	end elseif (node@ MclpParseNode_Type + @ PARSENODE_LITERAL ==)
+		if (node@ MclpParseNodeLiteral_Value + @)
+			node@ MclpParseNodeLiteral_Value + @ MclpFreeValue
+		end
 	end
 
 	node@ OSHeapFree
@@ -836,7 +852,7 @@ fn MclpParseExpression { endtoken ctx -- tokflag node ok }
 		// ident
 
 		PARSENODE_LITERAL // type
-		MclpParseNodeLiteral_SIZEOF toklen@ + 1 + // size
+		MclpParseNodeLiteral_SIZEOF // size
 		ctx@ // ctx
 		MclpParseNodeCreate ok! node!
 
@@ -846,11 +862,23 @@ fn MclpParseExpression { endtoken ctx -- tokflag node ok }
 			return
 		end
 
-		toklen@ node@ MclpParseNodeLiteral_Length + !
+		0 node@ MclpParseNodeLiteral_Value + !
 
-		node@ MclpParseNodeLiteral_Word + // dest
-		tokbuf@ // src
-		strcpy
+		auto value
+		toklen@ // len
+		tokbuf@ // contents
+		VALTYPE_INLINE // type
+		MclpValueNew ok! value!
+
+		if (ok@)
+			1 ctx@ MclpParseContext_Depth + -=
+
+			node@ MclpParseSubtreeFree
+
+			return
+		end
+
+		value@ node@ MclpParseNodeLiteral_Value + !
 	end
 
 	1 ctx@ MclpParseContext_Depth + -=

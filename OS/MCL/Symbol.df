@@ -113,9 +113,11 @@ fn MclpSymbolSet { value type name symboltable -- symbol ok }
 	end elseif (symbol@ MclpSymbol_Type + @ type@ ~=)
 		-1 ok!
 		return
-	end elseif (symbol@ MclpSymbol_Type + @ SYMTYPE_VARIABLE ==)
+	end elseif (symbol@ MclpSymbol_Type + @ SYMTYPE_VALUE ==)
 		symbol@ MclpSymbol_Value + @ MclpFreeValue
-		value@ strlen symbol@ MclpSymbol_ValueLength + !
+	end elseif (symbol@ MclpSymbol_Type + @ SYMTYPE_FUNCTION ==)
+		symbol@ MclpSymbol_Value + @ MclpParseSubtreeFree
+		value@ MclpParseNodeRef
 	end
 
 	value@ symbol@ MclpSymbol_Value + !
@@ -153,8 +155,8 @@ fn MclpSymbolCreate { value type name symboltable -- symbol ok }
 	name@ // src
 	strcpy
 
-	if (type@ SYMTYPE_VARIABLE ==)
-		value@ strlen symbol@ MclpSymbol_ValueLength + !
+	if (type@ SYMTYPE_FUNCTION ==)
+		value@ MclpParseNodeRef
 	end
 
 	// insert in global list
@@ -192,8 +194,10 @@ fn MclpSymbolCreate { value type name symboltable -- symbol ok }
 end
 
 fn MclpSymbolFree { symbol -- }
-	if (symbol@ MclpSymbol_Type + @ SYMTYPE_VARIABLE ==)
+	if (symbol@ MclpSymbol_Type + @ SYMTYPE_VALUE ==)
 		symbol@ MclpSymbol_Value + @ MclpFreeValue
+	end elseif (symbol@ MclpSymbol_Type + @ SYMTYPE_FUNCTION ==)
+		symbol@ MclpSymbol_Value + @ MclpParseSubtreeFree
 	end
 
 	auto symboltable
@@ -241,4 +245,86 @@ fn MclpSymbolFree { symbol -- }
 	end
 
 	symbol@ OSHeapFree
+end
+
+fn MclpValueNewX { heapcookie len contents type -- value ok }
+	len@ // len
+	contents@ // contents
+	type@ // type
+	MclpValueNew ok! value!
+
+	if (ok@)
+		return
+	end
+
+	heapcookie@ value@ MclpValue_HeapCookie + !
+end
+
+fn MclpValueNew { len contents type -- value ok }
+	if (type@ VALTYPE_INLINE ==)
+		MclpValue_SIZEOF len@ + 1 + OSHeapAllocate ok! value!
+
+		if (ok@)
+			return
+		end
+
+		if (len@ ~~)
+			contents@ strlen len!
+		end
+
+		1 value@ MclpValue_RefCount + !
+
+		value@ MclpValue_SIZEOF + value@ MclpValue_Contents + !
+
+		if (contents@)
+			value@ MclpValue_SIZEOF + // dest
+			contents@ // src
+			len@ // sz
+			memcpy
+		end
+
+		0 value@ MclpValue_SIZEOF + len@ + sb
+
+		len@ value@ MclpValue_Length + !
+
+		0 value@ MclpValue_HeapCookie + !
+
+		return
+	end
+
+	MclpValue_SIZEOF OSHeapAllocate ok! value!
+
+	contents@ value@ MclpValue_Contents + !
+
+	1 value@ MclpValue_RefCount + !
+
+	0 value@ MclpValue_HeapCookie + !
+
+	if (type@ VALTYPE_EXLINE ==)
+		if (len@ ~~)
+			contents@ strlen value@ MclpValue_Length + !
+		end else
+			len@ value@ MclpValue_Length + !
+		end
+	end
+end
+
+fn MclpRefValue { value -- }
+	1 value@ MclpValue_RefCount + +=
+end
+
+fn MclpFreeValue { value -- }
+	1 value@ MclpValue_RefCount + -=
+
+	if (value@ MclpValue_RefCount + @ ~~)
+		if (value@ MclpValue_HeapCookie + @)
+			value@ MclpValue_HeapCookie + @ OSHeapFree
+		end
+
+		value@ OSHeapFree
+	end
+end
+
+fn MclpValueContents { value -- contents }
+	value@ MclpValue_Contents + @ contents!
 end

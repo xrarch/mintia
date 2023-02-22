@@ -223,7 +223,10 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 		end
 
 		auto statusval
-		16 OSHeapAllocate ok! statusval!
+		16 // len
+		0 // contents
+		VALTYPE_INLINE // type
+		MclpValueNew ok! statusval!
 
 		if (ok@)
 			if (value@)
@@ -234,10 +237,10 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 			return
 		end
 
-		status@ statusval@ itoa
+		status@ statusval@ MclpValueContents itoa
 
 		statusval@ // value
-		SYMTYPE_VARIABLE // type
+		SYMTYPE_VALUE // type
 		"?" // name
 		machine@ MclpMachine_CurrentScope + @ // symboltable
 		MclpSymbolSet ok! drop
@@ -276,13 +279,13 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 
 		0 // flags
 		ACCESS_READ // access
-		pathval@ // path
+		pathval@ MclpValueContents // path
 		0 // ftype
 		OSFileOpen ok! stdin!
 
 		if (ok@)
 			ok@ OSStatusGetName
-			pathval@
+			pathval@ MclValueContents
 			"%s: failed to open: %s\n" // fmt
 			pipenode@ // node
 			0 // ctx
@@ -317,7 +320,7 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 		OSDEFAULTFILEPERMISSIONS // flags
 		0 // flags
 		ACCESS_WRITE // access
-		pathval@ // path
+		pathval@ MclpValueContents // path
 		OSFileCreate ok! stdout!
 
 		if (ok@)
@@ -326,7 +329,7 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 			end
 
 			ok@ OSStatusGetName
-			pathval@
+			pathval@ MclpValueContents
 			"%s: failed to create: %s\n" // fmt
 			pipenode@ // node
 			0 // ctx
@@ -386,7 +389,7 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 		OSDEFAULTFILEPERMISSIONS // flags
 		0 // flags
 		ACCESS_WRITE // access
-		pathval@ // path
+		pathval@ MclpValueContents // path
 		OSFileCreate ok! stderr!
 
 		if (ok@)
@@ -403,7 +406,7 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 			end
 
 			ok@ OSStatusGetName
-			pathval@
+			pathval@ MclpValueContents
 			"%s: failed to create: %s\n" // fmt
 			pipenode@ // node
 			0 // ctx
@@ -456,12 +459,15 @@ fn MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle 
 
 	// construct list of arguments
 
+	auto contents
+
 	auto arglist
 	auto argptr
+	auto argvalptr
 	auto cnt
 
 	if (node@ MclpParseNodeCommand_ArgCount + @)
-		node@ MclpParseNodeCommand_ArgCount + @ 2 << OSHeapAllocate ok! arglist!
+		node@ MclpParseNodeCommand_ArgCount + @ 3 << OSHeapAllocate ok! arglist!
 
 		if (ok@)
 			nameval@ MclpFreeValue
@@ -475,6 +481,7 @@ fn MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle 
 		node@ MclpParseNodeCommand_ArgListHead + @ argnode!
 
 		arglist@ argptr!
+		arglist@ node@ MclpParseNodeCommand_ArgCount + @ 2 << + argvalptr!
 
 		0 cnt!
 
@@ -489,17 +496,22 @@ fn MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle 
 			end
 
 			if (argval@ ~~)
-				1 OSHeapAllocate ok! argval!
+				0 // len
+				"" // contents
+				VALTYPE_INLINE // type
+				MclpValueNew ok! argval!
 
 				if (ok@)
 					break
 				end
-
-				0 argval@ sb
 			end
 
-			argval@ argptr@!
+			argval@ MclpValueContents contents!
 
+			argval@ argvalptr@!
+			contents@ argptr@!
+
+			4 argvalptr +=
 			4 argptr +=
 			1 cnt +=
 			argnode@ MclpParseNode_Next + @ argnode!
@@ -512,48 +524,59 @@ fn MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle 
 	if (ok@ ~~)
 		// spawn command
 
+		nameval@ MclpValueContents contents!
+
 		if (builtin@)
 			node@ MclpParseNodeCommand_ArgCount + @ // argcn
 			arglist@ // argvt
-			nameval@ // name
+			contents@ // name
 			node@ // node
 			MclpDoBuiltinCmd ok!
 		end else
-			auto threadhandle
 			node@ MclpParseNodeCommand_ArgCount + @ // argcn
 			arglist@ // argvt
-			nameval@ // progname
+			contents@ // progname
 			0 // creationflags
 			creationparams@ // creationparams
 			ACCESS_OWNER_ALL // permissions
 			0 // name
-			OSSpawnByNameV ok! processhandle! threadhandle!
+			OSSpawnByNameV ok! processhandle! argptr!
 
 			if (ok@)
 				if (ok@ STATUS_NOT_FOUND ==)
-					nameval@
+					contents@
 					"%s: command not found\n" // fmt
 					node@ // node
 					0 // ctx
 					MclpParseDiagnostic
+				end else
+					ok@ OSStatusGetName creationparams!
 
-					STATUS_SYNTAX_ERROR ok!
+					creationparams@
+					contents@
+					"%s: %s\n" // fmt
+					node@ // node
+					0 // ctx
+					MclpParseDiagnostic
 				end
-			end
 
-			threadhandle@ OSClose drop
+				STATUS_SYNTAX_ERROR ok!
+			end else
+				// actually a thread handle
+				argptr@ OSClose drop
+			end
 		end
 	end
 
 	nameval@ MclpFreeValue
 
 	if (arglist@)
-		arglist@ argptr!
+		arglist@ node@ MclpParseNodeCommand_ArgCount + @ 2 << + argvalptr!
 
 		while (cnt@)
-			argptr@@ MclpFreeValue
+			argvalptr@@ MclpFreeValue
 
-			4 argptr +=
+			4 argvalptr +=
 			1 cnt -=
 		end
 
@@ -584,6 +607,9 @@ fn MclpBuildBufferFromStream { capturehandle -- value ok }
 	auto bufcurrent
 	0 bufcurrent!
 
+	auto bufs
+	0 bufs!
+
 	auto bufptr
 
 	while (1)
@@ -611,6 +637,8 @@ fn MclpBuildBufferFromStream { capturehandle -- value ok }
 			newbuf@ bufcurrent!
 
 			bufsize@ bufleft!
+
+			1 bufs +=
 
 			1 bufsize <<=
 
@@ -643,8 +671,26 @@ fn MclpBuildBufferFromStream { capturehandle -- value ok }
 
 	if (ok@ ~~)
 		if (totalsize@)
-			totalsize@ 1 + OSHeapAllocate ok! value!
-			value@ bufptr!
+			if (bufs@ 1 ==)
+				buflisthead@ // heapcookie
+				totalsize@ // len
+				buflisthead@ BufferHeader_SIZEOF + // contents
+				VALTYPE_EXLINE // type
+				MclpValueNewX ok! value!
+
+				if (ok@ ~~)
+					return
+				end
+			end else
+				totalsize@ // len
+				0 // contents
+				VALTYPE_INLINE // type
+				MclpValueNew ok! value!
+
+				if (ok@ ~~)
+					value@ MclpValue_Contents + @ bufptr!
+				end
+			end
 		end else
 			0 value!
 		end
@@ -670,12 +716,6 @@ fn MclpBuildBufferFromStream { capturehandle -- value ok }
 		bufcurrent@ OSHeapFree
 
 		nbuf@ bufcurrent!
-	end
-
-	if (ok@ ~~)
-		if (totalsize@)
-			0 value@ totalsize@ + sb
-		end
 	end
 end
 

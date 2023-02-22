@@ -24,8 +24,8 @@ struct MclpMachine
 endstruct
 
 const SYMTYPE_FUNCTION 1
-const SYMTYPE_VARIABLE 2
-const SYMTYPE_BUILTIN  3
+const SYMTYPE_BUILTIN  2
+const SYMTYPE_VALUE    3
 
 struct MclpSymbol
 	4 SymbolTable
@@ -39,9 +39,23 @@ struct MclpSymbol
 
 	4 Type
 	4 Value
-	4 ValueLength
 
 	0 Name
+endstruct
+
+const VALTYPE_INLINE 1
+const VALTYPE_EXLINE 2
+
+struct MclpValue
+	4 RefCount
+
+	4 Type
+
+	4 Length
+
+	4 Contents
+
+	4 HeapCookie
 endstruct
 
 const LEXBUFFERSIZE 1024
@@ -102,6 +116,7 @@ extern MclpLexNextNonemptyToken { stopnl tokbuf ctx -- tokflag toklen ok }
 extern MclpLexLastToken { ctx -- }
 
 extern MclpParseNodeCreate { type size ctx -- node ok }
+extern MclpParseNodeRef { node -- }
 
 extern MclpParseSubtreeFree { node -- }
 
@@ -111,11 +126,16 @@ extern MclpEvaluateNode { capture node machine -- value ok }
 
 extern MclpEvaluatePipeline { node machine -- value ok }
 
-extern MclpFreeValue { value -- }
-
 extern MclpEvaluateValueTruthiness { value -- tru }
 
 extern MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle ok }
+
+extern MclpValueNewX { heapcookie len contents type -- value ok }
+extern MclpValueNew { len contents type -- value ok }
+extern MclpRefValue { value -- }
+extern MclpFreeValue { value -- }
+
+extern MclpValueContents { value -- contents }
 
 const PARSENODE_BLOCK      1
 const PARSENODE_LITERAL    2
@@ -137,6 +157,7 @@ struct MclpParseNode
 	4 Next
 	4 LineNumber
 	4 FileName
+	4 RefCount
 endstruct
 
 struct MclpParseNodeBlock
@@ -151,9 +172,7 @@ endstruct
 struct MclpParseNodeLiteral
 	MclpParseNode_SIZEOF Header
 
-	4 Length
-
-	0 Word
+	4 Value
 endstruct
 
 const PIPELINEFLAG_OUTAPPEND 1

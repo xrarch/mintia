@@ -279,40 +279,12 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			break
 		end
 
-		if (toklen@ ~~ tokflag@ LEXTOK_LITERAL & ~~ &&)
-			if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
-				break
-			end else
-				continue
-			end
-		end
-
-		if (endtoken@ tokflag@ LEXTOK_LITERAL & ~~ &&)
-			if (tokbuf@ endtoken@ strcmp)
-				break
-			end
-		end
-
 		auto node
 		0 node!
 
 		0 ok!
 
-		if (tokbuf@ "!" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
-			ctx@ MclpParseDirective ok! node!
-		end elseif (tokbuf@ "{" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
-			"}" // endtoken
-			ctx@ // ctx
-			MclpParseBlock ok! node!
-		end elseif (tokbuf@ "(" strcmp tokflag@ LEXTOK_LITERAL & ~~ &&)
-			// expression
-
-			ctx@ MclpLexLastToken
-
-			0 // endtoken
-			ctx@ // ctx
-			MclpParseExpression ok! node! drop
-		end else
+		if (tokflag@ LEXTOK_LITERAL &)
 			// command statement
 
 			ctx@ MclpLexLastToken
@@ -320,6 +292,66 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			endtoken@ // endtoken
 			ctx@ // ctx
 			MclpParsePipeline ok! node!
+		end else
+			if (toklen@ ~~)
+				if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
+					break
+				end else
+					continue
+				end
+			end
+
+			if (endtoken@)
+				if (tokbuf@ endtoken@ strcmp)
+					break
+				end
+			end
+
+			1 ctx@ MclpParseContext_Depth + +=
+
+			if (tokbuf@ "{" strcmp)
+				"}" // endtoken
+				ctx@ // ctx
+				MclpParseBlock ok! node!
+			end elseif (tokbuf@ "(" strcmp)
+				// expression
+
+				ctx@ MclpLexLastToken
+
+				0 // endtoken
+				ctx@ // ctx
+				MclpParseExpression ok! node! drop
+			end elseif (tokbuf@ "if" strcmp)
+				ctx@ MclpParseIfStatement ok! node!
+			end elseif (tokbuf@ "while" strcmp)
+				ctx@ MclpParseWhileStatement ok! node!
+			end elseif (tokbuf@ "set" strcmp)
+				ctx@ MclpParseSetStatement ok! node!
+			end elseif (tokbuf@ "func" strcmp)
+				ctx@ MclpParseFuncStatement ok! node!
+			end elseif (tokbuf@ "return" strcmp)
+				ctx@ MclpParseReturnStatement ok! node!
+			end elseif (tokbuf@ "break" strcmp)
+				ctx@ MclpParseBreakStatement ok! node!
+			end elseif (tokbuf@ "continue" strcmp)
+				ctx@ MclpParseContinueStatement ok! node!
+			end elseif (tokbuf@ "eval" strcmp)
+				ctx@ MclpParseEvalStatement ok! node!
+			end else
+				// command statement
+
+				1 ctx@ MclpParseContext_Depth + -=
+
+				ctx@ MclpLexLastToken
+
+				endtoken@ // endtoken
+				ctx@ // ctx
+				MclpParsePipeline ok! node!
+
+				1 ctx@ MclpParseContext_Depth + +=
+			end
+
+			1 ctx@ MclpParseContext_Depth + -=
 		end
 
 		if (ok@)
@@ -355,57 +387,6 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			0 block!
 		end
 	end
-end
-
-fn MclpParseDirective { ctx -- node ok }
-	0 node!
-
-	auto tokbuf
-	ctx@ MclpParseContext_TokBuffer + tokbuf!
-
-	1 ctx@ MclpParseContext_Depth + +=
-
-	auto tokflag
-	auto toklen
-
-	0 // stopnl
-	tokbuf@ // tokbuf
-	ctx@ // ctx
-	MclpLexNextNonemptyToken ok! toklen! tokflag!
-
-	if (ok@)
-		1 ctx@ MclpParseContext_Depth + -=
-
-		return
-	end
-
-	if (tokbuf@ "IF" strcmp)
-		ctx@ MclpParseIfStatement ok! node!
-	end elseif (tokbuf@ "WHILE" strcmp)
-		ctx@ MclpParseWhileStatement ok! node!
-	end elseif (tokbuf@ "SET" strcmp)
-		ctx@ MclpParseSetStatement ok! node!
-	end elseif (tokbuf@ "FUNC" strcmp)
-		ctx@ MclpParseFuncStatement ok! node!
-	end elseif (tokbuf@ "RETURN" strcmp)
-		ctx@ MclpParseReturnStatement ok! node!
-	end elseif (tokbuf@ "BREAK" strcmp)
-		ctx@ MclpParseBreakStatement ok! node!
-	end elseif (tokbuf@ "CONTINUE" strcmp)
-		ctx@ MclpParseContinueStatement ok! node!
-	end elseif (tokbuf@ "EVAL" strcmp)
-		ctx@ MclpParseEvalStatement ok! node!
-	end else
-		tokbuf@
-		"unknown directive '%s'\n" // fmt
-		0 // node
-		ctx@ // ctx
-		MclpParseDiagnostic
-
-		STATUS_SYNTAX_ERROR ok!
-	end
-
-	1 ctx@ MclpParseContext_Depth + -=
 end
 
 fn MclpParseIfStatement { ctx -- node ok }
@@ -473,28 +454,28 @@ fn MclpParseIfStatement { ctx -- node ok }
 				return
 			end
 
-			if (toklen@)
-				if (tokflag@ LEXTOK_LITERAL & ~~)
-					if (tokbuf@ "ELSE" strcmp)
-						auto body
-						"END" // endtoken
-						ctx@ // ctx
-						MclpParseBlock ok! body!
+			if (toklen@ tokflag@ LEXTOK_LITERAL & ~~ &&)
+				if (tokbuf@ "else" strcmp)
+					auto body
+					"end" // endtoken
+					ctx@ // ctx
+					MclpParseBlock ok! body!
 
-						if (ok@)
-							node@ MclpParseSubtreeFree
+					if (ok@)
+						node@ MclpParseSubtreeFree
 
-							return
-						end
-
-						body@ node@ MclpParseNodeIf_ElseBody + !
-					end elseif (tokbuf@ "ELSEIF" strcmp)
-						continue
+						return
 					end
-				end
-			end
 
-			ctx@ MclpLexLastToken
+					body@ node@ MclpParseNodeIf_ElseBody + !
+
+					break
+				end elseif (tokbuf@ "elseif" strcmp)
+					continue
+				end
+
+				ctx@ MclpLexLastToken
+			end
 		end
 
 		break
@@ -528,7 +509,7 @@ fn MclpParseConditionalBlock { type ctx -- node ok }
 	cond@ node@ MclpParseNodeConditionalBlock_Conditional + !
 
 	auto body
-	"END" // endtoken
+	"end" // endtoken
 	ctx@ // ctx
 	MclpParseBlock ok! body!
 
@@ -656,7 +637,7 @@ fn MclpParseFuncStatement { ctx -- node ok }
 	end
 
 	auto body
-	"END" // endtoken
+	"end" // endtoken
 	ctx@ // ctx
 	MclpParseBlock ok! body!
 
@@ -716,7 +697,7 @@ fn MclpParseExpression { endtoken ctx -- tokflag node ok }
 
 	if (endtoken@ tokflag@ LEXTOK_LITERAL & ~~ &&)
 		if (tokbuf@ endtoken@ strcmp)
-			if (endtoken@ ")" ~=)
+			if (endtoken@ ")" strcmp ~~)
 				ctx@ MclpLexLastToken
 			end
 

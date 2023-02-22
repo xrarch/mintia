@@ -106,3 +106,115 @@ end
 fn MclValueContents { value -- contents }
 	value@ MclpValueContents contents!
 end
+
+fn MclRunScript { argcn argvt filename -- value ok }
+	auto streamhandle
+	0 // flags
+	ACCESS_READ // access
+	filename@ // path
+	0 // ftype
+	OSFileOpen ok! streamhandle!
+
+	if (ok@)
+		return
+	end
+
+	auto machine
+	MclMachineCreate ok! machine!
+
+	if (ok@)
+		streamhandle@ OSClose drop
+
+		return
+	end
+
+	auto name
+	16 alloc name!
+
+	argcn@ name@ itoa
+
+	0 // len
+	name@ // contents
+	VALTYPE_INLINE // type
+	MclpValueNew ok! value!
+
+	if (ok@)
+		machine@ MclMachineFree
+
+		return
+	end
+
+	value@ // value
+	SYMTYPE_VALUE // type
+	"argc" // name
+	machine@ MclpMachine_RootSymbolTable + // symboltable
+	MclpSymbolCreate ok! drop
+
+	if (ok@)
+		value@ MclpFreeValue
+
+		machine@ MclMachineFree
+
+		return
+	end
+
+	auto i
+	0 i!
+
+	while (argcn@)
+		0 // len
+		argvt@@ // contents
+		VALTYPE_INLINE // type
+		MclpValueNew ok! value!
+
+		if (ok@)
+			machine@ MclMachineFree
+
+			return
+		end
+
+		i@ name@ itoa
+
+		value@ // value
+		SYMTYPE_VALUE // type
+		name@ // name
+		machine@ MclpMachine_RootSymbolTable + // symboltable
+		MclpSymbolCreate ok! drop
+
+		if (ok@)
+			value@ MclpFreeValue
+
+			machine@ MclMachineFree
+
+			return
+		end
+
+		1 argcn -=
+		4 argvt +=
+		1 i +=
+	end
+
+	auto rootblock
+	filename@ // filename
+	0 // interactive
+	streamhandle@ // streamhandle
+	machine@ // machine
+	MclMachineParseFile ok! rootblock!
+
+	streamhandle@ OSClose drop
+
+	if (ok@)
+		machine@ MclMachineFree
+
+		return
+	end
+
+	0 // capture
+	rootblock@ // node
+	machine@ // machine
+	MclpEvaluateNode ok! value!
+
+	rootblock@ MclpParseSubtreeFree
+
+	machine@ MclMachineFree
+end

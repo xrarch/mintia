@@ -13,3 +13,5 @@ extern MclValueContents { value -- contents }
 extern MclFreeValue { value -- }
 
 extern MclDiagnostic { ... fmt machine -- }
+
+extern MclRunScript { argcn argvt filename -- value ok }

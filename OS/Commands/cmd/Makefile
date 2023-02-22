@@ -1,5 +1,5 @@
 DYLIBS += mcl.dll:$(MCLBIN)
 
-CMDNAME = mcltest
+CMDNAME = cmd
 
 include $(REPO)/Command.mk

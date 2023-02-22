@@ -106,6 +106,7 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 		stdin@ // stdin
 		stdout@ // stdout
 		OSNONE // stderr
+		0 // builtin
 		cmdnode@ // node
 		machine@ // machine
 		MclpSpawnCommand ok! phandle!
@@ -143,6 +144,7 @@ fn MclpEvaluatePipeline { node machine -- value ok }
 	stdin@ // stdin
 	stdout@ // stdout
 	stderr@ // stderr
+	0 // builtin
 	cmdnode@ // node
 	machine@ // machine
 	MclpSpawnCommand ok! phandle!
@@ -262,11 +264,22 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 		0 // ftype
 		OSFileOpen ok! stdin!
 
-		pathval@ MclpFreeValue
-
 		if (ok@)
+			ok@ OSStatusGetName
+			pathval@
+			"%s: failed to open: %s\n" // fmt
+			pipenode@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			pathval@ MclpFreeValue
+
+			STATUS_SYNTAX_ERROR ok!
+
 			return
 		end
+
+		pathval@ MclpFreeValue
 	end else
 		OSNONE stdin!
 	end
@@ -291,15 +304,26 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 		pathval@ // path
 		OSFileCreate ok! stdout!
 
-		pathval@ MclpFreeValue
-
 		if (ok@)
 			if (stdin@ OSNONE ~=)
 				stdin@ OSClose drop
 			end
 
+			ok@ OSStatusGetName
+			pathval@
+			"%s: failed to create: %s\n" // fmt
+			pipenode@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+
+			pathval@ MclpFreeValue
+
 			return
 		end
+
+		pathval@ MclpFreeValue
 
 		if (pipenode@ MclpParseNodePipeline_Flags + @ PIPELINEFLAG_OUTAPPEND &)
 			0 // offset
@@ -349,8 +373,6 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 		pathval@ // path
 		OSFileCreate ok! stderr!
 
-		pathval@ MclpFreeValue
-
 		if (ok@)
 			if (stdin@ OSNONE ~=)
 				stdin@ OSClose drop
@@ -364,8 +386,21 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 				capturehandle@ OSClose drop
 			end
 
+			ok@ OSStatusGetName
+			pathval@
+			"%s: failed to create: %s\n" // fmt
+			pipenode@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+
+			pathval@ MclpFreeValue
+
 			return
 		end
+
+		pathval@ MclpFreeValue
 
 		if (pipenode@ MclpParseNodePipeline_Flags + @ PIPELINEFLAG_ERRAPPEND &)
 			0 // offset
@@ -378,7 +413,7 @@ fn MclpProcessRedirection { pipestdin pipenode machine -- capturehandle stdin st
 	end
 end
 
-fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
+fn MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle ok }
 	auto creationparams
 	OSCreationParams_SIZEOF alloc creationparams!
 
@@ -395,6 +430,11 @@ fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
 	MclpEvaluateNode ok! nameval!
 
 	if (ok@)
+		return
+	end
+
+	if (nameval@ ~~)
+		STATUS_NOT_FOUND ok!
 		return
 	end
 
@@ -432,6 +472,16 @@ fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
 				break
 			end
 
+			if (argval@ ~~)
+				1 OSHeapAllocate ok! argval!
+
+				if (ok@)
+					break
+				end
+
+				0 argval@ sb
+			end
+
 			argval@ argptr@!
 
 			4 argptr +=
@@ -446,29 +496,39 @@ fn MclpSpawnCommand { stdin stdout stderr node machine -- processhandle ok }
 	if (ok@ ~~)
 		// spawn command
 
-		auto threadhandle
-		node@ MclpParseNodeCommand_ArgCount + @ // argcn
-		arglist@ // argvt
-		nameval@ // progname
-		0 // creationflags
-		creationparams@ // creationparams
-		ACCESS_OWNER_ALL // permissions
-		0 // name
-		OSSpawnByNameV ok! processhandle! threadhandle!
+		if (builtin@)
+			node@ MclpParseNodeCommand_ArgCount + @ // argcn
+			arglist@ // argvt
+			nameval@ // name
+			node@ // node
+			MclpDoBuiltinCmd ok!
+		end else
+			auto threadhandle
+			node@ MclpParseNodeCommand_ArgCount + @ // argcn
+			arglist@ // argvt
+			nameval@ // progname
+			0 // creationflags
+			creationparams@ // creationparams
+			ACCESS_OWNER_ALL // permissions
+			0 // name
+			OSSpawnByNameV ok! processhandle! threadhandle!
 
-		if (ok@)
-			if (ok@ STATUS_NOT_FOUND ==)
-				nameval@
-				"%s: command not found\n" // fmt
-				node@ // node
-				0 // ctx
-				MclpParseDiagnostic
+			if (ok@)
+				if (ok@ STATUS_NOT_FOUND ==)
+					nameval@
+					"%s: command not found\n" // fmt
+					node@ // node
+					0 // ctx
+					MclpParseDiagnostic
+
+					STATUS_SYNTAX_ERROR ok!
+				end
+
+				return
 			end
 
-			return
+			threadhandle@ OSClose drop
 		end
-
-		threadhandle@ OSClose drop
 	end
 
 	nameval@ MclpFreeValue
@@ -601,6 +661,34 @@ fn MclpBuildBufferFromStream { capturehandle -- value ok }
 	if (ok@ ~~)
 		if (totalsize@)
 			0 value@ totalsize@ + sb
+		end
+	end
+end
+
+fn MclpDoBuiltinCmd { argcn argvt name node -- ok }
+	0 ok!
+
+	if (name@ "cd" strcmp)
+		if (argcn@ 1 <)
+			"cd requires 1 argument\n" // fmt
+			node@ // node
+			0 // ctx
+			MclpParseDiagnostic
+
+			STATUS_SYNTAX_ERROR ok!
+
+			return
+		end
+
+		argvt@@ OSChangeCWD ok!
+
+		if (ok@)
+			ok@ OSStatusGetName
+			argvt@@
+			"%s: %s\n" // fmt
+			node@ // node
+			0 // ctx
+			MclpParseDiagnostic
 		end
 	end
 end

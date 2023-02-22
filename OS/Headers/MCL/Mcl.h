@@ -8,5 +8,6 @@ extern MclMachineEvaluateNode { capture node machine -- value ok }
 extern MclMachineRegisterBuiltin { func name machine -- ok }
 
 extern MclParseSubtreeFree { node -- }
+extern MclFreeValue { value -- }
 
 extern MclDiagnostic { ... fmt machine -- }

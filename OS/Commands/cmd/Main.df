@@ -1,0 +1,106 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/MCL/Mcl.h"
+
+fn (OSSignalHandler) SignalInterrupt { context signum -- }
+	// do nothing
+end
+
+fn CmdIgnoreSignals { -- }
+	OSSIGNALACTION_IGNORE // action
+	OSSIGNAL_INT // signum
+	OSSignalSetAction drop
+
+	OSSIGNALACTION_IGNORE // action
+	OSSIGNAL_QUIT // signum
+	OSSignalSetAction drop
+end
+
+fn CmdResetSignals { -- }
+	pointerof SignalInterrupt // action
+	OSSIGNAL_INT // signum
+	OSSignalSetAction drop
+
+	pointerof SignalInterrupt // action
+	OSSIGNAL_QUIT // signum
+	OSSignalSetAction drop
+end
+
+fn Main { ... -- ret }
+	auto pwd
+	auto ok
+	0 ok!
+
+	CmdResetSignals
+
+	// TODO move to system.cmd script executed by SystemInit.exe
+	"/mintia/bin"
+	"PATH"
+	OSSetEnvironmentVariable drop
+
+	auto machine
+	MclMachineCreate ok! machine!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't create mcl machine: %s\n" OSError
+	end
+
+	while (1)
+		"PWD" OSFindEnvironmentVariable ok! pwd! drop
+
+		if (ok@)
+			"?" pwd!
+		end else
+			pwd@ OSLastComponent pwd!
+		end
+
+		pwd@ "%s # " Printf
+		OSFlushLine
+
+		auto rootblock
+		"stdin" // filename
+		1 // interactive
+		OSGetStdIn // streamhandle
+		machine@ // machine
+		MclMachineParseFile ok! rootblock!
+
+		if (ok@)
+			if (ok@ STATUS_SIGNALLED ==)
+				"\n" Printf
+			end elseif (ok@ STATUS_END_OF_FILE ==)
+				0 ret!
+				return
+			end elseif (ok@ STATUS_SYNTAX_ERROR ==)
+
+			end else
+				ok@ OSStatusGetName "%s\n" OSGetStdErr FPrintf
+			end
+		end else
+			auto value
+			0 // capture
+			rootblock@ // node
+			machine@ // machine
+			MclMachineEvaluateNode ok! value!
+
+			rootblock@ MclParseSubtreeFree
+
+			if (ok@)
+				if (ok@ STATUS_SIGNALLED ==)
+					"\n" Printf
+				end elseif (ok@ STATUS_SYNTAX_ERROR ==)
+
+				end else
+					ok@ OSStatusGetName "%s\n" OSGetStdErr FPrintf
+				end
+			end else
+				if (value@)
+					value@ "[%s]\n" Printf
+
+					value@ MclFreeValue
+				end
+			end
+		end
+	end
+end

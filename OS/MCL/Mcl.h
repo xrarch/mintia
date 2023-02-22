@@ -115,6 +115,8 @@ extern MclpFreeValue { value -- }
 
 extern MclpEvaluateValueTruthiness { value -- tru }
 
+extern MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle ok }
+
 const PARSENODE_BLOCK      1
 const PARSENODE_LITERAL    2
 const PARSENODE_PIPELINE   3

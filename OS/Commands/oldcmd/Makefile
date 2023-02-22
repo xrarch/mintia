@@ -1,3 +1,3 @@
-CMDNAME = cmdlite
+CMDNAME = oldcmd
 
 include $(REPO)/Command.mk

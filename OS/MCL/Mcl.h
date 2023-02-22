@@ -16,6 +16,8 @@ struct MclpMachine
 	4 CurrentNode
 	4 CaptureDepth
 
+	4 Interactive
+
 	4 HistoryCount
 	4 HistoryListHead
 	4 HistoryListTail

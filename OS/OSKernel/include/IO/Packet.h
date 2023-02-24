@@ -25,6 +25,17 @@ struct IOPacketHeader // IOPH
 
 	1 PriorityBoostB
 
+	// packet type:
+	//  - NORMAL: synchronous user IO, page-in IO, associated (fragment) IO, etc.
+	//  - USERASYNC: asynchronous user IO (needs special completion)
+	//  - PAGING: asynchronous page-out IO (needs special completion)
+	//
+	// also holds some flags pertaining to things like whether this IOP is
+	// zone-allocated or pool-allocated, and whether the MDL specified in the
+	// zeroth IOPL should be freed upon completion.
+
+	4 Type
+
 	// saved status.
 
 	4 Status
@@ -50,17 +61,6 @@ struct IOPacketHeader // IOPH
 	// kernel-reserved IO flags.
 
 	4 KFlags
-
-	// packet type:
-	//  - NORMAL: synchronous user IO, page-in IO, associated (fragment) IO, etc.
-	//  - USERASYNC: asynchronous user IO (needs special completion)
-	//  - PAGING: asynchronous page-out IO (needs special completion)
-	//
-	// also holds some flags pertaining to things like whether this IOP is
-	// zone-allocated or pool-allocated, and whether the MDL specified in the
-	// zeroth IOPL should be freed upon completion.
-
-	4 Type
 endstruct
 
 struct IOPacketHeaderPagingIO
@@ -142,6 +142,12 @@ struct IOPacketLocation // IOPL
 	// should be done.
 
 	4 OffsetInMDL
+
+	// points to an MDL that describes the buffer this operation is
+	// transferring to/from. if this is the zeroth stack location and the flag
+	// IOPTYPE_FREEMDL is specified in the IOP header, the MDL will be
+	// unmapped, unpinned, and freed when this IOPL completes.
+
 	4 MDL
 
 	// pointer to the header for this IOP.

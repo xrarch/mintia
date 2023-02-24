@@ -112,33 +112,33 @@ struct IOPacketLocation // IOPL
 	// number of associated packets that this one depends on for completion.
 	// biased by one if there is a stack location below this packet; however,
 	// that stack location is not linked into the associated packet list,
-	// since only packet headers are linked into it.
+	// since only IOPH are linked into it.
 	//
-	// it is also biased by one just because the IOPL exists, since completion
-	// occurs when IOCount drops to zero and otherwise it is simply
-	// decremented.
+	// it is also biased by one just because this IOPL exists, since
+	// completion occurs when IOCount drops to zero and otherwise that count
+	// is simply decremented.
 
 	2 IOCountI
 
-	// driver context for this IOPL.
+	// driver-specific context for this IOPL.
 
 	4 Context
 
-	// file control block that this IOPL is targeted towards.
+	// the file control block that this IOPL is targeted towards.
 
 	4 FileControlBlock
 
-	// routine to run in the context of the completion DPC when this IOPL is
-	// completed.
+	// optional routine to run in the context of the completion DPC when this
+	// IOPL is completed.
 
 	4 CompletionDPCRoutine
 
-	// offset and length of the IO transfer.
+	// offset and length of the IO transfer on the medium.
 
 	4 Offset
 	4 Length
 
-	// offset from the virtual base of the provided MDL at which the transfer
+	// offset from the virtual base of the provided MDL, at which the transfer
 	// should be done.
 
 	4 OffsetInMDL
@@ -150,11 +150,11 @@ struct IOPacketLocation // IOPL
 
 	4 MDL
 
-	// pointer to the header for this IOP.
+	// pointer to the IOPH for this IOP.
 
-	4 Header
+	4 IOPH
 
-	// linked list anchor for associated (fragment) IOPs of this IOPL.
+	// linked list anchors for associated (fragment) IOPs of this IOPL.
 
 	4 AssociatedPacketListHead
 	4 AssociatedPacketListTail

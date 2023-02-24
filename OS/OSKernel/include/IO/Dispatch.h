@@ -18,31 +18,30 @@ fnptr IODispatchDeleteDeviceObjectFunction { object -- }
 fnptr IODispatchCancelFunction { mdl -- }
 
 struct IODispatchTable
-	4 Open
-	4 Close
-	4 IOControl
-	4 Read
-	4 Write
-	4 Unlink
-	4 Parse
-	4 Reserved4
-	4 Flush
-	4 DeleteObject
-	4 Poke
-	4 SetSecurity
-	4 Rename
-	4 ReadBlock
-	4 WriteBlock
-	4 Truncate
-	4 ReadDirectory
-	4 GetPageAddress
-	4 DeleteDeviceObject
-	4 Reserved5
-	4 Cancel
-	4 Reserved6
-	4 Reserved7
+	4 Open                    // 0
+	4 Close                   // 1
+	4 IOControl               // 2
+	4 Read                    // 3
+	4 Write                   // 4
+	4 Unlink                  // 5
+	4 Parse                   // 6
+	4 Reserved4               // 7
+	4 Flush                   // 8
+	4 DeleteObject            // 9
+	4 Poke                    // 10
+	4 SetSecurity             // 11
+	4 Rename                  // 12
+	4 ReadBlock               // 13
+	4 WriteBlock              // 14
+	4 Truncate                // 15
+	4 ReadDirectory           // 16
+	4 GetPageAddress          // 17
+	4 DeleteDeviceObject      // 18
+	4 Reserved5               // 19
+	4 Cancel                  // 20
+	4 Reserved6               // 21
+	4 Reserved7               // 22
 endstruct
 
-const IOZEROFCBREFERENCES_OK       0
-const IOZEROFCBREFERENCES_TRYAGAIN 1
-const IOZEROFCBREFERENCES_FREED    2
+const IODISPATCH_READ  3
+const IODISPATCH_WRITE 4

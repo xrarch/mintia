@@ -23,7 +23,19 @@ struct IODevice
 	4 FileControlBlock
 	4 BlockLog
 	4 ConsoleHeader
+	4 Mount
+
+	4 AttachedTo
+	4 StackDepth // this driver plus number of drivers on stack below it
 endstruct
+
+extern IODeviceAttach { deviceobject todeviceobject -- ok }
+
+extern IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
+extern IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
+extern IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
+extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
+extern IODeviceDeleteFileObject { object -- ok }
 
 extern IODeviceDirectoryInsert { deviceobject -- ok }
 

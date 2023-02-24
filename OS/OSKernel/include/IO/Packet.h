@@ -3,7 +3,9 @@ fnptr IOPacketCompletionDPCRoutine { iopl -- }
 const IOPTYPE_NORMAL        1
 const IOPTYPE_USERASYNC     2
 const IOPTYPE_PAGING        4
+
 const IOPTYPE_ZONEALLOCATED 8192
+const IOPTYPE_FREEMDL       16384
 
 struct IOPacketHeader // IOPH
 	// indicates the current stack location in the iterative enqueuing
@@ -53,6 +55,10 @@ struct IOPacketHeader // IOPH
 	//  - NORMAL: synchronous user IO, page-in IO, associated (fragment) IO, etc.
 	//  - USERASYNC: asynchronous user IO (needs special completion)
 	//  - PAGING: asynchronous page-out IO (needs special completion)
+	//
+	// also holds some flags pertaining to things like whether this IOP is
+	// zone-allocated or pool-allocated, and whether the MDL specified in the
+	// zeroth IOPL should be freed upon completion.
 
 	4 Type
 endstruct

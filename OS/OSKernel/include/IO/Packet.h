@@ -1,8 +1,9 @@
-fnptr IOPacketCompletionDPCRoutine { iopsl -- }
+fnptr IOPacketCompletionDPCRoutine { iopl -- }
 
-const IOPTYPE_NORMAL    1
-const IOPTYPE_USERASYNC 2
-const IOPTYPE_PAGING    3
+const IOPTYPE_NORMAL        1
+const IOPTYPE_USERASYNC     2
+const IOPTYPE_PAGING        4
+const IOPTYPE_ZONEALLOCATED 8192
 
 struct IOPacketHeader // IOPH
 	// indicates the current stack location in the iterative enqueuing

@@ -1,3 +1,8 @@
+const IODRIVER_NOCHAIN   1
+const IODRIVER_CHAINSTOP 2
+
+const IODRIVER_FILESYSTEM (IODRIVER_NOCHAIN)
+
 struct IODriver
 	4 VersionMajor
 	4 VersionMinor
@@ -7,6 +12,7 @@ struct IODriver
 	4 DispatchTable
 	4 ExtensionSize
 	4 BlockLog
+	4 Flags
 
 	4 Reserved1
 	4 Reserved2
@@ -24,12 +30,15 @@ struct IODevice
 	4 BlockLog
 	4 ConsoleHeader
 	4 Mount
+	4 Flags
 
 	4 AttachedTo
+	4 AttachedBy
 	4 StackDepth // this driver plus number of drivers on stack below it
 endstruct
 
-extern IODeviceAttach { deviceobject todeviceobject -- ok }
+extern IODeviceGetAttached { deviceobject -- attacheddeviceobject } 
+extern IODeviceAttachObject { chain deviceobject todeviceobject -- ok }
 
 extern IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
 extern IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }

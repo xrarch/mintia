@@ -29,11 +29,65 @@
 
 #include "IOInternal.h"
 
-fn IODeviceAttach { deviceobject todeviceobject -- ok }
+fn IODeviceGetAttached { deviceobject -- attacheddeviceobject } 
 	fnsection "PAGE$text"
 
+	deviceobject@ attacheddeviceobject!
+
+	while (deviceobject@ IODevice_AttachedBy + @)
+		deviceobject@ IODevice_AttachedBy + @ attacheddeviceobject!
+
+		if (attacheddeviceobject@ IODevice_Driver + @ IODriver_Flags + @ IODRIVER_NOCHAIN &)
+			// driver doesn't want us to follow the device chain into its
+			// device object.
+
+			deviceobject@ attacheddeviceobject!
+
+			break
+		end
+
+		attacheddeviceobject@ deviceobject!
+
+		if (deviceobject@ IODevice_Driver + @ IODriver_Flags + @ IODRIVER_CHAINSTOP &)
+			// driver wants us to stop the chain at its device object.
+
+			break
+		end
+	end
+end
+
+fn IODeviceAttachObject { chain deviceobject todeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	if (todeviceobject@ IODevice_AttachedBy + @)
+		if (chain@ ~~)
+			STATUS_ALREADY_EXISTS ok!
+
+			return
+		end
+
+		todeviceobject@ IODeviceGetAttached todeviceobject!
+
+		if (todeviceobject@ IODevice_AttachedBy + @)
+			STATUS_ALREADY_EXISTS ok!
+
+			return
+		end
+	end
+
+	if (deviceobject@ IODevice_AttachedTo + @)
+		// the calling driver owns this device object, and should know that it
+		// already attached it to somebody, so this must be a bug.
+
+		"IODeviceAttach\n" KeCrash
+	end
+
+	0 ok!
+
+	deviceobject@ todeviceobject@ IODevice_AttachedBy + !
 	todeviceobject@ deviceobject@ IODevice_AttachedTo + !
 	todeviceobject@ IODevice_StackDepth + @ deviceobject@ IODevice_StackDepth + +=
+	todeviceobject@ IODevice_BlockLog + @ deviceobject@ IODevice_BlockLog + !
 end
 
 fn IODeviceDirectoryInsert { deviceobject -- ok }
@@ -124,6 +178,8 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 
 	0 deviceobject@ IODevice_AttachedTo + !
 	1 deviceobject@ IODevice_StackDepth + !
+	0 deviceobject@ IODevice_AttachedBy + !
+	0 deviceobject@ IODevice_Flags + !
 
 	auto fcb
 	deviceobject@ IODeviceCreateFileControlBlock ok! fcb!

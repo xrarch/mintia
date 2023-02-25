@@ -102,6 +102,7 @@
 .extern OSThreadUnmaskSignal
 .extern OSSetSystemConsole
 .extern OSConsoleSignal
+.extern OSIsAConsole
 .extern OSDuplexCreate
 .extern OSCheckPermission
 .extern OSGrantPermission
@@ -114,7 +115,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 109
+	.dl 110
 
 OSCallTable:
 .global OSCallTable
@@ -219,15 +220,16 @@ OSCallTable:
 	.dl OSTOSThreadUnmaskSignal                          ;98
 	.dl OSTOSSetSystemConsole                            ;99
 	.dl OSTOSConsoleSignal                               ;100
-	.dl OSTOSDuplexCreate                                ;101
-	.dl OSTOSCheckPermission                             ;102
-	.dl OSTOSGrantPermission                             ;103
-	.dl OSTOSPortCreate                                  ;104
-	.dl OSTOSPortConnect                                 ;105
-	.dl OSTOSPortAccept                                  ;106
-	.dl OSTOSPortSendAndWaitReceive                      ;107
-	.dl OSTOSPortSendAndWaitReply                        ;108
-	.dl OSTOSPortOpenProcessByClientID                   ;109
+	.dl OSTOSIsAConsole                                  ;101
+	.dl OSTOSDuplexCreate                                ;102
+	.dl OSTOSCheckPermission                             ;103
+	.dl OSTOSGrantPermission                             ;104
+	.dl OSTOSPortCreate                                  ;105
+	.dl OSTOSPortConnect                                 ;106
+	.dl OSTOSPortAccept                                  ;107
+	.dl OSTOSPortSendAndWaitReceive                      ;108
+	.dl OSTOSPortSendAndWaitReply                        ;109
+	.dl OSTOSPortOpenProcessByClientID                   ;110
 
 
 OSTOSConsolePutCharacter:
@@ -2605,6 +2607,24 @@ OSTOSConsoleSignal:
 	mov  a1, [t0]
 
 	call OSConsoleSignal
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	pop  fp
+	ret
+
+OSTOSIsAConsole:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	call OSIsAConsole
 
 
 	mov  t0, s17

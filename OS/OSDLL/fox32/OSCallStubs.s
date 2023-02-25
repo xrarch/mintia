@@ -1277,13 +1277,24 @@ OSConsoleSignal:
 
 	ret
 
+OSIsAConsole:
+.global OSIsAConsole
+	mov  t1, a0
+
+	mov  t0, 101
+	int  0x30
+
+	mov  a0, t1
+
+	ret
+
 OSDuplexCreate:
 .global OSDuplexCreate
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 101
+	mov  t0, 102
 	int  0x30
 
 	mov  a2, t3
@@ -1297,7 +1308,7 @@ OSCheckPermission:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 102
+	mov  t0, 103
 	int  0x30
 
 	mov  a0, t1
@@ -1309,7 +1320,7 @@ OSGrantPermission:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 103
+	mov  t0, 104
 	int  0x30
 
 	mov  a0, t1
@@ -1323,7 +1334,7 @@ OSPortCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 104
+	mov  t0, 105
 	int  0x30
 
 	mov  a1, t2
@@ -1338,7 +1349,7 @@ OSPortConnect:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 105
+	mov  t0, 106
 	int  0x30
 
 	mov  a1, t2
@@ -1353,7 +1364,7 @@ OSPortAccept:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 106
+	mov  t0, 107
 	int  0x30
 
 	mov  a0, t1
@@ -1367,7 +1378,7 @@ OSPortSendAndWaitReceive:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 107
+	mov  t0, 108
 	int  0x30
 
 	mov  a0, t1
@@ -1381,7 +1392,7 @@ OSPortSendAndWaitReply:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 108
+	mov  t0, 109
 	int  0x30
 
 	mov  a0, t1
@@ -1394,7 +1405,7 @@ OSPortOpenProcessByClientID:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 109
+	mov  t0, 110
 	int  0x30
 
 	mov  a1, t2

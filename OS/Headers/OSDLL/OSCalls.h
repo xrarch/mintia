@@ -148,6 +148,7 @@ extern OSThreadUnmaskSignal { signal threadhandle -- ok }
 extern OSSetSystemConsole { filehandle -- ok }
 
 extern OSConsoleSignal { signal filehandle -- ok }
+extern OSIsAConsole { filehandle -- ok }
 
 extern OSDuplexCreate { flags name permissions -- duplexhandle filehandle ok }
 

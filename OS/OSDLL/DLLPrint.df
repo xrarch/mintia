@@ -15,6 +15,8 @@
 #include "<ll>/OSDLL/OSFastMutex.h"
 #include "<ll>/OSDLL/OSStream.h"
 #include "<ll>/OSDLL/OSAccess.h"
+#include "<ll>/OSDLL/OSConsoleControl.h"
+#include "<ll>/OSDLL/OSEnvironment.h"
 
 #include "OSDLL.h"
 
@@ -245,4 +247,167 @@ fn OSStringIsAlphanumeric { str -- valid }
 	end
 
 	1 valid!
+end
+
+fn DLLGetResponseString { buf filehandle -- ok }
+	0 ok!
+
+	auto charbuf
+	4 alloc charbuf!
+
+	auto found
+	0 found!
+
+	while (1)
+		100 // timeout
+		0 // flags
+		1 // length
+		charbuf@ // buffer
+		filehandle@ // filehandle
+		OSFileRead ok! drop
+
+		if (ok@)
+			return
+		end
+
+		if (found@)
+			if (charbuf@ gb 'R' ==)
+				'R' buf@ sb
+				1 buf +=
+				0 buf@ sb
+				break
+			end
+
+			charbuf@ gb buf@ sb
+			1 buf +=
+		end elseif (charbuf@ gb '\[' ==)
+			'\[' buf@ sb
+			1 buf +=
+
+			1 found!
+		end
+	end
+end
+
+fn OSConsoleQuerySize { filehandle -- w h ok }
+	if (filehandle@ OSGetStdOut ==)
+		auto env
+
+		"COLUMNS" // name
+		OSFindEnvironmentVariable ok! env! drop
+
+		if (ok@ ~~)
+			env@ atoi w!
+
+			"LINES" // name
+			OSFindEnvironmentVariable ok! env! drop
+
+			if (ok@ ~~)
+				env@ atoi h!
+
+				return
+			end
+		end
+
+		0 ok!
+	end
+
+	filehandle@ OSIsAConsole ok!
+
+	if (ok@)
+		return
+	end
+
+	auto oldquerybuf
+	16 alloc oldquerybuf!
+
+	// set cursor position to corner of screen and then query it.
+	// this will determine the height and width of the screen.
+
+	OSCONSOLEMODE_RAW // arg2
+	OSCONSOLEIOCONTROL_SETMODE // arg1
+	filehandle@ // filehandle
+	OSIOControl ok! drop
+
+	if (ok@)
+		return
+	end
+
+	"\[[6n" filehandle@ FPrintf
+	0 filehandle@ OSStreamFlush drop
+
+	oldquerybuf@ // buf
+	filehandle@ // filehandle
+	DLLGetResponseString ok!
+
+	0 // arg2
+	OSCONSOLEIOCONTROL_RESETMODE // arg1
+	filehandle@ // filehandle
+	OSIOControl drop drop
+
+	if (ok@)
+		return
+	end
+
+	OSCONSOLEMODE_RAW // arg2
+	OSCONSOLEIOCONTROL_SETMODE // arg1
+	filehandle@ // filehandle
+	OSIOControl drop drop
+
+	"\[[999;999H\[[6n" filehandle@ FPrintf
+	0 filehandle@ OSStreamFlush drop
+
+	auto querybuf
+	16 alloc querybuf!
+
+	querybuf@ // buf
+	filehandle@ // filehandle
+	DLLGetResponseString ok!
+
+	0 // arg2
+	OSCONSOLEIOCONTROL_RESETMODE // arg1
+	filehandle@ // filehandle
+	OSIOControl drop drop
+
+	if (ok@)
+		return
+	end
+
+	// get rid of the open bracket and final R
+
+	2 querybuf +=
+
+	0 querybuf@ querybuf@ strlen + 1 - sb
+
+	// we got a query string. replace the semicolon with a null character.
+
+	auto ptr
+	querybuf@ ptr!
+
+	while (ptr@ gb ';' ~=)
+		1 ptr +=
+	end
+
+	0 ptr@ sb
+
+	querybuf@ atoi h!
+	ptr@ 1 + atoi w!
+
+	// reset the cursor position.
+
+	'H' oldquerybuf@ oldquerybuf@ strlen + 1 - sb
+	oldquerybuf@ "%s" filehandle@ FPrintf
+	0 filehandle@ OSStreamFlush drop
+
+	w@ querybuf@ itoa
+
+	querybuf@ // env
+	"COLUMNS" // name
+	OSSetEnvironmentVariable drop
+
+	h@ querybuf@ itoa
+
+	querybuf@ // env
+	"LINES" // name
+	OSSetEnvironmentVariable drop
 end

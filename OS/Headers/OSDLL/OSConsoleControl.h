@@ -7,8 +7,8 @@ const OSCONSOLEIOCONTROL_RESETMODE 3
 const OSCONSOLEIOCONTROL_EXPEDITE  4
 
 struct OSConsoleQuery
-	4 Columns
-	4 Rows
+	4 Reserved1
+	4 Reserved2
 	4 Mode
 
 	24 Reserved
@@ -16,3 +16,5 @@ endstruct
 
 const OSDUPLEXFLAG_SIMPLEX 1
 const OSDUPLEXFLAG_CONSOLE 2
+
+extern OSConsoleQuerySize { filehandle -- w h ok }

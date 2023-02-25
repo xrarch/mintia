@@ -3,16 +3,13 @@ struct CoConsoleHeader
 	4 Mode
 
 	4 Echoed
-
-	2 WidthI
-	2 HeightI
 endstruct
 
 extern CoConsoleByFileHandle { requiredaccess filehandle -- consoleobject ok }
 
 extern CoConsoleInitialize { header -- }
 
-extern CoConsoleSignal { signal console -- }
+extern CoConsoleSignal { signal console -- ok }
 
 extern CoConsoleRemoveProcess { process -- ok }
 extern CoConsoleInsertProcess { process consoleobject -- ok }

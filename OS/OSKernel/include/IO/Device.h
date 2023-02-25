@@ -32,7 +32,6 @@ struct IODevice
 	4 Mount
 	4 Flags
 
-	4 AttachedTo
 	4 AttachedBy
 	4 StackDepth // this driver plus number of drivers on stack below it
 endstruct

@@ -61,6 +61,14 @@ struct IOPacketHeader // IOPH
 	// kernel-reserved IO flags.
 
 	4 KFlags
+
+	// links for generic device-specific queue of pending IOPs.
+	// this is in the IOPH instead of the IOPL because it is anticipated that
+	// only bottom-level IOPLs will be enqueued by a driver, and the IOP
+	// therefore requires only one set of links.
+
+	4 DeviceQueueNext
+	4 DeviceQueuePrev
 endstruct
 
 struct IOPacketHeaderPagingIO

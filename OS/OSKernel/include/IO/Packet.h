@@ -4,8 +4,15 @@ const IOPTYPE_NORMAL        1
 const IOPTYPE_USERASYNC     2
 const IOPTYPE_PAGING        4
 
-const IOPTYPE_ZONEALLOCATED 8192
-const IOPTYPE_FREEMDL       16384
+const IOPFLAG_ZONEIOP 1  // the IOP was drawn from one of the pre-allocated zones.
+const IOPFLAG_FREEIOP 2  // the IOP should be freed upon completion.
+const IOPFLAG_FREEMDL 4  // the MDL in the zeroth IOPL should be freed upon completion.
+const IOPFLAG_QUOTA   8  // quota has been charged for this IOP.
+const IOPFLAG_USERIO  16 // the IOP represents a usermode request (either sync or async).
+
+// N.B. Changing the offsets of the fields within the following structs will
+// break practically every driver. Changing the overall size of the structs,
+// however, is designed to be fine.
 
 struct IOPacketHeader // IOPH
 	// indicates the current stack location in the iterative enqueuing
@@ -17,10 +24,6 @@ struct IOPacketHeader // IOPH
 
 	1 StackDepthB
 
-	// indicates whether this is user or kernel IO.
-
-	1 ModeB
-
 	// saved priority boost.
 
 	1 PriorityBoostB
@@ -29,12 +32,24 @@ struct IOPacketHeader // IOPH
 	//  - NORMAL: synchronous user IO, page-in IO, associated (fragment) IO, etc.
 	//  - USERASYNC: asynchronous user IO (needs special completion)
 	//  - PAGING: asynchronous page-out IO (needs special completion)
-	//
-	// also holds some flags pertaining to things like whether this IOP is
+
+	1 TypeB
+
+	// holds some flags pertaining to things like whether this IOP is
 	// zone-allocated or pool-allocated, and whether the MDL specified in the
 	// zeroth IOPL should be freed upon completion.
 
-	4 Type
+	1 FlagsB
+
+	// indicates the header size; i.e. the offset to get from the IOP base to
+	// the first IOPL.
+
+	1 HeaderSizeB
+
+	// alignment
+
+	1 Reserved1B
+	1 Reserved2B
 
 	// saved status.
 
@@ -80,7 +95,7 @@ struct IOPacketHeaderPagingIO
 	KeAPC_SIZEOF CompletionAPC
 endstruct
 
-struct IOPacketHeaderUserIO
+struct IOPacketHeaderUserAsync
 	IOPacketHeader_SIZEOF Header
 
 	// things required for user async IO completion.
@@ -139,7 +154,7 @@ struct IOPacketLocation // IOPL
 	// optional routine to run in the context of the completion DPC when this
 	// IOPL is completed.
 
-	4 CompletionDPCRoutine
+	4 CallbackRoutine
 
 	// offset and length of the IO transfer on the medium.
 
@@ -153,7 +168,7 @@ struct IOPacketLocation // IOPL
 
 	// points to an MDL that describes the buffer this operation is
 	// transferring to/from. if this is the zeroth stack location and the flag
-	// IOPTYPE_FREEMDL is specified in the IOP header, the MDL will be
+	// IOPFLAG_FREEMDL is specified in the IOP header, the MDL will be
 	// unmapped, unpinned, and freed when this IOPL completes.
 
 	4 MDL

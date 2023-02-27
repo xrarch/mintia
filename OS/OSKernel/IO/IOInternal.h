@@ -1,4 +1,5 @@
 extern IOiPageFileInit { -- }
+extern IOiPacketZonesInit { -- }
 
 extern IOiCacheInitialize { fcb -- cacheblock ok }
 extern IOiCacheInfoBlockCreate { -- cacheblock ok }

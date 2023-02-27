@@ -29,6 +29,358 @@
 
 #include "IOInternal.h"
 
-fn IOiPacketInit { -- }
+const SMALLSTACK 1
+const LARGESTACK 3
 
+buffer IOiPacketZoneUserAsync MmZoneHeader_SIZEOF
+buffer IOiPacketZonePaging    MmZoneHeader_SIZEOF
+buffer IOiPacketZoneNormal    MmZoneHeader_SIZEOF
+
+buffer IOiPacketZoneUserAsyncSmall MmZoneHeader_SIZEOF
+buffer IOiPacketZonePagingSmall    MmZoneHeader_SIZEOF
+buffer IOiPacketZoneNormalSmall    MmZoneHeader_SIZEOF
+
+table IOiPacketZonesLarge
+	0
+	pointerof IOiPacketZoneNormal
+	pointerof IOiPacketZonePaging
+	pointerof IOiPacketZoneUserAsync
+endtable
+
+table IOiPacketZonesSmall
+	0
+	pointerof IOiPacketZoneNormalSmall
+	pointerof IOiPacketZonePagingSmall
+	pointerof IOiPacketZoneUserAsyncSmall
+endtable
+
+table IOiPacketHeaderSizes
+	0
+	IOPacketHeader_SIZEOF
+	IOPacketHeaderPagingIO_SIZEOF
+	IOPacketHeaderUserAsync_SIZEOF
+endtable
+
+fn IOiPacketZoneInit { count stacksize headersize zone -- }
+	fnsection "INIT$text"
+
+	auto packetsize
+	headersize@ IOPacketLocation_SIZEOF stacksize@ * + packetsize!
+
+	auto ok
+	auto chunk
+
+	packetsize@ count@ * MMZONEOVERHEAD + // bytes
+	'IOPz' // tag
+	0 // flags
+	MmAllocWithTag ok! chunk!
+
+	if (ok@)
+		"IOiPacketZonesInit: failed to create packet zones\n" KeCrash
+	end
+
+	packetsize@ count@ * MMZONEOVERHEAD + // bytes
+	chunk@ // chunk
+	packetsize@ // blocksize
+	zone@ // zoneheader
+	MmZoneInitialize
+end
+
+fn IOiPacketZonesInit { -- }
+	fnsection "INIT$text"
+
+	auto largenormalcount
+	auto largepagingcount
+	auto largeasynccount
+
+	auto smallnormalcount
+	auto smallpagingcount
+	auto smallasynccount
+
+	if (MmSystemSize@ MMTINYSYSTEM <=)
+		3 smallasynccount!
+		2 largeasynccount!
+
+		4 smallpagingcount!
+		8 largepagingcount!
+
+		4 smallnormalcount!
+		5 largenormalcount!
+	end elseif (MmSystemSize@ MMMEDIUMSYSTEM <=)
+		8 smallasynccount!
+		5 largeasynccount!
+
+		8 smallpagingcount!
+		16 largepagingcount!
+
+		8 smallnormalcount!
+		10 largenormalcount!
+	end else
+		16 smallasynccount!
+		24 largeasynccount!
+
+		20 smallpagingcount!
+		35 largepagingcount!
+
+		50 smallnormalcount!
+		64 largenormalcount!
+	end
+
+	// create large normal zone
+
+	largenormalcount@ // count
+	LARGESTACK // stacksize
+	IOPacketHeader_SIZEOF // headersize
+	IOiPacketZoneNormal // zone
+	IOiPacketZoneInit
+
+	// create large paging zone
+
+	largepagingcount@ // count
+	LARGESTACK // stacksize
+	IOPacketHeaderPagingIO_SIZEOF // headersize
+	IOiPacketZonePaging // zone
+	IOiPacketZoneInit
+
+	// create large user async zone
+
+	largeasynccount@ // count
+	LARGESTACK // stacksize
+	IOPacketHeaderUserAsync_SIZEOF // headersize
+	IOiPacketZoneNormal // zone
+	IOiPacketZoneInit
+
+	// create small normal zone
+
+	smallnormalcount@ // count
+	SMALLSTACK // stacksize
+	IOPacketHeader_SIZEOF // headersize
+	IOiPacketZoneUserAsyncSmall // zone
+	IOiPacketZoneInit
+
+	// create small paging zone
+
+	smallpagingcount@ // count
+	SMALLSTACK // stacksize
+	IOPacketHeaderPagingIO_SIZEOF // headersize
+	IOiPacketZonePagingSmall // zone
+	IOiPacketZoneInit
+
+	// create small user async zone
+
+	smallasynccount@ // count
+	SMALLSTACK // stacksize
+	IOPacketHeaderUserAsync_SIZEOF // headersize
+	IOiPacketZoneUserAsyncSmall // zone
+	IOiPacketZoneInit
+end
+
+fn IOPacketFree { iop -- }
+	auto quotablock
+	iop@ IOPacketHeader_QuotaBlock + @ quotablock!
+
+	auto charge
+
+	if (quotablock@)
+		iop@ IOPacketHeader_HeaderSizeB + gb
+		iop@ IOPacketHeader_StackDepthB + gb IOPacketLocation_SIZEOF * + // bytes
+		MmChargeBytesGet charge!
+	end
+
+	if (iop@ IOPacketHeader_FlagsB + gb IOPFLAG_ZONEIOP &)
+		if (iop@ IOPacketHeader_StackDepthB + gb SMALLSTACK <=)
+			iop@ // ptr
+			[iop@ IOPacketHeader_TypeB + gb]IOiPacketZonesSmall@ // zoneheader
+			MmZoneFree
+		end else
+			iop@ // ptr
+			[iop@ IOPacketHeader_TypeB + gb]IOiPacketZonesLarge@ // zoneheader
+			MmZoneFree
+		end
+	end else
+		iop@ MmFree
+	end
+
+	if (quotablock@)
+		charge@ // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUncharge
+
+		quotablock@ MmQuotaBlockDereference
+	end
+end
+
+fn IOPacketAllocate { func mode type kflags deviceobject iopflags -- ioplzero iop ok }
+	auto stacksize
+	deviceobject@ IODevice_StackDepth + @ stacksize!
+
+	auto packetsize
+	[type@]IOiPacketHeaderSizes@ stacksize@ IOPacketLocation_SIZEOF * + packetsize!
+
+	auto quotablock
+	0 quotablock!
+
+	if (mode@ USERMODE ==)
+		IOPFLAG_USERIO iopflags |=
+	end
+
+	if (iopflags@ IOPFLAG_QUOTA &)
+		if (kflags@ IOKFLAG_PAGEIN &)
+			// nope, don't charge quota for paging IO
+			IOPFLAG_QUOTA ~ iopflags &=
+		end else
+			KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
+
+			packetsize@ MmChargeBytesGet // charge
+			quotablock@ // quotablock
+			MmQuotaBlockCharge ok!
+
+			if (ok@)
+				return
+			end
+
+			quotablock@ MmQuotaBlockReference
+		end
+	end
+
+	auto zone
+	0 zone!
+	0 iop!
+
+	if (stacksize@ SMALLSTACK <=)
+		[type@]IOiPacketZonesSmall@ zone!
+	end elseif (stacksize@ LARGESTACK <=)
+		[type@]IOiPacketZonesLarge@ zone!
+	end
+
+	if (zone@)
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		zone@ MmZoneAllocate ok! iop!
+
+		rs@ HALCPUInterruptRestore
+
+		if (ok@)
+			// no IOPs left in the zone.
+
+			0 iop!
+			0 zone!
+		end else
+			IOPFLAG_ZONEIOP iopflags |=
+		end
+	end
+
+	if (iop@ ~~)
+		auto flags
+		CANBLOCK flags!
+
+		kflags@ MmKflagToPriority flags |=
+
+		packetsize@ // bytes
+		'IOPa' // tag
+		flags@ // flags
+		MmAllocWithTag ok! iop!
+
+		if (ok@)
+			if (quotablock@)
+				packetsize@ MmChargeBytesGet // charge
+				quotablock@ // quotablock
+				MmQuotaBlockUncharge
+
+				quotablock@ MmQuotaBlockDereference
+			end
+
+			return
+		end
+	end
+
+	func@ // func
+	quotablock@ // quotablock
+	type@ // type
+	kflags@ // kflags
+	deviceobject@ // deviceobject
+	iopflags@ // iopflags
+	iop@ // iop
+	IOPacketInitialize ioplzero!
+end
+
+fn IOPacketInitialize { func quotablock type kflags deviceobject iopflags iop -- ioplzero }
+	auto stacksize
+	deviceobject@ IODevice_StackDepth + @ stacksize!
+
+	0 iop@ IOPacketHeader_CurrentStackIndexB + sb
+	stacksize@ iop@ IOPacketHeader_StackDepthB + sb
+	0 iop@ IOPacketHeader_PriorityBoostB + sb
+
+	type@ iop@ IOPacketHeader_TypeB + sb
+	iopflags@ iop@ IOPacketHeader_FlagsB + sb
+
+	[type@]IOiPacketHeaderSizes@ iop@ IOPacketHeader_HeaderSizeB + sb
+
+	0 iop@ IOPacketHeader_Status + !
+
+	quotablock@ iop@ IOPacketHeader_QuotaBlock + !
+
+	0 iop@ IOPacketHeader_ParentIOPL + !
+	0 iop@ IOPacketHeader_AssociatedPacketListPrev + !
+	0 iop@ IOPacketHeader_AssociatedPacketListNext + !
+
+	0 iop@ IOPacketHeader_Event + !
+
+	kflags@ iop@ IOPacketHeader_KFlags + !
+
+	0 iop@ IOPacketHeader_DeviceQueueNext + !
+	0 iop@ IOPacketHeader_DeviceQueuePrev + !
+
+	// initialize the IOPLs of the packet to indicate their stack location.
+
+	auto iopl
+	iop@ [type@]IOiPacketHeaderSizes@ + iopl!
+
+	auto i
+	0 i!
+
+	while (i@ stacksize@ <)
+		i@ iopl@ IOPacketLocation_StackLocationB + sb
+		1 iopl@ IOPacketLocation_IOCountI + si
+
+		// TODO more IOPL initialization here...
+
+		iop@ iopl@ IOPacketLocation_IOPH + !
+
+		1 i +=
+		IOPacketLocation_SIZEOF iopl +=
+	end
+
+	// initialize the zeroth IOPL to refer to the device object.
+	// XXX actually, don't do that.
+
+	iop@ [type@]IOiPacketHeaderSizes@ + ioplzero!
+end
+
+fn IOPacketIndex { index iop -- iopl }
+	if (DEBUGCHECKS)
+		if (index@ iop@ IOPacketHeader_StackDepthB + gb >=)
+			"IOPacketIndex: index out of bounds\n" KeCrash
+		end
+	end
+
+	iop@ iop@ IOPacketHeader_HeaderSizeB + gb + iopl!
+	index@ IOPacketLocation_SIZEOF * iopl +=
+end
+
+fn IOPacketFromLocation { iopl -- iop }
+	iopl@ IOPacketLocation_IOPH + @ iop!
+end
+
+fn IOPacketLocationNext { iopl -- nextiopl }
+	if (DEBUGCHECKS)
+		if (iopl@ IOPacketLocation_StackLocationB + gb
+			iopl@ IOPacketLocation_IOPH + @ IOPacketHeader_StackDepthB + gb >=)
+			"IOPacketLocationNext: out of bounds\n" KeCrash
+		end
+	end
+
+	iopl@ IOPacketLocation_SIZEOF + nextiopl!
 end

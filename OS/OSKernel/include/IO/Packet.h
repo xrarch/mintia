@@ -46,10 +46,12 @@ struct IOPacketHeader // IOPH
 
 	1 HeaderSizeB
 
-	// alignment
+	// number of associated packets that this one depends on for completion.
+	// it is also biased by one just because this IOP exists, since completion
+	// occurs when IOCount drops to zero and otherwise that count is simply
+	// decremented.
 
-	1 Reserved1B
-	1 Reserved2B
+	2 IOCountI
 
 	// saved status.
 
@@ -59,13 +61,10 @@ struct IOPacketHeader // IOPH
 
 	4 QuotaBlock
 
-	// if this is an associated (fragment) packet, these contain the links
-	// to our siblings in this fragment packet tree, and to our parent stack
-	// location.
+	// if this is an associated (fragment) packet, this contains the pointer
+	// to our parent IOP.
 
-	4 ParentIOPL
-	4 AssociatedPacketListPrev
-	4 AssociatedPacketListNext
+	4 ParentIOP
 
 	// pointer to a referenced event object if user async I/O.
 	// otherwise, just a KeEvent. in either case, signal upon completion if
@@ -135,16 +134,10 @@ struct IOPacketLocation // IOPL
 
 	1 StackLocationB
 
-	// number of associated packets that this one depends on for completion.
-	// biased by one if there is a stack location below this packet; however,
-	// that stack location is not linked into the associated packet list,
-	// since only IOPH are linked into it.
-	//
-	// it is also biased by one just because this IOPL exists, since
-	// completion occurs when IOCount drops to zero and otherwise that count
-	// is simply decremented.
+	// alignment
 
-	2 IOCountI
+	1 Alignment1B
+	1 Alignment2B
 
 	// IO flags.
 
@@ -183,9 +176,4 @@ struct IOPacketLocation // IOPL
 	// pointer to the IOPH for this IOP.
 
 	4 IOPH
-
-	// linked list anchors for associated (fragment) IOPs of this IOPL.
-
-	4 AssociatedPacketListHead
-	4 AssociatedPacketListTail
 endstruct

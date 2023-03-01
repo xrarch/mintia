@@ -61,11 +61,17 @@ table IOiPacketHeaderSizes
 	IOPacketHeaderUserAsync_SIZEOF
 endtable
 
+rosection "INIT$text"
+
 fn IOiPacketZoneInit { count stacksize headersize zone -- }
 	fnsection "INIT$text"
 
 	auto packetsize
 	headersize@ IOPacketLocation_SIZEOF stacksize@ * + packetsize!
+
+	packetsize@ count@ * MMZONEOVERHEAD +
+	"zonesize %d\n"
+	"IOiPacketZonesInit" HALLog
 
 	auto ok
 	auto chunk
@@ -85,6 +91,8 @@ fn IOiPacketZoneInit { count stacksize headersize zone -- }
 	zone@ // zoneheader
 	MmZoneInitialize
 end
+
+rosection "text"
 
 fn IOiPacketZonesInit { -- }
 	fnsection "INIT$text"
@@ -187,7 +195,7 @@ fn IOPacketFree { iop -- }
 		MmChargeBytesGet charge!
 	end
 
-	if (iop@ IOPacketHeader_FlagsB + gb IOPFLAG_ZONEIOP &)
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_ZONEIOP &)
 		if (iop@ IOPacketHeader_StackDepthB + gb SMALLSTACK <=)
 			iop@ // ptr
 			[iop@ IOPacketHeader_TypeB + gb]IOiPacketZonesSmall@ // zoneheader
@@ -210,7 +218,7 @@ fn IOPacketFree { iop -- }
 	end
 end
 
-fn IOPacketAllocate { func mode type kflags deviceobject iopflags -- ioplzero iop ok }
+fn IOPacketAllocate { mode type kflags deviceobject iopflags -- ioplzero iop ok }
 	auto stacksize
 	deviceobject@ IODevice_StackDepth + @ stacksize!
 
@@ -221,7 +229,7 @@ fn IOPacketAllocate { func mode type kflags deviceobject iopflags -- ioplzero io
 	0 quotablock!
 
 	if (mode@ USERMODE ==)
-		IOPFLAG_USERIO iopflags |=
+		IOPFLAG_USERMODE iopflags |=
 	end
 
 	if (iopflags@ IOPFLAG_QUOTA &)
@@ -295,7 +303,6 @@ fn IOPacketAllocate { func mode type kflags deviceobject iopflags -- ioplzero io
 		end
 	end
 
-	func@ // func
 	quotablock@ // quotablock
 	type@ // type
 	kflags@ // kflags
@@ -305,7 +312,7 @@ fn IOPacketAllocate { func mode type kflags deviceobject iopflags -- ioplzero io
 	IOPacketInitialize ioplzero!
 end
 
-fn IOPacketInitialize { func quotablock type kflags deviceobject iopflags iop -- ioplzero }
+fn IOPacketInitialize { quotablock type kflags deviceobject iopflags iop -- ioplzero }
 	auto stacksize
 	deviceobject@ IODevice_StackDepth + @ stacksize!
 
@@ -314,7 +321,7 @@ fn IOPacketInitialize { func quotablock type kflags deviceobject iopflags iop --
 	0 iop@ IOPacketHeader_PriorityBoostB + sb
 
 	type@ iop@ IOPacketHeader_TypeB + sb
-	iopflags@ iop@ IOPacketHeader_FlagsB + sb
+	iopflags@ iop@ IOPacketHeader_IOPFlagsB + sb
 
 	[type@]IOiPacketHeaderSizes@ iop@ IOPacketHeader_HeaderSizeB + sb
 
@@ -342,12 +349,33 @@ fn IOPacketInitialize { func quotablock type kflags deviceobject iopflags iop --
 	0 i!
 
 	while (i@ stacksize@ <)
+		0 iopl@ IOPacketLocation_FunctionCodeB + sb
 		i@ iopl@ IOPacketLocation_StackLocationB + sb
+
+		// subsequent IOPLs have a single-biased IOCount, because the
+		// final IOPL will be enqueued to a device, which will complete it
+		// and cause a cascade of IOPL completions up the stack. this
+		// means that on an error return, the driver must complete its
+		// IOPL, unless it has already given the same IOP to a lower driver,
+		// in which case it shouldn't (since that driver now owns it).
+
 		1 iopl@ IOPacketLocation_IOCountI + si
 
-		// TODO more IOPL initialization here...
+		0 iopl@ IOPacketLocation_Flags + !
+
+		0 iopl@ IOPacketLocation_FileControlBlock + !
+		0 iopl@ IOPacketLocation_CallbackRoutine + !
+
+		0 iopl@ IOPacketLocation_Offset + !
+		0 iopl@ IOPacketLocation_Length + !
+
+		0 iopl@ IOPacketLocation_OffsetInMDL + !
+		0 iopl@ IOPacketLocation_MDL + !
 
 		iop@ iopl@ IOPacketLocation_IOPH + !
+
+		0 iopl@ IOPacketLocation_AssociatedPacketListHead + !
+		0 iopl@ IOPacketLocation_AssociatedPacketListTail + !
 
 		1 i +=
 		IOPacketLocation_SIZEOF iopl +=
@@ -383,4 +411,13 @@ fn IOPacketLocationNext { iopl -- nextiopl }
 	end
 
 	iopl@ IOPacketLocation_SIZEOF + nextiopl!
+end
+
+fn IOPacketAssociate { iop iopl -- }
+	// associate the specified IOP with the specified IOPL.
+	// this biases the IOCount on the IOPL, adds the packet to the IOPL's
+	// associated packet list, and adds it to the current thread's deferred
+	// enqueue list.
+
+
 end

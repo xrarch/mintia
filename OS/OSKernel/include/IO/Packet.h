@@ -4,11 +4,11 @@ const IOPTYPE_NORMAL        1
 const IOPTYPE_USERASYNC     2
 const IOPTYPE_PAGING        4
 
-const IOPFLAG_ZONEIOP 1  // the IOP was drawn from one of the pre-allocated zones.
-const IOPFLAG_FREEIOP 2  // the IOP should be freed upon completion.
-const IOPFLAG_FREEMDL 4  // the MDL in the zeroth IOPL should be freed upon completion.
-const IOPFLAG_QUOTA   8  // quota has been charged for this IOP.
-const IOPFLAG_USERIO  16 // the IOP represents a usermode request (either sync or async).
+const IOPFLAG_ZONEIOP  1  // the IOP was drawn from one of the pre-allocated zones.
+const IOPFLAG_FREEIOP  2  // the IOP should be freed upon completion.
+const IOPFLAG_FREEMDL  4  // the MDL in the zeroth IOPL should be freed upon completion.
+const IOPFLAG_QUOTA    8  // quota has been charged for this IOP.
+const IOPFLAG_USERMODE 16 // the IOP represents a usermode request (either sync or async).
 
 // N.B. Changing the offsets of the fields within the following structs will
 // break practically every driver. Changing the overall size of the structs,
@@ -39,7 +39,7 @@ struct IOPacketHeader // IOPH
 	// zone-allocated or pool-allocated, and whether the MDL specified in the
 	// zeroth IOPL should be freed upon completion.
 
-	1 FlagsB
+	1 IOPFlagsB
 
 	// indicates the header size; i.e. the offset to get from the IOP base to
 	// the first IOPL.
@@ -81,6 +81,9 @@ struct IOPacketHeader // IOPH
 	// this is in the IOPH instead of the IOPL because it is anticipated that
 	// only bottom-level IOPLs will be enqueued by a driver, and the IOP
 	// therefore requires only one set of links.
+	//
+	// doubles as the list links for the per-thread list of associated IOPs
+	// whose enqueuing has been deferred.
 
 	4 DeviceQueueNext
 	4 DeviceQueuePrev
@@ -142,6 +145,10 @@ struct IOPacketLocation // IOPL
 	// is simply decremented.
 
 	2 IOCountI
+
+	// IO flags.
+
+	4 Flags
 
 	// driver-specific context for this IOPL.
 

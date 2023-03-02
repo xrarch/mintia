@@ -111,23 +111,27 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	while (pfdbe@)
 		IOiPageFrameEntryCache_Parent pfdbe -=
 
+		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
+
 		if (pfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ last@ >)
+			pfdbe@ MmEvictablePageDereference drop
+
+			IPLDPC KeIPLRaise ipl!
+
 			break
 		end
 
-		if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-			pfdbe@ MmEvictablePageReference drop
+		IPLDPC KeIPLRaise ipl!
 
+		if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
 			0 // transfer
 			IOKFLAG_URGENT // kflags
 			pfdbe@ // pfdbe
-			IOCachePageWrite ok!
+			IOCachePageWrite drop
 
 			pfdbe@ MmEvictablePageDereference drop
-
-			if (ok@)
-				break
-			end
 		end
 
 		pfdbe@ IOiPageFrameEntryCache_Parent + // node
@@ -163,13 +167,17 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 		return
 	end
 
+	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOiCacheInfoBlock_Flags + |=
+
 	if (cacheblock@ IOiCacheInfoBlock_BCBTreeRoot + @)
+		ipl@ KeIPLLower
+
 		newsize@ // newsize
 		cacheblock@ // cacheblock
 		VcCacheInfoBlockTruncate
-	end
 
-	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOiCacheInfoBlock_Flags + |=
+		IPLDPC KeIPLRaise ipl!
+	end
 
 	newsize@ // value
 	cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr
@@ -182,8 +190,12 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	while (pfdbe@)
 		IOiPageFrameEntryCache_Parent pfdbe -=
 
+		pfdbe@ MmEvictablePageReference drop
+
+		ipl@ KeIPLLower
+
 		if (pfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ newsize@ >=)
-			pfdbe@ MmEvictablePageReference drop
+			IPLDPC KeIPLRaise ipl!
 
 			while (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
 				0 // process
@@ -228,6 +240,8 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 			1 IOCachePagesUsed -=
 		end else
+			IPLDPC KeIPLRaise ipl!
+
 			pfdbe@ IOiPageFrameEntryCache_Parent + // node
 			ExSplayTreeNodeNext pfdbe!
 		end

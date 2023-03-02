@@ -179,6 +179,7 @@ endstruct
 const PIPELINEFLAG_OUTAPPEND 1
 const PIPELINEFLAG_ERRAPPEND 2
 const PIPELINEFLAG_ASYNC     4
+const PIPELINEFLAG_NEWLINE   8
 
 struct MclpParseNodePipeline
 	MclpParseNode_SIZEOF Header

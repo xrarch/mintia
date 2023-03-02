@@ -274,7 +274,11 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 	auto tokbuf
 	ctx@ MclpParseContext_TokBuffer + tokbuf!
 
+	auto morecmd
+
 	while (1)
+		0 morecmd!
+
 		auto tokflag
 		auto toklen
 		0 // peek
@@ -309,6 +313,12 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			endtoken@ // endtoken
 			ctx@ // ctx
 			MclpParsePipeline ok! node!
+
+			if (ok@ ~~)
+				if (node@ MclpParseNodePipeline_Flags + @ PIPELINEFLAG_NEWLINE & ~~)
+					1 morecmd!
+				end
+			end
 		end else
 			if (toklen@ ~~)
 				if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
@@ -357,12 +367,14 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 			end elseif (tokbuf@ "cd" strcmp)
 				ctx@ MclpLexLastToken
 
+				0 // pipenode
 				endtoken@ // endtoken
 				ctx@ // ctx
 				MclpParseCommand ok! node! drop
 			end elseif (tokbuf@ "umask" strcmp)
 				ctx@ MclpLexLastToken
 
+				0 // pipenode
 				endtoken@ // endtoken
 				ctx@ // ctx
 				MclpParseCommand ok! node! drop
@@ -378,6 +390,12 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 				MclpParsePipeline ok! node!
 
 				1 ctx@ MclpParseContext_Depth + +=
+
+				if (ok@ ~~)
+					if (node@ MclpParseNodePipeline_Flags + @ PIPELINEFLAG_NEWLINE & ~~)
+						1 morecmd!
+					end
+				end
 			end
 
 			1 ctx@ MclpParseContext_Depth + -=
@@ -404,7 +422,9 @@ fn MclpParseBlock { endtoken ctx -- block ok }
 		end
 
 		if (endtoken@ ~~ ctx@ MclpParseContext_LexFlags + @ LEX_INTERACTIVE & &&)
-			break
+			if (morecmd@ ~~)
+				break
+			end
 		end
 	end
 
@@ -890,9 +910,10 @@ fn MclpParseExpression { endtoken ctx -- tokflag node ok }
 	1 ctx@ MclpParseContext_Depth + -=
 end
 
-const WHYRETURN_TERM     1
-const WHYRETURN_REDIRECT 2
-const WHYRETURN_PIPE     3
+const WHYRETURN_TERM      1
+const WHYRETURN_REDIRECT  2
+const WHYRETURN_PIPE      3
+const WHYRETURN_ASYNCTERM 4
 
 fn MclpParsePipeline { endtoken ctx -- node ok }
 	PARSENODE_PIPELINE // type
@@ -930,6 +951,7 @@ fn MclpParsePipeline { endtoken ctx -- node ok }
 
 		auto whyreturn
 		auto cmdnode
+		node@ // pipenode
 		endtoken@ // endtoken
 		ctx@ // ctx
 		MclpParseCommand ok! cmdnode! whyreturn!
@@ -1022,7 +1044,9 @@ fn MclpParseRedirection { node ctx -- ok }
 			end
 		end elseif (tokbuf@ "&" strcmp)
 			PIPELINEFLAG_ASYNC node@ MclpParseNodePipeline_Flags + |=
-			continue
+			break
+		end elseif (tokbuf@ "&&" strcmp)
+			break
 		end else
 			"odd redirection\n" // fmt
 			0 // node
@@ -1048,9 +1072,13 @@ fn MclpParseRedirection { node ctx -- ok }
 
 		redirnode@ node@ off@ + !
 	end
+
+	if (tokflag@ LEXTOK_NEWLINE &)
+		PIPELINEFLAG_NEWLINE node@ MclpParseNodePipeline_Flags + |=
+	end
 end
 
-fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
+fn MclpParseCommand { pipenode endtoken ctx -- whyreturn node ok }
 	auto tokbuf
 	ctx@ MclpParseContext_TokBuffer + tokbuf!
 
@@ -1067,6 +1095,12 @@ fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
 
 	if (ok@)
 		return
+	end
+
+	if (tokflag@ LEXTOK_NEWLINE &)
+		if (pipenode@)
+			PIPELINEFLAG_NEWLINE pipenode@ MclpParseNodePipeline_Flags + |=
+		end
 	end
 
 	if (namenode@ ~~)
@@ -1114,6 +1148,12 @@ fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
 			return
 		end
 
+		if (tokflag@ LEXTOK_NEWLINE &)
+			if (pipenode@)
+				PIPELINEFLAG_NEWLINE pipenode@ MclpParseNodePipeline_Flags + |=
+			end
+		end
+
 		if (toklen@ ~~)
 			WHYRETURN_TERM whyreturn!
 			break
@@ -1125,6 +1165,8 @@ fn MclpParseCommand { endtoken ctx -- whyreturn node ok }
 			end elseif (tokbuf@ "<" strcmp)
 				WHYRETURN_REDIRECT whyreturn!
 			end elseif (tokbuf@ "&" strcmp)
+				WHYRETURN_REDIRECT whyreturn!
+			end elseif (tokbuf@ "&&" strcmp)
 				WHYRETURN_REDIRECT whyreturn!
 			end elseif (tokbuf@ gb '>' ==)
 				WHYRETURN_REDIRECT whyreturn!

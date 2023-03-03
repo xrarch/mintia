@@ -204,6 +204,8 @@ fn KiThreadReady { thread -- }
 			// there's already a next thread and we have a higher priority, so
 			// preempt it.
 
+			1 KeStatistics OSStatistics_Preemptions + +=
+
 			thread@ KiThreadNext!
 			THREADSTATUS_STANDBY thread@ KeThread_StatusB + sb
 
@@ -221,6 +223,8 @@ fn KiThreadReady { thread -- }
 			// preempt it.
 
 			IPLDPC KiSoftwareInterruptRequest
+
+			1 KeStatistics OSStatistics_Preemptions + +=
 
 			thread@ KiThreadNext!
 			THREADSTATUS_STANDBY thread@ KeThread_StatusB + sb
@@ -379,6 +383,8 @@ fn KiThreadBlock { status -- }
 	auto current
 	KeThreadCurrent@ current!
 
+	0 current@ KeThread_QuantumEndCountB + sb
+
 	status@ current@ KeThread_StatusB + sb
 
 	current@ KiThreadSelect KiThreadSwitch
@@ -464,9 +470,33 @@ fn KiThreadQuantumEnd { -- }
 		return
 	end
 
+	auto basequantum
+	current@ KeThread_Process + @ KeProcess_BaseQuantumB + gb basequantum!
+
+	1 KeStatistics OSStatistics_QuantumEnds + +=
+
+	auto qendcount
+	current@ KeThread_QuantumEndCountB + gb qendcount!
+
+	qendcount@ 1 + current@ KeThread_QuantumEndCountB + sb
+
 	// reset the thread's quantum.
 
-	current@ KeThread_Process + @ KeProcess_BaseQuantumB + gb current@ KeThread_QuantumB + sb
+	if (current@ KeThread_PriorityB + gb PRIORITY_LOWREALTIME >=)
+		// real-time, just reset the quantum.
+
+		basequantum@ current@ KeThread_QuantumB + sb
+	end else
+		// perform a linear reduction of the quantum based on how many
+		// consecutive quantum-ends this thread has taken w/o blocking
+		// voluntarily.
+
+		if (qendcount@ basequantum@ >=)
+			1 current@ KeThread_QuantumB + sb
+		end else
+			basequantum@ qendcount@ - current@ KeThread_QuantumB + sb
+		end
+	end
 
 	// decrement the thread's priority in order to decay boosting.
 
@@ -724,7 +754,9 @@ fn KiThreadWakeup { waitstatus priboost thread -- }
 				PRIORITY_HIGHUSER nm!
 			end
 
-			nm@ thread@ KeThread_PriorityB + sb
+			if (nm@ thread@ KeThread_PriorityB + gb >)
+				nm@ thread@ KeThread_PriorityB + sb
+			end
 		end
 
 		// penalize process for the wait and do a partial QuantumEnd if
@@ -739,6 +771,8 @@ fn KiThreadWakeup { waitstatus priboost thread -- }
 		end
 
 		if (nm@ ~~)
+			1 KeStatistics OSStatistics_QuantumEnds + +=
+
 			process@ KeProcess_BaseQuantumB + gb nm!
 
 			if (thread@ KeThread_InstantDecayB + gb)

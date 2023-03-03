@@ -4,14 +4,10 @@ extern KiDPCDispatchQueue { -- }
 extern KiSoftwareInterruptRequest { ipl -- }
 
 extern KiThreadSwitch { thread -- }
-extern KiThreadNextPick { -- thread }
-extern KiThreadNextSwitch { -- }
 
-extern KiThreadWakeup { waitstatus priboost thread -- woken }
+extern KiThreadWakeup { waitstatus priboost thread -- }
 
 extern KiThreadBasePrioritySet { priority thread -- }
-
-extern KiThreadEnqueue { front thread -- }
 
 extern KiDispatchInitialize { name type dobject -- }
 
@@ -26,8 +22,20 @@ extern KiCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 
 extern KiTimerExpiration { -- }
 extern KiThreadQuantumEnd { -- }
+extern KiThreadNextSwitch { -- }
+
+extern KiIdleThreadEntry { -- }
+
+extern KiThreadSelect { thread -- nextthread }
+
+extern KiThreadWait { waitipl waitmode alertable explicitstatus -- ok }
+extern KiThreadWaitBlocksDequeue { thread -- }
+
+extern KiThreadYieldQuantum { -- }
 
 fnptr KiSoftwareInterruptHandlerF { -- }
+
+externptr KiIdleThread
 
 externptr KiPendingSoftwareInterrupts
 externptr KiPendingSoftwareInterruptMask
@@ -37,7 +45,6 @@ externptr KiDPCListHead
 externptr KiDPCListTail
 
 externptr KiThreadNext
-externptr KiThreadNextReason
 
 externptr KiOldIPL
 

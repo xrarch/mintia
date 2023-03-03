@@ -21,6 +21,9 @@ externptr KeIPLCurrent
 var KiOldIPL 0
 public KiOldIPL
 
+var KiDispatchEvents 0
+public KiDispatchEvents
+
 fn KeIPLRaise { newipl -- oldipl }
 	KeIPLCurrent@ oldipl!
 
@@ -121,23 +124,40 @@ end
 fn (KiSoftwareInterruptHandlerF) KiSoftwareInterruptDPC { -- }
 	1 IPLDPC << ~ KiPendingSoftwareInterrupts &=
 
+	auto events
+	KiDispatchEvents@ events!
+	0 KiDispatchEvents!
+
 	IPLDPC KeIPLCurrent!
 
-	if (KiDPCListHead@)
+	HALCPUInterruptEnable
+
+	if (events@ KIDISPATCHIRQ_DPC &)
 		KiDPCDispatchQueue
 	end
 
-	if (KiThreadNext@)
-		HALCPUInterruptEnable
-
-		KiThreadNextSwitch
-
-		HALCPUInterruptDisable drop
+	if (events@ KIDISPATCHIRQ_TIMER &)
+		KiTimerExpiration
 	end
+
+	if (events@ KIDISPATCHIRQ_QUANTUMEND &)
+		KiThreadQuantumEnd
+	end
+
+	if (KiThreadNext@)
+		KiThreadNextSwitch
+	end
+
+	HALCPUInterruptDisable drop
 end
 
 fn KiSoftwareInterruptRequest { ipl -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	1 ipl@ << KiPendingSoftwareInterrupts |=
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn KeClockTick { uptime interval trapframe -- }
@@ -159,18 +179,12 @@ fn KeClockTick { uptime interval trapframe -- }
 
 	if (cmp@ ~~)
 		if (KiTimerExpirationEarliest KeTime_MsPart + @ uptime@ KeTime_MsPart + @ <=)
-			0 // context1
-			0 // context2
-			DPCLOWIMPORTANCE // importance
-			KiTimerExpirationDPC // dpc
-			KeDPCEnqueue drop
+			KIDISPATCHIRQ_TIMER KiDispatchEvents |=
+			1 IPLDPC << KiPendingSoftwareInterrupts |=
 		end
 	end elseif (cmp@ z<)
-		0 // context1
-		0 // context2
-		DPCLOWIMPORTANCE // importance
-		KiTimerExpirationDPC // dpc
-		KeDPCEnqueue drop
+		KIDISPATCHIRQ_TIMER KiDispatchEvents |=
+		1 IPLDPC << KiPendingSoftwareInterrupts |=
 	end
 
 	if (KeDPCActive@)
@@ -213,11 +227,8 @@ fn KeClockTick { uptime interval trapframe -- }
 	end
 
 	if (qt@ ~~)
-		0 // context1
-		0 // context2
-		DPCLOWIMPORTANCE // importance
-		KiThreadQuantumDPC // dpc
-		KeDPCEnqueue drop
+		KIDISPATCHIRQ_QUANTUMEND KiDispatchEvents |=
+		1 IPLDPC << KiPendingSoftwareInterrupts |=
 	end
 
 	qt@ cth@ KeThread_QuantumB + sb

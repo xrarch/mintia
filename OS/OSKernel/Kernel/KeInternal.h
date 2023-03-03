@@ -24,6 +24,9 @@ extern KiThreadPriorityBoost { boost thread -- }
 
 extern KiCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 
+extern KiTimerExpiration { -- }
+extern KiThreadQuantumEnd { -- }
+
 fnptr KiSoftwareInterruptHandlerF { -- }
 
 externptr KiPendingSoftwareInterrupts
@@ -39,6 +42,9 @@ externptr KiThreadNextReason
 externptr KiOldIPL
 
 externptr KiTimerExpirationEarliest
-externptr KiTimerExpirationDPC
 
-externptr KiThreadQuantumDPC
+externptr KiDispatchEvents
+
+const KIDISPATCHIRQ_DPC        1
+const KIDISPATCHIRQ_TIMER      2
+const KIDISPATCHIRQ_QUANTUMEND 4

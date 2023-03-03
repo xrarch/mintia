@@ -53,8 +53,6 @@ struct CoDuplex
 
 	KeMutex_SIZEOF Mutex // only used if paged buffers, otherwise IPL sync
 
-	KeEvent_SIZEOF StoppedEvent
-
 	4 Paged
 	4 QuotaBlock
 
@@ -64,6 +62,8 @@ struct CoDuplex
 	4 Disconnected
 
 	4 ServerFCB
+
+	4 StoppedQueueListHead
 
 	4 ServerReadListHead
 	4 ServerReadListTail
@@ -292,6 +292,8 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 	pri@ duplex@ CoDuplex_Paged + !
 	0 duplex@ CoDuplex_Disconnected + !
 
+	0 duplex@ CoDuplex_StoppedQueueListHead + !
+
 	0 duplex@ CoDuplex_ServerReadListHead + !
 	0 duplex@ CoDuplex_ServerReadListTail + !
 
@@ -359,12 +361,6 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 		duplex@ CoDuplex_Mutex + // mutex
 		KeMutexInitialize
 	end
-
-	0 // signaled
-	OSEVENT_NOTIF // type
-	"CoDuplexStoppedEvent" // name
-	duplex@ CoDuplex_StoppedEvent + // event
-	KeEventInitialize
 
 	auto serverfcb
 	CoDuplexDispatch // dispatchtable
@@ -752,6 +748,27 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 
 	// server fcb, reading from the transmit buffer and/or client buffers.
 	// this may pend.
+
+	if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
+		if (timeout@ ~~)
+			0 mdl@ MmMDLHeader_Length + !
+
+			STATUS_RING_EMPTY ok!
+
+			return
+		end else
+			// add to StoppedQueue
+
+			flags@ mdl@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Flags + !
+
+			duplex@ CoDuplex_StoppedQueueListHead + @ mdl@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Next + !
+			mdl@ duplex@ CoDuplex_StoppedQueueListHead + !
+
+			STATUS_OTHER_CONDITION ok!
+
+			return
+		end
+	end
 
 	if (flags@ OSACCESSFLAG_RETURNANY &)
 		REQFLAG_RETURNANY flags!
@@ -1550,6 +1567,9 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 		return
 	end
 
+	auto req
+	auto nreq
+
 	// duplex is locked (which means IPL may be >=IPLDPC).
 
 	0 ok!
@@ -1566,10 +1586,32 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 			return
 		end elseif (c@ 19 ==) // ^S
-			if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED & ~~)
-				DUPLEXFLAG_STOPPED duplex@ CoDuplex_InternalFlags + |=
+			DUPLEXFLAG_STOPPED duplex@ CoDuplex_InternalFlags + |=
 
-				duplex@ CoDuplex_StoppedEvent + KeEventReset drop
+			// satisfy any pending server read requests.
+
+			duplex@ CoDuplex_ServerReadListHead + @ req!
+
+			0 duplex@ CoDuplex_ServerReadListHead + !
+			0 duplex@ CoDuplex_ServerReadListTail + !
+
+			while (req@)
+				if (req@ duplex@ CoDuplex_ServerReadListHead + @ ==)
+					duplex@ CoDuplex_TransmitBuffer + CoDuplexBuffer_UserBufferIndex + @
+					req@ CoDuplexRequest_LengthDone + @ +
+					req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				end else
+					0 req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				end
+
+				req@ CoDuplexRequest_Next + @ nreq!
+
+				0 // status
+				duplex@ CoDuplex_ServerBoost + @ // priboost
+				req@ CoDuplexRequest_MDL + @ // mdl
+				MmMDLComplete
+
+				nreq@ req!
 			end
 
 			ipl@ duplex@ CoDuplexUnlock
@@ -1582,14 +1624,42 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 		if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
 			DUPLEXFLAG_STOPPED ~ duplex@ CoDuplex_InternalFlags + &=
 
-			0 // priboost
-			duplex@ CoDuplex_StoppedEvent + // event
-			KeEventSignal
-
 			if (duplex@ CoDuplex_FlushFunc + @)
 				duplex@ // duplex
 				duplex@ CoDuplex_FlushFunc + @ CoDuplexFlushFunction
 			end
+
+			// process the StoppedQueue of pending server requests.
+
+			duplex@ CoDuplex_StoppedQueueListHead + @ req!
+			0 duplex@ CoDuplex_StoppedQueueListHead + !
+
+			while (req@)
+				req@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Next + @ nreq!
+
+				req@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Flags + @ // flags
+				req@ MmMDLHeader_MappedAddress + @ // buf
+				OSWAIT_TIMEOUTINFINITE // timeout
+				req@ // mdl
+				duplex@ // duplex
+				CoDuplexServerRead ok!
+
+				if (ok@ ~~)
+					0 // status
+					duplex@ CoDuplex_ServerBoost + @ // priboost
+					req@ // mdl
+					MmMDLComplete
+				end elseif (ok@ STATUS_RING_EMPTY ==)
+					0 // status
+					duplex@ CoDuplex_ServerBoost + @ // priboost
+					req@ // mdl
+					MmMDLComplete
+				end
+
+				nreq@ req!
+			end
+
+			0 ok!
 
 			ipl@ duplex@ CoDuplexUnlock
 
@@ -1621,7 +1691,6 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 	auto rp
 
-	auto req
 	duplex@ CoDuplex_ClientReadListHead + @ req!
 
 	if (req@)
@@ -1734,7 +1803,6 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 			// unlink the client request.
 
-			auto nreq
 			req@ CoDuplexRequest_Next + @ nreq!
 
 			0 // status
@@ -2443,44 +2511,12 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 	end
 
 	if (isserver@)
-		while (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
-			if (timeout@ ~~)
-				0 mdl@ MmMDLHeader_Length + !
-
-				STATUS_RING_EMPTY ok!
-
-				break
-			end else
-				ipl@ duplex@ CoDuplexUnlock
-
-				mdl@ MmMDLHeader_ModeB + gb // waitmode
-				1 // alertable
-				timeout@ // timeout
-				duplex@ CoDuplex_StoppedEvent + // object
-				KeThreadWaitForObject ok!
-
-				if (ok@)
-					return
-				end
-
-				duplex@ // duplex
-				1 // alertable
-				CoDuplexLock ok! ipl!
-
-				if (ok@)
-					return
-				end
-			end
-		end
-
-		if (ok@ ~~)
-			flags@ // flags
-			buf@ // buf
-			timeout@ // timeout
-			mdl@ // mdl
-			duplex@ // duplex
-			CoDuplexServerRead ok!
-		end
+		flags@ // flags
+		buf@ // buf
+		timeout@ // timeout
+		mdl@ // mdl
+		duplex@ // duplex
+		CoDuplexServerRead ok!
 	end else
 		flags@ // flags
 		buf@ // buf

@@ -205,8 +205,10 @@ extern PsThreadUnmaskSignal { signal threadhandle -- ok }
 extern PsProcessGetUID { process -- uid }
 extern PsProcessGetGID { process -- gid }
 
-extern PsProcessRemove { trim process -- }
-extern PsProcessInsert { trim process -- }
+extern PsProcessRemove { locked trim process -- }
+extern PsProcessInsert { locked trim process -- }
+
+extern PsSignalAllProcesses { signal -- }
 
 externptr PsProcessTable
 externptr PsReaperEvent

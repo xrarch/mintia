@@ -92,5 +92,6 @@ const STATUS_USER_EXISTS              -90
 const STATUS_GROUP_EXISTS             -91
 const STATUS_REPARSE_MAXIMUM          -92
 const STATUS_SYNTAX_ERROR             -93
+const STATUS_IO_ERROR                 -94
 
 extern OSStatusGetName { status -- name }

@@ -51,12 +51,12 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 		0 initial!
 	end else
 		if (DEBUGCHECKS)
-			if (KeProcessCurrent KeProcessIdleProcess ~=)
+			if (KeProcessCurrent KeIdleProcess ~=)
 				"PsProcessCreate: no parent process specified but not the idle process\n" KeCrash
 			end
 		end
 
-		KeProcessIdleProcess parentprocess!
+		KeIdleProcess parentprocess!
 
 		1 initial!
 	end
@@ -281,13 +281,10 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 
 	// put it on the global process list
 
-	0 PsProcessListLock drop
-
+	0 // locked
 	0 // trim
 	processobject@ // process
 	PsProcessInsert
-
-	PsProcessListUnlock
 
 	if (initial@ ~~)
 		PsProcessTable@ ExHandleTableUnlock
@@ -509,6 +506,10 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 
 	pooladdr@ threadobject@ PsThread_PoolAddress + !
 
+	0 // try
+	processobject@ // process
+	KeProcessAttach drop drop
+
 	context1@ // context1
 	context2@ // context2
 	startfunc@ // startfunc
@@ -517,6 +518,8 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 	name@ // name
 	threadobject@ // thread
 	KeThreadInitialize
+
+	IPLLOW KeProcessDetach
 
 	if (startfunc@ pointerof PsThreadUserEntry ==)
 		threadobject@ MmThreadInitialize ok!
@@ -583,7 +586,7 @@ fn PsThreadCreateObject { context1 context2 startfunc creationflags permissions 
 
 	processobject@ PsProcessCreateDeleteUnlock
 
-	QUEUEBACK threadobject@ KeThreadReady
+	threadobject@ KeThreadReady
 end
 
 fn PsThreadCreate { context1 context2 startfunc creationflags permissions name processhandle -- threadhandle ok }
@@ -652,8 +655,10 @@ fn PsProcessGetGID { process -- gid }
 	process@ PsProcess_PagedArea + @ PsProcessPaged_GID + @ gid!
 end
 
-fn PsProcessRemove { trim process -- }
-	// assumes process list locked
+fn PsProcessRemove { locked trim process -- }
+	if (locked@ ~~)
+		0 PsProcessListLock drop
+	end
 
 	auto ls
 	auto ns
@@ -691,10 +696,16 @@ fn PsProcessRemove { trim process -- }
 	end else
 		ls@ PsProcessTrimListTail!
 	end
+
+	if (locked@ ~~)
+		PsProcessListUnlock
+	end
 end
 
-fn PsProcessInsert { trim process -- }
-	// assumes process list locked
+fn PsProcessInsert { locked trim process -- }
+	if (locked@ ~~)
+		0 PsProcessListLock drop
+	end
 
 	auto t
 
@@ -732,5 +743,9 @@ fn PsProcessInsert { trim process -- }
 		t@ process@ PsProcess_TrimListPrev + !
 		process@ t@ PsProcess_TrimListNext + !
 		process@ PsProcessTrimListTail!
+	end
+
+	if (locked@ ~~)
+		PsProcessListUnlock
 	end
 end

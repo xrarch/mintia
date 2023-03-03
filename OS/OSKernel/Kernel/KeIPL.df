@@ -12,10 +12,17 @@
 #include "<inc>/HALInterrupt.h"
 
 #include "<ll>/OSDLL/OSStatistics.h"
+#include "<ll>/OSDLL/OSContext.h"
 
 #include "KeInternal.h"
 
 externptr KeIPLCurrent
+
+var KiOldIPL 0
+public KiOldIPL
+
+var KiDispatchEvents 0
+public KiDispatchEvents
 
 fn KeIPLRaise { newipl -- oldipl }
 	KeIPLCurrent@ oldipl!
@@ -117,21 +124,112 @@ end
 fn (KiSoftwareInterruptHandlerF) KiSoftwareInterruptDPC { -- }
 	1 IPLDPC << ~ KiPendingSoftwareInterrupts &=
 
+	auto events
+	KiDispatchEvents@ events!
+	0 KiDispatchEvents!
+
 	IPLDPC KeIPLCurrent!
 
-	if (KiDPCListHead@)
+	HALCPUInterruptEnable
+
+	if (events@ KIDISPATCHIRQ_DPC &)
 		KiDPCDispatchQueue
 	end
 
-	if (KiThreadNext@)
-		HALCPUInterruptEnable
-
-		KiThreadNextSwitch
-
-		HALCPUInterruptDisable drop
+	if (events@ KIDISPATCHIRQ_TIMER &)
+		KiTimerExpiration
 	end
+
+	if (events@ KIDISPATCHIRQ_QUANTUMEND &)
+		KiThreadQuantumEnd
+	end
+
+	if (KiThreadNext@)
+		KiThreadNextSwitch
+	end
+
+	HALCPUInterruptDisable drop
 end
 
 fn KiSoftwareInterruptRequest { ipl -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	1 ipl@ << KiPendingSoftwareInterrupts |=
+
+	rs@ HALCPUInterruptRestore
+end
+
+fn KeClockTick { uptime interval trapframe -- }
+	// run from interrupt context.
+
+	auto stats
+	KeStatistics stats!
+
+	// update the number of clock ticks.
+
+	1 stats@ OSStatistics_ClockTicks + +=
+
+	// update the amount of time spent at the previous IPL.
+
+	interval@ stats@ OSStatistics_IPLTimes + KiOldIPL@ 2 << + +=
+
+	auto cmp
+	KiTimerExpirationEarliest KeTime_SecPart + @ uptime@ KeTime_SecPart + @ - cmp!
+
+	if (cmp@ ~~)
+		if (KiTimerExpirationEarliest KeTime_MsPart + @ uptime@ KeTime_MsPart + @ <=)
+			KIDISPATCHIRQ_TIMER KiDispatchEvents |=
+			1 IPLDPC << KiPendingSoftwareInterrupts |=
+		end
+	end elseif (cmp@ z<)
+		KIDISPATCHIRQ_TIMER KiDispatchEvents |=
+		1 IPLDPC << KiPendingSoftwareInterrupts |=
+	end
+
+	if (KeDPCActive@)
+		interval@ stats@ OSStatistics_DPCTimeMs + +=
+	end
+
+	auto cth
+	KeThreadCurrent@ cth!
+
+	if (cth@ ~~)
+		return
+	end
+
+	auto process
+	cth@ KeThread_Process + @ process!
+
+#ifdef XR17032
+	if (trapframe@ OSContext_ers + @ XR17032_ERS_USER &)
+#endif
+#ifdef FOX32
+	if (trapframe@ OSContext_eflagsB + gb FOX32_RS_USER &)
+#endif
+		interval@ cth@ KeThread_UserTimeMs + +=
+		interval@ process@ KeProcess_UserTimeMs + +=
+	end elseif (KiOldIPL@ IPLDPC ==)
+		interval@ cth@ KeThread_DPCTimeMs + +=
+		interval@ process@ KeProcess_DPCTimeMs + +=
+	end else
+		interval@ cth@ KeThread_SystemTimeMs + +=
+		interval@ process@ KeProcess_SystemTimeMs + +=
+	end
+
+	auto qt
+	cth@ KeThread_QuantumB + gb qt!
+
+	QUANTUMUNITSPERTICK qt -=
+
+	if (qt@ z<)
+		0 qt!
+	end
+
+	if (qt@ ~~)
+		KIDISPATCHIRQ_QUANTUMEND KiDispatchEvents |=
+		1 IPLDPC << KiPendingSoftwareInterrupts |=
+	end
+
+	qt@ cth@ KeThread_QuantumB + sb
 end

@@ -46,20 +46,15 @@ struct KeProcess
 	1 BaseQuantumB
 endstruct
 
-const THREADYIELD_PREEMPTED  1
-const THREADYIELD_QUANTUMEND 2
-
-const THREADSTATUS_INITIALIZED        1
-const THREADSTATUS_READY              2
-const THREADSTATUS_SUSPENDED          3
-const THREADSTATUS_RUNNING            4
-const THREADSTATUS_WAITINGALERTABLE   5
-const THREADSTATUS_WAITINGUNALERTABLE 6
-const THREADSTATUS_TERMINATED         7
-const THREADSTATUS_TRANSITION         8
-
-const QUEUEFRONT 1
-const QUEUEBACK  0
+const THREADSTATUS_INITIALIZED        1 // thread was just initialized
+const THREADSTATUS_READY              2 // thread is in priority queue or process swap list
+const THREADSTATUS_SUSPENDED          3 // thread is suspended
+const THREADSTATUS_RUNNING            4 // thread is the current thread
+const THREADSTATUS_WAITINGALERTABLE   5 // thread is waiting alertably
+const THREADSTATUS_WAITINGUNALERTABLE 6 // thread is waiting unalertably
+const THREADSTATUS_TERMINATED         7 // thread yielded for the final time
+const THREADSTATUS_TRANSITION         8 // thread is in the global swap list
+const THREADSTATUS_STANDBY            9 // thread isn't currently in any queue
 
 const THREADDEFAULTQUANTUM 30 // in milliseconds
 
@@ -83,6 +78,9 @@ struct KeThread
 
 	4 QueueNext
 	4 QueuePrev
+
+	// a special swap list link is needed because QueueNext/QueuePrev may be
+	// pulling double duty as links for the global thread wait list.
 
 	4 SwapListNext
 
@@ -125,7 +123,7 @@ struct KeThread
 	1 KernelStackCanBeSwappedB
 	1 InstantDecayB
 
-	1 EnqueuedB
+	1 InSwapListB
 	1 BasePriorityB
 	1 PriorityB
 	1 QuantumB
@@ -135,8 +133,10 @@ struct KeThread
 	1 StatusB
 	1 WaitIPLB
 
-	2 WaitBlockCountI
-	2 WaitCountI
+	1 WaitBlockCountB
+	1 WaitCountB
+	1 WasPreemptedB
+	1 Reserved1B
 endstruct
 
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
@@ -168,7 +168,7 @@ extern KeProcessAttach { try process -- ipl ok }
 extern KeProcessDetach { ipl -- }
 
 externptr KeProcessListHead
-externptr KeProcessIdleProcess
+externptr KeIdleProcess
 externptr KeProcessSwapInListHead
 
 extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- }
@@ -184,8 +184,8 @@ extern KeThreadUnmaskSignal { signal thread -- ok }
 extern KeThreadRundown { thread -- }
 extern KeThreadDispatchSignal { dispatchfunc trapframe -- }
 extern KeThreadIsKilled { mode alertable thread -- ok }
-extern KeThreadReady { front thread -- }
-extern KeThreadYield { yieldstatus -- }
+extern KeThreadReady { thread -- }
+extern KeThreadBlock { status -- }
 extern KeThreadPriorityBoost { boost thread -- }
 extern KeThreadSleep { ms waitmode alertable -- ok }
 extern KeThreadBasePrioritySet { priority thread -- }

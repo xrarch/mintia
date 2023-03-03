@@ -24,10 +24,6 @@ struct OSContext
 	4 lr
 
 	4 badaddr
-
-// not dumped
-
-	4 IPL
 endstruct
 
 const OSCONTEXTCOUNT 34

@@ -136,10 +136,12 @@ struct KeThread
 	1 WaitBlockCountB
 	1 WaitCountB
 	1 WasPreemptedB
-	1 Reserved1B
+	1 QuantumEndCountB // since last voluntary block
 endstruct
 
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
+
+const THREADINITIALBOOST 2
 
 extern KeSafeCopyIn { dest src size -- ok }
 extern KeSafeCopyOut { dest src size -- ok }

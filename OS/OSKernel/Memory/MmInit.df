@@ -81,6 +81,11 @@ public MiWorkingSetDefaultMaximum
 var MiWorkingSetDefaultQuota 256
 public MiWorkingSetDefaultQuota
 
+var MiFreedBootPageCount 0
+var MiDebugBootPageCount 0
+var MiWiredBootPageCount 0
+var MiPagedBootPageCount 0
+
 var MmViewCachePageCount 0
 public MmViewCachePageCount
 
@@ -519,6 +524,8 @@ fn MmReclaimMemory { -- }
 
 	HALLoaderInfo@ LdrInfo_DLLListHead + @ current!
 
+	auto pages
+
 	while (current@)
 		auto head
 		current@ ComDLL_HeadVAddr + @ head!
@@ -532,13 +539,19 @@ fn MmReclaimMemory { -- }
 			sectionheader@ XLOFFSectionHeader_NameOffset + @
 			head@ XLOFFHeader_StringTableOffset + @ + head@ + name!
 
+			sectionheader@ XLOFFSectionHeader_DataSize + @ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
 			auto type
 			0 type!
 
 			if (name@ "INIT" 4 strncmp)
 				MMUNWIRE_FREE type!
+				pages@ MiFreedBootPageCount +=
+				pages@ MiWiredBootPageCount -=
 			end elseif (name@ "PAGE" 4 strncmp)
 				MMUNWIRE_PAGE type!
+				pages@ MiPagedBootPageCount +=
+				pages@ MiWiredBootPageCount -=
 			end
 
 			if (type@)
@@ -553,7 +566,7 @@ fn MmReclaimMemory { -- }
 
 				type@ start@ MmUnwireRecord_Type + !
 				sectionheader@ XLOFFSectionHeader_VirtualAddress + @ start@ MmUnwireRecord_StartVA + !
-				sectionheader@ XLOFFSectionHeader_DataSize + @ PAGEOFFSETMASK + PAGESHIFT >> start@ MmUnwireRecord_Pages + !
+				pages@ start@ MmUnwireRecord_Pages + !
 
 				MmUnwireRecordListHead@ start@ MmUnwireRecord_Next + !
 				start@ MmUnwireRecordListHead!
@@ -573,18 +586,20 @@ fn MmReclaimMemory { -- }
 		auto reclaim
 		0 reclaim!
 
+		desc@ LdrMemoryDescriptor_Pages + @ pages!
+
 		if (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_RECLAIMABLE ==)
 			1 reclaim!
 		end elseif (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_DEBUG ==)
 			if (HALResourceKeepHeaders@ ~~)
 				1 reclaim!
+			end else
+				pages@ MiDebugBootPageCount +=
 			end
 		end
 
 		if (reclaim@)
-			auto pages
-			desc@ LdrMemoryDescriptor_Pages + @ pages!
-
+			pages@ MiFreedBootPageCount +=
 			pages@ MmPageFreeCount +=
 			pages@ MmPageTotal +=
 
@@ -601,6 +616,8 @@ fn MmReclaimMemory { -- }
 				MiPageFrameEntry_SIZEOF pfdbe +=
 				1 pages -=
 			end
+		end elseif (desc@ LdrMemoryDescriptor_Type + @ OSLOADERMEM_FREE ~=)
+			pages@ MiWiredBootPageCount +=
 		end
 
 		desc@ LdrMemoryDescriptor_Next + @ desc!
@@ -625,6 +642,9 @@ fn MmResourceJettison { -- }
 		if (rsrc@ LdrBootResource_Jettison + @)
 			rsrc@ LdrBootResource_Size + @ PAGEOFFSETMASK + PAGESHIFT >> sz!
 
+			sz@ MiFreedBootPageCount +=
+			sz@ MiWiredBootPageCount -=
+
 			// XXX assumes boot resources are allocated contiguously in
 			// physical memory, which is OSLoader's current behavior.
 
@@ -645,10 +665,8 @@ fn MmResourceJettison { -- }
 			while (sz@)
 				start@ MiPageFree
 
-				HALCPUInterruptDisable rs!
 				// the page is now un-wired
-				1 MmPageTotal +=
-				rs@ HALCPUInterruptRestore
+				1 MmPageTotal KeInterlockedIncrement drop
 
 				1 start +=
 				1 sz -=
@@ -666,6 +684,12 @@ fn MmResourceJettison { -- }
 	end
 
 	0 HALResourceListHead!
+
+	MiDebugBootPageCount@ PAGESHIFT << 1024 /
+	MiWiredBootPageCount@ PAGESHIFT << 1024 /
+	MiPagedBootPageCount@ PAGESHIFT << 1024 /
+	MiFreedBootPageCount@ PAGESHIFT << 1024 /
+	"%dK freed, %dK paged, %dK wired (%dK debug)\n" "MmResourceJettison" HALLog
 end
 
 fn MmInitPhysicalCommit { -- }

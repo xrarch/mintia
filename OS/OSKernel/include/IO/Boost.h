@@ -1,9 +1,0 @@
-// default boost values
-
-const IOBOOSTSERIAL   2
-const IOBOOSTDISK     1
-const IOBOOSTKEYBOARD 6
-const IOBOOSTMOUSE    6
-const IOBOOSTCONHOST  6
-const IOBOOSTCONSOLE  2
-const IOBOOSTPIPE     1

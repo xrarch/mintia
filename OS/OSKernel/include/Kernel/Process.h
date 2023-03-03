@@ -54,9 +54,9 @@ const THREADSTATUS_WAITINGALERTABLE   5 // thread is waiting alertably
 const THREADSTATUS_WAITINGUNALERTABLE 6 // thread is waiting unalertably
 const THREADSTATUS_TERMINATED         7 // thread yielded for the final time
 const THREADSTATUS_TRANSITION         8 // thread is in the global swap list
-const THREADSTATUS_STANDBY            9 // thread isn't currently in any queue
+const THREADSTATUS_STANDBY            9 // thread is currently the KiThreadNext
 
-const THREADDEFAULTQUANTUM 30 // in milliseconds
+const THREADDEFAULTQUANTUM 30 // in milliseconds. should divide evenly with QUANTUMUNITSPERTICK
 
 const QUANTUMUNITSPERTICK 3
 
@@ -140,8 +140,6 @@ struct KeThread
 endstruct
 
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
-
-const THREADINITIALBOOST 2
 
 extern KeSafeCopyIn { dest src size -- ok }
 extern KeSafeCopyOut { dest src size -- ok }

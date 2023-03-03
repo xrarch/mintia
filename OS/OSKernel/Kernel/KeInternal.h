@@ -35,3 +35,10 @@ externptr KiDPCListTail
 
 externptr KiThreadNext
 externptr KiThreadNextReason
+
+externptr KiOldIPL
+
+externptr KiTimerExpirationEarliest
+externptr KiTimerExpirationDPC
+
+externptr KiThreadQuantumDPC

@@ -12,10 +12,14 @@
 #include "<inc>/HALInterrupt.h"
 
 #include "<ll>/OSDLL/OSStatistics.h"
+#include "<ll>/OSDLL/OSContext.h"
 
 #include "KeInternal.h"
 
 externptr KeIPLCurrent
+
+var KiOldIPL 0
+public KiOldIPL
 
 fn KeIPLRaise { newipl -- oldipl }
 	KeIPLCurrent@ oldipl!
@@ -134,4 +138,87 @@ end
 
 fn KiSoftwareInterruptRequest { ipl -- }
 	1 ipl@ << KiPendingSoftwareInterrupts |=
+end
+
+fn KeClockTick { uptime interval trapframe -- }
+	// run from interrupt context.
+
+	auto stats
+	KeStatistics stats!
+
+	// update the number of clock ticks.
+
+	1 stats@ OSStatistics_ClockTicks + +=
+
+	// update the amount of time spent at the previous IPL.
+
+	interval@ stats@ OSStatistics_IPLTimes + KiOldIPL@ 2 << + +=
+
+	auto cmp
+	KiTimerExpirationEarliest KeTime_SecPart + @ uptime@ KeTime_SecPart + @ - cmp!
+
+	if (cmp@ ~~)
+		if (KiTimerExpirationEarliest KeTime_MsPart + @ uptime@ KeTime_MsPart + @ <=)
+			0 // context1
+			0 // context2
+			DPCLOWIMPORTANCE // importance
+			KiTimerExpirationDPC // dpc
+			KeDPCEnqueue drop
+		end
+	end elseif (cmp@ z<)
+		0 // context1
+		0 // context2
+		DPCLOWIMPORTANCE // importance
+		KiTimerExpirationDPC // dpc
+		KeDPCEnqueue drop
+	end
+
+	if (KeDPCActive@)
+		interval@ stats@ OSStatistics_DPCTimeMs + +=
+	end
+
+	auto cth
+	KeThreadCurrent@ cth!
+
+	if (cth@ ~~)
+		return
+	end
+
+	auto process
+	cth@ KeThread_Process + @ process!
+
+#ifdef XR17032
+	if (trapframe@ OSContext_ers + @ XR17032_ERS_USER &)
+#endif
+#ifdef FOX32
+	if (trapframe@ OSContext_eflagsB + gb FOX32_RS_USER &)
+#endif
+		interval@ cth@ KeThread_UserTimeMs + +=
+		interval@ process@ KeProcess_UserTimeMs + +=
+	end elseif (KiOldIPL@ IPLDPC ==)
+		interval@ cth@ KeThread_DPCTimeMs + +=
+		interval@ process@ KeProcess_DPCTimeMs + +=
+	end else
+		interval@ cth@ KeThread_SystemTimeMs + +=
+		interval@ process@ KeProcess_SystemTimeMs + +=
+	end
+
+	auto qt
+	cth@ KeThread_QuantumB + gb qt!
+
+	if (qt@ QUANTUMUNITSPERTICK <=)
+		0 qt!
+	end else
+		QUANTUMUNITSPERTICK qt -=
+	end
+
+	if (qt@ ~~)
+		0 // context1
+		0 // context2
+		DPCLOWIMPORTANCE // importance
+		KiThreadQuantumDPC // dpc
+		KeDPCEnqueue drop
+	end
+
+	qt@ cth@ KeThread_QuantumB + sb
 end

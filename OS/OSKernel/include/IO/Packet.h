@@ -1,8 +1,8 @@
-fnptr IOPacketCompletionDPCRoutine { iopl -- }
+fnptr IOPacketCompletionDPCRoutine { iopl -- ok }
 
 const IOPTYPE_NORMAL        1
-const IOPTYPE_USERASYNC     2
-const IOPTYPE_PAGING        4
+const IOPTYPE_PAGING        2
+const IOPTYPE_USERASYNC     3
 
 const IOPFLAG_ZONEIOP  1  // the IOP was drawn from one of the pre-allocated zones.
 const IOPFLAG_FREEIOP  2  // the IOP should be freed upon completion.

@@ -78,6 +78,9 @@ struct PsThread
 
 	4 IOListHead
 
+	4 IOPDeferredListHead
+	4 IOPDeferredListTail
+
 	4 MemoryPrivilegedCount
 
 	4 UTEB

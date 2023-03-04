@@ -17,6 +17,8 @@ fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
 fnptr IODispatchCancelFunction { mdl -- }
 
+fnptr IODispatchEnqueueReadWriteFunction { iopl -- done ok }
+
 struct IODispatchTable
 	4 Open                    // 0
 	4 Close                   // 1
@@ -39,9 +41,9 @@ struct IODispatchTable
 	4 DeleteDeviceObject      // 18
 	4 Reserved5               // 19
 	4 Cancel                  // 20
-	4 Reserved6               // 21
-	4 Reserved7               // 22
+	4 IOPRead                 // 21
+	4 IOPWrite                // 22
 endstruct
 
-const IODISPATCH_READ  3
-const IODISPATCH_WRITE 4
+const IODISPATCH_READ  21
+const IODISPATCH_WRITE 22

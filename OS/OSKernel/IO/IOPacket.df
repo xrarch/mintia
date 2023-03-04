@@ -218,10 +218,7 @@ fn IOPacketFree { iop -- }
 	end
 end
 
-fn IOPacketAllocate { mode type kflags deviceobject iopflags -- ioplzero iop ok }
-	auto stacksize
-	deviceobject@ IODevice_StackDepth + @ stacksize!
-
+fn IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 	auto packetsize
 	[type@]IOiPacketHeaderSizes@ stacksize@ IOPacketLocation_SIZEOF * + packetsize!
 
@@ -306,16 +303,13 @@ fn IOPacketAllocate { mode type kflags deviceobject iopflags -- ioplzero iop ok 
 	quotablock@ // quotablock
 	type@ // type
 	kflags@ // kflags
-	deviceobject@ // deviceobject
+	stacksize@ // stacksize
 	iopflags@ // iopflags
 	iop@ // iop
 	IOPacketInitialize ioplzero!
 end
 
-fn IOPacketInitialize { quotablock type kflags deviceobject iopflags iop -- ioplzero }
-	auto stacksize
-	deviceobject@ IODevice_StackDepth + @ stacksize!
-
+fn IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzero }
 	0 iop@ IOPacketHeader_CurrentStackIndexB + sb
 	stacksize@ iop@ IOPacketHeader_StackDepthB + sb
 	0 iop@ IOPacketHeader_PriorityBoostB + sb
@@ -325,7 +319,10 @@ fn IOPacketInitialize { quotablock type kflags deviceobject iopflags iop -- iopl
 
 	[type@]IOiPacketHeaderSizes@ iop@ IOPacketHeader_HeaderSizeB + sb
 
-	0 iop@ IOPacketHeader_Status + !
+	iop@ IOPacketHeader_StatusBlock + // ptr
+	OSStatusBlock_SIZEOF // sz
+	0 // word
+	memset
 
 	quotablock@ iop@ IOPacketHeader_QuotaBlock + !
 
@@ -334,6 +331,8 @@ fn IOPacketInitialize { quotablock type kflags deviceobject iopflags iop -- iopl
 	0 iop@ IOPacketHeader_Event + !
 
 	kflags@ iop@ IOPacketHeader_KFlags + !
+
+	0 iop@ IOPacketHeader_MDL + !
 
 	0 iop@ IOPacketHeader_DeviceQueueNext + !
 	0 iop@ IOPacketHeader_DeviceQueuePrev + !
@@ -367,7 +366,6 @@ fn IOPacketInitialize { quotablock type kflags deviceobject iopflags iop -- iopl
 		0 iopl@ IOPacketLocation_Length + !
 
 		0 iopl@ IOPacketLocation_OffsetInMDL + !
-		0 iopl@ IOPacketLocation_MDL + !
 
 		iop@ iopl@ IOPacketLocation_IOPH + !
 
@@ -407,10 +405,289 @@ fn IOPacketLocationNext { iopl -- nextiopl }
 	iopl@ IOPacketLocation_SIZEOF + nextiopl!
 end
 
+fn IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok }
+	// allocate an IOP and associate it with the master IOP.
+	// useful for when you want to give this IOP to another driver stack.
+
+	auto mode
+
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_USERMODE &)
+		USERMODE mode!
+	end else
+		KERNELMODE mode!
+	end
+
+	mode@ // mode
+	IOPTYPE_NORMAL // type
+	kflags@ // kflags
+	stacksize@ // stacksize
+	iopflags@ // iopflags
+	IOPacketAllocate ok! associop! ioplzero!
+
+	if (ok@)
+		return
+	end
+
+	associop@ // associop
+	iop@ // iop
+	IOPacketAssociate
+end
+
+fn IOPacketAllocateAssocStack { kflags iopflags iopl -- ioplzero associop ok }
+	// allocate an IOP and associate it with the master IOP.
+	// gives it as many stack locations as needed for the given IOPL minus
+	// one. useful for when you want to give this IOP directly to the lower
+	// level driver.
+
+	auto iop
+	iopl@ IOPacketLocation_IOPH + @ iop!
+
+	if (DEBUGCHECKS)
+		if (iopl@ IOPacketLocation_StackLocationB + gb 1 +
+			iop@ IOPacketHeader_StackDepthB + gb >=)
+			"IOPacketAllocateAssocStack: stack overflow\n" KeCrash
+		end
+	end
+
+	auto stacksize
+	iop@ IOPacketHeader_StackDepthB + gb
+	iopl@ IOPacketLocation_StackLocationB + gb - 1 - stacksize!
+
+	auto mode
+
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_USERMODE &)
+		USERMODE mode!
+	end else
+		KERNELMODE mode!
+	end
+
+	mode@ // mode
+	IOPTYPE_NORMAL // type
+	kflags@ // kflags
+	stacksize@ // stacksize
+	iopflags@ // iopflags
+	IOPacketAllocate ok! associop! ioplzero!
+
+	if (ok@)
+		return
+	end
+
+	associop@ // associop
+	iop@ // iop
+	IOPacketAssociate
+end
+
 fn IOPacketAssociate { associop iop -- }
 	// associate the given IOP with the master IOP.
-	// this biases the IOCount on the master IOP and adds it to the current
-	// thread's deferred enqueue list.
+	// this biases the IOCount on the master IOP and adds the associated IOP
+	// to the current thread's deferred enqueue list.
 
+	// no synchronization is used because it's assumed that the structures
+	// referenced will only be referenced by this very thread.
 
+	if (DEBUGCHECKS)
+		if (associop@ IOPacketHeader_ParentIOP + @)
+			"IOPacketAssociate: already associated\n" KeCrash
+		end
+	end
+
+	iop@ IOPacketHeader_IOCountI + gi 1 + 
+	iop@ IOPacketHeader_IOCountI + si
+
+	iop@ associop@ IOPacketHeader_ParentIOP + !
+
+	auto current
+	KeThreadCurrent@ current!
+
+	auto t
+	current@ PsThread_IOPDeferredListTail + @ t!
+
+	if (t@ ~~)
+		associop@ current@ PsThread_IOPDeferredListHead + !
+	end else
+		associop@ t@ IOPacketHeader_DeviceQueueNext + !
+	end
+
+	associop@ current@ PsThread_IOPDeferredListTail + !
+end
+
+fn IOPacketEnqueue { iop -- ok }
+	// enqueue the IOP, and any associated IOPs that appear.
+
+	auto current
+	KeThreadCurrent@ current!
+
+	0 ok!
+
+	while (1)
+		auto niop
+		iop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+		auto depth
+		iop@ IOPacketHeader_StackDepthB + gb depth!
+
+		0 iop@ IOPacketHeader_CurrentStackIndexB + sb
+
+		auto iopl
+		0 // index
+		iop@ // iop
+		IOPacketIndex iopl!
+
+		while (1)
+			if (DEBUGCHECKS)
+				if (iop@ IOPacketHeader_CurrentStackIndexB + gb
+					iop@ IOPacketHeader_StackDepthB + gb >=)
+					"IOPacketEnqueue: stack overflow\n" KeCrash
+				end
+			end
+
+			auto fcb
+			iopl@ IOPacketLocation_FileControlBlock + @ fcb!
+
+			auto fcode
+			iopl@ IOPacketLocation_FunctionCodeB + gb fcode!
+
+			auto eok
+			auto done
+
+			iopl@ // iopl
+			fcb@ IOFileControlBlock_DispatchTable + @ fcode@ 2 << + @ IODispatchEnqueueReadWriteFunction eok! done!
+
+			if (ok@ ~~)
+				eok@ ok!
+			end
+
+			if (eok@ done@ ||)
+				// error, or done indicated; don't proceed to next stack
+				// location.
+
+				break
+			end
+
+			iop@ IOPacketHeader_CurrentStackIndexB + gb 1 +
+			iop@ IOPacketHeader_CurrentStackIndexB + sb
+
+			1 depth -=
+			IOPacketLocation_SIZEOF iopl +=
+		end
+
+		niop@ iop!
+
+		if (iop@ ~~)
+			// no next associated IOP, so this must have been a master one, or
+			// a lone associated one. try to process the deferred IOP list.
+
+			current@ PsThread_IOPDeferredListHead + @ iop!
+
+			0 current@ PsThread_IOPDeferredListHead + !
+			0 current@ PsThread_IOPDeferredListTail + !
+
+			if (iop@ ~~)
+				return
+			end
+		end
+	end
+end
+
+fn IOPacketCompleteDPCLevel { priboost iop -- }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IOPacketCompleteDPCLevel: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
+	// complete the IOP and also complete any parent IOPs that are completed
+	// by completing this IOP.
+
+	while (1)
+		if (priboost@)
+			priboost@ iop@ IOPacketHeader_PriorityBoostB + sb
+		end
+
+		auto oldcount
+		iop@ IOPacketHeader_IOCountI + gi oldcount!
+
+		if (DEBUGCHECKS)
+			if (oldcount@ ~~)
+				"IOPacketCompleteDPCLevel: underflow\n" KeCrash
+			end
+		end
+
+		oldcount@ 1 - iop@ IOPacketHeader_IOCountI + si
+
+		if (oldcount@ 1 >)
+			// there are still IO ops depending on this IOP
+			break
+		end
+
+		// operation is completely done
+
+		iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_COMPLETE |
+		iop@ IOPacketHeader_IOPFlagsB + sb
+
+		auto parentiop
+		iop@ IOPacketHeader_ParentIOP + @ parentiop!
+
+		auto flags
+		iop@ IOPacketHeader_IOPFlagsB + gb flags!
+
+		if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_FREEMDL &)
+			iop@ IOPacketHeader_MDL + @ MmMDLFreeComplete
+		end
+
+		if (iop@ IOPacketHeader_TypeB + gb IOPTYPE_PAGING ==)
+			iop@ // context1
+			0 // context2
+			priboost@ // priboost
+			iop@ IOPacketHeaderPagingIO_CompletionAPC + // apc
+			KeAPCEnqueue drop
+		end elseif (iop@ IOPacketHeader_TypeB + gb IOPTYPE_USERASYNC ==)
+			iop@ // context1
+			0 // context2
+			priboost@ // priboost
+			iop@ IOPacketHeaderUserAsync_CompletionAPC + // apc
+			KeAPCEnqueue drop
+		end else
+			iop@ IOiPacketFinishEitherContext
+		end
+
+		if (parentiop@)
+			parentiop@ iop!
+		end else
+			return
+		end
+	end
+end
+
+fn IOiPacketFinishEitherContext { iop -- }
+	if (iop@ IOPacketHeader_TypeB + gb IOPTYPE_USERASYNC ==)
+		// XXX this part can be moved out of the generic finish routine and
+		// into the user async completion APC routine.
+
+		if (iop@ IOPacketHeaderUserAsync_UserStatusBlock + @)
+			// copy out iosb
+
+			iop@ IOPacketHeaderUserAsync_UserStatusBlock + @ // dest
+			iop@ IOPacketHeader_StatusBlock + // src
+			OSStatusBlock_SIZEOF // size
+			KeSafeCopyOut drop
+		end
+	end
+
+	auto event
+	iop@ IOPacketHeader_Event + @ event!
+
+	if (event@)
+		iop@ IOPacketHeader_PriorityBoostB + gb // priboost
+		event@ // event
+		KeEventSignal
+
+		if (iop@ IOPacketHeader_TypeB + gb IOPTYPE_USERASYNC ==)
+			event@ ObObjectDereferenceByPointer drop
+		end
+	end
+
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_FREEIOP &)
+		iop@ IOPacketFree
+	end
 end

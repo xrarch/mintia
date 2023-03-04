@@ -9,6 +9,7 @@ const IOPFLAG_FREEIOP  2  // the IOP should be freed upon completion.
 const IOPFLAG_FREEMDL  4  // the MDL in the zeroth IOPL should be freed upon completion.
 const IOPFLAG_QUOTA    8  // quota has been charged for this IOP.
 const IOPFLAG_USERMODE 16 // the IOP represents a usermode request (either sync or async).
+const IOPFLAG_COMPLETE 32 // the IOP has been completed
 
 // N.B. Changing the offsets of the fields within the following structs will
 // break practically every driver. Changing the overall size of the structs,
@@ -53,9 +54,9 @@ struct IOPacketHeader // IOPH
 
 	2 IOCountI
 
-	// saved status.
+	// status block that will be copied out upon completion.
 
-	4 Status
+	12 StatusBlock
 
 	// if quota is charged for this packet, it is charged to this quotablock.
 
@@ -75,6 +76,13 @@ struct IOPacketHeader // IOPH
 	// kernel-reserved IO flags.
 
 	4 KFlags
+
+	// points to an MDL that describes the buffer this operation is
+	// transferring to/from. if the flag IOPFLAG_FREEMDL is specified in the
+	// IOP header, the MDL will be unmapped, unpinned, and freed when this IOP
+	// completes.
+
+	4 MDL
 
 	// links for generic device-specific queue of pending IOPs.
 	// this is in the IOPH instead of the IOPL because it is anticipated that
@@ -113,7 +121,7 @@ struct IOPacketHeaderUserAsync
 
 	// pointer to the userspace IO status block.
 
-	4 StatusBlock
+	4 UserStatusBlock
 
 	// pointer to the pre-initialized completion message (if any).
 
@@ -166,14 +174,20 @@ struct IOPacketLocation // IOPL
 
 	4 OffsetInMDL
 
-	// points to an MDL that describes the buffer this operation is
-	// transferring to/from. if this is the zeroth stack location and the flag
-	// IOPFLAG_FREEMDL is specified in the IOP header, the MDL will be
-	// unmapped, unpinned, and freed when this IOPL completes.
-
-	4 MDL
-
 	// pointer to the IOPH for this IOP.
 
 	4 IOPH
 endstruct
+
+extern IOPacketFree { iop -- }
+extern IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
+extern IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzero }
+
+extern IOPacketIndex { index iop -- iopl }
+extern IOPacketFromLocation { iopl -- iop }
+extern IOPacketLocationNext { iopl -- nextiopl }
+
+extern IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok }
+extern IOPacketAllocateAssocStack { kflags iopflags iopl -- ioplzero associop ok }
+
+extern IOPacketAssociate { associop iop -- }

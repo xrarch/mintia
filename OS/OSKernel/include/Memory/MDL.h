@@ -49,6 +49,7 @@ extern MmMDLGetSize { vaddr length -- size }
 extern MmMDLAllocate { extraspace mode length vaddr kflags -- extra mdl ok }
 extern MmMDLAllocateWithQuota { extraspace mode length vaddr kflags -- extra mdl ok }
 extern MmMDLFree { mdl -- }
+extern MmMDLFreeComplete { mdl -- }
 
 extern MmMDLSplit { vaddr length srcmdl destmdl -- }
 

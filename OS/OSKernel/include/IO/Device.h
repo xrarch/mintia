@@ -24,12 +24,17 @@ struct IODriver
 endstruct
 
 struct IODevice
+	// transparent part of IODevice
+
+	4 Mount
+
+	// opaque part of IODevice
+
 	4 Driver
 	4 Extension
 	4 FileControlBlock
 	4 BlockLog
 	4 ConsoleHeader
-	4 Mount
 	4 Flags
 
 	4 AttachedBy

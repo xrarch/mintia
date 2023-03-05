@@ -30,19 +30,21 @@ struct IOFilesystem
 endstruct
 
 struct IOMount
-	4 Next
-	4 Prev
+	// transparent part of IOMount
 
 	4 FSContext
 	4 Filesystem
-	4 VolumeFile
+	4 DeviceObject // representing this mount, not of the actual underlying device
+
+	// opaque part of IOMount
+
 	4 RootFCB
-	4 Flags
-	4 BlockSize
 	4 RealVolumeFile
-	4 VolumeCapturedFCB
-	4 RealVolumeCapturedFCB
+	4 Flags
 	4 ReclaimedFrom
+
+	4 Next
+	4 Prev
 
 	4 Reserved1
 	4 Reserved2
@@ -73,8 +75,6 @@ extern IOMountQueryAll { buffer maxquery -- count ok }
 
 extern IOMountGetFlags { mount -- flags }
 extern IOMountSetFlags { flags mount -- }
-extern IOMountSetContext { context mount -- }
-extern IOMountGetContext { mount -- context }
 extern IOMountSetRootFCB { fcb mount -- }
 extern IOMountGetRootFCB { mount -- fcb }
 

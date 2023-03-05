@@ -38,9 +38,8 @@ endstruct
 struct IOFileControlBlockPaged
 	4 Flags
 	4 FileType
-	4 DeviceObject // or parent mountpoint
+	4 DeviceObject
 	4 FSContext
-	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime

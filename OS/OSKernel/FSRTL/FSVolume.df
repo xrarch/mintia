@@ -33,42 +33,42 @@ fn FSVolumeNameGet { mount -- name }
 
 	auto devobj
 
-	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
+	mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
 
 	devobj@ ObObjectName name!
 end
 
-fn FSVolumeInitialize { blocksize mount -- cacheblock ok }
+fn FSVolumeInitialize { blocklog mount -- ok }
 	fnsection "PAGE$text"
 
 	// start caching on volume file
 
 	auto volfcb
-	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
+	mount@ IOMount_DeviceObject + @ IODevice_FileControlBlock + @ volfcb!
+
+	auto realdevice
+	mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject realdevice!
 
 	if (DEBUGCHECKS)
-		if (volfcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ==)
+		if (realvolfcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ==)
 			// this is a character device!
 
 			"FSVolumeInitialize: attempted to initialize a character device\n" KeCrash
 		end
-	end
 
-	volfcb@ IOFileControlBlockCacheCheck ok! cacheblock!
-
-	blocksize@ mount@ IOMount_BlockSize + !
-
-	if (DEBUGCHECKS)
-		if (blocksize@ PAGESIZE >)
-			PAGESIZE blocksize@ "FSVolumeInitialize: blocksize (%d) > pagesize (%d)\n" KeCrash
+		if (blocklog@ realdevice@ IODevice_BlockLog + @ <)
+			"FSVolumeInitialize: fs block size smaller than underlying device's\n" KeCrash
 		end
 	end
+
+	blocklog@ mount@ IOMount_DeviceObject + @ IODevice_BlockLog + !
+
+	auto cacheblock
+	volfcb@ IOFileControlBlockCacheCheck ok! cacheblock!
 
 	if (ok@ ~~)
 		cacheblock@ IOCacheInfoBlockTryIncrementMap ok! drop
 	end
-
-	volfcb@ mount@ IOMount_VolumeCapturedFCB + !
 end
 
 fn FSVolumeUninitialize { mount -- ok }
@@ -76,107 +76,10 @@ fn FSVolumeUninitialize { mount -- ok }
 
 	0 ok!
 
-	auto volfile
-	mount@ IOMount_VolumeFile + @ volfile!
-
 	auto volfcb
-	volfile@ IOFile_FileControlBlock + @ volfcb!
+	mount@ IOMount_DeviceObject + @ IODevice_FileControlBlock + @ volfcb!
 
 	volfcb@ IOFileControlBlock_CacheInfoBlock + @ IOCacheInfoBlockDecrementMap drop
-
-	auto realvolfile
-	mount@ IOMount_RealVolumeFile + @ realvolfile!
-
-	if (realvolfile@)
-		volfile@ ObObjectDereferenceByPointer drop
-
-		1 // writeout
-		volfcb@ // fcb
-		IOFileControlBlockDelete drop
-
-		realvolfile@ mount@ IOMount_VolumeFile + !
-		0 mount@ IOMount_RealVolumeFile + !
-		0 mount@ IOMount_RealVolumeCapturedFCB + !
-		realvolfile@ IOFile_FileControlBlock + @ mount@ IOMount_VolumeCapturedFCB + !
-
-		realvolfile@ IOFile_FileControlBlock + @ IOFileControlBlock_CacheInfoBlock + @ IOCacheInfoBlockDecrementMap drop
-	end
-end
-
-fn FSVolumeFileCreate { size mount -- ok }
-	fnsection "PAGE$text"
-
-	// create a virtual volume file with the given size representing metadata
-	// at the beginning of the volume. if the filesystem wants to modify
-	// metadata more complex than a simple "header" at the beginning of the
-	// volume, it will need its own scheme to deal with that. assumes the
-	// caller already called FSVolumeInitialize.
-
-	// XXX if called more than once per mount, fileobjects will leak!
-
-	if (DEBUGCHECKS)
-		if (mount@ IOMount_RealVolumeFile + @)
-			"FSVolumeFileCreate: attempt to create virtual volume file twice\n" KeCrash
-		end
-	end
-
-	auto realvolfile
-	mount@ IOMount_VolumeFile + @ realvolfile!
-
-	auto realvolfcb
-	realvolfile@ IOFile_FileControlBlock + @ realvolfcb!
-
-	auto deviceobject
-	realvolfcb@ IOFileControlBlockGetDeviceObject deviceobject!
-
-	auto volfcb
-	deviceobject@ IODeviceCreateFileControlBlock ok! volfcb!
-
-	if (ok@)
-		return
-	end
-
-	size@ volfcb@ IOFileControlBlock_SizeInBytes + !
-
-	auto volfile
-	realvolfile@ IOFile_Flags + @ // flags
-	volfcb@ // fcb
-	deviceobject@ // deviceobject
-	IODeviceCreateFileObject ok! volfile!
-
-	if (ok@)
-		-1 // writeout
-		volfcb@ // fcb
-		IOFileControlBlockDelete drop
-
-		return
-	end
-
-	auto cacheblock
-	volfcb@ IOFileControlBlockCacheCheck ok! cacheblock!
-
-	if (ok@)
-		volfile@ ObObjectDereferenceByPointer drop
-
-		-1 // writeout
-		volfcb@ // fcb
-		IOFileControlBlockDelete drop
-
-		return
-	end
-
-	cacheblock@ IOCacheInfoBlockTryIncrementMap ok! drop
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "FSVolumeFileCreate: failed to increment map count (%i)\n" KeCrash
-		end
-	end
-
-	realvolfile@ mount@ IOMount_RealVolumeFile + !
-	realvolfcb@ mount@ IOMount_RealVolumeCapturedFCB + !
-	volfile@ mount@ IOMount_VolumeFile + !
-	volfcb@ mount@ IOMount_VolumeCapturedFCB + !
 end
 
 fn FSVolumeFlush { mount -- ok }
@@ -195,35 +98,15 @@ fn FSVolumeFlush { mount -- ok }
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
-fn FSVolumeGetFile { mount -- volfile }
-	mount@ IOMount_VolumeFile + @ volfile!
-end
-
 fn FSVolumeGetFCBByMount { mount -- volfcb }
-	if (mount@ IOMount_RealVolumeCapturedFCB + @)
-		mount@ IOMount_RealVolumeCapturedFCB + @ volfcb!
-	end else
-		mount@ IOMount_VolumeCapturedFCB + @ volfcb!
-	end
+	mount@ IOMount_DeviceObject + @ IODevice_FileControlBlock + @ volfcb!
 end
 
 fn FSVolumeGetFCB { fcb -- volfcb }
-	auto mount
-	fcb@ IOFileControlBlockGetDeviceObject mount!
+	auto devobj
+	fcb@ IOFileControlBlockGetDeviceObject devobj!
 
-	if (mount@ IOMount_RealVolumeCapturedFCB + @)
-		mount@ IOMount_RealVolumeCapturedFCB + @ volfcb!
-	end else
-		mount@ IOMount_VolumeCapturedFCB + @ volfcb!
-	end
-end
-
-fn FSVolumeFCBGetReadFunction { volfcb -- readfunc }
-	volfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
-end
-
-fn FSVolumeFCBGetWriteFunction { volfcb -- writefunc }
-	volfcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
+	devobj@ IODevice_FileControlBlock + @ volfcb!
 end
 
 fn FSCheckAccess { access permbits owninguid owninggid mount -- ok }
@@ -248,8 +131,7 @@ fn FSCheckAccess { access permbits owninguid owninggid mount -- ok }
 
 	if (mount@ IOMount_Flags + @ OSMOUNT_MATCHUID &)
 		auto dev
-		mount@ IOMount_VolumeCapturedFCB + @ dev!
-		dev@ IOFileControlBlockGetDeviceObject dev!
+		mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject dev!
 
 		dev@ ObObjectUIDGID owninggid! owninguid!
 
@@ -286,8 +168,7 @@ fn FSFileObjectSetSecurity { uid gid object mount -- }
 
 	if (mount@ IOMount_Flags + @ OSMOUNT_MATCHUID &)
 		auto dev
-		mount@ IOMount_VolumeCapturedFCB + @ dev!
-		dev@ IOFileControlBlockGetDeviceObject dev!
+		mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject dev!
 
 		dev@ ObObjectUIDGID gid! uid!
 	end

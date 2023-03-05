@@ -17,3 +17,9 @@ PastThePartitionTable:
 	out t1, 7                ; read the sector into memory
 
 	jmp 0xA00
+
+.bytes -508 0
+
+; fox32 boot block identifier
+
+.dl 0x523C334C

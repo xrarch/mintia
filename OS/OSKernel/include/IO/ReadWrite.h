@@ -4,8 +4,6 @@ extern IOFileTruncate { newsize growing handle -- oldsize ok }
 
 extern IOFileSeek { offset handle mode -- newoffset ok }
 
-extern IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes ok }
-
 extern IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern IOFileWrite { flags length buffer filehandle -- byteswritten ok }
 
@@ -21,4 +19,8 @@ extern IODirectoryReadObject { dirent fileobject -- ok }
 
 // direct transfer helpers
 
-extern IOReadWrite { timeout flags kflags length offset buffer portobject fileobject lastmode write -- bytes ok }
+extern IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fcb -- length ok }
+
+extern IOReadWriteAsync { context flags length offset buffer portobject fileobject functioncode -- ok }
+
+extern IOReadWrite { timeout flags length offset buffer fileobject functioncode -- bytes ok }

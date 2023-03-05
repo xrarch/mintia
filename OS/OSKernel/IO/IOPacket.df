@@ -218,6 +218,21 @@ fn IOPacketFree { iop -- }
 	end
 end
 
+fn IOPacketAllocateForFile { mode type kflags fcb iopflags -- ioplzero iop ok }
+	mode@ // mode
+	type@ // type
+	kflags@ // kflags
+	fcb@ IOFileControlBlock_StackDepth + @ // stacksize
+	iopflags@ // iopflags
+	IOPacketAllocate ok! iop! ioplzero!
+
+	if (ok@)
+		return
+	end
+
+	fcb@ ioplzero@ IOPacketLocation_FileControlBlock + !
+end
+
 fn IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 	auto packetsize
 	[type@]IOiPacketHeaderSizes@ stacksize@ IOPacketLocation_SIZEOF * + packetsize!
@@ -334,6 +349,8 @@ fn IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzer
 
 	0 iop@ IOPacketHeader_MDL + !
 
+	OSWAIT_TIMEOUTINFINITE iop@ IOPacketHeader_Timeout + !
+
 	0 iop@ IOPacketHeader_DeviceQueueNext + !
 	0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
@@ -343,7 +360,14 @@ fn IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzer
 	// to a lower driver, in which case it shouldn't (since that driver now
 	// owns it).
 
-	1 iop@ IOPacketHeader_IOCountI + si
+	if (type@ IOPTYPE_USERASYNC ==)
+		// double-biased refcount so that we can clean up properly upon
+		// an enqueuing error.
+
+		2 iop@ IOPacketHeader_IOCountI + si
+	end else
+		1 iop@ IOPacketHeader_IOCountI + si
+	end
 
 	// initialize the IOPLs of the packet to indicate their stack location.
 
@@ -394,6 +418,11 @@ fn IOPacketFromLocation { iopl -- iop }
 	iopl@ IOPacketLocation_IOPH + @ iop!
 end
 
+fn IOPacketCurrentLocation { iop -- iopl }
+	iop@ iop@ IOPacketHeader_HeaderSizeB + gb + iopl!
+	iop@ IOPacketHeader_CurrentStackIndexB + gb IOPacketLocation_SIZEOF * iopl +=
+end
+
 fn IOPacketLocationNext { iopl -- nextiopl }
 	if (DEBUGCHECKS)
 		if (iopl@ IOPacketLocation_StackLocationB + gb
@@ -403,6 +432,14 @@ fn IOPacketLocationNext { iopl -- nextiopl }
 	end
 
 	iopl@ IOPacketLocation_SIZEOF + nextiopl!
+end
+
+fn IOPacketLocationMappedBuffer { iopl -- vaddr }
+	iopl@ IOPacketLocation_IOPH + @ IOPacketHeader_MDL + @ MmMDLHeader_MappedAddress + @ iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
+end
+
+fn IOPacketLocationVirtualBuffer { iopl -- vaddr }
+	iopl@ IOPacketLocation_IOPH + @ IOPacketHeader_MDL + @ MmMDLHeader_VirtualAddress + @ iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
 end
 
 fn IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok }
@@ -544,6 +581,10 @@ fn IOPacketEnqueue { iop -- ok }
 					iop@ IOPacketHeader_StackDepthB + gb >=)
 					"IOPacketEnqueue: stack overflow\n" KeCrash
 				end
+
+				if (iopl@ IOPacketLocation_FileControlBlock + @ ~~)
+					"IOPacketEnqueue: no FCB in stack location\n" KeCrash
+				end
 			end
 
 			auto func
@@ -552,6 +593,11 @@ fn IOPacketEnqueue { iop -- ok }
 			iopl@ IOPacketLocation_FunctionCodeB + gb 2 << + @ func!
 
 			if (func@ ~~)
+				STATUS_NOT_SUPPORTED // status
+				0 // priboost
+				iop@ // iop
+				IOPacketCompleteLow
+			
 				if (ok@ ~~)
 					STATUS_NOT_SUPPORTED ok!
 				end
@@ -595,16 +641,27 @@ fn IOPacketEnqueue { iop -- ok }
 			0 current@ PsThread_IOPDeferredListTail + !
 
 			if (iop@ ~~)
-				return
+				break
 			end
 		end
 	end
 end
 
-fn IOPacketCompleteDPCLevel { priboost iop -- }
+fn IOPacketCompleteLow { status priboost iop -- }
+	// can be called from >IPLLOW. use this if it varies.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	status@ priboost@ iop@ IOPacketComplete
+
+	ipl@ KeIPLLower
+end
+
+fn IOPacketComplete { status priboost iop -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
-			"IOPacketCompleteDPCLevel: ipl != IPLDPC\n" KeCrash
+			"IOPacketComplete: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
@@ -616,12 +673,23 @@ fn IOPacketCompleteDPCLevel { priboost iop -- }
 			priboost@ iop@ IOPacketHeader_PriorityBoostB + sb
 		end
 
+		if (status@)
+			// status given for completing this IOP, save it.
+
+			status@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + !
+		end else
+			// no status given for completing this IOP.
+			// try to propagate an existing status to the parent.
+
+			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ status!
+		end
+
 		auto oldcount
 		iop@ IOPacketHeader_IOCountI + gi oldcount!
 
 		if (DEBUGCHECKS)
 			if (oldcount@ ~~)
-				"IOPacketCompleteDPCLevel: underflow\n" KeCrash
+				"IOPacketComplete: underflow\n" KeCrash
 			end
 		end
 

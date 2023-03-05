@@ -59,6 +59,7 @@ struct IOFileControlBlock
 	4 CacheInfoBlock
 	4 DispatchTable
 	4 SizeInBytes
+	4 StackDepth
 endstruct
 
 const IOFCBFLAG_PAGED      1
@@ -108,9 +109,7 @@ extern IOFileControlBlockGetChangeTime { fcb -- time }
 
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
-extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
-extern IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
-extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
+extern IOFileControlBlockCreate { devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }
 extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockLockShared { fcb -- ok }

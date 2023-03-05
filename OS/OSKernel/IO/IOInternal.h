@@ -9,7 +9,7 @@ extern IOiCacheInfoBlockDereference { cacheblock -- oldcount }
 
 extern IOiCacheInfoBlockDestroy { writeout cacheblock -- ok }
 
-extern IOiFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
+extern IOiFileControlBlockInitialize { devobj filetype flags fcb -- }
 
 extern IOiFilesystemReclaimFCB { -- }
 

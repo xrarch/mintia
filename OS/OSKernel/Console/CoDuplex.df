@@ -109,8 +109,8 @@ table CoDuplexDispatch
 	0                                    // open
 	0                                    // close
 	pointerof CoDuplexIOControl          // iocontrol
-	pointerof CoDuplexRead               // read
-	pointerof CoDuplexWrite              // write
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // unlink
 	0                                    // parse
 	0                                    // delete
@@ -127,8 +127,8 @@ table CoDuplexDispatch
 	pointerof CoDuplexDeleteObject       // delete device object
 	0                                    // reclaim fcb
 	pointerof CoDuplexCancel             // cancel operation
-	0                                    // reserved
-	0                                    // reserved
+	pointerof CoDuplexRead               // read
+	pointerof CoDuplexWrite              // write
 endtable
 
 const DUPLEXFLAG_PENDING_LF 0x80000000
@@ -360,7 +360,6 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 	end
 
 	auto serverfcb
-	CoDuplexDispatch // dispatchtable
 	duplexobject@ // devobj
 	OSFILETYPE_CHARDEVICE // filetype
 	0 // flags
@@ -531,33 +530,19 @@ fn (IODispatchIOControlFunction) CoDuplexIOControl { arg2 arg1 access fcb lastmo
 	end
 end
 
-struct CoDuplexRequest
-	4 Next
-	4 Prev
-
-	4 Flags
-	4 MDL
-	4 Duplex
-	4 LengthDone
-	4 Buffer
-	4 Length
-endstruct
-
 const REQFLAG_WRITE     1
 const REQFLAG_SERVER    2
 const REQFLAG_RETURNANY 4
 
-fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
-	auto req
-	mdl@ MmMDLHeader_DriverGoWild + req!
+fn CoDuplexEnqueueRequest { lengthdone flags iopl -- }
+	lengthdone@ iopl@ IOPacketLocation_Offset + !
+	flags@ iopl@ IOPacketLocation_Flags + !
 
-	flags@ req@ CoDuplexRequest_Flags + !
-	mdl@ req@ CoDuplexRequest_MDL + !
-	duplex@ req@ CoDuplexRequest_Duplex + !
-	lengthdone@ req@ CoDuplexRequest_LengthDone + !
-	0 req@ CoDuplexRequest_Next + !
-	buf@ req@ CoDuplexRequest_Buffer + !
-	length@ req@ CoDuplexRequest_Length + !
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
 	auto header
 	0 header!
@@ -574,16 +559,16 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			duplex@ CoDuplex_ServerWriteListTail + @ t!
 
-			t@ req@ CoDuplexRequest_Prev + !
+			t@ iop@ IOPacketHeader_DeviceQueuePrev + !
 
 			if (t@ ~~)
-				req@ duplex@ CoDuplex_ServerWriteListHead + !
+				iop@ duplex@ CoDuplex_ServerWriteListHead + !
 				duplex@ CoDuplex_ReceiveBuffer + header!
 			end else
-				req@ t@ CoDuplexRequest_Next + !
+				iop@ t@ IOPacketHeader_DeviceQueueNext + !
 			end
 
-			req@ duplex@ CoDuplex_ServerWriteListTail + !
+			iop@ duplex@ CoDuplex_ServerWriteListTail + !
 		end else
 			if (DEBUGCHECKS)
 				if (duplex@ CoDuplex_ClientWriteListHead + @)
@@ -593,16 +578,16 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			duplex@ CoDuplex_ServerReadListTail + @ t!
 
-			t@ req@ CoDuplexRequest_Prev + !
+			t@ iop@ IOPacketHeader_DeviceQueuePrev + !
 
 			if (t@ ~~)
-				req@ duplex@ CoDuplex_ServerReadListHead + !
+				iop@ duplex@ CoDuplex_ServerReadListHead + !
 				duplex@ CoDuplex_TransmitBuffer + header!
 			end else
-				req@ t@ CoDuplexRequest_Next + !
+				iop@ t@ IOPacketHeader_DeviceQueueNext + !
 			end
 
-			req@ duplex@ CoDuplex_ServerReadListTail + !
+			iop@ duplex@ CoDuplex_ServerReadListTail + !
 		end
 	end else
 		if (flags@ REQFLAG_WRITE &)
@@ -614,16 +599,16 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			duplex@ CoDuplex_ClientWriteListTail + @ t!
 
-			t@ req@ CoDuplexRequest_Prev + !
+			t@ iop@ IOPacketHeader_DeviceQueuePrev + !
 
 			if (t@ ~~)
-				req@ duplex@ CoDuplex_ClientWriteListHead + !
+				iop@ duplex@ CoDuplex_ClientWriteListHead + !
 				duplex@ CoDuplex_TransmitBuffer + header!
 			end else
-				req@ t@ CoDuplexRequest_Next + !
+				iop@ t@ IOPacketHeader_DeviceQueueNext + !
 			end
 
-			req@ duplex@ CoDuplex_ClientWriteListTail + !
+			iop@ duplex@ CoDuplex_ClientWriteListTail + !
 		end else
 			if (DEBUGCHECKS)
 				if (duplex@ CoDuplex_ServerWriteListHead + @)
@@ -633,23 +618,23 @@ fn CoDuplexEnqueueRequest { lengthdone buf length flags mdl duplex -- }
 
 			duplex@ CoDuplex_ClientReadListTail + @ t!
 
-			t@ req@ CoDuplexRequest_Prev + !
+			t@ iop@ IOPacketHeader_DeviceQueuePrev + !
 
 			if (t@ ~~)
-				req@ duplex@ CoDuplex_ClientReadListHead + !
+				iop@ duplex@ CoDuplex_ClientReadListHead + !
 				duplex@ CoDuplex_ReceiveBuffer + header!
 			end else
-				req@ t@ CoDuplexRequest_Next + !
+				iop@ t@ IOPacketHeader_DeviceQueueNext + !
 			end
 
-			req@ duplex@ CoDuplex_ClientReadListTail + !
+			iop@ duplex@ CoDuplex_ClientReadListTail + !
 		end
 	end
 
 	if (header@)
-		buf@ header@ CoDuplexBuffer_UserBuffer + !
-		0 header@ CoDuplexBuffer_UserBufferIndex + !
-		length@ header@ CoDuplexBuffer_UserBufferLength + !
+		iopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+		lengthdone@ header@ CoDuplexBuffer_UserBufferIndex + !
+		iopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 	end
 end
 
@@ -739,7 +724,19 @@ fn CoDuplexCookedCopyClient { dest src maxdest maxsrc duplex -- bufread bytecnt 
 	end
 end
 
-fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
+fn CoDuplexServerRead { iopl -- ok }
+	auto flags
+	iopl@ IOPacketLocation_Flags + @ flags!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
@@ -747,19 +744,17 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 	// this may pend.
 
 	if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
-		if (timeout@ ~~)
-			0 mdl@ MmMDLHeader_Length + !
+		if (iop@ IOPacketHeader_Timeout + @ ~~)
+			0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
-			STATUS_RING_EMPTY ok!
+			0 ok!
 
 			return
 		end else
 			// add to StoppedQueue
 
-			flags@ mdl@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Flags + !
-
-			duplex@ CoDuplex_StoppedQueueListHead + @ mdl@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Next + !
-			mdl@ duplex@ CoDuplex_StoppedQueueListHead + !
+			duplex@ CoDuplex_StoppedQueueListHead + @ iop@ IOPacketHeader_DeviceQueueNext + !
+			iop@ duplex@ CoDuplex_StoppedQueueListHead + !
 
 			STATUS_OTHER_CONDITION ok!
 
@@ -785,12 +780,12 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 		// if there's a pending request already, then that means the transmit
 		// buffer and any client buffers have all been drained.
 
-		if (timeout@)
+		if (iop@ IOPacketHeader_Timeout + @)
 			STATUS_OTHER_CONDITION ok!
 		end else
-			0 mdl@ MmMDLHeader_Length + !
+			0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
-			STATUS_RING_EMPTY ok!
+			0 ok!
 		end
 	end else
 		// read as much as possible from the buffer. if this completes, cool.
@@ -806,8 +801,8 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 
 		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
 
-		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
-			mdl@ MmMDLHeader_Length + @ bytecnt!
+		if (iopl@ IOPacketLocation_Length + @ bytecnt@ <)
+			iopl@ IOPacketLocation_Length + @ bytecnt!
 		end
 
 		if (bytecnt@)
@@ -844,7 +839,7 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 			rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
 			bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
 
-			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 				DONE_NORMAL done |=
 			end
 		end
@@ -855,20 +850,23 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 		// from their buffer.
 
 		while (done@ ~~)
-			auto req
-			duplex@ CoDuplex_ClientWriteListHead + @ req!
+			auto otheriop
+			duplex@ CoDuplex_ClientWriteListHead + @ otheriop!
 
-			if (req@ ~~)
+			if (otheriop@ ~~)
 				break
 			end
+
+			auto otheriopl
+			otheriop@ IOPacketCurrentLocation otheriopl!
 
 			// calculate available bytes in buffer.
 
 			header@ CoDuplexBuffer_UserBufferLength + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
 
-			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
 			auto bufread
@@ -885,7 +883,7 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 				buf@ bytecnt@ + // dest
 				header@ CoDuplexBuffer_UserBuffer + @
 				header@ CoDuplexBuffer_UserBufferIndex + @ + // src
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - // maxdest
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxdest
 				header@ CoDuplexBuffer_UserBufferLength + @
 				header@ CoDuplexBuffer_UserBufferIndex + @ - // maxsrc
 				duplex@ // duplex
@@ -896,7 +894,7 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 
 			rp@ bytecnt +=
 
-			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 				DONE_NORMAL done |=
 			end
 
@@ -906,29 +904,29 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 				// complete the client MDL.
 
 				header@ CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ +
-				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 				// unlink the client request.
 
-				auto nreq
-				req@ CoDuplexRequest_Next + @ nreq!
+				auto niop
+				otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 				0 // status
 				0 // priboost
-				req@ CoDuplexRequest_MDL + @ // mdl
-				MmMDLComplete
+				otheriop@ // iop
+				IOPacketCompleteLow
 
-				nreq@ req!
+				niop@ otheriop!
+				otheriop@ IOPacketCurrentLocation otheriopl!
 
-				req@ duplex@ CoDuplex_ClientWriteListHead + !
+				otheriop@ duplex@ CoDuplex_ClientWriteListHead + !
 
-				if (req@)
-					0 req@ CoDuplexRequest_Prev + !
+				if (otheriop@)
+					0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
 
-					req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-					0 header@ CoDuplexBuffer_UserBufferIndex + !
-					req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+					otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+					otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+					otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 				end else
 					0 duplex@ CoDuplex_ClientWriteListTail + !
 				end
@@ -938,19 +936,19 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 		if (flags@ REQFLAG_RETURNANY &)
 			if (bytecnt@)
 				DONE_NORMAL done |=
-				bytecnt@ mdl@ MmMDLHeader_Length + !
+				bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 			end
 		end
 
 		if (done@ ~~)
-			if (timeout@)
+			if (iop@ IOPacketHeader_Timeout + @)
 				// switch to user buffer.
 
 				STATUS_OTHER_CONDITION ok!
 			end else
-				bytecnt@ mdl@ MmMDLHeader_Length + !
+				bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
-				STATUS_RING_EMPTY ok!
+				0 ok!
 			end
 		end
 	end
@@ -959,21 +957,30 @@ fn CoDuplexServerRead { flags buf timeout mdl duplex -- ok }
 		// enqueue the request at the tail of the appropriate queue.
 
 		bytecnt@ // lengthdone
-		buf@ bytecnt@ + // buf
-		mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
 		REQFLAG_SERVER flags@ | // flags
-		mdl@ // mdl
-		duplex@ // duplex
+		iopl@ // iopl
 		CoDuplexEnqueueRequest
 	end
 end
 
-fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
+fn CoDuplexClientRead { iopl -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
 	// client fcb, reading from the receive buffer.
 	// this may pend.
+
+	auto flags
+	iopl@ IOPacketLocation_Flags + @ flags!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
 	if (flags@ OSACCESSFLAG_RETURNANY &)
 		REQFLAG_RETURNANY flags!
@@ -993,12 +1000,12 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 		// if there's a pending request already, then that means the receive
 		// buffer has been drained.
 
-		if (timeout@)
+		if (iop@ IOPacketHeader_Timeout + @)
 			STATUS_OTHER_CONDITION ok!
 		end else
-			0 mdl@ MmMDLHeader_Length + !
+			0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
-			STATUS_RING_EMPTY ok!
+			0 ok!
 		end
 	end else
 		// read as much as possible from the buffer. if this completes, cool.
@@ -1012,8 +1019,8 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 
 		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
 
-		if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
-			mdl@ MmMDLHeader_Length + @ bytecnt!
+		if (iopl@ IOPacketLocation_Length + @ bytecnt@ <)
+			iopl@ IOPacketLocation_Length + @ bytecnt!
 		end
 
 		if (bytecnt@)
@@ -1085,7 +1092,7 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 				bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
 			end
 
-			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 				DONE_NORMAL done |=
 			end
 		end
@@ -1096,12 +1103,15 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 		// from their buffer.
 
 		while (done@ ~~)
-			auto req
-			duplex@ CoDuplex_ServerWriteListHead + @ req!
+			auto otheriop
+			duplex@ CoDuplex_ServerWriteListHead + @ otheriop!
 
-			if (req@ ~~)
+			if (otheriop@ ~~)
 				break
 			end
+
+			auto otheriopl
+			otheriop@ IOPacketCurrentLocation otheriopl!
 
 			if (DEBUGCHECKS)
 				if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_CONSOLE &)
@@ -1114,8 +1124,8 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 			header@ CoDuplexBuffer_UserBufferLength + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
 
-			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
 			buf@ bytecnt@ + // dest
@@ -1128,7 +1138,7 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 
 			rp@ bytecnt +=
 
-			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 				DONE_NORMAL done |=
 			end
 
@@ -1138,29 +1148,29 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 				// complete the server MDL.
 
 				header@ CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ +
-				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 				// unlink the server request.
 
-				auto nreq
-				req@ CoDuplexRequest_Next + @ nreq!
+				auto niop
+				otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 				0 // status
 				duplex@ CoDuplex_ServerBoost + @ // priboost
-				req@ CoDuplexRequest_MDL + @ // mdl
-				MmMDLComplete
+				otheriop@ // iop
+				IOPacketCompleteLow
 
-				nreq@ req!
+				niop@ otheriop!
+				otheriop@ IOPacketCurrentLocation otheriopl!
 
-				req@ duplex@ CoDuplex_ServerWriteListHead + !
+				otheriop@ duplex@ CoDuplex_ServerWriteListHead + !
 
-				if (req@)
-					0 req@ CoDuplexRequest_Prev + !
+				if (otheriop@)
+					0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
 
-					req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-					0 header@ CoDuplexBuffer_UserBufferIndex + !
-					req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+					otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+					otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+					otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 				end else
 					0 duplex@ CoDuplex_ServerWriteListTail + !
 				end
@@ -1170,26 +1180,26 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 		if (flags@ REQFLAG_RETURNANY &)
 			if (bytecnt@)
 				DONE_NORMAL done |=
-				bytecnt@ mdl@ MmMDLHeader_Length + !
+				bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 			end
 		end
 
 		if (done@ ~~)
-			if (timeout@ duplex@ CoDuplex_Disconnected + @ ~~ &&)
+			if (iop@ IOPacketHeader_Timeout + @ duplex@ CoDuplex_Disconnected + @ ~~ &&)
 				// switch to user buffer.
 
 				STATUS_OTHER_CONDITION ok!
 			end else
-				bytecnt@ mdl@ MmMDLHeader_Length + !
+				bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
-				STATUS_RING_EMPTY ok!
+				0 ok!
 			end
 		end else
 			if (done@ DONE_CTRLD &)
 				1 bytecnt -=
 			end
 
-			bytecnt@ mdl@ MmMDLHeader_Length + !
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 		end
 	end
 
@@ -1197,11 +1207,8 @@ fn CoDuplexClientRead { flags buf timeout mdl duplex -- ok }
 		// enqueue the request at the tail of the appropriate queue.
 
 		bytecnt@ // lengthdone
-		buf@ bytecnt@ + // buf
-		mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
 		flags@ // flags
-		mdl@ // mdl
-		duplex@ // duplex
+		iopl@ // iopl
 		CoDuplexEnqueueRequest
 	end
 end
@@ -1282,12 +1289,9 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 	auto done
 	0 done!
 
-	auto txfunc
-	duplex@ CoDuplex_TXFunc + @ txfunc!
-
-	if (txfunc@)
+	if (duplex@ CoDuplex_TXFunc + @)
 		c@ // c
-		txfunc@ // txfunc
+		duplex@ CoDuplex_TXFunc + @ // txfunc
 		duplex@ // duplex
 		CoDuplexTXCharacter done |=
 	end
@@ -1301,12 +1305,15 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 	auto rp
 
 	while (done@ ~~)
-		auto req
-		duplex@ CoDuplex_ServerReadListHead + @ req!
+		auto otheriop
+		duplex@ CoDuplex_ServerReadListHead + @ otheriop!
 
-		if (req@ ~~)
+		if (otheriop@ ~~)
 			break
 		end
+
+		auto otheriopl
+		otheriop@ IOPacketCurrentLocation otheriopl!
 
 		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 			c@
@@ -1355,34 +1362,34 @@ fn CoDuplexWriteCharacter { c duplex -- ok }
 
 		if (header@ CoDuplexBuffer_UserBufferIndex + @
 			header@ CoDuplexBuffer_UserBufferLength + @ ==
-			req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY & ||)
+			otheriopl@ IOPacketLocation_Flags + @ REQFLAG_RETURNANY & ||)
 
 			// complete the server MDL.
 
 			header@ CoDuplexBuffer_UserBufferIndex + @
-			req@ CoDuplexRequest_LengthDone + @ +
-			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+			otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 			// unlink the server request.
 
-			auto nreq
-			req@ CoDuplexRequest_Next + @ nreq!
+			auto niop
+			otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 			0 // status
 			duplex@ CoDuplex_ServerBoost + @ // priboost
-			req@ CoDuplexRequest_MDL + @ // mdl
-			MmMDLComplete
+			otheriop@ // iop
+			IOPacketCompleteLow
 
-			nreq@ req!
+			niop@ otheriop!
+			otheriop@ IOPacketCurrentLocation otheriopl!
 
-			req@ duplex@ CoDuplex_ServerReadListHead + !
+			otheriop@ duplex@ CoDuplex_ServerReadListHead + !
 
-			if (req@)
-				0 req@ CoDuplexRequest_Prev + !
+			if (otheriop@)
+				0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
 
-				req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+				otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+				otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+				otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 			end else
 				0 duplex@ CoDuplex_ServerReadListTail + !
 			end
@@ -1487,10 +1494,13 @@ fn CoDuplexReadTransmitCharacter { duplex -- c ok }
 	// try to complete as many client writes as possible by reading
 	// from their buffer.
 
-	auto req
-	duplex@ CoDuplex_ClientWriteListHead + @ req!
+	auto iop
+	duplex@ CoDuplex_ClientWriteListHead + @ iop!
 
-	if (req@)
+	if (iop@)
+		auto iopl
+		iop@ IOPacketCurrentLocation iopl!
+
 		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 			header@ CoDuplexBuffer_UserBuffer + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ + gb c!
@@ -1520,29 +1530,29 @@ fn CoDuplexReadTransmitCharacter { duplex -- c ok }
 			// complete the client MDL.
 
 			header@ CoDuplexBuffer_UserBufferIndex + @
-			req@ CoDuplexRequest_LengthDone + @ +
-			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 			// unlink the client request.
 
-			auto nreq
-			req@ CoDuplexRequest_Next + @ nreq!
+			auto niop
+			iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 			0 // status
 			0 // priboost
-			req@ CoDuplexRequest_MDL + @ // mdl
-			MmMDLComplete
+			iop@ // iop
+			IOPacketCompleteLow
 
-			nreq@ req!
+			niop@ iop!
+			iop@ IOPacketCurrentLocation iopl!
 
-			req@ duplex@ CoDuplex_ClientWriteListHead + !
+			iop@ duplex@ CoDuplex_ClientWriteListHead + !
 
-			if (req@)
-				0 req@ CoDuplexRequest_Prev + !
+			if (iop@)
+				0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
-				req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+				iopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+				iopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+				iopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 			end else
 				0 duplex@ CoDuplex_ClientWriteListTail + !
 			end
@@ -1564,8 +1574,9 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 		return
 	end
 
-	auto req
-	auto nreq
+	auto iop
+	auto niop
+	auto iopl
 
 	// duplex is locked (which means IPL may be >=IPLDPC).
 
@@ -1587,29 +1598,28 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 			// satisfy any pending server read requests.
 
-			duplex@ CoDuplex_ServerReadListHead + @ req!
+			duplex@ CoDuplex_ServerReadListHead + @ iop!
 
-			0 duplex@ CoDuplex_ServerReadListHead + !
-			0 duplex@ CoDuplex_ServerReadListTail + !
-
-			while (req@)
-				if (req@ duplex@ CoDuplex_ServerReadListHead + @ ==)
+			while (iop@)
+				if (iop@ duplex@ CoDuplex_ServerReadListHead + @ ==)
 					duplex@ CoDuplex_TransmitBuffer + CoDuplexBuffer_UserBufferIndex + @
-					req@ CoDuplexRequest_LengthDone + @ +
-					req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+					iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 				end else
-					0 req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+					0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 				end
 
-				req@ CoDuplexRequest_Next + @ nreq!
+				iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 				0 // status
 				duplex@ CoDuplex_ServerBoost + @ // priboost
-				req@ CoDuplexRequest_MDL + @ // mdl
-				MmMDLComplete
+				iop@ // iop
+				IOPacketCompleteLow
 
-				nreq@ req!
+				niop@ iop!
 			end
+
+			0 duplex@ CoDuplex_ServerReadListHead + !
+			0 duplex@ CoDuplex_ServerReadListTail + !
 
 			ipl@ duplex@ CoDuplexUnlock
 
@@ -1628,32 +1638,24 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 			// process the StoppedQueue of pending server requests.
 
-			duplex@ CoDuplex_StoppedQueueListHead + @ req!
+			duplex@ CoDuplex_StoppedQueueListHead + @ iop!
 			0 duplex@ CoDuplex_StoppedQueueListHead + !
 
-			while (req@)
-				req@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Next + @ nreq!
+			while (iop@)
+				iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
-				req@ MmMDLHeader_DriverGoWild + CoDuplexRequest_Flags + @ // flags
-				req@ MmMDLHeader_MappedAddress + @ // buf
-				OSWAIT_TIMEOUTINFINITE // timeout
-				req@ // mdl
-				duplex@ // duplex
-				CoDuplexServerRead ok!
+				iop@ IOPacketCurrentLocation iopl!
 
-				if (ok@ ~~)
+				iopl@ CoDuplexServerRead ok!
+
+				if (ok@ STATUS_OTHER_CONDITION ~=)
 					0 // status
 					duplex@ CoDuplex_ServerBoost + @ // priboost
-					req@ // mdl
-					MmMDLComplete
-				end elseif (ok@ STATUS_RING_EMPTY ==)
-					0 // status
-					duplex@ CoDuplex_ServerBoost + @ // priboost
-					req@ // mdl
-					MmMDLComplete
+					iop@ // iop
+					IOPacketCompleteLow
 				end
 
-				nreq@ req!
+				niop@ iop!
 			end
 
 			0 ok!
@@ -1688,9 +1690,11 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 
 	auto rp
 
-	duplex@ CoDuplex_ClientReadListHead + @ req!
+	duplex@ CoDuplex_ClientReadListHead + @ iop!
 
-	if (req@)
+	if (iop@)
+		iop@ IOPacketCurrentLocation iopl!
+
 		auto clientdone
 		0 clientdone!
 
@@ -1719,17 +1723,8 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 			if (header@ CoDuplexBuffer_UserBufferIndex + @)
 				1 header@ CoDuplexBuffer_UserBufferIndex + -=
 
-				req@ CoDuplexRequest_Buffer + @
+				header@ CoDuplexBuffer_UserBuffer + @
 				header@ CoDuplexBuffer_UserBufferIndex + @ + gb // c
-				duplex@ // duplex
-				CoDuplexEchoRubout
-			end elseif (req@ CoDuplexRequest_LengthDone + @)
-				1 req@ CoDuplexRequest_LengthDone + -=
-				1 req@ CoDuplexRequest_Buffer + -=
-				1 header@ CoDuplexBuffer_UserBuffer + -=
-				1 req@ CoDuplexRequest_Length + +=
-
-				req@ CoDuplexRequest_Buffer + @ gb // c
 				duplex@ // duplex
 				CoDuplexEchoRubout
 			end
@@ -1742,17 +1737,8 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 				if (header@ CoDuplexBuffer_UserBufferIndex + @)
 					1 header@ CoDuplexBuffer_UserBufferIndex + -=
 
-					req@ CoDuplexRequest_Buffer + @
+					header@ CoDuplexBuffer_UserBuffer + @
 					header@ CoDuplexBuffer_UserBufferIndex + @ + gb // c
-					duplex@ // duplex
-					CoDuplexEchoRubout
-				end elseif (req@ CoDuplexRequest_LengthDone + @)
-					1 req@ CoDuplexRequest_LengthDone + -=
-					1 req@ CoDuplexRequest_Buffer + -=
-					1 header@ CoDuplexBuffer_UserBuffer + -=
-					1 req@ CoDuplexRequest_Length + +=
-
-					req@ CoDuplexRequest_Buffer + @ gb // c
 					duplex@ // duplex
 					CoDuplexEchoRubout
 				end else
@@ -1776,8 +1762,7 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 		end
 
 		if (clientdone@ DONE_CTRLD &)
-			if (header@ CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ + ~~)
+			if (header@ CoDuplexBuffer_UserBufferIndex + @ ~~)
 				DONE_NORMAL done |=
 
 				c@ duplex@ CoDuplexEcho
@@ -1787,7 +1772,7 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 		if (header@ CoDuplexBuffer_UserBufferIndex + @
 			header@ CoDuplexBuffer_UserBufferLength + @ ==)
 			DONE_NORMAL clientdone |=
-		end elseif (req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY &)
+		end elseif (iopl@ IOPacketLocation_Flags + @ REQFLAG_RETURNANY &)
 			DONE_NORMAL clientdone |=
 		end
 
@@ -1795,28 +1780,28 @@ fn CoDuplexInputCharacter { c duplex -- ok }
 			// complete the client MDL.
 
 			header@ CoDuplexBuffer_UserBufferIndex + @
-			req@ CoDuplexRequest_LengthDone + @ +
-			req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 			// unlink the client request.
 
-			req@ CoDuplexRequest_Next + @ nreq!
+			iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 			0 // status
 			duplex@ CoDuplex_ClientBoost + @ // priboost
-			req@ CoDuplexRequest_MDL + @ // mdl
-			MmMDLComplete
+			iop@ // iop
+			IOPacketCompleteLow
 
-			nreq@ req!
+			niop@ iop!
+			iop@ IOPacketCurrentLocation iopl!
 
-			req@ duplex@ CoDuplex_ClientReadListHead + !
+			iop@ duplex@ CoDuplex_ClientReadListHead + !
 
-			if (req@)
-				0 req@ CoDuplexRequest_Prev + !
+			if (iop@)
+				0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
-				req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-				0 header@ CoDuplexBuffer_UserBufferIndex + !
-				req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+				iopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+				iopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+				iopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 			end else
 				0 duplex@ CoDuplex_ClientReadListTail + !
 			end
@@ -1981,12 +1966,21 @@ fn CoDuplexEchoRubout { c duplex -- }
 	end
 end
 
-fn CoDuplexServerWriteCooked { buf mdl duplex -- ok }
+fn CoDuplexServerWriteCooked { iopl -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
 	auto len
-	mdl@ MmMDLHeader_Length + @ len!
+	iopl@ IOPacketLocation_Length + @ len!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
 	auto done
 	0 done!
@@ -1997,7 +1991,7 @@ fn CoDuplexServerWriteCooked { buf mdl duplex -- ok }
 		CoDuplexInputCharacter ok!
 
 		if (ok@)
-			done@ mdl@ MmMDLHeader_Length + !
+			done@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 			return
 		end
@@ -2008,7 +2002,7 @@ fn CoDuplexServerWriteCooked { buf mdl duplex -- ok }
 	end
 end
 
-fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
+fn CoDuplexServerWriteRaw { iopl -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
@@ -2017,6 +2011,15 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 	// expected to read characters promptly. otherwise it may pend.
 	// also if it is a console, it will echo to the transmit buffer. if the
 	// transmit buffer fills up, characters will be dropped.
+
+	auto iop
+	iopl@ IOPacketCurrentLocation iop!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
 
 	0 ok!
 
@@ -2030,11 +2033,8 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 		// there's already a pending request, so add ours to the end and return.
 
 		0 // lengthdone
-		buf@ // buf
-		mdl@ MmMDLHeader_Length + @ // length
 		REQFLAG_WRITE REQFLAG_SERVER | // flags
-		mdl@ // mdl
-		duplex@ // duplex
+		iopl@ // iopl
 		CoDuplexEnqueueRequest
 
 		STATUS_OTHER_CONDITION ok!
@@ -2049,12 +2049,15 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 		auto rp
 
 		while (done@ ~~)
-			auto req
-			duplex@ CoDuplex_ClientReadListHead + @ req!
+			auto otheriop
+			duplex@ CoDuplex_ClientReadListHead + @ otheriop!
 
-			if (req@ ~~)
+			if (otheriop@ ~~)
 				break
 			end
+
+			auto otheriopl
+			otheriop@ IOPacketCurrentLocation otheriopl!
 
 			// calculate available bytes in buffer.
 
@@ -2064,8 +2067,8 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 			header@ CoDuplexBuffer_UserBufferLength + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
 
-			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
 			header@ CoDuplexBuffer_UserBuffer + @
@@ -2077,14 +2080,14 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 			rp@ header@ CoDuplexBuffer_UserBufferIndex + +=
 			rp@ bytecnt +=
 
-			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 				DONE_NORMAL done |=
 			end
 
 			if (header@ CoDuplexBuffer_UserBufferIndex + @
 				header@ CoDuplexBuffer_UserBufferLength + @ ==)
 				DONE_NORMAL clientdone |=
-			end elseif (req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY &)
+			end elseif (otheriopl@ IOPacketLocation_Flags + @ REQFLAG_RETURNANY &)
 				DONE_NORMAL clientdone |=
 			end
 
@@ -2092,29 +2095,29 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 				// complete the client MDL.
 
 				header@ CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ +
-				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 				// unlink the client request.
 
-				auto nreq
-				req@ CoDuplexRequest_Next + @ nreq!
+				auto niop
+				otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 				0 // status
 				duplex@ CoDuplex_ClientBoost + @ // priboost
-				req@ CoDuplexRequest_MDL + @ // mdl
-				MmMDLComplete
+				otheriop@ // iop
+				IOPacketCompleteLow
 
-				nreq@ req!
+				niop@ otheriop!
+				otheriop@ IOPacketCurrentLocation otheriopl!
 
-				req@ duplex@ CoDuplex_ClientReadListHead + !
+				otheriop@ duplex@ CoDuplex_ClientReadListHead + !
 
-				if (req@)
-					0 req@ CoDuplexRequest_Prev + !
+				if (otheriop@)
+					0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
 
-					req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-					0 header@ CoDuplexBuffer_UserBufferIndex + !
-					req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+					otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+					otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+					otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 				end else
 					0 duplex@ CoDuplex_ClientReadListTail + !
 				end
@@ -2129,8 +2132,8 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 
 			header@ CoDuplexBuffer_RemainingSpace + @ rp!
 
-			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
 			if (rp@)
@@ -2172,7 +2175,7 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 
 				rp@ bytecnt +=
 
-				if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+				if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 					DONE_NORMAL done |=
 				end
 			end
@@ -2183,11 +2186,8 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 				// enqueue the request.
 
 				bytecnt@ // lengthdone
-				buf@ bytecnt@ + // buf
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
 				REQFLAG_WRITE REQFLAG_SERVER | // flags
-				mdl@ // mdl
-				duplex@ // duplex
+				iopl@ // iopl
 				CoDuplexEnqueueRequest
 
 				STATUS_OTHER_CONDITION ok!
@@ -2197,17 +2197,26 @@ fn CoDuplexServerWriteRaw { buf mdl duplex -- ok }
 		end
 
 		if (done@)
-			bytecnt@ mdl@ MmMDLHeader_Length + !
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 		end
 	end
 end
 
-fn CoDuplexClientWrite { buf mdl duplex -- ok }
+fn CoDuplexClientWrite { iopl -- ok }
 	// duplex is locked (which means IPL may be >=IPLDPC).
 	// MDL is pinned.
 
 	// client fcb, writing to the transmit buffer and/or server buffers.
 	// this may pend.
+
+	auto iop
+	iopl@ IOPacketCurrentLocation iop!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
 
 	0 ok!
 
@@ -2221,11 +2230,8 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 		// there's already a pending request, so add ours to the end and return.
 
 		0 // lengthdone
-		buf@ // buf
-		mdl@ MmMDLHeader_Length + @ // length
 		REQFLAG_WRITE // flags
-		mdl@ // mdl
-		duplex@ // duplex
+		iopl@ // iopl
 		CoDuplexEnqueueRequest
 
 		STATUS_OTHER_CONDITION ok!
@@ -2235,7 +2241,7 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 		if (txfunc@)
 			while (1)
-				if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+				if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 					DONE_NORMAL done |=
 					break
 				end
@@ -2265,20 +2271,23 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 		auto rp
 
 		while (done@ ~~)
-			auto req
-			duplex@ CoDuplex_ServerReadListHead + @ req!
+			auto otheriop
+			duplex@ CoDuplex_ServerReadListHead + @ otheriop!
 
-			if (req@ ~~)
+			if (otheriop@ ~~)
 				break
 			end
+
+			auto otheriopl
+			otheriop@ IOPacketCurrentLocation otheriopl!
 
 			// calculate available bytes in buffer.
 
 			header@ CoDuplexBuffer_UserBufferLength + @
 			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
 
-			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
 			auto bufwritten
@@ -2297,7 +2306,7 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 				buf@ bytecnt@ + // src
 				header@ CoDuplexBuffer_UserBufferLength + @
 				header@ CoDuplexBuffer_UserBufferIndex + @ - // maxdest
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - // maxsrc
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxsrc
 				duplex@ // duplex
 				CoDuplexCookedCopyClient rp! bufwritten!
 			end
@@ -2306,40 +2315,40 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 			bufwritten@ bytecnt +=
 
-			if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 				DONE_NORMAL done |=
 			end
 
 			if (header@ CoDuplexBuffer_UserBufferIndex + @
 				header@ CoDuplexBuffer_UserBufferLength + @ ==
-				req@ CoDuplexRequest_Flags + @ REQFLAG_RETURNANY & ||)
+				otheriopl@ IOPacketLocation_Flags + @ REQFLAG_RETURNANY & ||)
 
 				// complete the server MDL.
 
 				header@ CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ +
-				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 				// unlink the server request.
 
-				auto nreq
-				req@ CoDuplexRequest_Next + @ nreq!
+				auto niop
+				otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 				0 // status
 				duplex@ CoDuplex_ServerBoost + @ // priboost
-				req@ CoDuplexRequest_MDL + @ // mdl
-				MmMDLComplete
+				otheriop@ // iop
+				IOPacketCompleteLow
 
-				nreq@ req!
+				niop@ otheriop!
+				otheriop@ IOPacketCurrentLocation otheriopl!
 
-				req@ duplex@ CoDuplex_ServerReadListHead + !
+				otheriop@ duplex@ CoDuplex_ServerReadListHead + !
 
-				if (req@)
-					0 req@ CoDuplexRequest_Prev + !
+				if (otheriop@)
+					0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
 
-					req@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-					0 header@ CoDuplexBuffer_UserBufferIndex + !
-					req@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+					otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+					otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+					otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 				end else
 					0 duplex@ CoDuplex_ServerReadListTail + !
 				end
@@ -2354,16 +2363,13 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 			header@ CoDuplexBuffer_RemainingSpace + @ rp!
 
-			if (mdl@ MmMDLHeader_Length + @ bytecnt@ - rp@ <)
-				mdl@ MmMDLHeader_Length + @ bytecnt@ - rp!
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
 			if (rp@)
 				auto bufsize
 				header@ CoDuplexBuffer_Size + @ bufsize!
-
-				auto bufmask
-				bufsize@ 1 - bufmask!
 
 				auto index
 				header@ CoDuplexBuffer_WriteIndex + @ index!
@@ -2372,10 +2378,10 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 					auto endp
 					index@ rp@ + endp!
 
-					if (index@ bufmask@ ~ & endp@ 1 - bufmask@ ~ & ==)
+					if (index@ bufsize@ 1 - ~ & endp@ 1 - bufsize@ 1 - ~ & ==)
 						// doesn't cross the boundary, do a single copy
 
-						bufp@ index@ bufmask@ & + // dest
+						bufp@ index@ bufsize@ 1 - & + // dest
 						buf@ bytecnt@ + // src
 						rp@ // sz
 						memcpy
@@ -2384,14 +2390,14 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 					end else
 						// crosses the boundary, do two copies
 
-						bufp@ index@ bufmask@ & + // dest
+						bufp@ index@ bufsize@ 1 - & + // dest
 						buf@ bytecnt@ + // src
-						bufsize@ index@ bufmask@ & - // sz
+						bufsize@ index@ bufsize@ 1 - & - // sz
 						memcpy
 
 						bufp@ // dest
-						buf@ bytecnt@ + bufsize@ index@ bufmask@ & - + // src
-						endp@ bufmask@ & // sz
+						buf@ bytecnt@ + bufsize@ index@ bufsize@ 1 - & - + // src
+						endp@ bufsize@ 1 - & // sz
 						memcpy
 
 						rp@ bufwritten!
@@ -2401,27 +2407,27 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 					// still too complicated for me to feel like writing a
 					// comment explaining it.
 
-					if (header@ CoDuplexBuffer_ReadIndex + @ bufmask@ & index@ bufmask@ & <)
-						bufp@ index@ bufmask@ & + // dest
+					if (header@ CoDuplexBuffer_ReadIndex + @ bufsize@ 1 - & index@ bufsize@ 1 - & <)
+						bufp@ index@ bufsize@ 1 - & + // dest
 						buf@ bytecnt@ + // src
-						bufsize@ index@ bufmask@ & - // maxdest
-						mdl@ MmMDLHeader_Length + @ bytecnt@ - // maxsrc
+						bufsize@ index@ bufsize@ 1 - & - // maxdest
+						iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxsrc
 						duplex@ // duplex
 						CoDuplexCookedCopyClient rp! bufwritten!
 
-						if (mdl@ MmMDLHeader_Length + @ bytecnt@ - bufwritten@ ~=)
+						if (iopl@ IOPacketLocation_Length + @ bytecnt@ - bufwritten@ ~=)
 							bufp@ // dest
 							buf@ bytecnt@ + bufwritten@ + // src
-							header@ CoDuplexBuffer_ReadIndex + @ bufmask@ & // maxdest
-							mdl@ MmMDLHeader_Length + @ bytecnt@ - bufwritten@ - // maxsrc
+							header@ CoDuplexBuffer_ReadIndex + @ bufsize@ 1 - & // maxdest
+							iopl@ IOPacketLocation_Length + @ bytecnt@ - bufwritten@ - // maxsrc
 							duplex@ // duplex
 							CoDuplexCookedCopyClient rp += bufwritten +=
 						end
 					end else
-						bufp@ index@ bufmask@ & + // dest
+						bufp@ index@ bufsize@ 1 - & + // dest
 						buf@ bytecnt@ + // src
-						header@ CoDuplexBuffer_ReadIndex + @ bufmask@ & index@ bufmask@ & - // maxdest
-						mdl@ MmMDLHeader_Length + @ bytecnt@ - // maxsrc
+						header@ CoDuplexBuffer_ReadIndex + @ bufsize@ 1 - & index@ bufsize@ 1 - & - // maxdest
+						iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxsrc
 						duplex@ // duplex
 						CoDuplexCookedCopyClient rp! bufwritten!
 					end
@@ -2432,7 +2438,7 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 
 				bufwritten@ bytecnt +=
 
-				if (bytecnt@ mdl@ MmMDLHeader_Length + @ ==)
+				if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
 					DONE_NORMAL done |=
 				end
 			end
@@ -2442,61 +2448,80 @@ fn CoDuplexClientWrite { buf mdl duplex -- ok }
 			// enqueue the request.
 
 			bytecnt@ // lengthdone
-			buf@ bytecnt@ + // buf
-			mdl@ MmMDLHeader_Length + @ bytecnt@ - // length
 			REQFLAG_WRITE // flags
-			mdl@ // mdl
-			duplex@ // duplex
+			iopl@ // iopl
 			CoDuplexEnqueueRequest
 
 			STATUS_OTHER_CONDITION ok!
 		end else
-			bytecnt@ mdl@ MmMDLHeader_Length + !
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 		end
 	end
 end
 
-fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) CoDuplexRead { iopl -- done ok }
 	0 ok!
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
 	auto duplex
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
 
-	if (mdl@ MmMDLHeader_Length + @ ~~)
+	duplex@ iopl@ IOPacketLocation_Context + !
+
+	if (iopl@ IOPacketLocation_Length + @ ~~)
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
 	auto isserver
-	fcb@ IOFileControlBlockGetContext isserver!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetContext isserver!
 
 	if (isserver@)
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
 			STATUS_FORBIDDEN_OPERATION ok!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 	end
 
-	1 // lockforwrite
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	0 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	auto buf
 	mdl@ MmMDLMap ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
-
-	mdl@ MmMDLHeader_MappedAddress + @ buf!
 
 	auto ipl
 	duplex@ // duplex
@@ -2504,23 +2529,18 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 	CoDuplexLock ok! ipl!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	if (isserver@)
-		flags@ // flags
-		buf@ // buf
-		timeout@ // timeout
-		mdl@ // mdl
-		duplex@ // duplex
-		CoDuplexServerRead ok!
+		iopl@ CoDuplexServerRead ok!
 	end else
-		flags@ // flags
-		buf@ // buf
-		timeout@ // timeout
-		mdl@ // mdl
-		duplex@ // duplex
-		CoDuplexClientRead ok!
+		iopl@ CoDuplexClientRead ok!
 	end
 
 	ipl@ duplex@ CoDuplexUnlock
@@ -2528,62 +2548,82 @@ fn (IODispatchReadFunction) CoDuplexRead { timeout flags kflags offset mdl fcb -
 	if (ok@ ~~)
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 	end elseif (ok@ STATUS_OTHER_CONDITION ==)
 		// this means the request was enqueued successfully, so report success
 		0 ok!
-	end elseif (ok@ STATUS_RING_EMPTY ==)
-		0 // status
+	end else
+		ok@ // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-
-		0 ok!
+		iop@ // iop
+		IOPacketCompleteLow
 	end
 end
 
-fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) CoDuplexWrite { iopl -- done ok }
 	0 ok!
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
 	auto duplex
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject IODeviceGetExtension duplex!
 
-	if (mdl@ MmMDLHeader_Length + @ ~~)
+	duplex@ iopl@ IOPacketLocation_Context + !
+
+	if (iopl@ IOPacketLocation_Length + @ ~~)
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
 	auto isserver
-	fcb@ IOFileControlBlockGetContext isserver!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetContext isserver!
 
 	if (isserver@ ~~)
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
 			STATUS_FORBIDDEN_OPERATION ok!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
 
 	0 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	auto buf
 	mdl@ MmMDLMap ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
-
-	mdl@ MmMDLHeader_MappedAddress + @ buf!
 
 	auto ipl
 	duplex@ // duplex
@@ -2591,6 +2631,11 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 	CoDuplexLock ok! ipl!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
@@ -2600,8 +2645,8 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 
 			0 // status
 			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
+			iop@ // iop
+			IOPacketCompleteLow
 
 			0 ok!
 
@@ -2609,15 +2654,9 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 		end
 
 		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
-			buf@ // buf
-			mdl@ // mdl
-			duplex@ // duplex
-			CoDuplexServerWriteRaw ok!
+			iopl@ CoDuplexServerWriteRaw ok!
 		end else
-			buf@ // buf
-			mdl@ // mdl
-			duplex@ // duplex
-			CoDuplexServerWriteCooked ok!
+			iopl@ CoDuplexServerWriteCooked ok!
 		end
 	end else
 		if (duplex@ CoDuplex_Disconnected + @)
@@ -2625,13 +2664,15 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 
 			STATUS_CONSOLE_HUNG_UP ok!
 
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 
-		buf@ // buf
-		mdl@ // mdl
-		duplex@ // duplex
-		CoDuplexClientWrite ok!
+		iopl@ CoDuplexClientWrite ok!
 	end
 
 	ipl@ duplex@ CoDuplexUnlock
@@ -2639,41 +2680,39 @@ fn (IODispatchWriteFunction) CoDuplexWrite { flags kflags offset mdl fcb -- ok }
 	if (ok@ ~~)
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 	end elseif (ok@ STATUS_OTHER_CONDITION ==)
 		// this means the request was enqueued successfully, so report success
 		0 ok!
-	end elseif (ok@ STATUS_RING_FULL ==)
-		0 // status
+	end else
+		ok@ // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-
-		0 ok!
+		iop@ // iop
+		IOPacketCompleteLow
 	end
 end
 
-fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
-	auto ior
-	mdl@ MmMDLHeader_DriverGoWild + ior!
+fn (IODispatchCancelFunction) CoDuplexCancel { iop -- }
+	auto iopl
+	iop@ IOPacketCurrentLocation iopl!
 
 	auto duplex
-	ior@ CoDuplexRequest_Duplex + @ duplex!
+	iopl@ IOPacketLocation_Context + @ duplex!
 
 	auto ipl
 	duplex@ // duplex
 	0 // alertable
 	CoDuplexLock drop ipl!
 
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_COMPLETE &)
 		// already completed, nothing to do
 		ipl@ duplex@ CoDuplexUnlock
 		return
 	end
 
 	auto flags
-	ior@ CoDuplexRequest_Flags + @ flags!
+	iopl@ IOPacketLocation_Flags + @ flags!
 
 	auto header
 	0 header!
@@ -2681,33 +2720,33 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 	auto ls
 	auto ns
 
-	ior@ CoDuplexRequest_Prev + @ ls!
-	ior@ CoDuplexRequest_Next + @ ns!
+	iop@ IOPacketHeader_DeviceQueuePrev + @ ls!
+	iop@ IOPacketHeader_DeviceQueueNext + @ ns!
 
 	if (flags@ REQFLAG_SERVER &)
 		if (flags@ REQFLAG_WRITE &)
 			if (ls@)
-				ns@ ls@ CoDuplexRequest_Next + !
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
 			end else
 				ns@ duplex@ CoDuplex_ServerWriteListHead + !
 				duplex@ CoDuplex_ReceiveBuffer + header!
 			end
 
 			if (ns@)
-				ls@ ns@ CoDuplexRequest_Prev + !
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
 			end else
 				ls@ duplex@ CoDuplex_ServerWriteListTail + !
 			end
 		end else
 			if (ls@)
-				ns@ ls@ CoDuplexRequest_Next + !
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
 			end else
 				ns@ duplex@ CoDuplex_ServerReadListHead + !
 				duplex@ CoDuplex_TransmitBuffer + header!
 			end
 
 			if (ns@)
-				ls@ ns@ CoDuplexRequest_Prev + !
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
 			end else
 				ls@ duplex@ CoDuplex_ServerReadListTail + !
 			end
@@ -2715,27 +2754,27 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 	end else
 		if (flags@ REQFLAG_WRITE &)
 			if (ls@)
-				ns@ ls@ CoDuplexRequest_Next + !
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
 			end else
 				ns@ duplex@ CoDuplex_ClientWriteListHead + !
 				duplex@ CoDuplex_TransmitBuffer + header!
 			end
 
 			if (ns@)
-				ls@ ns@ CoDuplexRequest_Prev + !
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
 			end else
 				ls@ duplex@ CoDuplex_ClientWriteListTail + !
 			end
 		end else
 			if (ls@)
-				ns@ ls@ CoDuplexRequest_Next + !
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
 			end else
 				ns@ duplex@ CoDuplex_ClientReadListHead + !
 				duplex@ CoDuplex_ReceiveBuffer + header!
 			end
 
 			if (ns@)
-				ls@ ns@ CoDuplexRequest_Prev + !
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
 			end else
 				ls@ duplex@ CoDuplex_ClientReadListTail + !
 			end
@@ -2743,17 +2782,20 @@ fn (IODispatchCancelFunction) CoDuplexCancel { mdl -- }
 	end
 
 	if (header@ ns@ &&)
-		ns@ CoDuplexRequest_Buffer + @ header@ CoDuplexBuffer_UserBuffer + !
-		0 header@ CoDuplexBuffer_UserBufferIndex + !
-		ns@ CoDuplexRequest_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+		auto nsiopl
+		ns@ IOPacketCurrentLocation nsiopl!
+
+		nsiopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+		nsiopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+		nsiopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
 	end
 
 	ipl@ duplex@ CoDuplexUnlock
 
 	STATUS_IO_CANCELLED // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	iop@ // iop
+	IOPacketCompleteLow
 end
 
 fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
@@ -2774,8 +2816,9 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 	deviceobject@ IODeviceGetExtension duplex!
 
 	auto ipl
-	auto req
-	auto nreq
+	auto iop
+	auto niop
+	auto iopl
 
 	if (fcb@ IOFileControlBlockGetContext)
 		// server fcb! mark duplex headless and satisfy any pending requests.
@@ -2786,38 +2829,37 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 
 		1 duplex@ CoDuplex_Disconnected + !
 
-		duplex@ CoDuplex_ClientWriteListHead + @ req!
+		duplex@ CoDuplex_ClientWriteListHead + @ iop!
 
-		while (req@)
-			req@ CoDuplexRequest_Next + @ nreq!
+		while (iop@)
+			iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 			STATUS_CONSOLE_HUNG_UP // status
 			0 // priboost
-			req@ CoDuplexRequest_MDL + @ // mdl
-			MmMDLComplete
+			iop@ // iop
+			IOPacketCompleteLow
 
-			nreq@ req!
+			niop@ iop!
 		end
 
-		duplex@ CoDuplex_ClientReadListHead + @ req!
+		duplex@ CoDuplex_ClientReadListHead + @ iop!
 
-		while (req@)
-			if (req@ duplex@ CoDuplex_ClientReadListHead + @ ==)
+		while (iop@)
+			if (iop@ duplex@ CoDuplex_ClientReadListHead + @ ==)
 				duplex@ CoDuplex_ReceiveBuffer + CoDuplexBuffer_UserBufferIndex + @
-				req@ CoDuplexRequest_LengthDone + @ +
-				req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 			end else
-				0 req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+				0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 			end
 
-			req@ CoDuplexRequest_Next + @ nreq!
+			iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 			0 // status
 			duplex@ CoDuplex_ClientBoost + @ // priboost
-			req@ CoDuplexRequest_MDL + @ // mdl
-			MmMDLComplete
+			iop@ // iop
+			IOPacketCompleteLow
 
-			nreq@ req!
+			niop@ iop!
 		end
 
 		0 duplex@ CoDuplex_ClientReadListHead + !
@@ -2844,25 +2886,24 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 
 			1 duplex@ CoDuplex_Disconnected + !
 
-			duplex@ CoDuplex_ServerWriteListHead + @ req!
+			duplex@ CoDuplex_ServerWriteListHead + @ iop!
 
-			while (req@)
-				if (req@ duplex@ CoDuplex_ServerWriteListHead + @ ==)
+			while (iop@)
+				if (iop@ duplex@ CoDuplex_ServerWriteListHead + @ ==)
 					duplex@ CoDuplex_ReceiveBuffer + CoDuplexBuffer_UserBufferIndex + @
-					req@ CoDuplexRequest_LengthDone + @ +
-					req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+					iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 				end else
-					0 req@ CoDuplexRequest_MDL + @ MmMDLHeader_Length + !
+					0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 				end
 
-				req@ CoDuplexRequest_Next + @ nreq!
+				iop@ IOPacketHeader_DeviceQueueNext + @ niop!
 
 				0 // status
 				duplex@ CoDuplex_ServerBoost + @ // priboost
-				req@ CoDuplexRequest_MDL + @ // mdl
-				MmMDLComplete
+				iop@ // mdl
+				IOPacketCompleteLow
 
-				nreq@ req!
+				niop@ iop!
 			end
 
 			0 duplex@ CoDuplex_ServerWriteListHead + !

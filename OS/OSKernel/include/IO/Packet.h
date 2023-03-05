@@ -17,7 +17,7 @@ const IOPFLAG_COMPLETE 32 // the IOP has been completed
 
 struct IOPacketHeader // IOPH
 	// indicates the current stack location in the iterative enqueuing
-	// process. undefined after enqueue time.
+	// process. after enqueue time, it will be the final stack location.
 
 	1 CurrentStackIndexB
 
@@ -56,7 +56,11 @@ struct IOPacketHeader // IOPH
 
 	// status block that will be copied out upon completion.
 
-	12 StatusBlock
+	8 StatusBlock
+
+	// timeout (if any)
+
+	4 Timeout
 
 	// if quota is charged for this packet, it is charged to this quotablock.
 
@@ -180,6 +184,7 @@ struct IOPacketLocation // IOPL
 endstruct
 
 extern IOPacketFree { iop -- }
+extern IOPacketAllocateForFile { mode type kflags fcb iopflags -- ioplzero iop ok }
 extern IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 extern IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzero }
 
@@ -187,7 +192,17 @@ extern IOPacketIndex { index iop -- iopl }
 extern IOPacketFromLocation { iopl -- iop }
 extern IOPacketLocationNext { iopl -- nextiopl }
 
+extern IOPacketLocationMappedBuffer { iopl -- vaddr }
+extern IOPacketLocationVirtualBuffer { iopl -- vaddr }
+
+extern IOPacketCurrentLocation { iop -- iopl }
+
 extern IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok }
 extern IOPacketAllocateAssocStack { kflags iopflags iopl -- ioplzero associop ok }
 
 extern IOPacketAssociate { associop iop -- }
+
+extern IOPacketEnqueue { iop -- ok }
+
+extern IOPacketCompleteLow { status priboost iop -- }
+extern IOPacketComplete { status priboost iop -- }

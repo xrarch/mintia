@@ -31,7 +31,7 @@ extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 
 extern MmMPWAnonTransferInitialize { pagefile transfer -- }
-extern MmMPWAnonPageWriteMDLComplete { mdl -- }
+extern MmAnonPageWriterAPCRoutine { normalfunc context1 context2 apc -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }
 

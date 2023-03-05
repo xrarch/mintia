@@ -1,8 +1,6 @@
 fnptr IODispatchOpenFunction { access fileobject -- ok }
 fnptr IODispatchCloseFunction { access fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg2 arg1 access fcb lastmode -- ret ok }
-fnptr IODispatchReadFunction { timeout flags kflags offset mdl fcb -- ok }
-fnptr IODispatchWriteFunction { flags kflags offset mdl fcb -- ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
@@ -15,7 +13,7 @@ fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
-fnptr IODispatchCancelFunction { mdl -- }
+fnptr IODispatchCancelFunction { iop -- }
 
 fnptr IODispatchEnqueueIOPFunction { iopl -- done ok }
 

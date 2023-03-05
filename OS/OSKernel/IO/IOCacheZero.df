@@ -88,9 +88,6 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 
 	// initialize all the MDL page frames to point to the zero page.
 
-	auto event
-	KeEvent_SIZEOF alloc event!
-
 	auto pagecount
 	IOCLUSTERMAX PAGESHIFT >> pagecount!
 
@@ -121,51 +118,23 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 			break
 		end
 
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IOCacheZeroEvent" // name
-		event@ // event
-		KeEventInitialize
-
-		KERNELMODE // mode
 		IOCLUSTERMAX // length
 		offset@ PAGEOFFSETMASK & // vaddr
+		IOKFLAG_URGENT // kflags
 		mdl@ // mdl
 		MmMDLInitialize
 
 		MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
-		event@ mdl@ MmMDLHeader_Event + !
 
+		0 // iop
+		0 // completionroutine
+		IODISPATCH_WRITE // functioncode
 		0 // flags
 		IOKFLAG_URGENT // kflags
-		offset@ // offset
 		mdl@ // mdl
+		offset@ // offset
 		fcb@ // fcb
-		writefunc@ IODispatchWriteFunction ok!
-
-		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
-
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end
-
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
-			0 // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
-			event@ // object
-			KeThreadWaitForObject drop
-		end
-
-		if (ok@)
-			0 size!
-			break
-		end
-
-		mdl@ MmMDLHeader_Status + @ ok!
+		IOMDLTransfer ok! drop
 
 		if (ok@)
 			0 size!
@@ -177,39 +146,23 @@ fn IOCacheZeroDirectIO { size offset fcb -- ok }
 	end
 
 	if (size@)
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IOCacheZeroEvent" // name
-		event@ // event
-		KeEventInitialize
-
-		KERNELMODE // mode
 		size@ // length
 		offset@ PAGEOFFSETMASK & // vaddr
+		IOKFLAG_URGENT // kflags
 		mdl@ // mdl
 		MmMDLInitialize
 
 		MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
-		event@ mdl@ MmMDLHeader_Event + !
 
+		0 // iop
+		0 // completionroutine
+		IODISPATCH_WRITE // functioncode
 		0 // flags
 		IOKFLAG_URGENT // kflags
-		offset@ // offset
 		mdl@ // mdl
+		offset@ // offset
 		fcb@ // fcb
-		writefunc@ IODispatchWriteFunction ok!
-
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
-			0 // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
-			event@ // object
-			KeThreadWaitForObject drop
-		end
-
-		if (ok@ ~~)
-			mdl@ MmMDLHeader_Status + @ ok!
-		end
+		IOMDLTransfer ok! drop
 	end
 
 	KeThreadCurrent@ KeThreadAcceptKill drop

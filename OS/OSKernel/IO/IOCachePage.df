@@ -388,30 +388,13 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 
 	-1 mdlpos@!
 
-	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length
 	0 // vaddr
+	kflags@ // kflags
 	mdl@ // mdl
 	MmMDLInitialize
 
-	if (transfer@ ~~)
-		auto event
-		KeEvent_SIZEOF alloc event!
-
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IOCachePageWriteEvent" // name
-		event@ // event
-		KeEventInitialize
-
-		event@ mdl@ MmMDLHeader_Event + !
-	end else
-		pointerof IOiCachePageMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
-	end
-
 	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
-
-	transfer@ mdl@ MmMDLHeader_Context + !
 
 	if (transfer@)
 		IPLDPC KeIPLRaise drop
@@ -424,39 +407,21 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
+	0 // iop
+	0 // completionroutine
+	IODISPATCH_WRITE // functioncode
 	0 // flags
 	kflags@ // kflags
-	startoffset@ // offset
 	mdl@ // mdl
+	startoffset@ // offset
 	fcb@ // fcb
-	writefunc@ IODispatchWriteFunction ok!
-
-	if (ok@)
-		// complete the MDL so we can wait for any fragments to finish
-
-		ok@ // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end
-
-	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-		KERNELMODE // waitmode
-		0 // alertable
-		OSWAIT_TIMEOUTINFINITE // timeout
-		event@ // object
-		KeThreadWaitForObject drop
-	end
-
-	if (ok@ ~~)
-		mdl@ MmMDLHeader_Status + @ ok!
-	end
+	IOMDLTransfer ok! drop
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 
-	IPLAPC KeIPLRaise drop
-
-	mdl@ IOiCachePageMDLComplete
+	ok@ // status
+	mdl@ // mdl
+	IOiCachePageMDLCleanup
 
 	IPLDPC KeIPLRaise drop
 end
@@ -540,15 +505,6 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 
 		// perform the read operation
 
-		auto event
-		KeEvent_SIZEOF alloc event!
-
-		0 // signaled
-		OSEVENT_NOTIF // type
-		"IOCachePageReadEvent" // name
-		event@ // event
-		KeEventInitialize
-
 		auto mdl
 		MmMDLHeader_SIZEOF IOREADCLUSTERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
 
@@ -558,50 +514,30 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 		mdl@ // mdl
 		IOiCachePageReadCluster pagecount!
 
-		KERNELMODE // mode
 		pagecount@ PAGESHIFT << // length
 		0 // vaddr
+		kflags@ IOKFLAG_PAGEIN | // kflags
 		mdl@ // mdl
 		MmMDLInitialize
 
 		MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
 
-		event@ mdl@ MmMDLHeader_Event + !
-
-		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // iop
+		0 // completionroutine
+		IODISPATCH_READ // functioncode
 		flags@ // flags
 		kflags@ IOKFLAG_PAGEIN | // kflags
-		mdl@ MmMDLHeader_SIZEOF + @ IOiPageFrameEntryCache_OffsetInFile + @ // offset
 		mdl@ // mdl
+		mdl@ MmMDLHeader_SIZEOF + @ IOiPageFrameEntryCache_OffsetInFile + @ // offset
 		fcb@ // fcb
-		readfunc@ IODispatchReadFunction ok!
-
-		if (ok@)
-			// complete the MDL so we can wait for any fragments to finish
-
-			ok@ // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end
-
-		if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-			KERNELMODE // waitmode
-			0 // alertable
-			OSWAIT_TIMEOUTINFINITE // timeout
-			event@ // object
-			KeThreadWaitForObject drop
-		end
-
-		if (ok@ ~~)
-			mdl@ MmMDLHeader_Status + @ ok!
-		end
+		IOMDLTransfer ok! drop
 
 		process@ MmVADListLock drop
 
 		IPLDPC KeIPLRaise ipl!
 
 		if (pagecount@ 1 >)
+			ok@ // status
 			pfdbe@ // firstpfdbe
 			mdl@ // mdl
 			IOiCachePageReadClusterComplete
@@ -690,10 +626,7 @@ fn IOCachePageModified { pfdbe -- }
 	ipl@ KeIPLLower
 end
 
-fn (MmMDLCompleteRoutine) IOiCachePageMDLComplete { mdl -- }
-	auto status
-	mdl@ MmMDLHeader_Status + @ status!
-
+fn IOiCachePageMDLCleanup { status mdl -- }
 	if (status@)
 		// TODO pop-up window or something
 		status@ "IO error while writing unsaved data (%i)\n" Printf
@@ -703,7 +636,7 @@ fn (MmMDLCompleteRoutine) IOiCachePageMDLComplete { mdl -- }
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	auto pagecount
-	mdl@ MmMDLHeader_Pages + @ pagecount!
+	mdl@ MmMDLHeader_Length + @ PAGESHIFT >> pagecount!
 
 	auto ipl
 
@@ -727,14 +660,28 @@ fn (MmMDLCompleteRoutine) IOiCachePageMDLComplete { mdl -- }
 		1 pagecount -=
 		4 mdlpos +=
 	end
+end
 
-	if (mdl@ MmMDLHeader_Context + @)
-		// this requires no synchronization as the transfer structures are
-		// only accessed by the modified page writer, which is currently
-		// executing this routine.
-	
-		mdl@ MmMDLHeader_Context + @ IOTransferComplete
-	end
+fn (KeAPCFunctionSpecial) IOiFilePageWriterAPCRoutine { normalfunc context1 context2 apc -- }
+	auto iop
+	context1@@ iop!
+
+	auto status
+	iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ status!
+
+	status@ // status
+	iop@ IOPacketHeader_MDL + @ // mdl
+	IOiCachePageMDLCleanup
+
+	// this requires no synchronization as the transfer structures are
+	// only accessed by the modified page writer, which is currently
+	// executing this routine.
+
+	iop@ IOPacketHeader_MDL + @ IOTransferComplete
+
+	// the I/O system won't free the IOP for us, so do it now.
+
+	iop@ IOPacketFree
 end
 
 fn IOiCachePageReadCluster { firstpfdbe fcb mdl -- pagecount }
@@ -835,21 +782,18 @@ fn IOiCachePageReadCluster { firstpfdbe fcb mdl -- pagecount }
 	ipl@ KeIPLLower
 end
 
-fn IOiCachePageReadClusterComplete { firstpfdbe mdl -- }
+fn IOiCachePageReadClusterComplete { status firstpfdbe mdl -- }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"IOiCachePageReadClusterComplete: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
-	auto status
-	mdl@ MmMDLHeader_Status + @ status!
-
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
 	auto pagecount
-	mdl@ MmMDLHeader_Pages + @ pagecount!
+	mdl@ MmMDLHeader_Length + @ PAGESHIFT >> pagecount!
 
 	while (pagecount@)
 		auto pfdbe
@@ -880,23 +824,13 @@ fn IOFilePageWriterDispatch { transfer -- }
 	auto fcb
 	firstpfdbe@ IOiPageFrameEntryCache_FCB + @ fcb!
 
-	auto writefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
-
-	// dispatch the clustered write to the page's backing store.
-
-	auto ok
+	0 // iop
+	pointerof IOiFilePageWriterAPCRoutine // completionroutine
+	IODISPATCH_WRITE // functioncode
 	0 // flags
 	IOKFLAG_SWAPOUT // kflags
-	firstpfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ // offset
 	transfer@ // mdl
+	firstpfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ // offset
 	fcb@ // fcb
-	writefunc@ IODispatchWriteFunction ok!
-
-	if (ok@)
-		ok@ // status
-		0 // priboost
-		transfer@ // mdl
-		MmMDLComplete
-	end
+	IOMDLTransfer drop drop
 end

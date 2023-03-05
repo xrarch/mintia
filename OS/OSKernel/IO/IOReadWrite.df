@@ -234,39 +234,26 @@ fn IOFileAccessPoke { write fileobject -- }
 	end
 end
 
-fn IOFileAccessValidate { length buffer fileobject write -- fcb lastmode ok }
+fn IOFileAccessValidate { length buffer fileobject write -- fcb ok }
 	fnsection "PAGE$text"
 
 	0 ok!
 
-	if (KeProcessCurrent PsSystemProcess@ ==)
-		// no process provided to read into. therefore, we must be reading
-		// directly into system space.
+	// do these checks first to make sure no overflow
+	if (buffer@ MMHIGHESTUSERADDRESS >)
+		STATUS_FAULT ok!
 
-		if (buffer@ MMLOWESTSYSTEMADDRESS <)
-			"IOFileAccessValidate: buffer was not in system space\n" KeCrash
-		end
+		return
+	end elseif (length@ MMHIGHESTUSERADDRESS >)
+		STATUS_FAULT ok!
 
-		KERNELMODE lastmode!
-	end else
-		// do these checks first to make sure no overflow
-		if (buffer@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
+		return
+	end
 
-			return
-		end elseif (length@ MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
+	if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
+		STATUS_FAULT ok!
 
-			return
-		end
-
-		if (buffer@ length@ + MMHIGHESTUSERADDRESS >)
-			STATUS_FAULT ok!
-
-			return
-		end
-
-		USERMODE lastmode!
+		return
 	end
 
 	fileobject@ IOFile_FileControlBlock + @ fcb!
@@ -339,7 +326,7 @@ fn IOFileRead { timeout flags length buffer filehandle -- bytesread ok }
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	0 // write
+	IODISPATCH_READ // functioncode
 	IOFileReadWriteObject ok! bytesread!
 
 	fileobject@ ObObjectDereferenceByPointer drop
@@ -377,23 +364,21 @@ fn IOFileWrite { flags length buffer filehandle -- byteswritten ok }
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	1 // write
+	IODISPATCH_WRITE // write
 	IOFileReadWriteObject ok! byteswritten!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes ok }
+fn IOFileReadWriteObject { timeout flags length buffer fileobject functioncode -- bytes ok }
 	fnsection "PAGE$text"
 
-	auto lastmode
 	auto fcb
-
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	write@ // write
-	IOFileAccessValidate ok! lastmode! fcb!
+	functioncode@ IODISPATCH_WRITE == // write
+	IOFileAccessValidate ok! fcb!
 
 	if (ok@)
 		return
@@ -418,14 +403,11 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes
 
 		timeout@ // timeout
 		flags@ // flags
-		0 // kflags
 		length@ // length
 		fileobject@ IOFile_Offset + @ // offset
 		buffer@ // buffer
-		0 // portobject
 		fileobject@ // fileobject
-		lastmode@ // lastmode
-		write@ // write
+		functioncode@ // functioncode
 		IOReadWrite ok! bytes!
 
 		bytes@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
@@ -459,27 +441,24 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes
 
 		timeout@ // timeout
 		flags@ // flags
-		0 // kflags
 		length@ // length
 		fileobject@ IOFile_Offset + @ // offset
 		buffer@ // buffer
-		0 // portobject
 		fileobject@ // fileobject
-		lastmode@ // lastmode
-		write@ // write
+		functioncode@ // functioncode
 		IOReadWrite ok! bytes!
 
 		fcb@ IOFileControlBlockUnlock
 	end else
 		// caching -- call into cache function.
 
-		if (write@)
+		if (functioncode@ IODISPATCH_WRITE ==)
 			flags@ // flags
 			length@ // length
 			fileobject@ IOFile_Offset + @ // offset
 			buffer@ // buffer
 			fcb@ // fcb
-			lastmode@ // lastmode
+			USERMODE // lastmode
 			VcFileWrite ok! bytes!
 
 			// IOCacheFileWrite is responsible for unlocking the FCB now.
@@ -490,7 +469,7 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes
 			fileobject@ IOFile_Offset + @ // offset
 			buffer@ // buffer
 			fcb@ // fcb
-			lastmode@ // lastmode
+			USERMODE // lastmode
 			VcFileRead ok! bytes!
 
 			fcb@ IOFileControlBlockUnlock
@@ -499,7 +478,7 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject write -- bytes
 
 	bytes@ fileobject@ IOFile_Offset + KeInterlockedIncrement drop
 
-	write@ // write
+	functioncode@ IODISPATCH_WRITE == // write
 	fileobject@ // fileobject
 	IOFileAccessPoke
 end
@@ -591,14 +570,14 @@ fn IOFileWriteAsync { context porthandle flags offset length buffer filehandle -
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	1 // write
+	IODISPATCH_WRITE // functioncode
 	IOFileReadWriteAsyncObject ok!
 
 	portobject@ ObObjectDereferenceByPointer drop
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fileobject write -- ok }
+fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fileobject functioncode -- ok }
 	fnsection "PAGE$text"
 
 	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_NOCACHE & ~~)
@@ -611,14 +590,12 @@ fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fi
 
 	OSACCESSFLAG_ASYNC flags |=
 
-	auto lastmode
 	auto fcb
-
 	length@ // length
 	buffer@ // buffer
 	fileobject@ // fileobject
-	write@ // write
-	IOFileAccessValidate ok! lastmode! fcb!
+	functioncode@ IODISPATCH_WRITE == // write
+	IOFileAccessValidate ok! fcb!
 
 	if (ok@)
 		return
@@ -634,17 +611,15 @@ fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fi
 
 	// FCB is kept locked shared for the duration of the IO.
 
-	context@ // timeout
+	context@ // context
 	flags@ // flags
-	0 // kflags
 	length@ // length
 	offset@ // offset
 	buffer@ // buffer
 	portobject@ // portobject
 	fileobject@ // fileobject
-	lastmode@ // lastmode
-	write@ // write
-	IOReadWrite ok! drop
+	functioncode@ // functioncode
+	IOReadWriteAsync ok!
 
 	if (fcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ~=)
 		fcb@ IOFileControlBlockUnlock
@@ -654,7 +629,7 @@ fn IOFileReadWriteAsyncObject { context portobject flags offset length buffer fi
 		return
 	end
 
-	write@ // write
+	functioncode@ IODISPATCH_WRITE == // write
 	fileobject@ // fileobject
 	IOFileAccessPoke
 end

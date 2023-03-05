@@ -277,12 +277,15 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
+	auto stacksize
+	fcb@ IOFileControlBlock_StackDepth + @ stacksize!
+
 	// do an inline allocation of the pagefile, two transfer structures, and
 	// the bitmap.
 
 	auto pagefile
 	IOiPageFile_SIZEOF
-	IOTransfer_SIZEOF 2 * +
+	IOTransfer_SIZEOF IOPacketHeaderPagingIO_SIZEOF + 2 * + stacksize@ IOPacketLocation_SIZEOF * 2 * +
 	maxpages@ 7 + 3 >> + // bytes
 	'SwFi' // tag
 	CANBLOCK // flags
@@ -304,14 +307,14 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	MmMPWAnonTransferInitialize
 
 	auto transfer2
-	transfer1@ IOTransfer_SIZEOF + transfer2!
+	transfer1@ IOTransfer_SIZEOF + IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + transfer2!
 
 	pagefile@ // pagefile
 	transfer2@ // transfer
 	MmMPWAnonTransferInitialize
 
 	auto bitmap
-	transfer2@ IOTransfer_SIZEOF + bitmap!
+	transfer2@ IOTransfer_SIZEOF + IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + bitmap!
 
 	// initialize the bitmap
 	maxpages@ // sizeinbits
@@ -518,61 +521,29 @@ fn IOSwapPageReadPTE { kflags pfdbe pte -- ok }
 
 	// perform the read operation
 
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_NOTIF // type
-	"IOSwapPageReadEvent" // name
-	event@ // event
-	KeEventInitialize
-
 	auto mdl
 	MmMDLHeader_SIZEOF 4 2 * + alloc mdl!
 
 	pfdbe@ mdl@ MmMDLHeader_SIZEOF + !
 	-1 mdl@ MmMDLHeader_SIZEOF + 4 + !
 
-	KERNELMODE // mode
 	PAGESIZE // length
 	0 // vaddr
+	kflags@ // kflags
 	mdl@ // mdl
 	MmMDLInitialize
 
 	MMMDL_PINNED MMMDL_DONTUNPIN | mdl@ MmMDLHeader_Flags + !
 
-	event@ mdl@ MmMDLHeader_Event + !
-
-	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // iop
+	0 // completionroutine
+	IODISPATCH_READ // functioncode
 	0 // flags
 	kflags@ // kflags
-	pte@ PAGENUMBERMASK & // offset
 	mdl@ // mdl
+	pte@ PAGENUMBERMASK & // offset
 	fcb@ // fcb
-	readfunc@ IODispatchReadFunction ok!
-
-	if (ok@)
-		// complete the MDL so we can wait for any fragments to finish
-
-		ok@ // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end
-
-	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-		KERNELMODE // waitmode
-		0 // alertable
-		OSWAIT_TIMEOUTINFINITE // timeout
-		event@ // object
-		KeThreadWaitForObject drop
-	end
-
-	if (ok@)
-		return
-	end
-
-	mdl@ MmMDLHeader_Status + @ ok!
+	IOMDLTransfer ok! drop
 
 	if (ok@)
 		return
@@ -586,15 +557,15 @@ fn IOSwapPageReadPTE { kflags pfdbe pte -- ok }
 end
 
 fn IOPageFileWriteMDL { pagecount offset mdl -- ok }
-	KERNELMODE // mode
 	pagecount@ PAGESHIFT << // length
 	0 // vaddr
+	IOKFLAG_SWAPOUT // kflags
 	mdl@ // mdl
 	MmMDLInitialize
 
 	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
-	pointerof MmMPWAnonPageWriteMDLComplete mdl@ MmMDLHeader_CompleteRoutine + !
-	offset@ mdl@ MmMDLHeader_Context + !
+
+	offset@ mdl@ IOTransfer_Prev + !
 
 	auto pagefile
 	mdl@ IOTransfer_PageFile + @ pagefile!
@@ -602,22 +573,17 @@ fn IOPageFileWriteMDL { pagecount offset mdl -- ok }
 	auto fcb
 	pagefile@ IOiPageFile_CapturedFCB + @ fcb!
 
-	auto writefunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Write + @ writefunc!
-
+	mdl@ IOTransfer_SIZEOF + // iop
+	pointerof MmAnonPageWriterAPCRoutine // completionroutine
+	IODISPATCH_WRITE // functioncode
 	0 // flags
 	IOKFLAG_SWAPOUT // kflags
-	offset@ PAGESHIFT << // offset
 	mdl@ // mdl
+	offset@ PAGESHIFT << // offset
 	fcb@ // fcb
-	writefunc@ IODispatchWriteFunction ok!
+	IOMDLTransfer ok! drop
 
 	if (ok@)
-		ok@ // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-
 		return
 	end
 

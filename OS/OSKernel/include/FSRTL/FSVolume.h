@@ -5,9 +5,6 @@ extern FSVolumeFlush { mount -- ok }
 
 extern FSVolumeFileCreate { size mount -- ok }
 
-extern FSVolumeRead { length offset buf lastmode mount -- bytesread ok }
-extern FSVolumeWrite { length offset buf lastmode mount -- byteswritten ok }
-
 extern FSVolumeGetFCBByMount { mount -- volfcb }
 extern FSVolumeGetFCB { fcb -- volfcb }
 

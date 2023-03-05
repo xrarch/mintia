@@ -1463,8 +1463,9 @@ fn CoVideoConsoleUpdate { -- }
 end
 
 buffer CoVideoConsoleMDL (MmMDLHeader_SIZEOF 4 + 4 +)
+buffer CoVideoConsoleIOP (IOPacketHeader_SIZEOF IOPacketLocation_SIZEOF +)
 
-buffer CoVideoConsoleMDLEvent KeEvent_SIZEOF
+buffer CoVideoConsoleReadEvent KeEvent_SIZEOF
 
 buffer CoVideoConsoleWaitBlocks (KeDispatchWaitBlock_SIZEOF 3 *)
 
@@ -1533,6 +1534,48 @@ fn (KeAPCFunctionSpecial) CoVideoConsoleAPCRoutine { normalfunc context1 context
 	end
 end
 
+fn CoVideoConsoleDoRead { -- }
+	fnsection "PAGE$text"
+
+	auto fcb
+	CoVideoConsoleServerFile@ IOFile_FileControlBlock + @ fcb!
+
+	auto iop
+	CoVideoConsoleIOP iop!
+
+	auto iopl
+	0 // quotablock
+	IOPTYPE_NORMAL // type
+	0 // kflags
+	1 // stacksize
+	0 // iopflags
+	iop@ // iop
+	IOPacketInitialize iopl!
+
+	CoVideoConsoleReadEvent iop@ IOPacketHeader_Event + !
+	CoVideoConsoleMDL iop@ IOPacketHeader_MDL + !
+
+	0 // signaled
+	OSEVENT_SYNCH // type
+	0 // name
+	CoVideoConsoleReadEvent // event
+	KeEventInitialize
+
+	OSACCESSFLAG_RETURNANY iopl@ IOPacketLocation_Flags + !
+	fcb@ iopl@ IOPacketLocation_FileControlBlock + !
+	COVIDEOCONSOLECLUSTER iopl@ IOPacketLocation_Length + !
+	COVIDEOCONSOLECLUSTER iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+	IODISPATCH_READ iopl@ IOPacketLocation_FunctionCodeB + sb
+
+	auto ipl
+	IPLAPC KeIPLRaise ipl!
+
+	iop@ IOPacketEnqueue drop
+
+	ipl@ KeIPLLower
+end
+
 fn CoVideoConsoleDrawWorker { context1 context2 -- }
 	fnsection "PAGE$text"
 
@@ -1551,47 +1594,16 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 	auto objecttable
 	12 alloc objecttable!
 
-	auto readmdl
-	CoVideoConsoleMDL readmdl!
-
-	auto fcb
-	CoVideoConsoleServerFile@ IOFile_FileControlBlock + @ fcb!
-
-	auto readfunc
-	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Read + @ readfunc!
-
-	auto event
-	CoVideoConsoleMDLEvent event!
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	0 // name
-	event@ // event
-	KeEventInitialize
-
-	KERNELMODE // mode
 	COVIDEOCONSOLECLUSTER // length
 	CoVideoConsoleCharBuf // vaddr
-	readmdl@ // mdl
+	0 // kflags
+	CoVideoConsoleMDL // mdl
 	MmMDLInitialize
 
-	event@ readmdl@ MmMDLHeader_Event + !
-
-	auto ipl
-	IPLAPC KeIPLRaise ipl!
-
-	OSWAIT_TIMEOUTINFINITE // timeout
-	OSACCESSFLAG_RETURNANY // flags
-	0 // kflags
-	0 // offset
-	readmdl@ // mdl
-	fcb@ // fcb
-	readfunc@ IODispatchReadFunction drop
-
-	ipl@ KeIPLLower
+	CoVideoConsoleDoRead
 
 	CoVideoConsoleTimer objecttable@ !
-	event@ objecttable@ 4 + !
+	CoVideoConsoleReadEvent objecttable@ 4 + !
 	CoVideoConsoleOutputEvent objecttable@ 8 + !
 
 	// this variable is used to help with odd-looking backspace behavior
@@ -1619,7 +1631,7 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 			auto len
 			auto buf
 
-			readmdl@ MmMDLHeader_Length + @ len!
+			CoVideoConsoleIOP IOPacketHeader_StatusBlock + OSStatusBlock_Length + @ len!
 			CoVideoConsoleCharBuf buf!
 
 			if (backspace@)
@@ -1639,31 +1651,7 @@ fn CoVideoConsoleDrawWorker { context1 context2 -- }
 				1 len -=
 			end
 
-			0 // signaled
-			OSEVENT_SYNCH // type
-			0 // name
-			event@ // event
-			KeEventInitialize
-
-			KERNELMODE // mode
-			COVIDEOCONSOLECLUSTER // length
-			CoVideoConsoleCharBuf // vaddr
-			readmdl@ // mdl
-			MmMDLInitialize
-
-			event@ readmdl@ MmMDLHeader_Event + !
-
-			IPLAPC KeIPLRaise ipl!
-
-			OSWAIT_TIMEOUTINFINITE // timeout
-			OSACCESSFLAG_RETURNANY // flags
-			0 // kflags
-			0 // offset
-			readmdl@ // mdl
-			fcb@ // fcb
-			readfunc@ IODispatchReadFunction drop
-
-			ipl@ KeIPLLower
+			CoVideoConsoleDoRead
 		end
 
 		if (reason@ 1 ~= CoVideoConsoleHeader@ CoConsoleHeader_Echoed + @ ||)

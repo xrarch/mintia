@@ -55,7 +55,6 @@ endstruct
 struct OSStatusBlock
 	4 Status
 	4 Length
-	4 ExtraReturn
 endstruct
 
 externptr OSStdIn

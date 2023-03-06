@@ -48,14 +48,6 @@ struct IOMount
 
 	4 Next
 	4 Prev
-
-	4 Reserved1
-	4 Reserved2
-	4 Reserved3
-	4 Reserved4
-	4 Reserved5
-	4 Reserved6
-	4 Reserved7
 endstruct
 
 const IOFSFLAG_NOAUTO 1

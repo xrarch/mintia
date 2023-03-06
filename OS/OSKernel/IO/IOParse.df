@@ -41,6 +41,18 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 	auto parsefunc
 
 	if (type@ IODeviceTypeObject@ ==)
+		0 // locked
+		0 // failmounted
+		initialobject@ // deviceobject
+		IODeviceReferenceAttached ok! initialobject!
+
+		if (ok@)
+			return
+		end
+
+		// we now have an extra reference to the initialobject that we must be
+		// sure to release.
+
 		initialobject@ IODevice_FileControlBlock + @ fcb!
 
 		if (path@ gb ~~)
@@ -53,11 +65,8 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			// path.
 
 			flags@ // flags
-			initialobject@ IODevice_FileControlBlock + @ // fcb
 			initialobject@ // deviceobject
 			IODeviceCreateFileObject ok! object!
-
-			return
 		end else
 			// remaining path, call mounted filesystem (if any) to resolve it
 
@@ -70,22 +79,49 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			auto fcbp
 			fcb@ IOFileControlBlock_Paged + @ fcbp!
 
+			fcb@ IOFileControlBlockLockShared ok!
+
+			if (ok@)
+				initialobject@ ObObjectDereferenceByPointer drop
+
+				return
+			end
+
+			if (fcbp@ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ==)
+				fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_Parse + @ parsefunc!
+
+				flags@ // flags
+				path@ // path
+				0 // initialfcb
+				process@ // process
+				parsefunc@ IODispatchParseFunction ok! object! reparsepath!
+
+				fcb@ IOFileControlBlockUnlock
+
+				initialobject@ ObObjectDereferenceByPointer drop
+
+				return
+			end
+
 			if (fcbp@ IOFileControlBlockPaged_FileType + @ OSFILETYPE_BLOCKDEVICE ~=)
+				fcb@ IOFileControlBlockUnlock
+
+				initialobject@ ObObjectDereferenceByPointer drop
+
 				STATUS_NOT_SUPPORTED ok!
 
 				return
 			end
 
-			fcb@ IOFileControlBlockLockShared ok!
+			auto fsdevobj
+			fcbp@ IOFileControlBlockPaged_DeviceObject + @ fsdevobj!
 
-			if (ok@)
-				return
-			end
-
-			fcbp@ IOFileControlBlockPaged_Mount + @ mount!
+			fsdevobj@ IODevice_RelevantMount + @ mount!
 
 			if (mount@ ~~)
 				fcb@ IOFileControlBlockUnlock
+
+				initialobject@ ObObjectDereferenceByPointer drop
 
 				STATUS_NOT_A_DIRECTORY ok!
 
@@ -100,6 +136,8 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 			if (fcbp@ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 				fcb@ IOFileControlBlockUnlock
 
+				initialobject@ ObObjectDereferenceByPointer drop
+
 				STATUS_NOT_A_DIRECTORY ok!
 
 				return
@@ -109,6 +147,8 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 
 			if (parsefunc@ ~~)
 				fcb@ IOFileControlBlockUnlock
+
+				initialobject@ ObObjectDereferenceByPointer drop
 
 				STATUS_NOT_A_DIRECTORY ok!
 
@@ -123,6 +163,10 @@ fn (ObTypeParseFunction) IOParse { flags path initialobject process -- reparsepa
 
 			fcb@ IOFileControlBlockUnlock
 		end
+
+		initialobject@ ObObjectDereferenceByPointer drop
+
+		return
 	end elseif (type@ IOFileTypeObject@ ==)
 		// we need to call into the filesystem whether there is remaining path
 		// or not, in order to open this new file object correctly

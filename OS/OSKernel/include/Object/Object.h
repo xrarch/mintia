@@ -57,6 +57,8 @@ extern ObObjectReferenceByPointer { object -- oldcount }
 extern ObObjectDereferenceByPointerCapturedHeader { object npheader -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
 
+extern ObObjectInheritPermissions { destobject srcobject -- }
+
 extern ObConditionallyReferenceObject { object -- ok }
 
 extern ObObjectReferences { object -- refs }

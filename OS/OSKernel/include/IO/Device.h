@@ -1,16 +1,9 @@
-const IODRIVER_NOCHAIN   1
-const IODRIVER_CHAINSTOP 2
-
-const IODRIVER_FILESYSTEM (IODRIVER_NOCHAIN)
-
 struct IODriver
 	4 VersionMajor
 	4 VersionMinor
 
 	4 Name
-	4 DeviceType
 	4 DispatchTable
-	4 ExtensionSize
 	4 BlockLog
 	4 Flags
 
@@ -26,37 +19,43 @@ endstruct
 struct IODevice
 	// transparent part of IODevice
 
-	4 Mount
-
-	// opaque part of IODevice
-
 	4 Driver
 	4 Extension
 	4 FileControlBlock
 	4 BlockLog
-	4 ConsoleHeader
+
+	// RelevantMount could be either:
+	//  1. If this is a volume device, it is the mount that the volume is of.
+	//  2. If this is a physical device, it is a mount for a volume atop it.
+
+	4 RelevantMount
+	4 StackDepth // this driver plus number of drivers on stack below it
 	4 Flags
 
+	// opaque part of IODevice
+
+	4 ConsoleHeader
+
 	4 AttachedBy
-	4 StackDepth // this driver plus number of drivers on stack below it
 endstruct
 
 extern IODeviceGetAttached { deviceobject -- attacheddeviceobject } 
-extern IODeviceAttachObject { chain deviceobject todeviceobject -- ok }
+extern IODeviceReferenceAttached { locked failmounted deviceobject -- attacheddeviceobject ok }
+extern IODeviceAttachObject { deviceobject todeviceobject -- realdeviceobject ok }
 
-extern IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
-extern IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
-extern IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
-extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
+extern IODeviceCreateFileObject { flags deviceobject -- fileobject ok }
+extern IODeviceCreateEx { extensionsize type name sizeinbytes driver permissions permanent -- deviceobject ok }
+extern IODeviceCreate { extensionsize type name sizeinbytes driver permissions -- deviceobject ok }
 extern IODeviceDeleteFileObject { object -- ok }
 
 extern IODeviceDirectoryInsert { deviceobject -- ok }
 
 extern IODeviceDeallocateObject { object -- }
-extern IODeviceDeleteObject { object -- ok }
 
-extern IODeviceGetExtension { deviceobject -- extension }
-extern IODeviceSetConsoleHeader { console deviceobject -- }
-extern IODeviceGetConsoleHeader { deviceobject -- console }
-extern IODeviceSetBlockLog { blocklog deviceobject -- }
-extern IODeviceGetBlockLog { deviceobject -- blocklog }
+extern IOLockDeviceDatabase { alertable -- ok }
+extern IOLockDeviceDatabaseShared { alertable -- ok }
+extern IOUnlockDeviceDatabase { -- }
+
+extern IODeviceLock { device -- ok }
+extern IODeviceLockShared { device -- ok }
+extern IODeviceUnlock { device -- }

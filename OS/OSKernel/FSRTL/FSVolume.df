@@ -28,87 +28,6 @@
 
 #include "<ll>/OSDLL/OS.h"
 
-fn FSVolumeNameGet { mount -- name }
-	fnsection "PAGE$text"
-
-	auto devobj
-
-	mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
-
-	devobj@ ObObjectName name!
-end
-
-fn FSVolumeInitialize { blocklog mount -- ok }
-	fnsection "PAGE$text"
-
-	// start caching on volume file
-
-	auto volfcb
-	mount@ IOMount_DeviceObject + @ IODevice_FileControlBlock + @ volfcb!
-
-	auto realdevice
-	mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject realdevice!
-
-	if (DEBUGCHECKS)
-		if (realvolfcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ==)
-			// this is a character device!
-
-			"FSVolumeInitialize: attempted to initialize a character device\n" KeCrash
-		end
-
-		if (blocklog@ realdevice@ IODevice_BlockLog + @ <)
-			"FSVolumeInitialize: fs block size smaller than underlying device's\n" KeCrash
-		end
-	end
-
-	blocklog@ mount@ IOMount_DeviceObject + @ IODevice_BlockLog + !
-
-	auto cacheblock
-	volfcb@ IOFileControlBlockCacheCheck ok! cacheblock!
-
-	if (ok@ ~~)
-		cacheblock@ IOCacheInfoBlockTryIncrementMap ok! drop
-	end
-end
-
-fn FSVolumeUninitialize { mount -- ok }
-	fnsection "PAGE$text"
-
-	0 ok!
-
-	auto volfcb
-	mount@ IOMount_DeviceObject + @ IODevice_FileControlBlock + @ volfcb!
-
-	volfcb@ IOFileControlBlock_CacheInfoBlock + @ IOCacheInfoBlockDecrementMap drop
-end
-
-fn FSVolumeFlush { mount -- ok }
-	fnsection "PAGE$text"
-
-	auto volfcb
-	mount@ IOMount_VolumeFile + @ IOFile_FileControlBlock + @ volfcb!
-
-	auto cacheblock
-	volfcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	KeThreadCurrent@ KeThreadIgnoreKill drop
-
-	cacheblock@ IOCacheInfoBlockFlush ok!
-
-	KeThreadCurrent@ KeThreadAcceptKill drop
-end
-
-fn FSVolumeGetFCBByMount { mount -- volfcb }
-	mount@ IOMount_DeviceObject + @ IODevice_FileControlBlock + @ volfcb!
-end
-
-fn FSVolumeGetFCB { fcb -- volfcb }
-	auto devobj
-	fcb@ IOFileControlBlockGetDeviceObject devobj!
-
-	devobj@ IODevice_FileControlBlock + @ volfcb!
-end
-
 fn FSCheckAccess { access permbits owninguid owninggid mount -- ok }
 	fnsection "PAGE$text"
 
@@ -131,7 +50,7 @@ fn FSCheckAccess { access permbits owninguid owninggid mount -- ok }
 
 	if (mount@ IOMount_Flags + @ OSMOUNT_MATCHUID &)
 		auto dev
-		mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject dev!
+		mount@ IOMount_UnderlyingDeviceObject + @ dev!
 
 		dev@ ObObjectUIDGID owninggid! owninguid!
 
@@ -168,7 +87,7 @@ fn FSFileObjectSetSecurity { uid gid object mount -- }
 
 	if (mount@ IOMount_Flags + @ OSMOUNT_MATCHUID &)
 		auto dev
-		mount@ IOMount_RealVolumeFile + @ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject dev!
+		mount@ IOMount_UnderlyingDeviceObject + @ dev!
 
 		dev@ ObObjectUIDGID gid! uid!
 	end

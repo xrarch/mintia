@@ -1,16 +1,15 @@
-fnptr IOFilesystemMountFunction { mount -- ok }
-fnptr IOFilesystemUnmountFunction { mount -- ok }
-fnptr IOFilesystemFlushFunction { shutdown mount -- ok }
-fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags mount -- ok }
-fnptr IOFilesystemVolumeQueryFunction { query mount -- ok }
-fnptr IOFilesystemReclaimFunction { preferredcount mount -- actualcount }
+fnptr IOFilesystemMountFunction { deviceobject -- fsdeviceobject ok }
+fnptr IOFilesystemUnmountFunction { fsdeviceobject -- ok }
+fnptr IOFilesystemFlushFunction { shutdown fsdeviceobject -- ok }
+fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags fsdeviceobject -- ok }
+fnptr IOFilesystemVolumeQueryFunction { query fsdeviceobject -- ok }
+fnptr IOFilesystemReclaimFunction { preferredcount fsdeviceobject -- actualcount }
 
 struct IOFilesystem
 	4 Next
 	4 Reserved0 // leave room for a prev link just in case
 
-	4 Name
-	4 DispatchTable
+	4 Driver
 
 	4 MountFunction
 	4 UnmountFunction
@@ -32,15 +31,15 @@ endstruct
 struct IOMount
 	// transparent part of IOMount
 
-	4 FSContext
+	4 Extension
+	4 FsDeviceObject // representing this mount, not of the actual underlying device
+	4 UnderlyingDeviceObject
 	4 Filesystem
-	4 DeviceObject // representing this mount, not of the actual underlying device
+	4 RootFCB
+	4 Flags
 
 	// opaque part of IOMount
 
-	4 RootFCB
-	4 RealVolumeFile
-	4 Flags
 	4 ReclaimedFrom
 
 	4 Next
@@ -59,8 +58,8 @@ const IOFSFLAG_NOAUTO 1
 
 extern IOFilesystemRegister { filesystem -- ok }
 
-extern IOFilesystemMount { flags handle fsname -- mount ok }
-extern IOMountObject { flags fileobject fsname -- mount ok }
+extern IOFilesystemMount { flags handle fsname -- ok }
+extern IOMountObject { flags fileobject fsname -- ok }
 
 extern IOFilesystemUnmount { handle -- ok }
 extern IOUnmountObject { fileobject -- ok }
@@ -72,10 +71,5 @@ extern IOMountGetFilesystemName { buffer handle -- ok }
 extern IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 
 extern IOMountQueryAll { buffer maxquery -- count ok }
-
-extern IOMountGetFlags { mount -- flags }
-extern IOMountSetFlags { flags mount -- }
-extern IOMountSetRootFCB { fcb mount -- }
-extern IOMountGetRootFCB { mount -- fcb }
 
 externptr IOMountCount

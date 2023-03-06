@@ -11,6 +11,9 @@ extern IOiCacheInfoBlockDestroy { writeout cacheblock -- ok }
 
 extern IOiFileControlBlockInitialize { devobj filetype flags fcb -- }
 
+extern IOiVolumeDeviceUninitialize { fsdeviceobject -- }
+extern IOiDeviceDeleteObject { object -- }
+
 extern IOiFilesystemReclaimFCB { -- }
 
 extern IOiPageFileExtend { -- }
@@ -33,11 +36,7 @@ externptr IOiFileControlBlockCacheTrimEvent
 externptr IOiWritebehindTimer
 externptr IOiWritebehindEvent
 
-externptr IOiMountListRwLock
-
-extern IOiLockMountList { alertable -- ok }
-extern IOiLockMountListShared { alertable -- ok }
-extern IOiUnlockMountList { -- }
+externptr IOiDeviceDatabaseRwLock
 
 struct IOiCacheInfoBlock
 	4 Next

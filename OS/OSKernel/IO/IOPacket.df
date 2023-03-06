@@ -519,10 +519,6 @@ fn IOPacketAssociate { associop iop -- }
 	// this biases the IOCount on the master IOP and adds the associated IOP
 	// to the current thread's deferred enqueue list.
 
-	// no synchronization is used because it's assumed that the structures
-	// referenced will only be referenced by this very thread, and that
-	// APCs will never enqueue IO.
-
 	if (DEBUGCHECKS)
 		if (associop@ IOPacketHeader_ParentIOP + @)
 			"IOPacketAssociate: already associated\n" KeCrash
@@ -537,6 +533,9 @@ fn IOPacketAssociate { associop iop -- }
 	auto current
 	KeThreadCurrent@ current!
 
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	auto t
 	current@ PsThread_IOPDeferredListTail + @ t!
 
@@ -547,15 +546,11 @@ fn IOPacketAssociate { associop iop -- }
 	end
 
 	associop@ current@ PsThread_IOPDeferredListTail + !
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn IOPacketEnqueue { iop -- ok }
-	if (DEBUGCHECKS)
-		if (KeThreadCurrent@ KeThread_APCInProgressB + gb)
-			"IOPacketEnqueue: APC in progress\n" KeCrash
-		end
-	end
-
 	// enqueue the IOP, and any associated IOPs that appear.
 
 	auto current
@@ -597,7 +592,7 @@ fn IOPacketEnqueue { iop -- ok }
 				0 // priboost
 				iop@ // iop
 				IOPacketCompleteLow
-			
+
 				if (ok@ ~~)
 					STATUS_NOT_SUPPORTED ok!
 				end
@@ -635,10 +630,15 @@ fn IOPacketEnqueue { iop -- ok }
 			// no next associated IOP, so this must have been a master one, or
 			// a lone associated one. try to process the deferred IOP list.
 
+			auto rs
+			HALCPUInterruptDisable rs!
+
 			current@ PsThread_IOPDeferredListHead + @ iop!
 
 			0 current@ PsThread_IOPDeferredListHead + !
 			0 current@ PsThread_IOPDeferredListTail + !
+
+			rs@ HALCPUInterruptRestore
 
 			if (iop@ ~~)
 				break

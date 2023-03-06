@@ -18,6 +18,8 @@ endstruct
 
 struct IODevice
 	// transparent part of IODevice
+	// after stabilization of the ABI, the offsets of these fields must never
+	// change since they are accessed directly by drivers.
 
 	4 Driver
 	4 Extension
@@ -33,6 +35,8 @@ struct IODevice
 	4 Flags
 
 	// opaque part of IODevice
+	// the offsets of these can change freely as they may only be accessed by
+	// the kernel itself.
 
 	4 ConsoleHeader
 

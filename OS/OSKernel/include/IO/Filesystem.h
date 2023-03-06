@@ -30,6 +30,8 @@ endstruct
 
 struct IOMount
 	// transparent part of IOMount
+	// after stabilization of the ABI, the offsets of these fields must never
+	// change since they are accessed directly by drivers.
 
 	4 Extension
 	4 FsDeviceObject // representing this mount, not of the actual underlying device
@@ -39,6 +41,8 @@ struct IOMount
 	4 Flags
 
 	// opaque part of IOMount
+	// the offsets of these can change freely as they may only be accessed by
+	// the kernel itself.
 
 	4 ReclaimedFrom
 

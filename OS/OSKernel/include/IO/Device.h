@@ -56,6 +56,6 @@ extern IOLockDeviceDatabase { alertable -- ok }
 extern IOLockDeviceDatabaseShared { alertable -- ok }
 extern IOUnlockDeviceDatabase { -- }
 
-extern IODeviceLock { device -- ok }
+extern IODeviceLock { alertable device -- ok }
 extern IODeviceLockShared { device -- ok }
 extern IODeviceUnlock { device -- }

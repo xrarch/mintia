@@ -50,8 +50,7 @@ ULIBRARIES := AMS/Client \
 
 LIBRARIES := OSDLL $(ULIBRARIES)
 
-KERNELMODULES := BootDrivers/AisixFS \
-				BootDrivers/AnalogClockTest \
+KERNELMODULES := BootDrivers/AnalogClockTest \
 				KDebug
 
 COMMANDS := $(wildcard OS/Commands/*)

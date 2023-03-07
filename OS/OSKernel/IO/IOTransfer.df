@@ -31,7 +31,78 @@
 
 #include "IOInternal.h"
 
-fn IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fcb -- length ok }
+fn IOSystemBufferTransfer { functioncode flags kflags buf length offset fcb -- bytes ok }
+	auto iop
+	auto iopl
+
+	KERNELMODE // mode
+	IOPTYPE_NORMAL // type
+	kflags@ // kflags
+	fcb@ // fcb
+	IOPFLAG_FREEMDL // iopflags
+	IOPacketAllocateForFile ok! iop! iopl!
+
+	if (ok@)
+		return
+	end
+
+	auto mdl
+	length@ // length
+	buf@ // vaddr
+	kflags@ // kflags
+	MmMDLAllocate ok! mdl!
+
+	if (ok@)
+		iop@ IOPacketFree
+
+		return
+	end
+
+	MMMDL_FREE mdl@ MmMDLHeader_Flags + |=
+
+	auto event
+	KeEvent_SIZEOF alloc event!
+
+	0 // signaled
+	OSEVENT_NOTIF // type
+	"IOSystemBufferTransferEvent" // name
+	event@ // event
+	KeEventInitialize
+
+	event@ iop@ IOPacketHeader_Event + !
+
+	mdl@ iop@ IOPacketHeader_MDL + !
+
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
+	offset@ iopl@ IOPacketLocation_Offset + !
+	flags@ iopl@ IOPacketLocation_Flags + !
+
+	functioncode@ iopl@ IOPacketLocation_FunctionCodeB + sb
+
+	iop@ IOPacketEnqueue ok!
+
+	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		// wait for completion.
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		event@ // object
+		KeThreadWaitForObject drop
+	end
+
+	if (ok@ ~~)
+		iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ ok!
+		iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + @ bytes!
+	end
+
+	// we allocated this packet, so let's free it.
+
+	iop@ IOPacketFree
+end
+
+fn IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fcb -- bytes ok }
 	auto iopl
 
 	auto type
@@ -118,7 +189,7 @@ fn IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fc
 
 		if (ok@ ~~)
 			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ ok!
-			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + @ length!
+			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + @ bytes!
 		end
 
 		if (type@)

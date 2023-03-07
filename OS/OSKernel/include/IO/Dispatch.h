@@ -7,8 +7,6 @@ fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchPokeFunction { poketype object -- }
 fnptr IODispatchSetSecurityFunction { uid gid permissions object -- ok }
 fnptr IODispatchRenameFunction { srcname srcfcb destname destfcb -- ok }
-fnptr IODispatchWriteBlockFunction { blockno buffer devobject -- ok }
-fnptr IODispatchReadBlockFunction { blockno buffer devobject -- ok }
 fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
@@ -31,8 +29,8 @@ struct IODispatchTable
 	4 Poke                    // 10
 	4 SetSecurity             // 11
 	4 Rename                  // 12
-	4 ReadBlock               // 13
-	4 WriteBlock              // 14
+	4 Reserved6               // 13
+	4 Reserved7               // 14
 	4 Truncate                // 15
 	4 ReadDirectory           // 16
 	4 GetPageAddress          // 17

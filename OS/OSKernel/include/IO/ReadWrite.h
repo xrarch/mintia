@@ -19,8 +19,8 @@ extern IODirectoryReadObject { dirent fileobject -- ok }
 
 // direct transfer helpers
 
-extern IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fcb -- length ok }
+extern IOSystemBufferTransfer { functioncode flags kflags buf length offset fcb -- bytes ok }
+extern IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fcb -- bytes ok }
 
 extern IOReadWriteAsync { context flags length offset buffer portobject fileobject functioncode -- ok }
-
 extern IOReadWrite { timeout flags length offset buffer fileobject functioncode -- bytes ok }

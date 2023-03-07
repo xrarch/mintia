@@ -206,3 +206,7 @@ extern IOPacketEnqueue { iop -- ok }
 
 extern IOPacketCompleteLow { status priboost iop -- }
 extern IOPacketComplete { status priboost iop -- }
+
+const IODONE_NEXTLOCATION 0
+const IODONE_NOLOCATIONS  1
+const IODONE_SAMELOCATION 2

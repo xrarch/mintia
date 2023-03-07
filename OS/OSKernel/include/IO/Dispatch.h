@@ -19,8 +19,8 @@ struct IODispatchTable
 	4 Open                    // 0
 	4 Close                   // 1
 	4 IOControl               // 2
-	4 Read                    // 3
-	4 Write                   // 4
+	4 Reserved8               // 3
+	4 Reserved9               // 4
 	4 Unlink                  // 5
 	4 Parse                   // 6
 	4 Reserved4               // 7

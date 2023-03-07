@@ -43,6 +43,9 @@ struct IODevice
 	4 AttachedBy
 endstruct
 
+extern IOVolumeDeviceCreate { extensionsize sizeinbytes filesystem deviceobject -- mount fsdeviceobject ok }
+extern IOVolumeDeviceUninitialize { fsdeviceobject -- }
+
 extern IODeviceGetAttached { deviceobject -- attacheddeviceobject } 
 extern IODeviceReferenceAttached { locked failmounted deviceobject -- attacheddeviceobject ok }
 extern IODeviceAttachObject { deviceobject todeviceobject -- realdeviceobject ok }
@@ -61,5 +64,5 @@ extern IOLockDeviceDatabaseShared { alertable -- ok }
 extern IOUnlockDeviceDatabase { -- }
 
 extern IODeviceLock { alertable device -- ok }
-extern IODeviceLockShared { device -- ok }
+extern IODeviceLockShared { alertable device -- ok }
 extern IODeviceUnlock { device -- }

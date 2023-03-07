@@ -11,7 +11,6 @@ extern IOiCacheInfoBlockDestroy { writeout cacheblock -- ok }
 
 extern IOiFileControlBlockInitialize { devobj filetype flags fcb -- }
 
-extern IOiVolumeDeviceUninitialize { fsdeviceobject -- }
 extern IOiDeviceDeleteObject { object -- }
 
 extern IOiFilesystemReclaimFCB { -- }

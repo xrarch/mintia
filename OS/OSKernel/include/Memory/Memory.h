@@ -76,6 +76,8 @@ const MMMEDIUMSYSTEM 3
 const MMLARGESYSTEM  4
 const MMHUGESYSTEM   5
 
+const MPWFILETRANSFERS 8
+
 externptr MmAnonTransfersAvailable
 
 // free page count thresholds at which various types/priorities of page

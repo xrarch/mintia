@@ -30,6 +30,62 @@
 
 #include "MmInternal.h"
 
+buffer MiMDLZoneSmall MmZoneHeader_SIZEOF
+buffer MiMDLZone      MmZoneHeader_SIZEOF
+
+const SMALLPAGES 2
+const LARGEPAGES (IOMAXCLUSTERMAX PAGESHIFT >>)
+
+const SMALLMDLS 40
+const LARGEMDLS 16
+
+rosection "INIT$text"
+
+fn MiMDLZoneInit { count pagecount zone -- }
+	fnsection "INIT$text"
+
+	auto mdlsize
+	MmMDLHeader_SIZEOF pagecount@ 1 + 2 << + mdlsize!
+
+	mdlsize@ count@ * MMZONEOVERHEAD +
+	"zonesize %d\n"
+	"MiMDLZonesInit" HALLog
+
+	auto ok
+	auto chunk
+
+	mdlsize@ count@ * MMZONEOVERHEAD + // bytes
+	'MDLz' // tag
+	0 // flags
+	MmAllocWithTag ok! chunk!
+
+	if (ok@)
+		"MiMDLZonesInit: failed to create packet zones\n" KeCrash
+	end
+
+	mdlsize@ count@ * MMZONEOVERHEAD + // bytes
+	chunk@ // chunk
+	mdlsize@ // blocksize
+	zone@ // zoneheader
+	MmZoneInitialize
+end
+
+fn MiMDLZonesInit { -- }
+	fnsection "INIT$text"
+
+	SMALLMDLS // count
+	SMALLPAGES // pagecount
+	MiMDLZoneSmall // zone
+	MiMDLZoneInit
+
+	LARGEMDLS // count
+	LARGEPAGES // pagecount
+	MiMDLZone // zone
+	MiMDLZoneInit
+end
+
+rosection "text"
+
 fn MmMDLInitialize { length vaddr kflags mdl -- }
 	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
 	length@ mdl@ MmMDLHeader_Length + !
@@ -60,21 +116,56 @@ fn MmMDLAllocate { length vaddr kflags -- mdl ok }
 	auto bytes
 	vaddr@ length@ MmMDLGetSize bytes!
 
-	auto flags
-	CANBLOCK flags!
+	auto pages
+	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
-	kflags@ MmKflagToPriority flags |=
+	auto zone
+	0 zone!
+	0 mdl!
 
-	bytes@ // bytes
-	'MMDL' // tag
-	flags@ // flags
-	MmAllocWithTag ok! mdl!
+	if (pages@ SMALLPAGES <=)
+		MiMDLZoneSmall zone!
+	end elseif (pages@ LARGEPAGES <=)
+		MiMDLZone zone!
+	end
 
-	if (ok@)
-		return
+	if (zone@)
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		zone@ MmZoneAllocate ok! mdl!
+
+		rs@ HALCPUInterruptRestore
+
+		if (ok@)
+			// no MDLs left in the zone.
+
+			0 mdl!
+			0 zone!
+		end
+	end
+
+	if (mdl@ ~~)
+		auto flags
+		CANBLOCK flags!
+
+		kflags@ MmKflagToPriority flags |=
+
+		bytes@ // bytes
+		'MMDL' // tag
+		flags@ // flags
+		MmAllocWithTag ok! mdl!
+
+		if (ok@)
+			return
+		end
 	end
 
 	length@ vaddr@ kflags@ mdl@ MmMDLInitialize
+
+	if (zone@)
+		MMMDL_ZONEMDL mdl@ MmMDLHeader_Flags + |=
+	end
 end
 
 fn MmMDLAllocateWithQuota { length vaddr kflags -- mdl ok }
@@ -107,7 +198,6 @@ fn MmMDLAllocateWithQuota { length vaddr kflags -- mdl ok }
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
 	end else
-		quotablock@ MmQuotaBlockReference
 		quotablock@ mdl@ MmMDLHeader_QuotaBlock + !
 	end
 end
@@ -119,16 +209,40 @@ fn MmMDLFree { mdl -- }
 	mdl@ MmMDLHeader_QuotaBlock + @ quotablock!
 
 	auto charge
-	mdl@ MmBlockChargeGet charge!
 
-	mdl@ MmFree
+	if (quotablock@)
+		mdl@ MmMDLHeader_VirtualAddress + @ // vaddr
+		mdl@ MmMDLHeader_Length + @ // length
+		MmMDLGetSize MmChargeBytesGet charge!
+	end
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_ZONEMDL &)
+		auto pages
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK &
+		mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		if (pages@ SMALLPAGES <=)
+			mdl@ // ptr
+			MiMDLZoneSmall // zoneheader
+			MmZoneFree
+		end else
+			mdl@ // ptr
+			MiMDLZone // zoneheader
+			MmZoneFree
+		end
+
+		rs@ HALCPUInterruptRestore
+	end else
+		mdl@ MmFree
+	end
 
 	if (quotablock@)
 		charge@ // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
-
-		quotablock@ MmQuotaBlockDereference
 	end
 end
 
@@ -155,69 +269,6 @@ fn MmMDLGetSize { vaddr length -- size }
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	pages@ 1 + 2 << MmMDLHeader_SIZEOF + size!
-end
-
-fn MmMDLSplit { vaddr length srcmdl destmdl -- }
-	// split the source MDL into a destination MDL that only describes a
-	// subset.
-
-	auto srcva
-	srcmdl@ MmMDLHeader_VirtualAddress + @ srcva!
-
-	if (DEBUGCHECKS)
-		if (srcmdl@ MmMDLHeader_Flags + @ MMMDL_PINNED & ~~)
-			"MmMDLSplit: srcmdl must be pinned\n" KeCrash
-		end
-
-		// make sure the address and length actually fits into the source MDL
-		if (vaddr@ srcva@ <)
-			"MmMDLSplit: vaddr < srcmdl vaddr\n" KeCrash
-		end
-
-		if (vaddr@ length@ +
-			srcva@ srcmdl@ MmMDLHeader_Length + @ + >)
-			srcmdl@ MmMDLHeader_Length + @ srcva@
-			length@ vaddr@
-			"MmMDLSplit: vaddr+length > srcmdl vaddr+length (%d+%d, %d+%d)\n" KeCrash
-		end
-	end
-
-	auto offset
-	vaddr@ srcva@ - offset!
-
-	vaddr@ destmdl@ MmMDLHeader_VirtualAddress + !
-	length@ destmdl@ MmMDLHeader_Length + !
-
-	srcmdl@ MmMDLHeader_Flags + @ destmdl@ MmMDLHeader_Flags + |=
-	MMMDL_DONTUNPIN destmdl@ MmMDLHeader_Flags + |=
-
-	srcmdl@ MmMDLHeader_Process + @ destmdl@ MmMDLHeader_Process + !
-
-	// reuse the mapping from the source MDL
-	srcmdl@ MmMDLHeader_MappedAddress + @ offset@ + destmdl@ MmMDLHeader_MappedAddress + !
-
-	auto destmdlpos
-	destmdl@ MmMDLHeader_SIZEOF + destmdlpos!
-
-	auto srcmdlpos
-	srcmdl@ MmMDLHeader_SIZEOF + offset@ PAGESHIFT >> 4 * + srcmdlpos!
-
-	auto pages
-	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
-
-	while (pages@)
-		if (DEBUGCHECKS)
-			if (srcmdlpos@@ -1 ==)
-				"MmMDLSplit: srcmdl ended early\n" KeCrash
-			end
-		end
-
-		srcmdlpos@@ destmdlpos@!
-
-		4 destmdlpos +=
-		4 srcmdlpos +=
-		1 pages -=
-	end
 end
 
 fn MmMDLFill { mdl -- }

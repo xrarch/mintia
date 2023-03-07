@@ -391,3 +391,9 @@ extern MiWorkingSetEntryFree { wsli wsleptr process -- }
 extern MiWorkingSetEntryForceOut { vaddr pfdbe process -- }
 
 extern MiManageWorkingSets { -- success }
+
+
+// MDL stuff
+
+
+extern MiMDLZonesInit { -- }

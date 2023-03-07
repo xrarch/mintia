@@ -10,6 +10,7 @@ const IOPFLAG_FREEMDL  4  // the MDL in the zeroth IOPL should be freed upon com
 const IOPFLAG_QUOTA    8  // quota has been charged for this IOP.
 const IOPFLAG_USERMODE 16 // the IOP represents a usermode request (either sync or async).
 const IOPFLAG_COMPLETE 32 // the IOP has been completed
+const IOPFLAG_DOCOMPLT 64 // determines whether the full scope of completion processing will occur
 
 // N.B. Changing the offsets of the fields within the following structs will
 // break practically every driver. Changing the overall size of the structs,
@@ -187,6 +188,8 @@ extern IOPacketFree { iop -- }
 extern IOPacketAllocateForFile { mode type kflags fcb iopflags -- ioplzero iop ok }
 extern IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 extern IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzero }
+
+extern IOPacketWasEnqueued { iop -- }
 
 extern IOPacketIndex { index iop -- iopl }
 extern IOPacketFromLocation { iopl -- iop }

@@ -28,8 +28,6 @@ extern MmMDLAllocateWithQuota { length vaddr kflags -- mdl ok }
 extern MmMDLFree { mdl -- }
 extern MmMDLFreeComplete { mdl -- }
 
-extern MmMDLSplit { vaddr length srcmdl destmdl -- }
-
 extern MmMDLPin { lockforwrite mdl -- ok }
 extern MmMDLUnpin { mdl -- }
 

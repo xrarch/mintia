@@ -214,8 +214,6 @@ fn IOPacketFree { iop -- }
 		charge@ // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
-
-		quotablock@ MmQuotaBlockDereference
 	end
 end
 
@@ -259,8 +257,6 @@ fn IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 			if (ok@)
 				return
 			end
-
-			quotablock@ MmQuotaBlockReference
 		end
 	end
 
@@ -308,8 +304,6 @@ fn IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 				packetsize@ MmChargeBytesGet // charge
 				quotablock@ // quotablock
 				MmQuotaBlockUncharge
-
-				quotablock@ MmQuotaBlockDereference
 			end
 
 			return
@@ -434,6 +428,11 @@ end
 
 fn IOPacketLocationVirtualBuffer { iopl -- vaddr }
 	iopl@ IOPacketLocation_IOPH + @ IOPacketHeader_MDL + @ MmMDLHeader_VirtualAddress + @ iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
+end
+
+fn IOPacketWasEnqueued { iop -- }
+	iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_DOCOMPLT |
+	iop@ IOPacketHeader_IOPFlagsB + sb
 end
 
 fn IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok }
@@ -697,6 +696,11 @@ fn IOPacketComplete { status priboost iop -- }
 		if (oldcount@ 1 >)
 			// there are still IO ops depending on this IOP
 			break
+		end
+
+		if (iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ ~~)
+			iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_DOCOMPLT |
+			iop@ IOPacketHeader_IOPFlagsB + sb
 		end
 
 		// call completion routines

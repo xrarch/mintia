@@ -77,19 +77,17 @@ fn (IODispatchEnqueueIOPFunction) AFSReadWriteFile { iopl -- done ok }
 		if (iopl@ IOPacketLocation_Offset + @ iopl@ IOPacketLocation_Length + @ + bytesize@ >)
 
 			// truncate the transfer to the size of the volume file.
-			// this should be paging I/O from the viewcache, so lets trust the
-			// length and offset not to overflow.
+			// this should be paging I/O from the viewcache, so lets trust
+			// length + offset not to overflow.
 
 			bytesize@ iopl@ IOPacketLocation_Offset + @ - iopl@ IOPacketLocation_Length + !
+			bytesize@ iopl@ IOPacketLocation_Offset + @ - iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 		end
 
 		IODONE_SAMELOCATION done!
 
 		return
 	end
-
-		iopl@ IOPacketLocation_Offset + @
-		"file io %d\n" KeCrash
 
 	bytes@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytes!
 
@@ -109,5 +107,185 @@ fn (IODispatchEnqueueIOPFunction) AFSReadWriteFile { iopl -- done ok }
 
 		return
 	end
+
+	bytes@ iopl@ IOPacketLocation_Context + !
+	pointerof AFSReadWriteCallback iopl@ IOPacketLocation_CallbackRoutine + !
+
+	auto rundownlisthead
+	4 alloc rundownlisthead!
+
+	0 rundownlisthead@!
+
+	rundownlisthead@ // rundownlisthead
+	fcb@ // fcb
+	offset@ // offset
+	bytes@ // bytes
+	mount@ // mount
+	iopl@ // iopl
+	iop@ // iop
+	AFSReadWrite ok!
+
+	if (ok@)
+		// clean up any associated IOP that AFSReadWrite allocated before the
+		// error condition occurred.
+
+		auto associop
+		rundownlisthead@@ associop!
+
+		while (associop@)
+			auto niop
+			associop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+			associop@ IOPacketFree
+
+			niop@ associop!
+		end
+
+		1 done!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
 end
 
+fn AFSReadWrite { rundownlisthead fcb offset bytes mount iopl iop -- ok }
+	// we need to allocate all of the associated IOPs that will be needed to
+	// complete this operation. this has to be done first because there's no
+	// good way to clean up associated IOPs in a failure scenario.
+
+	// we link the associated IOPs into a rundown list, so that we can
+	// deallocate all of them if there is a failure. we run the list through
+	// the DeviceQueue links, since these are unused while the IOP is in our
+	// custody. they are actually used for the per-thread associated IOP list,
+	// but we don't associate them until after we no longer need the rundown
+	// list, so that is fine.
+
+	0 ok!
+
+	auto rundownlisttail
+	0 rundownlisttail!
+
+	auto kflags
+	iopl@ IOPacketHeader_KFlags + @ kflags!
+
+	auto off
+	0 off!
+
+	auto fragiopl
+	iopl@ IOPacketLocationNext fragiopl!
+
+	auto fragiop
+	iop@ fragiop!
+
+	mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @
+	fragiopl@ IOPacketLocation_FileControlBlock + !
+
+	iopl@ IOPacketLocation_FunctionCodeB + gb
+	fragiopl@ IOPacketLocation_FunctionCodeB + sb
+
+	iopl@ IOPacketLocation_Flags + @
+	fragiopl@ IOPacketLocation_Flags + !
+
+	auto lastblkno
+	-1 lastblkno!
+
+	auto fraglength
+	0 fraglength!
+
+	while (off@ bytes@ <)
+		auto blkno
+		offset@ off@ + AFSBLOCKSHIFT >> // blkoff
+		fcb@ // fcb
+		kflags@ // kflags
+		AFSBlockMap ok! blkno!
+
+		if (ok@)
+			return
+		end
+
+		if (lastblkno@ -1 ~=)
+			if (blkno@ lastblkno@ 1 + ~=)
+				// not contiguous -- new fragment.
+
+				fraglength@ fragiopl@ IOPacketLocation_Length + !
+
+				iop@ IOPacketHeader_KFlags + @ // kflags
+				IOPFLAG_FREEIOP IOPFLAG_QUOTA | // iopflags
+				iopl@ // iopl
+				IOPacketAllocateAssocStack ok! fragiop! fragiopl!
+
+				if (ok@)
+					return
+				end
+
+				mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @
+				fragiopl@ IOPacketLocation_FileControlBlock + !
+
+				blkno@ AFSBLOCKSHIFT <<
+				fragiopl@ IOPacketLocation_Offset + !
+
+				iopl@ IOPacketLocation_FunctionCodeB + gb
+				fragiopl@ IOPacketLocation_FunctionCodeB + sb
+
+				iopl@ IOPacketLocation_Flags + @
+				fragiopl@ IOPacketLocation_Flags + !
+
+				iop@ IOPacketHeader_MDL + @
+				fragiop@ IOPacketHeader_MDL + !
+
+				iopl@ IOPacketLocation_OffsetInMDL + @ off@ +
+				fragiopl@ IOPacketLocation_OffsetInMDL + !
+
+				if (rundownlisttail@ ~~)
+					fragiop@ rundownlisthead@!
+					fragiop@ rundownlisttail!
+				end else
+					fragiop@ rundownlisttail@ IOPacketHeader_DeviceQueueNext + !
+				end
+
+				0 fraglength!
+			end
+		end else
+			blkno@ AFSBLOCKSHIFT <<
+			fragiopl@ IOPacketLocation_Offset + !
+		end
+
+		blkno@ lastblkno!
+		AFSBLOCKSIZE fraglength +=
+		AFSBLOCKSIZE off +=
+	end
+
+	fraglength@ fragiopl@ IOPacketLocation_Length + !
+
+	// allocating the packets succeeded, so associate them now.
+
+	rundownlisthead@@ fragiop!
+
+	while (fragiop@)
+		auto niop
+		fragiop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+		fragiop@ // associop
+		iop@ // iop
+		IOPacketAssociate
+
+		niop@ fragiop!
+	end
+end
+
+fn (IOPacketCompletionDPCRoutine) AFSReadWriteCallback { iopl -- ok }
+	// save the actual length if successful
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	if (iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ ~~)
+		iopl@ IOPacketLocation_Context + @ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	end
+
+	0 ok!
+end

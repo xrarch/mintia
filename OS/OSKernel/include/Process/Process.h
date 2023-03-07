@@ -81,6 +81,8 @@ struct PsThread
 	4 IOPDeferredListHead
 	4 IOPDeferredListTail
 
+	KeEvent_SIZEOF SynchronousIOEvent
+
 	4 MemoryPrivilegedCount
 
 	4 UTEB

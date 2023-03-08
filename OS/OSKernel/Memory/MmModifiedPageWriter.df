@@ -30,8 +30,6 @@
 
 #include "MmInternal.h"
 
-const MPWFILETRANSFERS 8
-
 struct IOAnonTransferTable
 	KeEvent_SIZEOF Event
 	(IOPAGEFILEMAXPRI 4 *) FreeListHeads
@@ -182,6 +180,7 @@ end
 
 fn MmMPWAnonTransferInitialize { pagefile transfer -- }
 	pagefile@ transfer@ IOTransfer_PageFile + !
+	0 transfer@ IOTransfer_Prev + !
 	0 transfer@ IOTransfer_Next + !
 	IOTRANSFER_ACTIVE transfer@ IOTransfer_State + !
 end
@@ -236,7 +235,7 @@ fn MiMPWGetFileTransfer { wait ipl -- transfer }
 	end
 end
 
-fn MmMPWAssessTransfers { transfer1 -- }
+fn MmMPWAssessTransfers { transfersize transfer1 -- }
 	// assess a pagefile's transfer structures and see if they should be moved
 	// to the priority queue.
 
@@ -301,7 +300,7 @@ fn MmMPWAssessTransfers { transfer1 -- }
 			transfer1@ MmMPWAnonTransfers IOAnonTransferTable_FreeListHeads + pri@ 2 << + !
 		end
 
-		IOTransfer_SIZEOF transfer1 +=
+		transfersize@ transfer1 +=
 		1 count -=
 	end
 end
@@ -659,20 +658,26 @@ fn MiFilePageWriter { context1 context2 -- }
 	end
 end
 
-fn (MmMDLCompleteRoutine) MmMPWAnonPageWriteMDLComplete { mdl -- }
+fn (KeAPCFunctionSpecial) MmAnonPageWriterAPCRoutine { normalfunc context1 context2 apc -- }
 	// runs as an APC in the context of the modified page writer.
 
+	auto iop
+	context1@@ iop!
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
 	auto status
-	mdl@ MmMDLHeader_Status + @ status!
+	iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ status!
 
 	auto pagecount
-	mdl@ MmMDLHeader_Pages + @ pagecount!
+	mdl@ MmMDLHeader_Length + @ PAGESHIFT >> pagecount!
 
 	auto pagefile
 	mdl@ IOTransfer_PageFile + @ pagefile!
 
 	auto offset
-	mdl@ MmMDLHeader_Context + @ offset!
+	mdl@ IOTransfer_Prev + @ offset!
 
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
@@ -732,7 +737,10 @@ fn (MmMDLCompleteRoutine) MmMPWAnonPageWriteMDLComplete { mdl -- }
 		status@ "I/O error while writing data to pagefile (%i)\n" Printf
 	end
 
-	// root MDL, complete transfer.
+	// don't free the IOP, since it was allocated inline with the transfer.
+
+	iop@ IOPacketFinishEitherContext
+
 	// this requires no synchronization as the transfer structures are
 	// only accessed by the modified page writer, which is currently
 	// executing this routine

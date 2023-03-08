@@ -69,7 +69,7 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 - [x] Unix-like permissions model.
 - [x] Sophisticated memory manager.
 - [x] Support for native and MBR partition table formats.
-- [x] Fully asynchronous I/O API.
+- [x] Fully asynchronous, iteratively layered I/O model.
 - [x] Fully asynchronous PTY, filesystem, and disk drivers.
 
 ### Memory Management

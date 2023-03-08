@@ -46,18 +46,6 @@ endstruct
 
 const DKSKFLAG_READ 0x80000000
 
-// must be <=32 bytes to fit in the MDL DriverGoWild area
-struct DKSRequest
-	4 Next
-
-	4 KFlags
-	4 MDL
-	4 WakeEvent
-	4 Buffer
-	4 BlockNumber
-	4 BlockCount
-endstruct
-
 const DKSMAXDISKID 7
 
 table DKSRealDisks[(DKSMAXDISKID 1 +)]
@@ -84,8 +72,8 @@ table DriverDKSDispatch
 	0                                    // open
 	0                                    // close
 	pointerof DriverDKSIOControl         // iocontrol
-	pointerof DriverDKSRead              // read
-	pointerof DriverDKSWrite             // write
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -94,16 +82,16 @@ table DriverDKSDispatch
 	0                                    // set information
 	0                                    // get information
 	0                                    // rename
-	pointerof DriverDKSReadBlock         // readblock
-	pointerof DriverDKSWriteBlock        // writeblock
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // truncate
 	0                                    // readdirectory
 	0                                    // getpageaddr
 	0                                    // delete device object
 	0                                    // reserved
 	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
+	pointerof DriverDKSRead              // read
+	pointerof DriverDKSWrite             // write
 endtable
 
 table DriverDKS
@@ -111,9 +99,8 @@ table DriverDKS
 	IOVERSION_MINOR                      // ioversion minor
 
 	"dks"                                // name
-	OSFILETYPE_BLOCKDEVICE               // type
 	pointerof DriverDKSDispatch          // dispatch table
-	Disk_SIZEOF                          // extension size
+	0                                    // flags
 
 	0                                    // reserved
 	0                                    // reserved
@@ -133,6 +120,9 @@ fn private CreateDisk { name blocks type id offset -- dev }
 	blocks@ 512 * sizeinbytes!
 
 	auto ok
+
+	Disk_SIZEOF // extensionsize
+	OSFILETYPE_BLOCKDEVICE // type
 	name@ // name
 	sizeinbytes@ // sizeinbytes
 	DriverDKS // driver
@@ -143,10 +133,10 @@ fn private CreateDisk { name blocks type id offset -- dev }
 		ok@ "DKSDriverInit: failed to create device object (%i)\n" KeCrash
 	end
 
-	9 dev@ IODeviceSetBlockLog // 1<<9 = 512
+	9 dev@ IODevice_BlockLog + ! // 1<<9 = 512
 
 	auto disk
-	dev@ IODeviceGetExtension disk!
+	dev@ IODevice_Extension + @ disk!
 
 	type@ disk@ Disk_Type + !
 	id@ disk@ Disk_DKSID + !
@@ -293,81 +283,72 @@ fn DKSComplete { id -- }
 		end
 	end
 
-	auto ior
-	disk@ Disk_RequestListHead + @ ior!
+	auto iop
+	disk@ Disk_RequestListHead + @ iop!
 
 	if (DEBUGCHECKS)
-		if (ior@ ~~)
+		if (iop@ ~~)
 			"DriverDKSDPCFunction: no request\n" KeCrash
 		end
 	end
 
-	auto mdl
-	ior@ DKSRequest_MDL + @ mdl!
+	auto iopl
+	iop@ IOPacketCurrentLocation iopl!
 
-	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
-		ior@ DKSRequest_Buffer + @ // dest
+	if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
+		iopl@ IOPacketLocationMappedBuffer iopl@ IOPacketLocation_Context + @ + // dest
 		DKSBuffer@ id@ DKSBLOCKSHIFT << + // src
 		DKSBLOCKSIZE // size
 		memcpy
 	end
 
-	1 ior@ DKSRequest_BlockCount + -=
-	1 ior@ DKSRequest_BlockNumber + +=
-	DKSBLOCKSIZE ior@ DKSRequest_Buffer + +=
+	DKSBLOCKSIZE iopl@ IOPacketLocation_Offset + +=
+	DKSBLOCKSIZE iopl@ IOPacketLocation_Context + +=
 
-	if (ior@ DKSRequest_BlockCount + @ ~~)
+	if (iopl@ IOPacketLocation_Context + @
+		iopl@ IOPacketLocation_Length + @ ==)
 		// complete, start next one
 
-		if (ior@ DKSRequest_WakeEvent + @)
-			IOBOOSTDISK // priboost
-			ior@ DKSRequest_WakeEvent + @ // event
-			KeEventSignal
+		auto niop
+		iop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
+			iopl@ IOPacketLocation_OffsetInMDL + @ // offset
+			iopl@ IOPacketLocation_Length + @ // length
+			0 // write
+			0 // dma
+			iop@ IOPacketHeader_MDL + @ // mdl
+			MmMDLFlush
 		end
 
-		auto nior
-		ior@ DKSRequest_Next + @ nior!
+		0 // status
+		IOBOOSTDISK // priboost
+		iop@ // iop
+		IOPacketComplete
 
-		if (mdl@)
-			if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
-				ior@ DKSRequest_KFlags + @ // kflags
-				0 // write
-				0 // dma
-				mdl@ // mdl
-				MmMDLFlush
-			end
+		niop@ iop!
 
-			0 // status
-			IOBOOSTDISK // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end else
-			ior@ MmFree
-		end
+		iop@ disk@ Disk_RequestListHead + !
 
-		nior@ ior!
-
-		ior@ disk@ Disk_RequestListHead + !
-
-		if (ior@ ~~)
+		if (iop@ ~~)
 			0 disk@ Disk_RequestListTail + !
 			return
+		end else
+			iop@ IOPacketCurrentLocation iopl!
 		end
-
-		ior@ DKSRequest_MDL + @ mdl!
 	end
 
 	auto rs
 
-	// start next one
+	// start next block transfer
 
-	if (ior@ DKSRequest_KFlags + @ DKSKFLAG_READ &)
+	if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
 		HALCPUInterruptDisable rs!
 
 		id@ DKSPORTA HALXRstationCitronOutl
 		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
 
-		ior@ DKSRequest_BlockNumber + @ DKSPORTA HALXRstationCitronOutl
+		iopl@ IOPacketLocation_Offset + @ DKSBLOCKSHIFT >> DKSPORTA HALXRstationCitronOutl
 		DKSCMDREAD DKSPORTCMD HALXRstationCitronCommandASyncIdle
 
 		rs@ HALCPUInterruptRestore
@@ -375,7 +356,7 @@ fn DKSComplete { id -- }
 		return
 	end else
 		DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-		ior@ DKSRequest_Buffer + @ // src
+		iopl@ IOPacketLocationMappedBuffer iopl@ IOPacketLocation_Context + @ + // src
 		DKSBLOCKSIZE // size
 		memcpy
 
@@ -384,7 +365,7 @@ fn DKSComplete { id -- }
 		id@ DKSPORTA HALXRstationCitronOutl
 		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
 
-		ior@ DKSRequest_BlockNumber + @ DKSPORTA HALXRstationCitronOutl
+		iopl@ IOPacketLocation_Offset + @ DKSBLOCKSHIFT >> DKSPORTA HALXRstationCitronOutl
 		DKSCMDWRITE DKSPORTCMD HALXRstationCitronCommandASyncIdle
 
 		rs@ HALCPUInterruptRestore
@@ -393,7 +374,7 @@ fn DKSComplete { id -- }
 	end
 end
 
-fn (DPCFunction) DriverDKSDPCFunction { context1 context2 -- }
+fn (KeDPCFunction) DriverDKSDPCFunction { context1 context2 dpc -- }
 	// fulfill pending requests
 
 	auto completed
@@ -443,24 +424,11 @@ fn (HALInterruptHandler) DriverDKSInterrupt { trapframe int -- }
 	end
 end
 
-fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
+fn DKSBlockTransferCommand { disk iopl -- ok }
 	0 ok!
 
-	auto ior
-
-	if (mdl@)
-		mdl@ MmMDLHeader_DriverGoWild + ior!
-		mdl@ MmMDLHeader_MappedAddress + @ buf!
-	end else
-		DKSRequest_SIZEOF // bytes
-		'DKSt' // tag
-		kflags@ MmKflagToPriority CANBLOCK | // flags
-		MmAllocWithTag ok! ior!
-
-		if (ok@)
-			return
-		end
-	end
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
 	auto id
 	disk@ Disk_DKSID + @ id!
@@ -468,13 +436,16 @@ fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
 	auto realdisk
 	[id@]DKSRealDisks@ realdisk!
 
-	kflags@ ior@ DKSRequest_KFlags + !
-	buf@ ior@ DKSRequest_Buffer + !
-	mdl@ ior@ DKSRequest_MDL + !
-	blockno@ disk@ Disk_BlockOffset + @ + ior@ DKSRequest_BlockNumber + !
-	blocks@ ior@ DKSRequest_BlockCount + !
-	0 ior@ DKSRequest_Next + !
-	event@ ior@ DKSRequest_WakeEvent + !
+	iop@ IOPacketWasEnqueued
+
+	// stash the completed length in context
+
+	0 iopl@ IOPacketLocation_Context + !
+
+	disk@ Disk_BlockOffset + @ DKSBLOCKSHIFT << iopl@ IOPacketLocation_Offset + +=
+
+	0 iop@ IOPacketHeader_DeviceQueueNext + !
+	0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -483,14 +454,14 @@ fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
 	realdisk@ Disk_RequestListTail + @ t!
 
 	if (t@ ~~)
-		ior@ realdisk@ Disk_RequestListTail + !
-		ior@ realdisk@ Disk_RequestListHead + !
+		iop@ realdisk@ Disk_RequestListTail + !
+		iop@ realdisk@ Disk_RequestListHead + !
 
-		if (kflags@ DKSKFLAG_READ & ~~)
+		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_WRITE ==)
 			rs@ HALCPUInterruptRestore
 
 			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-			buf@ // src
+			iopl@ IOPacketLocationMappedBuffer // src
 			DKSBLOCKSIZE // len
 			memcpy
 
@@ -502,16 +473,16 @@ fn DKSBlockTransferCommand { kflags buf mdl blocks blockno disk event -- ok }
 		id@ DKSPORTA HALXRstationCitronOutl
 		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
 
-		ior@ DKSRequest_BlockNumber + @ DKSPORTA HALXRstationCitronOutl
+		iopl@ IOPacketLocation_Offset + @ DKSBLOCKSHIFT >> DKSPORTA HALXRstationCitronOutl
 
-		if (kflags@ DKSKFLAG_READ &)
+		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
 			DKSCMDREAD DKSPORTCMD HALXRstationCitronCommandASyncIdle
 		end else
 			DKSCMDWRITE DKSPORTCMD HALXRstationCitronCommandASyncIdle
 		end
 	end else
-		ior@ t@ DKSRequest_Next + !
-		ior@ realdisk@ Disk_RequestListTail + !
+		iop@ t@ IOPacketHeader_DeviceQueueNext + !
+		iop@ realdisk@ Disk_RequestListTail + !
 	end
 
 	rs@ HALCPUInterruptRestore
@@ -528,25 +499,33 @@ end
 // if caller isn't careful these can lead to some redundant reads and writes.
 // which are slow.
 
-fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) DriverDKSRead { iopl -- done ok }
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
 	auto devobj
-	fcb@ IOFileControlBlockGetDeviceObject devobj!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
 
 	auto disk
-	devobj@ IODeviceGetExtension disk!
+	devobj@ IODevice_Extension + @ disk!
+
+	auto size
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetSize size!
+
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
 
 	0 ok!
 
-	auto size
-	fcb@ IOFileControlBlockGetSize size!
-
 	if (offset@ size@ >=)
-		0 mdl@ MmMDLHeader_Length + !
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 	
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -554,33 +533,51 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	if (offset@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	if (mdl@ MmMDLHeader_VirtualAddress + @ DKSBLOCKOFFMASK &)
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	if (iopl@ IOPacketLocationVirtualBuffer DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
 	auto length
 	size@ offset@ -
-	mdl@ MmMDLHeader_Length + @
+	iopl@ IOPacketLocation_Length + @
 	min length!
 
 	if (length@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	if (length@ ~~)
-		0 mdl@ MmMDLHeader_Length + !
-
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -590,42 +587,69 @@ fn (IODispatchReadFunction) DriverDKSRead { timeout flags kflags offset mdl fcb 
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	mdl@ MmMDLMap ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	length@ mdl@ MmMDLHeader_Length + !
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
 
-	kflags@ DKSKFLAG_READ | // kflags
-	0 // buf
-	mdl@ // mdl
-	length@ DKSBLOCKSHIFT >> // blocks
-	offset@ DKSBLOCKSHIFT >> // blockno
 	disk@ // disk
-	0 // event
+	iopl@ // iopl
 	DKSBlockTransferCommand ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 end
 
-fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) DriverDKSWrite { iopl -- done ok }
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	auto devobj
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
+
 	auto disk
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
+	devobj@ IODevice_Extension + @ disk!
+
+	auto bytesize
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetSize bytesize!
+
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
 
 	0 ok!
 
-	auto bytesize
-	fcb@ IOFileControlBlockGetSize bytesize!
-
 	if (offset@ bytesize@ >=)
 		STATUS_END_OF_DISK ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -633,33 +657,51 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- ok 
 	if (offset@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	if (mdl@ MmMDLHeader_VirtualAddress + @ DKSBLOCKOFFMASK &)
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	if (iopl@ IOPacketLocationVirtualBuffer DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
 	auto length
 	bytesize@ offset@ -
-	mdl@ MmMDLHeader_Length + @
+	iopl@ IOPacketLocation_Length + @
 	min length!
 
 	if (length@ DKSBLOCKOFFMASK &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	if (length@ ~~)
-		0 mdl@ MmMDLHeader_Length + !
-
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -669,130 +711,45 @@ fn (IODispatchWriteFunction) DriverDKSWrite { flags kflags offset mdl fcb -- ok 
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	mdl@ MmMDLMap ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	length@ mdl@ MmMDLHeader_Length + !
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
 
-	kflags@ // kflags
+	iopl@ IOPacketLocation_OffsetInMDL + @ // offset
+	iopl@ IOPacketLocation_Length + @ // length
 	1 // write
 	0 // dma
 	mdl@ // mdl
 	MmMDLFlush
 
-	kflags@ // kflags
-	0 // buf
-	mdl@ // mdl
-	length@ DKSBLOCKSHIFT >> // blocks
-	offset@ DKSBLOCKSHIFT >> // blockno
 	disk@ // disk
-	0 // event
+	iopl@ // iopl
 	DKSBlockTransferCommand ok!
 
 	if (ok@)
-		return
-	end
-end
-
-// routines for I/O by block offset, by device object. rarely called.
-// used in some boot situations where acquiring an FCB would be irritating.
-
-fn (IODispatchWriteBlockFunction) DriverDKSWriteBlock { blockno buffer devobject -- ok }
-	// write by block
-
-	auto disk
-	devobject@ IODeviceGetExtension disk!
-
-	if (blockno@ disk@ Disk_Blocks + @ >=)
-		STATUS_END_OF_DISK ok!
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
-	end
-
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"DKSWriteBlockEvent" // name
-	event@ // event
-	KeEventInitialize
-
-	0 // kflags
-	buffer@ // buf
-	0 // mdl
-	1 // blocks
-	blockno@ // blockno
-	disk@ // disk
-	event@ // event
-	DKSBlockTransferCommand ok!
-
-	if (ok@)
-		return
-	end
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	event@ // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "DriverDKSWriteBlock: couldn't wait on event (%i)\n" KeCrash
-		end
-	end
-end
-
-fn (IODispatchReadBlockFunction) DriverDKSReadBlock { blockno buffer devobject -- ok }
-	// read by block
-
-	auto disk
-	devobject@ IODeviceGetExtension disk!
-
-	if (blockno@ disk@ Disk_Blocks + @ >=)
-		STATUS_END_OF_DISK ok!
-
-		return
-	end
-
-	auto event
-	KeEvent_SIZEOF alloc event!
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"DKSReadBlockEvent" // name
-	event@ // event
-	KeEventInitialize
-
-	DKSKFLAG_READ // kflags
-	buffer@ // buf
-	0 // mdl
-	1 // blocks
-	blockno@ // blockno
-	disk@ // disk
-	event@ // event
-	DKSBlockTransferCommand ok!
-
-	if (ok@)
-		return
-	end
-
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	event@ // object
-	KeThreadWaitForObject ok!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "DriverDKSReadBlock: couldn't wait on event (%i)\n" KeCrash
-		end
 	end
 end

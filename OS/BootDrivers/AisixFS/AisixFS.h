@@ -106,7 +106,7 @@ const AFSSUPERBLOCKVERSION 0x6
 extern AFSMountReference { mount -- oldcount }
 extern AFSMountDereference { mount -- oldcount }
 
-extern AFSINodeReclaim { preferredcount mount -- actualcount }
+extern AFSINodeReclaim { preferredcount fsdeviceobject -- actualcount }
 
 extern AFSFCBMetadataUnpin { fcb -- ok }
 extern AFSFCBMetadataPin { fcb -- ok }
@@ -147,8 +147,7 @@ extern AFSClose { access fileobject -- ok }
 
 extern AFSParse { flags path initialfcb process -- reparsepath object ok }
 extern AFSDeleteObject { object -- ok }
-extern AFSReadFile { timeout flags kflags offset mdl fcb -- ok }
-extern AFSWriteFile { flags kflags offset mdl fcb -- ok }
+extern AFSReadWriteFile { iopl -- done ok }
 
 extern AFSDirectoryAllocateEntry { fcb -- dirent bcb ok }
 extern AFSReadDirectory { seek dirent fcb -- nextseek ok }

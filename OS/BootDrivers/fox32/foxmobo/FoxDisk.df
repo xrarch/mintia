@@ -45,8 +45,8 @@ table FoxDiskDispatch
 	0                                    // open
 	0                                    // close
 	pointerof FoxDiskIOControl           // iocontrol
-	pointerof FoxDiskRead                // read
-	pointerof FoxDiskWrite               // write
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -55,16 +55,16 @@ table FoxDiskDispatch
 	0                                    // set information
 	0                                    // get information
 	0                                    // rename
-	pointerof FoxDiskReadBlock           // readblock
-	pointerof FoxDiskWriteBlock          // writeblock
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // truncate
 	0                                    // readdirectory
 	0                                    // getpageaddr
 	0                                    // delete device object
 	0                                    // reserved
 	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
+	pointerof FoxDiskRead                // read
+	pointerof FoxDiskWrite               // write
 endtable
 
 table DriverFoxDisk
@@ -72,9 +72,8 @@ table DriverFoxDisk
 	IOVERSION_MINOR                      // ioversion minor
 
 	"dks"                                // name
-	OSFILETYPE_BLOCKDEVICE               // type
 	pointerof FoxDiskDispatch            // dispatch table
-	Disk_SIZEOF                          // extension size
+	0                                    // flags
 
 	0                                    // reserved
 	0                                    // reserved
@@ -99,6 +98,9 @@ fn private CreateDisk { name blocks type id offset -- dev }
 	blocks@ 512 * sizeinbytes!
 
 	auto ok
+
+	Disk_SIZEOF // extensionsize
+	OSFILETYPE_BLOCKDEVICE // type
 	name@ // name
 	sizeinbytes@ // sizeinbytes
 	DriverFoxDisk // driver
@@ -109,10 +111,10 @@ fn private CreateDisk { name blocks type id offset -- dev }
 		ok@ "FoxDiskInit: failed to create device object (%i)\n" KeCrash
 	end
 
-	BLOCKSHIFT dev@ IODeviceSetBlockLog // 1<<9 = 512
+	BLOCKSHIFT dev@ IODevice_BlockLog + ! // 1<<9 = 512
 
 	auto disk
-	dev@ IODeviceGetExtension disk!
+	dev@ IODevice_Extension + @ disk!
 
 	type@ disk@ Disk_Type + !
 	id@ disk@ Disk_DKSID + !
@@ -228,25 +230,33 @@ end
 
 rosection "text"
 
-fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) FoxDiskRead { iopl -- done ok }
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
 	auto devobj
-	fcb@ IOFileControlBlockGetDeviceObject devobj!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
 
 	auto disk
-	devobj@ IODeviceGetExtension disk!
+	devobj@ IODevice_Extension + @ disk!
+
+	auto size
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetSize size!
+
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
 
 	0 ok!
 
-	auto size
-	fcb@ IOFileControlBlockGetSize size!
-
 	if (offset@ size@ >=)
-		0 mdl@ MmMDLHeader_Length + !
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 	
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -254,27 +264,51 @@ fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb --
 	if (offset@ BLOCKSIZE 1 - &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	if (iopl@ IOPacketLocationVirtualBuffer BLOCKSIZE 1 - &)
+		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	auto length
 	size@ offset@ -
-	mdl@ MmMDLHeader_Length + @
+	iopl@ IOPacketLocation_Length + @
 	min length!
 
 	if (length@ BLOCKSIZE 1 - &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	if (length@ ~~)
-		0 mdl@ MmMDLHeader_Length + !
-
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -284,8 +318,16 @@ fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb --
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
+
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
 
 	BLOCKSHIFT offset >>=
 	BLOCKSHIFT length >>=
@@ -296,10 +338,7 @@ fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb --
 	mdl@ MmMDLHeader_SIZEOF + mdlpages!
 
 	auto buf
-	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	iopl@ IOPacketLocationVirtualBuffer PAGEOFFSETMASK & buf!
 
 	while (length@)
 		auto pfdbe
@@ -308,6 +347,9 @@ fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb --
 		auto pageframe
 		pfdbe@ MmPFDBEToPhysicalAddress pageframe!
 		buf@ PAGEOFFSETMASK & pageframe +=
+
+		auto rs
+		HALCPUInterruptDisable rs!
 
 		pageframe@ // value
 		PORT_SET_BUFFER // port
@@ -317,30 +359,46 @@ fn (IODispatchReadFunction) FoxDiskRead { timeout flags kflags offset mdl fcb --
 		PORT_READ_SECTOR disk@ Disk_DKSID + @ | // port
 		HALfox32Out
 
+		rs@ HALCPUInterruptRestore
+
 		1 offset +=
 		1 length -=
 		BLOCKSIZE buf +=
 	end
 
-	ipl@ KeIPLLower
-
 	0 // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	iop@ // iop
+	IOPacketCompleteLow
 end
 
-fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) FoxDiskWrite { iopl -- done ok }
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	auto devobj
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject devobj!
+
 	auto disk
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension disk!
+	devobj@ IODevice_Extension + @ disk!
+
+	auto bytesize
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetSize bytesize!
+
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
 
 	0 ok!
 
-	auto bytesize
-	fcb@ IOFileControlBlockGetSize bytesize!
-
 	if (offset@ bytesize@ >=)
 		STATUS_END_OF_DISK ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -348,27 +406,51 @@ fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
 	if (offset@ BLOCKSIZE 1 - &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	if (iopl@ IOPacketLocationVirtualBuffer BLOCKSIZE 1 - &)
+		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	auto length
 	bytesize@ offset@ -
-	mdl@ MmMDLHeader_Length + @
+	iopl@ IOPacketLocation_Length + @
 	min length!
 
 	if (length@ BLOCKSIZE 1 - &)
 		STATUS_UNALIGNED ok!
 
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
 	if (length@ ~~)
-		0 mdl@ MmMDLHeader_Length + !
-
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
@@ -378,8 +460,16 @@ fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
+
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
 
 	BLOCKSHIFT offset >>=
 	BLOCKSHIFT length >>=
@@ -390,10 +480,7 @@ fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
 	mdl@ MmMDLHeader_SIZEOF + mdlpages!
 
 	auto buf
-	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & buf!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	iopl@ IOPacketLocationVirtualBuffer PAGEOFFSETMASK & buf!
 
 	while (length@)
 		auto pfdbe
@@ -403,6 +490,9 @@ fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
 		pfdbe@ MmPFDBEToPhysicalAddress pageframe!
 		buf@ PAGEOFFSETMASK & pageframe +=
 
+		auto rs
+		HALCPUInterruptDisable rs!
+
 		pageframe@ // value
 		PORT_SET_BUFFER // port
 		HALfox32Out
@@ -411,80 +501,15 @@ fn (IODispatchWriteFunction) FoxDiskWrite { flags kflags offset mdl fcb -- ok }
 		PORT_WRITE_SECTOR disk@ Disk_DKSID + @ | // port
 		HALfox32Out
 
+		rs@ HALCPUInterruptRestore
+
 		1 offset +=
 		1 length -=
 		BLOCKSIZE buf +=
 	end
 
-	ipl@ KeIPLLower
-
 	0 // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
-end
-
-// routines for I/O by block offset, by device object. rarely called.
-// used in some boot situations where acquiring an FCB would be irritating.
-
-fn (IODispatchWriteBlockFunction) FoxDiskWriteBlock { blockno buffer devobject -- ok }
-	// write by block
-
-	auto disk
-	devobject@ IODeviceGetExtension disk!
-
-	if (blockno@ disk@ Disk_Blocks + @ >=)
-		STATUS_END_OF_DISK ok!
-
-		return
-	end
-
-	0 ok!
-
-	auto phyaddr
-	buffer@ MmVirtualToPhysical phyaddr!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	phyaddr@ // value
-	PORT_SET_BUFFER // port
-	HALfox32Out
-
-	blockno@ // value
-	PORT_WRITE_SECTOR disk@ Disk_DKSID + @ | // port
-	HALfox32Out
-
-	ipl@ KeIPLLower
-end
-
-fn (IODispatchReadBlockFunction) FoxDiskReadBlock { blockno buffer devobject -- ok }
-	// read by block
-
-	auto disk
-	devobject@ IODeviceGetExtension disk!
-
-	if (blockno@ disk@ Disk_Blocks + @ >=)
-		STATUS_END_OF_DISK ok!
-
-		return
-	end
-
-	0 ok!
-
-	auto phyaddr
-	buffer@ MmVirtualToPhysical phyaddr!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	phyaddr@ // value
-	PORT_SET_BUFFER // port
-	HALfox32Out
-
-	blockno@ // value
-	PORT_READ_SECTOR disk@ Disk_DKSID + @ | // port
-	HALfox32Out
-
-	ipl@ KeIPLLower
+	iop@ // iop
+	IOPacketCompleteLow
 end

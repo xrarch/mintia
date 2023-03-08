@@ -13,12 +13,6 @@ const IOKFLAG_CLUSTR   64 // return error if IO in progress
 
 extern IOInitPhase1 { -- }
 
-extern IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
-extern IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
-extern IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
-extern IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
-extern IODeviceDeleteFileObject { object -- ok }
-
 extern IOParse { flags path initialobject process -- reparsepath object ok }
 
 externptr IODevicesDirectoryObject
@@ -44,9 +38,8 @@ endstruct
 struct IOFileControlBlockPaged
 	4 Flags
 	4 FileType
-	4 DeviceObject // or parent mountpoint
+	4 DeviceObject
 	4 FSContext
-	4 Mount // a mountpoint that is mounted atop this FCB (i.e., the FCB is a device, or a disk image)
 
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
@@ -65,6 +58,7 @@ struct IOFileControlBlock
 	4 CacheInfoBlock
 	4 DispatchTable
 	4 SizeInBytes
+	4 StackDepth
 endstruct
 
 const IOFCBFLAG_PAGED      1
@@ -80,6 +74,8 @@ const IOPOKE_READ  2
 
 const IOCLUSTERMAX (16 1024 *)
 const IOREADCLUSTERMAX (32 1024 *)
+
+const IOMAXCLUSTERMAX (IOCLUSTERMAX IOREADCLUSTERMAX _max)
 
 // maximum amount of file to zero in page cache before resorting to direct IO.
 
@@ -112,9 +108,7 @@ extern IOFileControlBlockGetChangeTime { fcb -- time }
 
 extern IOFileControlBlockGetSizeof { -- sizeof }
 
-extern IOFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
-extern IOFileControlBlockAllocate { dispatchtable devobj filetype flags -- fcb ok }
-extern IOFileControlBlockCreate { dispatchtable devobj filetype flags -- fcb ok }
+extern IOFileControlBlockCreate { devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }
 extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockLockShared { fcb -- ok }
@@ -128,7 +122,7 @@ extern IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 
 extern IOFileGetFileControlBlock { fileobject -- fcb }
 
-extern IOFileControlBlockDestroyCache { fcb -- }
+extern IOFileControlBlockDestroyCache { writeout fcb -- }
 
 extern IOFileGetContext { fileobject -- context }
 extern IOFileSetContext { context fileobject -- }

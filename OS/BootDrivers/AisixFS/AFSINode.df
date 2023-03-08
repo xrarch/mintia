@@ -40,25 +40,24 @@ fn AFSINodeRead { inum mount urgent -- ptr bcb ok }
 
 	inum@ AFSINode_SIZEOF * off!
 
-	mount@ IOMountGetContext AFSData_IStart + @ AFSBLOCKSHIFT << off@ + block!
+	mount@ IOMount_Extension + @ AFSData_IStart + @ AFSBLOCKSHIFT << off@ + block!
 
 	block@ // offset
-	0 // length
-	mount@ FSVolumeGetFile // fileobject
-	VcFileMap ok! bcb! ptr!
+	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+	VcFileControlBlockMap ok! bcb! ptr!
 end
 
 fn AFSINodeAllocationLock { mount -- ok }
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMountGetContext AFSData_INodeAllocationMutex + // object
+	mount@ IOMount_Extension + @ AFSData_INodeAllocationMutex + // object
 	KeThreadWaitForObject ok!
 end
 
 fn AFSINodeAllocationUnlock { mount -- }
 	0 // abandon
-	mount@ IOMountGetContext AFSData_INodeAllocationMutex + // mutex
+	mount@ IOMount_Extension + @ AFSData_INodeAllocationMutex + // mutex
 	KeMutexRelease drop
 end
 
@@ -89,7 +88,7 @@ end
 
 fn AFSINodeAllocate { mount -- inum inode bcb ok }
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto inodes
 	afsdata@ AFSData_ICount + @ inodes!
@@ -104,9 +103,8 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 	end
 
 	inoblk@ AFSBLOCKSHIFT << // offset
-	0 // length
-	mount@ FSVolumeGetFile // fileobject
-	VcFileMap ok! bcb! inode!
+	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+	VcFileControlBlockMap ok! bcb! inode!
 
 	if (ok@)
 		mount@ AFSINodeAllocationUnlock
@@ -125,9 +123,8 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 			1 inoblk +=
 
 			inoblk@ AFSBLOCKSHIFT << // offset
-			0 // length
-			mount@ FSVolumeGetFile // fileobject
-			VcFileMap ok! bcb! inode!
+			mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+			VcFileControlBlockMap ok! bcb! inode!
 
 			if (ok@)
 				mount@ AFSINodeAllocationUnlock
@@ -204,7 +201,7 @@ fn (IODispatchSetSecurityFunction) AFSSetSecurity { uid gid permissions object -
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
 
-	if (mount@ IOMountGetFlags OSMOUNT_READONLY &)
+	if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
 		STATUS_READONLY_FILESYSTEM ok!
 		return
 	end
@@ -288,13 +285,13 @@ fn AFSFCBCacheLock { alertable mount -- ok }
 	KERNELMODE // waitmode
 	alertable@ // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMountGetContext AFSData_FCBCacheMutex + // object
+	mount@ IOMount_Extension + @ AFSData_FCBCacheMutex + // object
 	KeThreadWaitForObject ok!
 end
 
 fn AFSFCBCacheUnlock { mount -- }
 	0 // abandon
-	mount@ IOMountGetContext AFSData_FCBCacheMutex + // mutex
+	mount@ IOMount_Extension + @ AFSData_FCBCacheMutex + // mutex
 	KeMutexRelease drop
 end
 
@@ -347,7 +344,7 @@ end
 
 fn AFSMountReference { mount -- oldcount }
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -361,7 +358,7 @@ end
 
 fn AFSMountDereference { mount -- oldcount }
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -383,10 +380,10 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 	0 ok!
 
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto rootfcb
-	mount@ IOMountGetRootFCB rootfcb!
+	mount@ IOMount_RootFCB + @ rootfcb!
 
 	// iterate each bucket from 0 to AFSFCBBUCKETS-1.
 	// for each bucket, flush or destroy the FCB.
@@ -459,13 +456,15 @@ fn AFSDelete { fcb -- }
 	// must clean up any internal structures relating to the FCB and free any
 	// on-disk resources associated with it as well.
 
-	fcb@ IOFileControlBlockDestroyCache
+	0 // writeout
+	fcb@ // fcb
+	IOFileControlBlockDestroyCache
 
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
 
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
@@ -522,12 +521,15 @@ fn AFSDelete { fcb -- }
 	IOFileControlBlockDelete drop
 end
 
-fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount mount -- actualcount }
+fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount fsdeviceobject -- actualcount }
 	// called from the context of an IO worker thread to trim FCBs from our
 	// cache.
 
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	0 actualcount!
 
@@ -591,7 +593,7 @@ fn AFSFCBDelete { fcb -- }
 	fcb@ IOFileControlBlockGetMount mount!
 
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
@@ -636,7 +638,7 @@ fn AFSFCBReferenceLockHeld { fcb -- }
 	fcb@ IOFileControlBlockGetMount mount!
 
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
@@ -676,7 +678,7 @@ fn AFSFCBDereference { fcb -- }
 	fcb@ IOFileControlBlockGetMount mount!
 
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	0 mount@ AFSFCBCacheLock drop
 
@@ -728,7 +730,7 @@ end
 
 fn AFSFCBRead { flags inum mount -- fcb ok }
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	if (inum@ 0 ==)
 		"AFSFCBRead: inum == 0\n" KeCrash
@@ -805,14 +807,12 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 		end
 
 		if (flags@ OSFILEFLAG_PAGEFILE &)
-			DriverAFSDispatch // dispatchtable
-			mount@ // devobj
+			mount@ IOMount_FsDeviceObject + @ // devobj
 			filetype@ // filetype
 			0 // flags
 			IOFileControlBlockCreate ok! fcb!
 		end else
-			DriverAFSDispatch // dispatchtable
-			mount@ // devobj
+			mount@ IOMount_FsDeviceObject + @ // devobj
 			filetype@ // filetype
 			IOFCBFLAG_PAGED // flags
 			IOFileControlBlockCreate ok! fcb!

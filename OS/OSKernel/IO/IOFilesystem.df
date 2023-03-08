@@ -1,5 +1,7 @@
 //
 // Implements filesystem volume management.
+// Non-volume-based filesystems (i.e. network redirectors) do not go through
+// here.
 //
 
 #include "<df>/dragonfruit.h"
@@ -38,31 +40,6 @@ public IOMountListHead
 var IOMountCount 0
 public IOMountCount
 
-fn IOiLockMountList { alertable -- ok }
-	fnsection "PAGE$text"
-
-	alertable@ // alertable
-	0 // nowait
-	IOiMountListRwLock // rwlock
-	ExRwLockAcquireExclusive ok!
-end
-
-fn IOiLockMountListShared { alertable -- ok }
-	fnsection "PAGE$text"
-
-	alertable@ // alertable
-	0 // nowait
-	0 // canstarve
-	IOiMountListRwLock // rwlock
-	ExRwLockAcquireShared ok!
-end
-
-fn IOiUnlockMountList { -- }
-	fnsection "PAGE$text"
-
-	IOiMountListRwLock ExRwLockRelease
-end
-
 fn IOFilesystemRegister { filesystem -- ok }
 	fnsection "INIT$text"
 
@@ -74,7 +51,7 @@ fn IOFilesystemRegister { filesystem -- ok }
 	filesystem@ IOFilesystemListHead!
 end
 
-fn IOFilesystemMount { flags handle fsname -- mount ok }
+fn IOFilesystemMount { flags handle fsname -- ok }
 	fnsection "PAGE$text"
 
 	auto fileobject
@@ -114,12 +91,12 @@ fn IOFilesystemMount { flags handle fsname -- mount ok }
 	flags@ // flags
 	fileobject@ // fileobject
 	fsname@ // fsname
-	IOMountObject ok! mount!
+	IOMountObject ok!
 
 	fileobject@ ObObjectDereferenceByPointer drop
 end
 
-fn IOMountObject { flags fileobject fsname -- mount ok }
+fn IOMountObject { flags fileobject fsname -- ok }
 	fnsection "PAGE$text"
 
 	auto fcb
@@ -150,7 +127,7 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 		IOFilesystemListHead@ filesystem!
 
 		while (filesystem@)
-			if (filesystem@ IOFilesystem_Name + @ fsname@ strcmp)
+			if (filesystem@ IOFilesystem_Driver + @ IODriver_Name + @ fsname@ strcmp)
 				break
 			end
 
@@ -164,7 +141,7 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 		end
 	end
 
-	1 IOiLockMountList ok!
+	1 IOLockDeviceDatabase ok!
 
 	if (ok@)
 		return
@@ -173,43 +150,33 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	fcb@ IOFileControlBlockLock ok!
 
 	if (ok@)
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		return
 	end
 
-	if (fcbp@ IOFileControlBlockPaged_Mount + @)
+	auto devobj
+	fcbp@ IOFileControlBlockPaged_DeviceObject + @ devobj!
+
+	if (devobj@ IODevice_AttachedBy + @)
 		fcb@ IOFileControlBlockUnlock
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		STATUS_DEVICE_BUSY ok!
 
 		return
 	end
 
-	IOMount_SIZEOF // bytes
-	'IOMt' // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! mount!
-
-	if (ok@)
+	if (devobj@ IODevice_RelevantMount + @)
 		fcb@ IOFileControlBlockUnlock
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
+
+		STATUS_DEVICE_BUSY ok!
 
 		return
 	end
 
-	0 mount@ IOMount_Next + !
-	0 mount@ IOMount_Prev + !
-
-	0 mount@ IOMount_FSContext + !
-	fileobject@ mount@ IOMount_VolumeFile + !
-	0 mount@ IOMount_RootFCB + !
-	flags@ mount@ IOMount_Flags + !
-	0 mount@ IOMount_RealVolumeFile + !
-	0 mount@ IOMount_VolumeCapturedFCB + !
-	0 mount@ IOMount_RealVolumeCapturedFCB + !
-	0 mount@ IOMount_ReclaimedFrom + !
+	auto fsdevobj
 
 	STATUS_BAD_FILESYSTEM ok!
 
@@ -222,8 +189,6 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 		IOFilesystemListHead@ filesystem!
 
 		while (filesystem@)
-			filesystem@ mount@ IOMount_Filesystem + !
-			
 			if (filesystem@ IOFilesystem_Flags + @ IOFSFLAG_NOAUTO & ~~)
 				filesystem@ IOFilesystem_MountFunction + @ mountfunc!
 
@@ -233,8 +198,9 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 					end
 				end
 
-				mount@ // mount
-				mountfunc@ IOFilesystemMountFunction ok!
+				flags@ // flags
+				devobj@ // deviceobject
+				mountfunc@ IOFilesystemMountFunction ok! fsdevobj!
 
 				if (ok@ 0 ==)
 					// successfully mounted as this filesystem
@@ -246,8 +212,6 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 			filesystem@ IOFilesystem_Next + @ filesystem!
 		end
 	end else
-		filesystem@ mount@ IOMount_Filesystem + !
-
 		filesystem@ IOFilesystem_MountFunction + @ mountfunc!
 
 		if (DEBUGCHECKS)
@@ -256,25 +220,22 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 			end
 		end
 
-		mount@ // mount
-		mountfunc@ IOFilesystemMountFunction ok!
+		flags@ // flags
+		devobj@ // deviceobject
+		mountfunc@ IOFilesystemMountFunction ok! fsdevobj!
 	end
 
 	if (ok@)
 		fcb@ IOFileControlBlockUnlock
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		// did not successfully mount
-
-		mount@ MmFree
 
 		return
 	end
 
-	mount@ fcbp@ IOFileControlBlockPaged_Mount + !
-
-	// bias the reference count of the volume file object
-	fileobject@ ObObjectReferenceByPointer drop
+	auto mount
+	fsdevobj@ IODevice_RelevantMount + @ mount!
 
 	// add to head of mount list
 
@@ -291,7 +252,7 @@ fn IOMountObject { flags fileobject fsname -- mount ok }
 	1 IOMountCount +=
 
 	fcb@ IOFileControlBlockUnlock
-	IOiUnlockMountList
+	IOUnlockDeviceDatabase
 end
 
 fn IOFilesystemUnmount { handle -- ok }
@@ -349,7 +310,7 @@ fn IOUnmountObject { fileobject -- ok }
 		return
 	end
 
-	1 IOiLockMountList ok!
+	1 IOLockDeviceDatabase ok!
 
 	if (ok@)
 		return
@@ -358,22 +319,27 @@ fn IOUnmountObject { fileobject -- ok }
 	fcb@ IOFileControlBlockLock ok!
 
 	if (ok@)
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		return
 	end
 
+	auto fsdevobj
+	fcbp@ IOFileControlBlockPaged_DeviceObject + @ fsdevobj!
+
 	auto mount
-	fcbp@ IOFileControlBlockPaged_Mount + @ mount!
+	fsdevobj@ IODevice_RelevantMount + @ mount!
 
 	if (mount@ ~~)
 		fcb@ IOFileControlBlockUnlock
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		STATUS_NOT_MOUNTED ok!
 
 		return
 	end
+
+	mount@ IOMount_FsDeviceObject + @ fsdevobj!
 
 	auto filesystem
 	mount@ IOMount_Filesystem + @ filesystem!
@@ -387,14 +353,14 @@ fn IOUnmountObject { fileobject -- ok }
 		end
 	end
 
-	mount@ // mount
+	fsdevobj@ // fsdevobj
 	unmountfunc@ IOFilesystemUnmountFunction ok!
 
 	if (ok@)
 		// failed to unmount
 
 		fcb@ IOFileControlBlockUnlock
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		return
 	end
@@ -418,21 +384,10 @@ fn IOUnmountObject { fileobject -- ok }
 
 	1 IOMountCount -=
 
-	auto volfile
-	mount@ IOMount_VolumeFile + @ volfile!
-
-	mount@ MmFree
-
-	// unmounted successfully
-
-	0 fcbp@ IOFileControlBlockPaged_Mount + !
-
-	// unbias reference count of volume file object
-
-	volfile@ ObObjectDereferenceByPointer drop
+	fsdevobj@ IOVolumeDeviceUninitialize
 
 	fcb@ IOFileControlBlockUnlock
-	IOiUnlockMountList
+	IOUnlockDeviceDatabase
 end
 
 fn IOMountUpdateFlags { newflags handle -- ok }
@@ -509,8 +464,11 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 		return
 	end
 
+	auto fsdevobj
+	fcbp@ IOFileControlBlockPaged_DeviceObject + @ fsdevobj!
+
 	auto mount
-	fcbp@ IOFileControlBlockPaged_Mount + @ mount!
+	fsdevobj@ IODevice_RelevantMount + @ mount!
 
 	if (mount@ ~~)
 		fcb@ IOFileControlBlockUnlock
@@ -519,6 +477,8 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 
 		return
 	end
+
+	mount@ IOMount_FsDeviceObject + @ fsdevobj!
 
 	auto oldflags
 	mount@ IOMount_Flags + @ oldflags!
@@ -543,7 +503,7 @@ fn IOMountUpdateFlagsObject { newflags fileobject -- ok }
 
 	newflags@ // newflags
 	oldflags@ // oldflags
-	mount@ // mount
+	fsdevobj@ // fsdeviceobject
 	updatefunc@ IOFilesystemUpdateFlagsFunction ok!
 
 	if (ok@ ~~)
@@ -620,8 +580,11 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 		return
 	end
 
+	auto fsdevobj
+	fcbp@ IOFileControlBlockPaged_DeviceObject + @ fsdevobj!
+
 	auto mount
-	fcbp@ IOFileControlBlockPaged_Mount + @ mount!
+	fsdevobj@ IODevice_RelevantMount + @ mount!
 
 	if (mount@ ~~)
 		fcb@ IOFileControlBlockUnlock
@@ -631,8 +594,10 @@ fn IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 		return
 	end
 
+	mount@ IOMount_FsDeviceObject + @ fsdevobj!
+
 	buffer@ // dest
-	mount@ IOMount_Filesystem + @ IOFilesystem_Name + @ // src
+	mount@ IOMount_Filesystem + @ IOFilesystem_Driver + @ IODriver_Name + @ // src
 	OBNAMEMAX 1 -
 	strncpy
 
@@ -647,7 +612,7 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 	0 // word
 	memset
 
-	1 IOiLockMountListShared ok!
+	1 IOLockDeviceDatabaseShared ok!
 
 	if (ok@)
 		return
@@ -664,7 +629,7 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 		end
 
 		auto name
-		mount@ IOMount_VolumeFile + @ IOFile_OpenedPath + @ name!
+		mount@ IOMount_UnderlyingDeviceObject + @ ObObjectName name!
 
 		if (name@)
 			buffer@ OSMountInformation_VolumeName + // dest
@@ -678,13 +643,13 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 		mount@ IOMount_Flags + @ buffer@ OSMountInformation_Flags + !
 
 		buffer@ OSMountInformation_FilesystemName + // dest
-		mount@ IOMount_Filesystem + @ IOFilesystem_Name + @ // src
+		mount@ IOMount_Filesystem + @ IOFilesystem_Driver + @ IODriver_Name + @ // src
 		OBNAMEMAX 1 -
 		strncpy
 
 		if (mount@ IOMount_Filesystem + @ IOFilesystem_VolumeQueryFunction + @)
 			buffer@ // query
-			mount@ // mount
+			mount@ IOMount_FsDeviceObject + @ // fsdeviceobject
 			mount@ IOMount_Filesystem + @ IOFilesystem_VolumeQueryFunction + @ IOFilesystemVolumeQueryFunction drop
 		end
 
@@ -694,37 +659,13 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	IOiUnlockMountList
-end
-
-fn IOMountGetFlags { mount -- flags }
-	mount@ IOMount_Flags + @ flags!
-end
-
-fn IOMountSetFlags { flags mount -- }
-	flags@ mount@ IOMount_Flags + !
-end
-
-fn IOMountSetContext { context mount -- }
-	context@ mount@ IOMount_FSContext + !
-end
-
-fn IOMountGetContext { mount -- context }
-	mount@ IOMount_FSContext + @ context!
-end
-
-fn IOMountSetRootFCB { fcb mount -- }
-	fcb@ mount@ IOMount_RootFCB + !
-end
-
-fn IOMountGetRootFCB { mount -- fcb }
-	mount@ IOMount_RootFCB + @ fcb!
+	IOUnlockDeviceDatabase
 end
 
 fn IOiFilesystemSyncAll { shutdown -- ok }
 	fnsection "PAGE$text"
 
-	1 IOiLockMountListShared ok!
+	1 IOLockDeviceDatabaseShared ok!
 
 	if (ok@)
 		return
@@ -742,14 +683,14 @@ fn IOiFilesystemSyncAll { shutdown -- ok }
 
 		if (flushfunc@)
 			shutdown@ // shutdown
-			mount@ // mount
+			mount@ IOMount_FsDeviceObject + @ // fsdeviceobject
 			flushfunc@ IOFilesystemFlushFunction drop
 		end
 
 		mount@ IOMount_Next + @ mount!
 	end
 
-	IOiUnlockMountList
+	IOUnlockDeviceDatabase
 end
 
 fn IOiFilesystemReclaimFCB { -- }
@@ -784,7 +725,7 @@ fn IOiFilesystemReclaimFCB { -- }
 	0 skipped!
 
 	auto ok
-	0 IOiLockMountListShared ok!
+	0 IOLockDeviceDatabaseShared ok!
 
 	if (ok@)
 		return
@@ -801,7 +742,7 @@ fn IOiFilesystemReclaimFCB { -- }
 
 			if (reclaimfunc@)
 				count@ actual@ - // preferredcount
-				mount@ // mount
+				mount@ IOMount_FsDeviceObject + @ // fsdeviceobject
 				reclaimfunc@ IOFilesystemReclaimFunction trimmed!
 
 				if (trimmed@)
@@ -822,7 +763,7 @@ fn IOiFilesystemReclaimFCB { -- }
 	end
 
 	if (actual@ count@ >=)
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		return
 	end
@@ -832,7 +773,7 @@ fn IOiFilesystemReclaimFCB { -- }
 	if (skipped@ ~~)
 		// we didn't skip any mounts, so that can't be why.
 
-		IOiUnlockMountList
+		IOUnlockDeviceDatabase
 
 		return
 	end
@@ -853,7 +794,7 @@ fn IOiFilesystemReclaimFCB { -- }
 
 			if (reclaimfunc@)
 				count@ actual@ - // preferredcount
-				mount@ // mount
+				mount@ IOMount_FsDeviceObject + @ // fsdeviceobject
 				reclaimfunc@ IOFilesystemReclaimFunction trimmed!
 
 				trimmed@ actual +=
@@ -863,5 +804,5 @@ fn IOiFilesystemReclaimFCB { -- }
 		mount@ IOMount_Next + @ mount!
 	end
 
-	IOiUnlockMountList
+	IOUnlockDeviceDatabase
 end

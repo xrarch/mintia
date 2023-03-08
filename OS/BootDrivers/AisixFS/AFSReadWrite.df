@@ -29,277 +29,263 @@
 // filesystem specific code, because the upper-level code does not achieve
 // this for us.
 
-fn (IODispatchReadFunction) AFSReadFile { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) AFSReadWriteFile { iopl -- done ok }
+	0 ok!
+	0 done!
+
+	auto fcb
+	iopl@ IOPacketLocation_FileControlBlock + @ fcb!
+
 	auto bytesize
 	fcb@ IOFileControlBlockGetSize bytesize!
 
-	auto volfcb
-	fcb@ FSVolumeGetFCB volfcb!
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
 
-	0 ok!
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
-	if (offset@ bytesize@ >=)
-		0 mdl@ MmMDLHeader_Length + !
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
 
-		0 // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-
-		return
-	end
-
-	auto bytesread
-	mdl@ MmMDLHeader_Length + @ bytesread!
-
-	if (bytesread@ AFSBLOCKOFFMASK &)
-		STATUS_UNALIGNED ok!
-
-		return
-	end
-
-	bytesize@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytesize!
-
-	bytesize@ offset@ -
-	bytesread@
-	min bytesread!
-
-	if (bytesread@ ~~)
-		0 mdl@ MmMDLHeader_Length + !
-
-		0 // status
-		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-
-		return
-	end
-
-	bytesread@ // length
-	flags@ // flags
-	kflags@ // kflags
-	offset@ // offset
-	mdl@ // mdl
-	fcb@ // fcb
-	0 // write
-	AFSReadWrite ok!
-end
-
-fn (IODispatchWriteFunction) AFSWriteFile { flags kflags offset mdl fcb -- ok }
-	auto bytesize
-	fcb@ IOFileControlBlockGetSize bytesize!
-
-	0 ok!
-
-	auto byteswritten
-	0 byteswritten!
+	auto bytes
+	iopl@ IOPacketLocation_Length + @ bytes!
 
 	if (offset@ bytesize@ >=)
-		STATUS_END_OF_FILE ok!
+		1 done!
+
+		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
+			0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+		end else
+			STATUS_END_OF_FILE ok!
+		end
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
-	mdl@ MmMDLHeader_Length + @ byteswritten!
+	if (fcb@ IOFileControlBlockGetType OSFILETYPE_BLOCKDEVICE ==)
+		// this is actually the volume device, just redirect the request to
+		// the underlying device.
 
-	if (byteswritten@ AFSBLOCKOFFMASK &)
-		STATUS_UNALIGNED ok!
+		mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @ iopl@ IOPacketLocation_FileControlBlock + !
+
+		if (iopl@ IOPacketLocation_Offset + @ iopl@ IOPacketLocation_Length + @ + bytesize@ >)
+
+			// truncate the transfer to the size of the volume file.
+			// this should be paging I/O from the viewcache, so lets trust
+			// length + offset not to overflow.
+
+			bytesize@ iopl@ IOPacketLocation_Offset + @ - iopl@ IOPacketLocation_Length + !
+			bytesize@ iopl@ IOPacketLocation_Offset + @ - iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+		end
+
+		IODONE_SAMELOCATION done!
 
 		return
 	end
 
-	bytesize@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytesize!
+	bytes@ AFSBLOCKOFFMASK + AFSBLOCKNUMBERMASK & bytes!
 
 	bytesize@ offset@ -
-	byteswritten@
-	min byteswritten!
+	bytes@
+	min bytes!
 
-	if (byteswritten@ ~~)
-		0 mdl@ MmMDLHeader_Length + !
+	if (bytes@ ~~)
+		1 done!
+
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
-	byteswritten@ // length
-	flags@ // flags
-	kflags@ // kflags
-	offset@ // offset
-	mdl@ // mdl
+	bytes@ iopl@ IOPacketLocation_Context + !
+	pointerof AFSReadWriteCallback iopl@ IOPacketLocation_CallbackRoutine + !
+
+	auto rundownlisthead
+	4 alloc rundownlisthead!
+
+	0 rundownlisthead@!
+
+	rundownlisthead@ // rundownlisthead
 	fcb@ // fcb
-	1 // write
+	offset@ // offset
+	bytes@ // bytes
+	mount@ // mount
+	iopl@ // iopl
+	iop@ // iop
 	AFSReadWrite ok!
-end
-
-fn AFSReadWrite { length flags kflags offset mdl fcb write -- ok }
-	length@ mdl@ MmMDLHeader_Length + !
-
-	auto volfcb
-	fcb@ FSVolumeGetFCB volfcb!
-
-	write@ ~~ // lockforwrite
-	mdl@ // mdl
-	MmMDLPin ok!
 
 	if (ok@)
+		// clean up any associated IOP that AFSReadWrite allocated before the
+		// error condition occurred.
+
+		auto associop
+		rundownlisthead@@ associop!
+
+		while (associop@)
+			auto niop
+			associop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+			associop@ IOPacketFree
+
+			niop@ associop!
+		end
+
+		1 done!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
+end
 
-	auto fragmentstart
-	auto fragmentlength
+fn AFSReadWrite { rundownlisthead fcb offset bytes mount iopl iop -- ok }
+	// we need to allocate all of the associated IOPs that will be needed to
+	// complete this operation. this has to be done first because there's no
+	// good way to clean up associated IOPs in a failure scenario.
 
-	auto fragmentlastblkno
-	-1 fragmentlastblkno!
+	// we link the associated IOPs into a rundown list, so that we can
+	// deallocate all of them if there is a failure. we run the list through
+	// the DeviceQueue links, since these are unused while the IOP is in our
+	// custody. they are actually used for the per-thread associated IOP list,
+	// but we don't associate them until after we no longer need the rundown
+	// list, so that is fine.
 
-	auto fragmentoffset
-	0 fragmentoffset!
+	0 ok!
 
-	auto bufoffset
-	0 bufoffset!
+	auto rundownlisttail
+	0 rundownlisttail!
 
-	auto fragged
-	0 fragged!
+	auto kflags
+	iopl@ IOPacketHeader_KFlags + @ kflags!
 
-	while (bufoffset@ length@ <)
+	auto off
+	0 off!
+
+	auto fragiopl
+	iopl@ IOPacketLocationNext fragiopl!
+
+	auto fragiop
+	iop@ fragiop!
+
+	mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @
+	fragiopl@ IOPacketLocation_FileControlBlock + !
+
+	iopl@ IOPacketLocation_FunctionCodeB + gb
+	fragiopl@ IOPacketLocation_FunctionCodeB + sb
+
+	iopl@ IOPacketLocation_Flags + @
+	fragiopl@ IOPacketLocation_Flags + !
+
+	auto lastblkno
+	-1 lastblkno!
+
+	auto fraglength
+	0 fraglength!
+
+	while (off@ bytes@ <)
 		auto blkno
-		offset@ AFSBLOCKSHIFT >> // blkoff
+		offset@ off@ + AFSBLOCKSHIFT >> // blkoff
 		fcb@ // fcb
 		kflags@ // kflags
 		AFSBlockMap ok! blkno!
 
 		if (ok@)
-			break
+			return
 		end
 
-		if (fragmentlastblkno@ -1 ~=)
-			if (blkno@ fragmentlastblkno@ 1 + ~=)
+		if (lastblkno@ -1 ~=)
+			if (blkno@ lastblkno@ 1 + ~=)
 				// not contiguous -- new fragment.
-				// write the last one.
 
-				fragmentoffset@ // offset
-				fragmentstart@ // start
-				fragmentlength@ // length
-				mdl@ // mdl
-				flags@ // flags
-				kflags@ // kflags
-				volfcb@ // volfcb
-				write@ // write
-				AFSTransfer ok!
+				fraglength@ fragiopl@ IOPacketLocation_Length + !
+				0 fraglength!
+
+				iop@ IOPacketHeader_KFlags + @ // kflags
+				IOPFLAG_FREEIOP IOPFLAG_QUOTA | // iopflags
+				iopl@ // iopl
+				IOPacketAllocateAssocStack ok! fragiop! fragiopl!
 
 				if (ok@)
-					break
+					return
 				end
 
-				1 fragged!
-				-1 fragmentlastblkno!
+				mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @
+				fragiopl@ IOPacketLocation_FileControlBlock + !
+
+				blkno@ AFSBLOCKSHIFT <<
+				fragiopl@ IOPacketLocation_Offset + !
+
+				iopl@ IOPacketLocation_FunctionCodeB + gb
+				fragiopl@ IOPacketLocation_FunctionCodeB + sb
+
+				iopl@ IOPacketLocation_Flags + @
+				fragiopl@ IOPacketLocation_Flags + !
+
+				iop@ IOPacketHeader_MDL + @
+				fragiop@ IOPacketHeader_MDL + !
+
+				iopl@ IOPacketLocation_OffsetInMDL + @ off@ +
+				fragiopl@ IOPacketLocation_OffsetInMDL + !
+
+				if (rundownlisttail@ ~~)
+					fragiop@ rundownlisthead@!
+				end else
+					fragiop@ rundownlisttail@ IOPacketHeader_DeviceQueueNext + !
+				end
+
+				fragiop@ rundownlisttail!
 			end
-		end
-
-		if (fragmentlastblkno@ -1 ==)
-			blkno@ AFSBLOCKSHIFT << fragmentstart!
-			bufoffset@ fragmentoffset!
-			0 fragmentlength!
-		end
-
-		AFSBLOCKSIZE fragmentlength +=
-		blkno@ fragmentlastblkno!
-
-		AFSBLOCKSIZE offset +=
-		AFSBLOCKSIZE bufoffset +=
-	end
-
-	if (ok@)
-		return
-	end
-
-	if (fragged@ ~~)
-		// transfer never fragmented, pass the entire MDL to the volume file
-
-		if (write@)
-			flags@ // flags
-			kflags@ // kflags
-			fragmentstart@ // offset
-			mdl@ // mdl
-			volfcb@ // fcb
-			volfcb@ FSVolumeFCBGetWriteFunction IODispatchWriteFunction ok!
 		end else
-			OSWAIT_TIMEOUTINFINITE // timeout
-			flags@ // flags
-			kflags@ // kflags
-			fragmentstart@ // offset
-			mdl@ // mdl
-			volfcb@ // fcb
-			volfcb@ FSVolumeFCBGetReadFunction IODispatchReadFunction ok!
-		end
-	end else
-		if (fragmentlength@)
-			fragmentoffset@ // offset
-			fragmentstart@ // start
-			fragmentlength@ // length
-			mdl@ // mdl
-			flags@ // flags
-			kflags@ // kflags
-			volfcb@ // volfcb
-			write@ // write
-			AFSTransfer ok!
+			blkno@ AFSBLOCKSHIFT <<
+			fragiopl@ IOPacketLocation_Offset + !
 		end
 
-		if (ok@ ~~)
-			// release the extra I/O count on the MDL, making it entirely
-			// dependent on the child fragment MDLs.
+		blkno@ lastblkno!
+		AFSBLOCKSIZE fraglength +=
+		AFSBLOCKSIZE off +=
+	end
 
-			0 // status
-			0 // priboost
-			mdl@ // mdl
-			MmMDLComplete
-		end
+	fraglength@ fragiopl@ IOPacketLocation_Length + !
+
+	// allocating the packets succeeded, so associate them now.
+
+	rundownlisthead@@ fragiop!
+
+	while (fragiop@)
+		auto niop
+		fragiop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+		fragiop@ // associop
+		iop@ // iop
+		IOPacketAssociate
+
+		niop@ fragiop!
 	end
 end
 
-fn AFSTransfer { offset start length mdl flags kflags volfcb write -- ok }
-	auto fragmdl
-	0 // extraspace
-	0 // mode (gets filled in by MmMDLSplit)
-	length@ // length
-	mdl@ MmMDLHeader_VirtualAddress + @ offset@ + // vaddr
-	kflags@ // kflags
-	MmMDLAllocateWithQuota ok! fragmdl! drop
+fn (IOPacketCompletionDPCRoutine) AFSReadWriteCallback { iopl -- ok }
+	// save the actual length if successful
 
-	if (ok@)
-		return
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	if (iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ ~~)
+		iopl@ IOPacketLocation_Context + @ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 	end
 
-	mdl@ MmMDLHeader_VirtualAddress + @ offset@ + // vaddr
-	length@ // length
-	mdl@ // srcmdl
-	fragmdl@ // destmdl
-	MmMDLSplit
-
-	if (write@)
-		flags@ // flags
-		kflags@ // kflags
-		start@ // offset
-		fragmdl@ // mdl
-		volfcb@ // fcb
-		volfcb@ FSVolumeFCBGetWriteFunction IODispatchWriteFunction ok!
-	end else
-		OSWAIT_TIMEOUTINFINITE // timeout
-		flags@ // flags
-		kflags@ // kflags
-		start@ // offset
-		fragmdl@ // mdl
-		volfcb@ // fcb
-		volfcb@ FSVolumeFCBGetReadFunction IODispatchReadFunction ok!
-	end
-
-	if (ok@)
-		ok@ // status
-		0 // priboost
-		fragmdl@ // mdl
-		MmMDLComplete
-	end
+	0 ok!
 end

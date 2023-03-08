@@ -78,8 +78,8 @@ public IOiWritebehindEvent
 buffer IOiFileControlBlockCacheTrimEvent KeEvent_SIZEOF
 public IOiFileControlBlockCacheTrimEvent
 
-buffer IOiMountListRwLock ExRwLock_SIZEOF
-public IOiMountListRwLock
+buffer IOiDeviceDatabaseRwLock ExRwLock_SIZEOF
+public IOiDeviceDatabaseRwLock
 
 externptr IOiWritebehindTimerDPCFunction
 
@@ -148,7 +148,7 @@ fn IOInitPhase1 { -- }
 	"Device" typeinit@ ObTypeInitializer_Name + !
 	'Devi'   typeinit@ ObTypeInitializer_Tag + !
 	0        typeinit@ ObTypeInitializer_BodySize + !
-	pointerof IODeviceDeleteObject typeinit@ ObTypeInitializer_DeleteFunction + !
+	pointerof IOiDeviceDeleteObject typeinit@ ObTypeInitializer_DeleteFunction + !
 	typeinit@ ObTypeCreate ok! type!
 
 	if (ok@)
@@ -200,11 +200,15 @@ rosection "text"
 	IOiFileControlBlockCacheTrimEvent // event
 	KeEventInitialize
 
-	"IOiMountListRwLock" // name
-	IOiMountListRwLock // rwlock
+	"IOiDeviceDatabaseRwLock" // name
+	IOiDeviceDatabaseRwLock // rwlock
 	ExRwLockInitialize
 
 rosection "INIT$text"
+
+	// initialize IOP zones
+
+	IOiPacketZonesInit
 
 	// initialize drivers
 
@@ -274,19 +278,16 @@ fn IOiBootDeviceMount { -- }
 		ok@ "IOiBootDeviceMount: inaccessible boot device (%i)\n" KeCrash
 	end
 
-	auto mount
-
 	OSMOUNT_READONLY // flags
 	bootdevhandle@ // handle
 	0 // fsname (any)
-	IOFilesystemMount ok! mount!
+	IOFilesystemMount ok!
 
 	if (ok@)
 		ok@ "IOiBootDeviceMount: failed to mount boot device (%i)\n" KeCrash
 	end
 
 	auto bootfile
-
 	IOFileTypeObject@ // type
 	bootdevhandle@ // handle
 	ObObjectReferenceByHandle ok! bootfile! drop
@@ -297,6 +298,9 @@ fn IOiBootDeviceMount { -- }
 
 	bootfile@ IOFile_FileControlBlock + @ IOFileControlBlockGetDeviceObject IOBootDevice!
 
+	IOBootDevice@ IODevice_RelevantMount + @ IOMount_Filesystem + @ IOFilesystem_Driver + @ IODriver_Name + @
+	"mounted read-only as: %s\n" "IOiBootDeviceMount" HALLog
+
 	bootfile@ ObObjectDereferenceByPointer drop
 
 	bootdevhandle@ ObObjectClose ok!
@@ -304,6 +308,4 @@ fn IOiBootDeviceMount { -- }
 	if (ok@)
 		ok@ "IOiBootDeviceMount: failed to close boot device (%i)\n" KeCrash
 	end
-
-	mount@ IOMount_Filesystem + @ IOFilesystem_Name + @ "mounted read-only as: %s\n" "IOiBootDeviceMount" HALLog
 end

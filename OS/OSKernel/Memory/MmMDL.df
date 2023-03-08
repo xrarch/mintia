@@ -30,43 +30,71 @@
 
 #include "MmInternal.h"
 
-fn MmMDLInitialize { mode length vaddr mdl -- }
-	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
-	length@ mdl@ MmMDLHeader_Length + !
-	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> mdl@ MmMDLHeader_Pages + !
-	0 mdl@ MmMDLHeader_Flags + !
-	mode@ mdl@ MmMDLHeader_ModeB + sb
+buffer MiMDLZoneSmall MmZoneHeader_SIZEOF
 
-	0 mdl@ MmMDLHeader_MappedAddress + !
+const SMALLPAGES 8
 
-	0 mdl@ MmMDLHeader_Status + !
-	0 mdl@ MmMDLHeader_PriorityBoostB + sb
-	0 mdl@ MmMDLHeader_Event + !
-	0 mdl@ MmMDLHeader_ParentMDL + !
-	1 mdl@ MmMDLHeader_IOCountI + si
+const SMALLMDLS 40
 
-	0 mdl@ MmMDLHeader_CompleteRoutine + !
+rosection "INIT$text"
 
-	0 mdl@ MmMDLHeader_QuotaBlock + !
-	0 mdl@ MmMDLHeader_CompletionMessage + !
-	0 mdl@ MmMDLHeader_FileObject + !
+fn MiMDLZoneInit { count pagecount zone -- }
+	fnsection "INIT$text"
 
-	0 mdl@ MmMDLHeader_IOListNext + !
-	0 mdl@ MmMDLHeader_IOListPrev + !
+	auto mdlsize
+	MmMDLHeader_SIZEOF pagecount@ 1 + 2 << + mdlsize!
 
-	KeThreadCurrent@ // thread
-	pointerof MiMDLCompleteAPC // specialfunc
-	0 // normalfunc
-	mdl@ MmMDLHeader_CompletionAPC + // apc
-	KeAPCInitialize
+	mdlsize@ count@ * MMZONEOVERHEAD +
+	"zonesize %d\n"
+	"MiMDLZonesInit" HALLog
+
+	auto ok
+	auto chunk
+
+	mdlsize@ count@ * MMZONEOVERHEAD + // bytes
+	'MDLz' // tag
+	0 // flags
+	MmAllocWithTag ok! chunk!
+
+	if (ok@)
+		"MiMDLZonesInit: failed to create MDL zones\n" KeCrash
+	end
+
+	mdlsize@ count@ * MMZONEOVERHEAD + // bytes
+	chunk@ // chunk
+	mdlsize@ // blocksize
+	zone@ // zoneheader
+	MmZoneInitialize
 end
 
-fn MmMDLAllocate { extraspace mode length vaddr kflags -- extra mdl ok }
+fn MiMDLZonesInit { -- }
+	fnsection "INIT$text"
+
+	SMALLMDLS // count
+	SMALLPAGES // pagecount
+	MiMDLZoneSmall // zone
+	MiMDLZoneInit
+end
+
+rosection "text"
+
+fn MmMDLInitialize { length vaddr kflags mdl -- }
+	vaddr@ mdl@ MmMDLHeader_VirtualAddress + !
+	length@ mdl@ MmMDLHeader_Length + !
+	0 mdl@ MmMDLHeader_Flags + !
+	0 mdl@ MmMDLHeader_MappedAddress + !
+	0 mdl@ MmMDLHeader_QuotaBlock + !
+
+	KeProcessCurrent mdl@ MmMDLHeader_Process + !
+
+	if (kflags@ IOKFLAG_PAGEIN &)
+		MMMDL_PAGEIN mdl@ MmMDLHeader_Flags + |=
+	end
+end
+
+fn MmMDLAllocate { length vaddr kflags -- mdl ok }
 	// try pretty hard not to call this since it puts IO integrity at the
 	// mercy of the memory manager.
-	//
-	// it is sadly necessary for some stuff like non-contiguous disk transfers
-	// from filesystem drivers.
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC >=)
@@ -74,35 +102,62 @@ fn MmMDLAllocate { extraspace mode length vaddr kflags -- extra mdl ok }
 		end
 	end
 
-	auto bytes
-	vaddr@ length@ MmMDLGetSize bytes!
+	auto pages
+	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
-	auto flags
-	CANBLOCK flags!
+	0 mdl!
 
-	kflags@ MmKflagToPriority flags |=
+	auto zone
+	0 zone!
 
-	bytes@ extraspace@ + // bytes
-	'MMDL' // tag
-	flags@ // flags
-	MmAllocWithTag ok! mdl!
+	if (pages@ SMALLPAGES <=)
+		auto rs
+		HALCPUInterruptDisable rs!
 
-	if (ok@)
-		return
+		MiMDLZoneSmall MmZoneAllocate ok! mdl!
+
+		rs@ HALCPUInterruptRestore
+
+		if (ok@)
+			// no MDLs left in the zone.
+
+			0 mdl!
+		end else
+			1 zone!
+		end
 	end
 
-	mode@ length@ vaddr@ mdl@ MmMDLInitialize
+	if (mdl@ ~~)
+		auto bytes
+		vaddr@ length@ MmMDLGetSize bytes!
 
-	MMMDL_DELETE mdl@ MmMDLHeader_Flags + |=
+		auto flags
+		CANBLOCK flags!
 
-	mdl@ bytes@ + extra!
+		kflags@ MmKflagToPriority flags |=
+
+		bytes@ // bytes
+		'MMDL' // tag
+		flags@ // flags
+		MmAllocWithTag ok! mdl!
+
+		if (ok@)
+			return
+		end
+	end
+
+	length@ vaddr@ kflags@ mdl@ MmMDLInitialize
+
+	if (zone@)
+		MMMDL_ZONEMDL mdl@ MmMDLHeader_Flags + |=
+	end
 end
 
-fn MmMDLAllocateWithQuota { extraspace mode length vaddr kflags -- extra mdl ok }
-	if (kflags@ IOKFLAG_PAGEIN &)
+fn MmMDLAllocateWithQuota { length vaddr kflags -- mdl ok }
+	if (kflags@ IOKFLAG_PAGEIN IOKFLAG_SWAPOUT | &)
 		// nope, don't charge quota for paging IO
 
-		extraspace@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl! extra!
+		length@ vaddr@ kflags@ MmMDLAllocate ok! mdl!
 
 		return
 	end
@@ -111,7 +166,7 @@ fn MmMDLAllocateWithQuota { extraspace mode length vaddr kflags -- extra mdl ok 
 	KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
 
 	auto bytes
-	vaddr@ length@ MmMDLGetSize extraspace@ + bytes!
+	vaddr@ length@ MmMDLGetSize bytes!
 
 	bytes@ MmChargeBytesGet // charge
 	quotablock@ // quotablock
@@ -121,14 +176,13 @@ fn MmMDLAllocateWithQuota { extraspace mode length vaddr kflags -- extra mdl ok 
 		return
 	end
 
-	extraspace@ mode@ length@ vaddr@ kflags@ MmMDLAllocate ok! mdl! extra!
+	length@ vaddr@ kflags@ MmMDLAllocate ok! mdl!
 
 	if (ok@)
 		bytes@ MmChargeBytesGet // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
 	end else
-		quotablock@ MmQuotaBlockReference
 		quotablock@ mdl@ MmMDLHeader_QuotaBlock + !
 	end
 end
@@ -140,16 +194,46 @@ fn MmMDLFree { mdl -- }
 	mdl@ MmMDLHeader_QuotaBlock + @ quotablock!
 
 	auto charge
-	mdl@ MmBlockChargeGet charge!
 
-	mdl@ MmFree
+	if (quotablock@)
+		mdl@ MmMDLHeader_VirtualAddress + @ // vaddr
+		mdl@ MmMDLHeader_Length + @ // length
+		MmMDLGetSize MmChargeBytesGet charge!
+	end
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_ZONEMDL &)
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		mdl@ // ptr
+		MiMDLZoneSmall // zoneheader
+		MmZoneFree
+
+		rs@ HALCPUInterruptRestore
+	end else
+		mdl@ MmFree
+	end
 
 	if (quotablock@)
 		charge@ // charge
 		quotablock@ // quotablock
 		MmQuotaBlockUncharge
+	end
+end
 
-		quotablock@ MmQuotaBlockDereference
+fn MmMDLFreeComplete { mdl -- }
+	// XXX review being able to clean this up after IOPackets are done
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
+		mdl@ MmMDLUnmap
+	end
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED &)
+		mdl@ MmMDLUnpin
+	end
+
+	if (mdl@ MmMDLHeader_Flags + @ MMMDL_FREE &)
+		mdl@ MmMDLFree
 	end
 end
 
@@ -162,90 +246,17 @@ fn MmMDLGetSize { vaddr length -- size }
 	pages@ 1 + 2 << MmMDLHeader_SIZEOF + size!
 end
 
-fn MmMDLSplit { vaddr length srcmdl destmdl -- }
-	// split the source MDL into a destination MDL that only describes a
-	// subset.
-
-	auto srcva
-	srcmdl@ MmMDLHeader_VirtualAddress + @ srcva!
-
-	if (DEBUGCHECKS)
-		if (srcmdl@ MmMDLHeader_Flags + @ MMMDL_PINNED & ~~)
-			"MmMDLSplit: srcmdl must be pinned\n" KeCrash
-		end
-
-		// make sure the address and length actually fits into the source MDL
-		if (vaddr@ srcva@ <)
-			"MmMDLSplit: vaddr < srcmdl vaddr\n" KeCrash
-		end
-
-		if (vaddr@ length@ +
-			srcva@ srcmdl@ MmMDLHeader_Length + @ + >)
-			srcmdl@ MmMDLHeader_Length + @ srcva@
-			length@ vaddr@
-			"MmMDLSplit: vaddr+length > srcmdl vaddr+length (%d+%d, %d+%d)\n" KeCrash
-		end
-	end
-
-	auto offset
-	vaddr@ srcva@ - offset!
-
-	auto pages
-	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
-
-	vaddr@ destmdl@ MmMDLHeader_VirtualAddress + !
-	length@ destmdl@ MmMDLHeader_Length + !
-	pages@ destmdl@ MmMDLHeader_Pages + !
-
-	srcmdl@ MmMDLHeader_Flags + @ MMMDL_FLAGS_NOT_TO_INHERIT ~ & destmdl@ MmMDLHeader_Flags + |=
-	MMMDL_DONTUNPIN destmdl@ MmMDLHeader_Flags + |=
-
-	srcmdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + @ destmdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + !
-	srcmdl@ MmMDLHeader_ModeB + gb destmdl@ MmMDLHeader_ModeB + sb
-
-	// reuse the mapping from the source MDL
-	srcmdl@ MmMDLHeader_MappedAddress + @ offset@ + destmdl@ MmMDLHeader_MappedAddress + !
-
-	srcmdl@ destmdl@ MmMDLHeader_ParentMDL + !
-
-	auto rs
-	HALCPUInterruptDisable rs!
-	srcmdl@ MmMDLHeader_IOCountI + gi 1 +
-	srcmdl@ MmMDLHeader_IOCountI + si
-	rs@ HALCPUInterruptRestore
-
-	auto destmdlpos
-	destmdl@ MmMDLHeader_SIZEOF + destmdlpos!
-
-	auto srcmdlpos
-	srcmdl@ MmMDLHeader_SIZEOF + offset@ PAGESHIFT >> 4 * + srcmdlpos!
-
-	while (pages@)
-		if (DEBUGCHECKS)
-			if (srcmdlpos@@ -1 ==)
-				"MmMDLSplit: srcmdl ended early\n" KeCrash
-			end
-		end
-
-		srcmdlpos@@ destmdlpos@!
-
-		4 destmdlpos +=
-		4 srcmdlpos +=
-		1 pages -=
-	end
-end
-
 fn MmMDLFill { mdl -- }
-	// fill up an MDL with system space.
+	// fill up an MDL with nonpaged system space.
 
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
-	auto pages
-	mdl@ MmMDLHeader_Pages + @ pages!
+	auto vaddr
+	mdl@ MmMDLHeader_VirtualAddress + @ vaddr!
 
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+	auto pages
+	vaddr@ PAGEOFFSETMASK & mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	auto ok
 
@@ -253,7 +264,7 @@ fn MmMDLFill { mdl -- }
 
 	while (pages@)
 		auto pte
-		buffer@ // vaddr
+		vaddr@ // vaddr
 		MmVirtualtoPTEAddress pte!
 
 		auto pfdbe
@@ -273,7 +284,7 @@ fn MmMDLFill { mdl -- }
 		-1 mdlpos@!
 
 		1 pages -=
-		PAGESIZE buffer +=
+		PAGESIZE vaddr +=
 	end
 end
 
@@ -367,10 +378,10 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		end
 	end
 
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+	auto vaddr
+	mdl@ MmMDLHeader_VirtualAddress + @ vaddr!
 
-	if (buffer@ MMLOWESTSYSTEMADDRESS >=)
+	if (vaddr@ MMLOWESTSYSTEMADDRESS >=)
 		mdl@ MmMDLFill
 
 		// so that nothing happens when it tries to unpin...
@@ -385,7 +396,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 	KeProcessCurrent process!
 
 	auto pages
-	mdl@ MmMDLHeader_Pages + @ pages!
+	vaddr@ PAGEOFFSETMASK & mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	// lock the process's VAD list mutex so we know nothing can get yoinked
 	// out from underneath us by another thread in the process. in particular
@@ -412,8 +423,8 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			return
 		end
 
-		mdl@ MmMDLHeader_VirtualAddress + @ // startva
-		mdl@ MmMDLHeader_VirtualAddress + @ mdl@ MmMDLHeader_Length + @ + // endva
+		vaddr@ // startva
+		vaddr@ mdl@ MmMDLHeader_Length + @ + // endva
 		process@ // process
 		MiVADListCheckRange ok!
 
@@ -435,8 +446,6 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 		return
 	end
-
-	KeThreadCurrent@ mdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + !
 
 	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
 	// clean up the partial pin if we fail at any point.
@@ -463,7 +472,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		if (lockforwrite@)
 			// force any COWs and discover any read-only violations.
 
-			buffer@ KeSafeProbeWrite ok!
+			vaddr@ KeSafeProbeWrite ok!
 
 			if (ok@)
 				process@ MiMapUnlock
@@ -484,7 +493,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 		while (1)
 			// poke the buffer page to make sure it is resident.
-			buffer@ KeSafeGetByte ok! drop
+			vaddr@ KeSafeGetByte ok! drop
 
 			if (ok@)
 				process@ MiMapUnlock
@@ -500,20 +509,20 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				return
 			end
 
-			if (buffer@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
+			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
 				if (ptpfdbe@)
 					pinnedvaddr@ // vaddr
 					ptpfdbe@ // ptpfdbe
 					MiPTEUnpin
 				end
 
-				buffer@ MiPTEPin pte! ptpfdbe!
+				vaddr@ MiPTEPin pte! ptpfdbe!
 
 				if (ptpfdbe@ ~~)
 					continue
 				end
 
-				buffer@ pinnedvaddr!
+				vaddr@ pinnedvaddr!
 			end
 
 			auto ipl
@@ -546,7 +555,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 		4 mdlpos +=
 		1 pages -=
-		PAGESIZE buffer +=
+		PAGESIZE vaddr +=
 		4 pte +=
 
 		// this is so that we probe at the start of each subsequent page after
@@ -557,7 +566,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		// is not acceptable to do this to random memory that may be just
 		// beyond the buffer because it will cause satanic race conditions
 		// with any other threads in this process.
-		PAGENUMBERMASK buffer &=
+		PAGENUMBERMASK vaddr &=
 	end
 
 	if (ptpfdbe@)
@@ -591,10 +600,11 @@ fn MmMDLUnpin { mdl -- }
 	MMMDL_PINNED ~ mdl@ MmMDLHeader_Flags + &=
 
 	auto process
-	mdl@ MmMDLHeader_CompletionAPC + KeAPC_Thread + @ KeThread_Process + @ process!
+	mdl@ MmMDLHeader_Process + @ process!
 
 	if (process@)
-		mdl@ MmMDLHeader_Pages + @ // count
+		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK &
+		mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> // count
 		process@ // process
 		MmMDLUnchargePinnedPages
 	end
@@ -639,7 +649,7 @@ fn MmMDLMap { mdl -- ok }
 	end
 
 	auto pages
-	mdl@ MmMDLHeader_Pages + @ pages!
+	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	auto offset
 	pages@ MiPoolSpaceReserve ok! offset!
@@ -689,7 +699,7 @@ fn MmMDLUnmap { mdl -- }
 	MMMDL_MAPPED ~ mdl@ MmMDLHeader_Flags + &=
 
 	auto pages
-	mdl@ MmMDLHeader_Pages + @ pages!
+	mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK & mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	auto vaddr
 	mdl@ MmMDLHeader_MappedAddress + @ PAGENUMBERMASK & vaddr!
@@ -700,7 +710,10 @@ fn MmMDLUnmap { mdl -- }
 	auto mdlpos
 	mdl@ MmMDLHeader_SIZEOF + mdlpos!
 
-	while (pages@)
+	auto cnt
+	pages@ cnt!
+
+	while (cnt@)
 		auto ok
 		0 // phyaddr
 		0 // flags
@@ -709,180 +722,10 @@ fn MmMDLUnmap { mdl -- }
 
 		PAGESIZE vaddr +=
 		4 mdlpos +=
-		1 pages -=
+		1 cnt -=
 	end
 
-	mdl@ MmMDLHeader_Pages + @ // pages
+	pages@ // pages
 	mdl@ MmMDLHeader_MappedAddress + @ POOLSPACE - PAGESHIFT >> // offset
 	MiPoolSpaceRelease
-end
-
-fn MmMDLComplete { status priboost mdl -- }
-	// complete an I/O operation represented by an MDL.
-	// usually called from DPC context.
-
-	if (priboost@)
-		priboost@ mdl@ MmMDLHeader_PriorityBoostB + sb
-	end
-
-	if (mdl@ MmMDLHeader_Status + @ ~~)
-		status@ mdl@ MmMDLHeader_Status + !
-	end
-
-	auto oldcount
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	mdl@ MmMDLHeader_IOCountI + gi oldcount!
-
-	if (DEBUGCHECKS)
-		if (oldcount@ ~~)
-			"MmMDLComplete: underflow\n" KeCrash
-		end
-	end
-
-	oldcount@ 1 - mdl@ MmMDLHeader_IOCountI + si
-
-	rs@ HALCPUInterruptRestore
-
-	if (oldcount@ 1 >)
-		// there are still IO ops depending on this MDL
-		return
-	end
-
-	MMMDL_COMPLETE mdl@ MmMDLHeader_Flags + |=
-
-	// operation is completely done
-
-	auto enqueueapc
-	0 enqueueapc!
-
-	if (mdl@ MmMDLHeader_CompleteRoutine + @)
-		1 enqueueapc!
-	end elseif (mdl@ MmMDLHeader_CompletionMessage + @)
-		1 enqueueapc!
-	end
-
-	auto parentmdl
-	mdl@ MmMDLHeader_ParentMDL + @ parentmdl!
-
-	auto flags
-	mdl@ MmMDLHeader_Flags + @ flags!
-
-	if (parentmdl@)
-		// !!! RECURSION !!!
-
-		status@ // status
-		mdl@ MmMDLHeader_PriorityBoostB + gb // priboost
-		parentmdl@ // mdl
-		MmMDLComplete
-	end else
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_MAPPED &)
-			mdl@ MmMDLUnmap
-		end
-
-		if (mdl@ MmMDLHeader_Flags + @ MMMDL_PINNED &)
-			mdl@ MmMDLUnpin
-		end
-	end
-
-	if (enqueueapc@ ~~)
-		mdl@ MiMDLFinishEitherContext
-	end else
-		mdl@ // context1
-		0 // context2
-		priboost@ // priboost
-		mdl@ MmMDLHeader_CompletionAPC + // apc
-		KeAPCEnqueue drop
-	end
-end
-
-fn (KeAPCFunctionSpecial) MiMDLCompleteAPC { normalfunc context1 context2 apc -- }
-	auto mdl
-	context1@@ mdl!
-
-	if (mdl@ MmMDLHeader_CompleteRoutine + @)
-		mdl@ // mdl
-		mdl@ MmMDLHeader_CompleteRoutine + @ MmMDLCompleteRoutine
-	end
-
-	if (mdl@ MmMDLHeader_CompletionMessage + @)
-		// this is an async IO operation requested by a user thread.
-		// dereference the file object and send a message to the port
-		// object.
-
-		auto msg
-		mdl@ MmMDLHeader_CompletionMessage + @ msg!
-
-		auto fileobject
-		mdl@ MmMDLHeader_FileObject + @ fileobject!
-
-		auto fcb
-		fileobject@ IOFile_FileControlBlock + @ fcb!
-
-		// message fields were already initialized with context about the IO.
-
-		mdl@ MmMDLHeader_Length + @ // bytes
-		mdl@ MmMDLHeader_Status + @ // status
-		msg@ // msg
-		IPCPortSendCompletionMessage
-
-		// dequeue this request from the thread's outstanding IO list.
-		// no synchronization is required because we are running at IPLAPC
-		// and only this thread can manipulate this list.
-
-		auto ls
-		mdl@ MmMDLHeader_IOListPrev + @ ls!
-
-		auto ns
-		mdl@ MmMDLHeader_IOListNext + @ ns!
-
-		if (ls@)
-			ns@ ls@ MmMDLHeader_IOListNext + !
-		end else
-			ns@ KeThreadCurrent@ PsThread_IOListHead + !
-		end
-
-		if (ns@)
-			ls@ ns@ MmMDLHeader_IOListPrev + !
-		end
-
-		// decrement the AsyncIOCount on the FCB, if it reaches 0, signal the
-		// notification event.
-
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		1 fcb@ IOFileControlBlock_AsyncIOCount + -=
-
-		if (fcb@ IOFileControlBlock_AsyncIOCount + @ ~~)
-			0 // priboost
-			fcb@ IOFileControlBlock_AsyncIOEvent + // event
-			KeEventSignal
-		end
-
-		ipl@ KeIPLLower
-
-		// dereference the file and port object
-
-		fileobject@ ObObjectDereferenceByPointer drop
-	end
-
-	mdl@ MiMDLFinishEitherContext
-end
-
-fn MiMDLFinishEitherContext { mdl -- }
-	auto event
-	mdl@ MmMDLHeader_Event + @ event!
-
-	if (event@)
-		mdl@ MmMDLHeader_PriorityBoostB + gb // priboost
-		event@ // event
-		KeEventSignal
-	end
-
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_DELETE &)
-		mdl@ MmMDLFree
-	end
 end

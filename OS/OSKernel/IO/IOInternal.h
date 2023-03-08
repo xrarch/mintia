@@ -1,4 +1,5 @@
 extern IOiPageFileInit { -- }
+extern IOiPacketZonesInit { -- }
 
 extern IOiCacheInitialize { fcb -- cacheblock ok }
 extern IOiCacheInfoBlockCreate { -- cacheblock ok }
@@ -8,7 +9,9 @@ extern IOiCacheInfoBlockDereference { cacheblock -- oldcount }
 
 extern IOiCacheInfoBlockDestroy { writeout cacheblock -- ok }
 
-extern IOiFileControlBlockInitialize { dispatchtable devobj filetype flags fcb -- }
+extern IOiFileControlBlockInitialize { devobj filetype flags fcb -- }
+
+extern IOiDeviceDeleteObject { object -- }
 
 extern IOiFilesystemReclaimFCB { -- }
 
@@ -32,11 +35,7 @@ externptr IOiFileControlBlockCacheTrimEvent
 externptr IOiWritebehindTimer
 externptr IOiWritebehindEvent
 
-externptr IOiMountListRwLock
-
-extern IOiLockMountList { alertable -- ok }
-extern IOiLockMountListShared { alertable -- ok }
-extern IOiUnlockMountList { -- }
+externptr IOiDeviceDatabaseRwLock
 
 struct IOiCacheInfoBlock
 	4 Next

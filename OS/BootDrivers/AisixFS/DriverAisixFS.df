@@ -29,12 +29,28 @@
 
 datasection "text"
 
+table DriverAFS
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"AisixFS"                            // name
+	pointerof DriverAFSDispatch          // dispatch table
+	0                                    // flags
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
 table DriverAFSFilesystem
 	0                              // next
 	0                              // prev
 
-	"AisixFS"                      // name
-	pointerof DriverAFSDispatch    // dispatchtable
+	pointerof DriverAFS            // driver
 
 	pointerof DriverAFSMount       // mountfunction
 	pointerof DriverAFSUnmount     // unmountfunction
@@ -57,8 +73,8 @@ table DriverAFSDispatch
 	pointerof AFSOpen                    // open
 	pointerof AFSClose                   // close
 	0                                    // iocontrol
-	pointerof AFSReadFile                // read
-	pointerof AFSWriteFile               // write
+	0                                    // reserved
+	0                                    // reserved
 	pointerof AFSUnlink                  // unlink
 	pointerof AFSParse                   // parse
 	0                                    // reserved
@@ -75,8 +91,8 @@ table DriverAFSDispatch
 	0                                    // delete device object
 	0                                    // reserved
 	0                                    // cancel
-	0                                    // reserved
-	0                                    // reserved
+	pointerof AFSReadWriteFile           // read
+	pointerof AFSReadWriteFile           // write
 endtable
 public DriverAFSDispatch
 
@@ -95,33 +111,26 @@ fn (FDriverInit) DriverInit { stage -- ok }
 	0 ok!
 end
 
-fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
-	AFSBLOCKSIZE // blocksize
-	mount@ // mount
-	FSVolumeInitialize ok! drop
+fn (IOFilesystemMountFunction) DriverAFSMount { flags deviceobject -- fsdeviceobject ok }
+	deviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockCacheCheck ok! drop
 
 	if (ok@)
 		return
 	end
 
 	auto pageframe
-
 	auto bcb
 
 	0 // offset
-	0 // length
-	mount@ FSVolumeGetFile // fileobject
-	VcFileMap ok! bcb! pageframe!
+	deviceobject@ IODevice_FileControlBlock + @ // fcb
+	VcFileControlBlockMap ok! bcb! pageframe!
 
 	if (ok@)
-		mount@ FSVolumeUninitialize drop
 		return
 	end
 
 	if (pageframe@ AFSSuperblock_Magic + @ AFSSUPERBLOCKMAGIC ~=)
 		bcb@ VcBufferDecrementMapCount drop
-
-		mount@ FSVolumeUninitialize drop
 
 		STATUS_BAD_FILESYSTEM ok!
 
@@ -131,38 +140,27 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	if (pageframe@ AFSSuperblock_Version + @ AFSSUPERBLOCKVERSION ~=)
 		bcb@ VcBufferDecrementMapCount drop
 
-		mount@ FSVolumeUninitialize drop
-
 		STATUS_BAD_FILESYSTEM ok!
 
 		return
 	end
 
-	pageframe@ AFSSuperblock_DataStart + @ AFSBLOCKSHIFT << // size
-	mount@ // mount
-	FSVolumeFileCreate ok!
+	auto mount
+	flags@ // mountflags
+	AFSData_SIZEOF // extensionsize
+	pageframe@ AFSSuperblock_DataStart + @ AFSBLOCKSHIFT << // sizeinbytes
+	DriverAFSFilesystem // filesystem
+	deviceobject@ // deviceobject
+	IOVolumeDeviceCreate ok! fsdeviceobject! mount!
 
 	if (ok@)
 		bcb@ VcBufferDecrementMapCount drop
-
-		mount@ FSVolumeUninitialize drop
 
 		return
 	end
 
 	auto afsdata
-	AFSData_SIZEOF // bytes
-	'AFSD' // tag
-	0 // flags
-	MmAllocWithTag ok! afsdata!
-
-	if (ok@)
-		bcb@ VcBufferDecrementMapCount drop
-
-		mount@ FSVolumeUninitialize drop
-
-		return
-	end
+	mount@ IOMount_Extension + @ afsdata!
 
 	0 afsdata@ AFSData_UsedBlocks + !
 
@@ -198,22 +196,17 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	0 // word
 	memset
 
-	afsdata@ mount@ IOMountSetContext
-
 	bcb@ VcBufferDecrementMapCount drop
 
 	mount@ AFSBlockBitmapInitialize ok!
 
 	if (ok@)
-		afsdata@ MmFree
-
-		mount@ FSVolumeUninitialize drop
+		fsdeviceobject@ IOVolumeDeviceUninitialize
 
 		return
 	end
 
 	auto rootfcb
-
 	0 // flags
 	1 // inum
 	mount@ // mount
@@ -222,21 +215,22 @@ fn (IOFilesystemMountFunction) DriverAFSMount { mount -- ok }
 	if (ok@)
 		mount@ AFSBlockBitmapUninitialize
 
-		afsdata@ MmFree
-
-		mount@ FSVolumeUninitialize drop
+		fsdeviceobject@ IOVolumeDeviceUninitialize
 
 		return
 	end
 
-	rootfcb@ mount@ IOMountSetRootFCB
+	rootfcb@ mount@ IOMount_RootFCB + !
 
 	0 ok!
 end
 
-fn (IOFilesystemUnmountFunction) DriverAFSUnmount { mount -- ok }
+fn (IOFilesystemUnmountFunction) DriverAFSUnmount { fsdeviceobject -- ok }
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	mount@ IOMount_Extension + @ afsdata!
 
 	if (afsdata@ AFSData_FCBRefTotal + @)
 		STATUS_DEVICE_BUSY ok!
@@ -252,22 +246,12 @@ fn (IOFilesystemUnmountFunction) DriverAFSUnmount { mount -- ok }
 		return
 	end
 
-	mount@ FSVolumeUninitialize ok!
-
-	if (ok@)
-		return
-	end
-
 	mount@ AFSBlockBitmapUninitialize
-
-	afsdata@ MmFree
-
-	0 mount@ IOMountSetContext
 
 	mount@ FSVolumeFlush drop
 end
 
-fn (IOFilesystemFlushFunction) DriverAFSFlush { shutdown mount -- ok }
+fn (IOFilesystemFlushFunction) DriverAFSFlush { shutdown fsdeviceobject -- ok }
 	// "DriverAFSFlush: TODO\n" KeCrash
 
 	// I mean, we access the volume through the page cache,
@@ -278,15 +262,18 @@ fn (IOFilesystemFlushFunction) DriverAFSFlush { shutdown mount -- ok }
 	0 ok!
 end
 
-fn (IOFilesystemUpdateFlagsFunction) DriverAFSUpdateFlags { newflags oldflags mount -- ok }
+fn (IOFilesystemUpdateFlagsFunction) DriverAFSUpdateFlags { newflags oldflags fsdeviceobject -- ok }
 	0 ok!
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
 
 	if (newflags@ OSMOUNT_READONLY &)
 		if (oldflags@ OSMOUNT_READONLY & ~~)
 			// volume is being downgraded to read-only.
 			// only allow if there are no writable files opened.
 
-			if (mount@ IOMountGetContext AFSData_WritableFiles + @)
+			if (mount@ IOMount_Extension + @ AFSData_WritableFiles + @)
 				STATUS_DEVICE_BUSY ok!
 
 				return
@@ -312,9 +299,9 @@ fn (IOFilesystemUpdateFlagsFunction) DriverAFSUpdateFlags { newflags oldflags mo
 	end
 end
 
-fn (IOFilesystemVolumeQueryFunction) DriverAFSVolumeQuery { query mount -- ok }
+fn (IOFilesystemVolumeQueryFunction) DriverAFSVolumeQuery { query fsdeviceobject -- ok }
 	auto afsdata
-	mount@ IOMountGetContext afsdata!
+	fsdeviceobject@ IODevice_RelevantMount + @ IOMount_Extension + @ afsdata!
 
 	afsdata@ AFSData_VolSize + @ AFSBLOCKSHIFT << query@ OSMountInformation_VolumeCapacity + !
 	afsdata@ AFSData_UsedBlocks + @ AFSBLOCKSHIFT << query@ OSMountInformation_VolumeUsed + !

@@ -585,8 +585,6 @@ OSFileReadAsync:
 	mov  t4, a3
 	mov  r31, sp
 	add  r31, 4
-	mov  a0, [r31]
-	add  r31, 4
 	mov  t6, [r31]
 	add  r31, 4
 	mov  t5, [r31]
@@ -606,8 +604,6 @@ OSFileWriteAsync:
 	mov  t3, a2
 	mov  t4, a3
 	mov  r31, sp
-	add  r31, 4
-	mov  a0, [r31]
 	add  r31, 4
 	mov  t6, [r31]
 	add  r31, 4

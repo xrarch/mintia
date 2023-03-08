@@ -1342,10 +1342,6 @@ OSTOSFileReadAsync:
 	add  t0, 24 ;t6
 	push [t0]
 
-	mov  t0, s17
-	add  t0, 28 ;a0
-	push [t0]
-
 	call OSFileReadAsync
 
 
@@ -1353,7 +1349,7 @@ OSTOSFileReadAsync:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
-	add  sp, 12
+	add  sp, 8
 	pop  fp
 	ret
 
@@ -1385,10 +1381,6 @@ OSTOSFileWriteAsync:
 	add  t0, 24 ;t6
 	push [t0]
 
-	mov  t0, s17
-	add  t0, 28 ;a0
-	push [t0]
-
 	call OSFileWriteAsync
 
 
@@ -1396,7 +1388,7 @@ OSTOSFileWriteAsync:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
-	add  sp, 12
+	add  sp, 8
 	pop  fp
 	ret
 

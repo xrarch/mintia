@@ -29,6 +29,163 @@
 
 #include "IOInternal.h"
 
+fn IOLockDeviceDatabase { alertable -- ok }
+	fnsection "PAGE$text"
+
+	alertable@ // alertable
+	0 // nowait
+	IOiDeviceDatabaseRwLock // rwlock
+	ExRwLockAcquireExclusive ok!
+end
+
+fn IOLockDeviceDatabaseShared { alertable -- ok }
+	fnsection "PAGE$text"
+
+	alertable@ // alertable
+	0 // nowait
+	0 // canstarve
+	IOiDeviceDatabaseRwLock // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn IOUnlockDeviceDatabase { -- }
+	fnsection "PAGE$text"
+
+	IOiDeviceDatabaseRwLock ExRwLockRelease
+end
+
+fn IODeviceLock { alertable device -- ok }
+	fnsection "PAGE$text"
+
+	alertable@ // alertable
+	0 // nowait
+	device@ IODevice_FileControlBlock + @ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockAcquireExclusive ok!
+end
+
+fn IODeviceLockShared { alertable device -- ok }
+	fnsection "PAGE$text"
+
+	1 // alertable
+	0 // nowait
+	0 // canstarve
+	device@ IODevice_FileControlBlock + @ IOFileControlBlock_RwLock + // rwlock
+	ExRwLockAcquireShared ok!
+end
+
+fn IODeviceUnlock { device -- }
+	fnsection "PAGE$text"
+
+	device@ IODevice_FileControlBlock + @ IOFileControlBlock_RwLock + ExRwLockRelease
+end
+
+fn IODeviceGetAttached { deviceobject -- attacheddeviceobject }
+	fnsection "PAGE$text"
+
+	// assumes device database is locked at least shared.
+
+	deviceobject@ attacheddeviceobject!
+
+	while (attacheddeviceobject@ IODevice_AttachedBy + @)
+		attacheddeviceobject@ IODevice_AttachedBy + @ attacheddeviceobject!
+	end
+end
+
+fn IODeviceReferenceAttached { locked failmounted deviceobject -- attacheddeviceobject ok }
+	fnsection "PAGE$text"
+
+	if (locked@ ~~)
+		0 IOLockDeviceDatabaseShared drop
+	end
+
+	deviceobject@ attacheddeviceobject!
+
+	while (attacheddeviceobject@ IODevice_AttachedBy + @)
+		attacheddeviceobject@ IODevice_AttachedBy + @ attacheddeviceobject!
+	end
+
+	if (failmounted@)
+		if (attacheddeviceobject@ IODevice_RelevantMount + @)
+			STATUS_DEVICE_BUSY ok!
+
+			if (locked@ ~~)
+				IOUnlockDeviceDatabase
+			end
+
+			return
+		end
+	end
+
+	attacheddeviceobject@ ObConditionallyReferenceObject ok!
+
+	if (locked@ ~~)
+		IOUnlockDeviceDatabase
+	end
+
+	if (ok@)
+		STATUS_DEVICE_BUSY ok!
+
+		return
+	end
+end
+
+fn IODeviceAttachObject { deviceobject todeviceobject -- realdeviceobject ok }
+	fnsection "PAGE$text"
+
+	// references the realdeviceobject.
+	// assumes the device database is locked exclusively.
+
+	deviceobject@ realdeviceobject!
+
+	if (realdeviceobject@ IODevice_AttachedBy + @)
+		realdeviceobject@ IODeviceGetAttached realdeviceobject!
+	end
+
+	if (realdeviceobject@ IODevice_RelevantMount + @)
+		STATUS_DEVICE_BUSY ok!
+
+		return
+	end
+
+	realdeviceobject@ ObConditionallyReferenceObject ok!
+
+	if (ok@)
+		STATUS_DEVICE_BUSY ok!
+
+		return
+	end
+
+	realdeviceobject@ realdeviceobject@ IODevice_AttachedBy + !
+	realdeviceobject@ IODevice_BlockLog + @ deviceobject@ IODevice_BlockLog + !
+
+	// only set the stack depth on the device object if it would increase.
+	// otherwise multiple attachments might result in there being insufficient
+	// IOP stack space for some of the lower devices on the stack.
+
+	if (realdeviceobject@ IODevice_StackDepth + @ 1 +
+		deviceobject@ IODevice_StackDepth + @ >)
+		realdeviceobject@ IODevice_StackDepth + @ 1 + deviceobject@ IODevice_StackDepth + !
+	end
+
+	// inherit permissions
+
+	deviceobject@ // destobject
+	todeviceobject@ // srcobject
+	ObObjectInheritPermissions
+end
+
+fn IODeviceDetachObject { todeviceobject -- }
+	fnsection "PAGE$text"
+
+	// assumes the device database is locked exclusively.
+	// should be used only in device object deletion routines, since there are
+	// interactions with the object manager's pointer count due to the usage
+	// of ObConditionallyReferenceObject above.
+
+	0 todeviceobject@ IODevice_AttachedBy + !
+	todeviceobject@ ObObjectDereferenceByPointer drop
+end
+
 fn IODeviceDirectoryInsert { deviceobject -- ok }
 	fnsection "PAGE$text"
 
@@ -37,20 +194,7 @@ fn IODeviceDirectoryInsert { deviceobject -- ok }
 	ObDirectoryInsertByPointers ok!
 end
 
-fn IODeviceCreateFileControlBlock { deviceobject -- fcb ok }
-	fnsection "PAGE$text"
-
-	auto driver
-	deviceobject@ IODevice_Driver + @ driver!
-
-	driver@ IODriver_DispatchTable + @ // dispatchtable
-	deviceobject@ // devobj
-	driver@ IODriver_DeviceType + @ // filetype
-	0 // flags
-	IOFileControlBlockCreate ok! fcb!
-end
-
-fn IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
+fn IODeviceCreateFileObject { flags deviceobject -- fileobject ok }
 	fnsection "PAGE$text"
 
 	deviceobject@ ObObjectReferenceByPointer drop
@@ -69,7 +213,7 @@ fn IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
 	fullpath@ // openedpath
 	flags@ // flags
 	deviceobject@ ObObjectPermissions // permissions
-	fcb@ // fcb
+	deviceobject@ IODevice_FileControlBlock + @ // fcb
 	IOFileCreateObject ok! fileobject!
 
 	if (ok@)
@@ -85,7 +229,114 @@ fn IODeviceCreateFileObject { flags fcb deviceobject -- fileobject ok }
 	end
 end
 
-fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobject ok }
+fn IOVolumeDeviceCreate { mountflags extensionsize sizeinbytes filesystem deviceobject -- mount fsdeviceobject ok }
+	fnsection "PAGE$text"
+
+	// assumes the device database and device object are locked exclusively, if
+	// relevant.
+
+	if (DEBUGCHECKS)
+		if (deviceobject@)
+			if (deviceobject@ IODevice_RelevantMount + @)
+				"IOVolumeDeviceCreate: device already mounted\n" KeCrash
+			end
+		end
+	end
+
+	auto type
+
+	if (deviceobject@)
+		// the volume object will not be visible and will be used for caching
+		// fs data.
+
+		OSFILETYPE_BLOCKDEVICE type!
+	end else
+		// the volume object will be visible and will be a gateway to the
+		// virtual filesystem.
+
+		OSFILETYPE_DIRECTORY type!
+		0 sizeinbytes!
+	end
+
+	IOMount_SIZEOF extensionsize@ + // extensionsize
+	type@ // type
+	0 // name
+	sizeinbytes@ // sizeinbytes
+	filesystem@ IOFilesystem_Driver + @ // driver
+	0 // permissions
+	0 // permanent
+	IODeviceCreateEx ok! fsdeviceobject!
+
+	if (ok@)
+		return
+	end
+
+	fsdeviceobject@ IODevice_Extension + @ mount!
+	mount@ IOMount_SIZEOF + mount@ IOMount_Extension + !
+
+	if (sizeinbytes@)
+		// initialize caching on the volume file.
+
+		auto cacheblock
+		fsdeviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockCacheCheck ok! cacheblock!
+
+		if (ok@)
+			fsdeviceobject@ IODeviceDeallocateObject
+
+			return
+		end
+	end
+
+	0 mount@ IOMount_RootFCB + !
+	mountflags@ mount@ IOMount_Flags + !
+	0 mount@ IOMount_ReclaimedFrom + !
+	0 mount@ IOMount_Next + !
+	0 mount@ IOMount_Prev + !
+	filesystem@ mount@ IOMount_Filesystem + !
+
+	mount@ fsdeviceobject@ IODevice_RelevantMount + !
+	fsdeviceobject@ mount@ IOMount_FsDeviceObject + !
+	deviceobject@ mount@ IOMount_UnderlyingDeviceObject + !
+
+	if (deviceobject@)
+		mount@ deviceobject@ IODevice_RelevantMount + !
+
+		deviceobject@ ObObjectReferenceByPointer drop
+
+		// if there's no deviceobject, (i.e. a network redirector), the
+		// filesystem driver will have to initialize these fields
+		// appropriately.
+
+		deviceobject@ IODevice_BlockLog + @ fsdeviceobject@ IODevice_BlockLog + !
+		deviceobject@ IODevice_StackDepth + @ 1 + fsdeviceobject@ IODevice_StackDepth + !
+	end
+end
+
+fn IOVolumeDeviceUninitialize { fsdeviceobject -- }
+	fnsection "PAGE$text"
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
+	if (fsdeviceobject@ IODevice_FileControlBlock + @ IOFileControlBlock_CacheInfoBlock + @)
+		1 // writeout
+		fsdeviceobject@ IODevice_FileControlBlock + @ // fcb
+		IOFileControlBlockDestroyCache
+	end
+
+	auto devobj
+	mount@ IOMount_UnderlyingDeviceObject + @ devobj!
+
+	if (devobj@)
+		0 devobj@ IODevice_RelevantMount + !
+
+		devobj@ ObObjectDereferenceByPointer drop
+	end
+
+	fsdeviceobject@ ObObjectDereferenceByPointer drop
+end
+
+fn IODeviceCreateEx { extensionsize type name sizeinbytes driver permissions permanent -- deviceobject ok }
 	fnsection "PAGE$text"
 
 	auto flags
@@ -101,7 +352,7 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 	permissions@ // permissions
 	0 // npquotabias
 	0 // pquotabias
-	IODevice_SIZEOF driver@ IODriver_ExtensionSize + @ + // bodysize
+	IODevice_SIZEOF extensionsize@ + // bodysize
 	IODeviceTypeObject@ // type
 	ObObjectCreate ok! deviceobject!
 
@@ -112,10 +363,18 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 	driver@ deviceobject@ IODevice_Driver + !
 	deviceobject@ IODevice_SIZEOF + deviceobject@ IODevice_Extension + !
 	0 deviceobject@ IODevice_BlockLog + !
+	0 deviceobject@ IODevice_RelevantMount + !
+	1 deviceobject@ IODevice_StackDepth + !
+	0 deviceobject@ IODevice_Flags + !
+
 	0 deviceobject@ IODevice_ConsoleHeader + !
+	0 deviceobject@ IODevice_AttachedBy + !
 
 	auto fcb
-	deviceobject@ IODeviceCreateFileControlBlock ok! fcb!
+	deviceobject@ // devobj
+	type@ // filetype
+	0 // flags
+	IOFileControlBlockCreate ok! fcb!
 
 	if (ok@)
 		deviceobject@ ObObjectDeallocate
@@ -128,7 +387,7 @@ fn IODeviceCreateEx { name sizeinbytes driver permissions permanent -- deviceobj
 	sizeinbytes@ fcb@ IOFileControlBlockSetSize
 end
 
-fn IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
+fn IODeviceCreate { extensionsize type name sizeinbytes driver permissions -- deviceobject ok }
 	fnsection "PAGE$text"
 
 	// makes the device object permanent and inserts it in the Devices object
@@ -150,6 +409,8 @@ fn IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
 		name@ "Device '%s' has mismatched driver interface.\n" "IODeviceCreate" HALLog
 	end
 
+	extensionsize@ // extensionsize
+	type@ // type
 	name@ // name
 	sizeinbytes@ // sizeinbytes
 	driver@ // driver
@@ -168,29 +429,6 @@ fn IODeviceCreate { name sizeinbytes driver permissions -- deviceobject ok }
 	end
 end
 
-fn IODeviceGetExtension { deviceobject -- extension }
-	deviceobject@ IODevice_Extension + @ extension!
-end
-
-fn IODeviceSetConsoleHeader { console deviceobject -- }
-	fnsection "PAGE$text"
-	console@ deviceobject@ IODevice_ConsoleHeader + !
-end
-
-fn IODeviceGetConsoleHeader { deviceobject -- console }
-	fnsection "PAGE$text"
-	deviceobject@ IODevice_ConsoleHeader + @ console!
-end
-
-fn IODeviceSetBlockLog { blocklog deviceobject -- }
-	fnsection "PAGE$text"
-	blocklog@ deviceobject@ IODevice_BlockLog + !
-end
-
-fn IODeviceGetBlockLog { deviceobject -- blocklog }
-	deviceobject@ IODevice_BlockLog + @ blocklog!
-end
-
 fn IODeviceDeallocateObject { object -- }
 	fnsection "PAGE$text"
 
@@ -204,10 +442,8 @@ fn IODeviceDeallocateObject { object -- }
 	object@ ObObjectDeallocate
 end
 
-fn (IODispatchDeleteObjectFunction) IODeviceDeleteObject { object -- ok }
+fn (ObTypeDeleteFunction) IOiDeviceDeleteObject { object -- }
 	fnsection "PAGE$text"
-
-	0 ok!
 
 	auto fcb
 	object@ IODevice_FileControlBlock + @ fcb!
@@ -232,7 +468,6 @@ fn (IODispatchDeleteObjectFunction) IODeviceDeleteFileObject { object -- ok }
 
 	0 ok!
 
-	object@ IOFile_FileControlBlock + @
-	IOFileControlBlockGetDeviceObject
+	object@ IOFile_FileControlBlock + @ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_DeviceObject + @
 	ObObjectDereferenceByPointer drop
 end

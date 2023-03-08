@@ -1,4 +1,4 @@
-fnptr DPCFunction { context1 context2 -- }
+fnptr KeDPCFunction { context1 context2 dpc -- }
 
 // WARNING: changing the offset of the Next field may break optimized asm
 // routines

@@ -31,7 +31,7 @@ extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 
 extern MmMPWAnonTransferInitialize { pagefile transfer -- }
-extern MmMPWAnonPageWriteMDLComplete { mdl -- }
+extern MmAnonPageWriterAPCRoutine { normalfunc context1 context2 apc -- }
 
 extern MmPageFault { writing badaddr trapframe -- handled }
 
@@ -52,6 +52,7 @@ externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
 externptr MmBalanceSetManagerThread
+externptr MmModifiedPageWriterThread
 
 externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize
@@ -67,6 +68,16 @@ externptr MmCommitUsage            // virtual memory promised
 
 externptr MmPhysicalCommitLimit // physical memory available, sans a minimum margin for paging activity
 externptr MmPhysicalCommitUsage // physical memory promised to nonpaged pool and working set minimums
+
+externptr MmSystemSize
+
+const MMTINYSYSTEM   1
+const MMSMALLSYSTEM  2
+const MMMEDIUMSYSTEM 3
+const MMLARGESYSTEM  4
+const MMHUGESYSTEM   5
+
+const MPWFILETRANSFERS 8
 
 externptr MmAnonTransfersAvailable
 

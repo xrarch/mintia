@@ -45,22 +45,12 @@ struct Mouse
 	4 RequestListTail
 endstruct
 
-struct MouseRequest
-	4 Next
-	4 Prev
-
-	4 Mouse
-	4 MDL
-	4 Buffer
-	4 Length
-endstruct
-
 table DriverMouseDispatch
 	0                                    // open
 	0                                    // close
 	0                                    // iocontrol
-	pointerof DriverMouseRead            // read
-	0                                    // write
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -77,7 +67,7 @@ table DriverMouseDispatch
 	0                                    // delete device object
 	0                                    // reclaim fcb
 	pointerof DriverMouseCancel          // cancel request
-	0                                    // reserved
+	pointerof DriverMouseRead            // read
 	0                                    // reserved
 endtable
 
@@ -86,9 +76,8 @@ table DriverMouse
 	IOVERSION_MINOR                      // ioversion minor
 
 	"mouse"                              // name
-	OSFILETYPE_CHARDEVICE                // type
 	pointerof DriverMouseDispatch        // dispatch table
-	Mouse_SIZEOF                         // extension size
+	0                                    // flags
 
 	0                                    // reserved
 	0                                    // reserved
@@ -108,6 +97,9 @@ fn Fox32MouseInit { -- }
 
 	auto dev
 	auto ok
+
+	Mouse_SIZEOF // extensionsize
+	OSFILETYPE_CHARDEVICE // type
 	"foxmouse0" // name
 	0 // sizeinbytes
 	DriverMouse // driver
@@ -119,7 +111,7 @@ fn Fox32MouseInit { -- }
 	end
 
 	auto mouse
-	dev@ IODeviceGetExtension mouse!
+	dev@ IODevice_Extension + @ mouse!
 
 	0 mouse@ Mouse_RequestListHead + !
 	0 mouse@ Mouse_RequestListTail + !
@@ -133,36 +125,36 @@ end
 
 rosection "text"
 
-fn (IODispatchCancelFunction) DriverMouseCancel { mdl -- }
+fn (IODispatchCancelFunction) DriverMouseCancel { iop -- }
+	auto iopl
+	iop@ IOPacketCurrentLocation iopl!
+
+	auto mouse
+	iopl@ IOPacketLocation_Context + @ mouse!
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	auto ior
-	mdl@ MmMDLHeader_DriverGoWild + ior!
-
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_COMPLETE &)
 		// already completed, nothing to do
 		ipl@ KeIPLLower
 		return
 	end
 
-	auto mouse
-	ior@ MouseRequest_Mouse + @ mouse!
-
 	auto ls
 	auto ns
 
-	ior@ MouseRequest_Prev + @ ls!
-	ior@ MouseRequest_Next + @ ns!
+	iop@ IOPacketHeader_DeviceQueuePrev + @ ls!
+	iop@ IOPacketHeader_DeviceQueueNext + @ ns!
 
 	if (ls@)
-		ns@ ls@ MouseRequest_Next + !
+		ns@ ls@ IOPacketHeader_DeviceQueueNext + !
 	end else
 		ns@ mouse@ Mouse_RequestListHead + !
 	end
 
 	if (ns@)
-		ls@ ns@ MouseRequest_Prev + !
+		ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
 	end else
 		ls@ mouse@ Mouse_RequestListTail + !
 	end
@@ -171,47 +163,72 @@ fn (IODispatchCancelFunction) DriverMouseCancel { mdl -- }
 
 	STATUS_IO_CANCELLED // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	iop@ // iop
+	IOPacketCompleteLow
 end
 
-fn (IODispatchReadFunction) DriverMouseRead { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) DriverMouseRead { iopl -- done ok }
+	1 done!
 	0 ok!
 
-	if (mdl@ MmMDLHeader_Length + @ OSMousePacket_SIZEOF %)
+	auto mouse
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject IODevice_Extension + @ mouse!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	if (iopl@ IOPacketLocation_Length + @ OSMousePacket_SIZEOF %)
 		STATUS_UNALIGNED ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	auto mouse
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension mouse!
-
-	if (mdl@ MmMDLHeader_Length + @ ~~)
+	if (iopl@ IOPacketLocation_Length + @ ~~)
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
 
 	1 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
-
-	auto buf
 
 	mdl@ MmMDLMap ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	mdl@ MmMDLHeader_MappedAddress + @ buf!
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	auto length
+	iopl@ IOPacketLocation_Length + @ length!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -222,15 +239,15 @@ fn (IODispatchReadFunction) DriverMouseRead { timeout flags kflags offset mdl fc
 	auto bytecnt
 	mouse@ Mouse_WriteIndex + @ rp@ - bytecnt!
 
-	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
-		mdl@ MmMDLHeader_Length + @ bytecnt!
+	if (length@ bytecnt@ <)
+		length@ bytecnt!
 	end
 
 	if (bytecnt@)
 		auto endp
 		rp@ bytecnt@ + endp!
 
-		if (rp@ PACKETBUFFERSIZE 1 - ~ & endp@ PACKETBUFFERSIZE 1 - ~ & ==)
+		if (rp@ PACKETBUFFERSIZE 1 - ~ & endp@ 1 - PACKETBUFFERSIZE 1 - ~ & ==)
 			// doesn't cross the boundary, do a single copy
 
 			buf@ // dest
@@ -255,47 +272,44 @@ fn (IODispatchReadFunction) DriverMouseRead { timeout flags kflags offset mdl fc
 		bytecnt@ mouse@ Mouse_Remaining + +=
 	end
 
-	if (bytecnt@ mdl@ MmMDLHeader_Length + @ ~=)
-		if (timeout@)
+	if (bytecnt@ length@ ~=)
+		if (iop@ IOPacketHeader_Timeout + @)
 			// enqueue
 
 			STATUS_OTHER_CONDITION ok!
 
-			auto ior
-			mdl@ MmMDLHeader_DriverGoWild + ior!
+			bytecnt@ iopl@ IOPacketLocation_Offset + !
+			mouse@ iopl@ IOPacketLocation_Context + !
 
-			mouse@ ior@ MouseRequest_Mouse + !
-			mdl@ ior@ MouseRequest_MDL + !
-			buf@ bytecnt@ + ior@ MouseRequest_Buffer + !
-			mdl@ MmMDLHeader_Length + @ bytecnt@ - ior@ MouseRequest_Length + !
-
-			0 ior@ MouseRequest_Next + !
+			0 iop@ IOPacketHeader_DeviceQueueNext + !
 
 			auto t
 			mouse@ Mouse_RequestListTail + @ t!
 
-			t@ ior@ MouseRequest_Prev + !
+			t@ iop@ IOPacketHeader_DeviceQueuePrev + !
 
 			if (t@ ~~)
-				ior@ mouse@ Mouse_RequestListHead + !
-				ior@ mouse@ Mouse_RequestListTail + !
+				iop@ mouse@ Mouse_RequestListHead + !
 			end else
-				ior@ t@ MouseRequest_Next + !
+				iop@ t@ IOPacketHeader_DeviceQueueNext + !
 			end
+
+			iop@ mouse@ Mouse_RequestListTail + !
+
+			iop@ IOPacketWasEnqueued
 		end else
-			bytecnt@ mdl@ MmMDLHeader_Length + !
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 		end
 	end
 
 	ipl@ KeIPLLower
 
-	if (ok@ ~~)
-		0 // status
+	if (ok@ STATUS_OTHER_CONDITION ~=)
+		ok@ // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end elseif (ok@ STATUS_OTHER_CONDITION ==)
-		// this means the request was enqueued successfully, so report success
+		iop@ // iop
+		IOPacketCompleteLow
+	end else
 		0 ok!
 	end
 end
@@ -307,32 +321,43 @@ fn Fox32MouseEvent { info eventtype -- }
 	auto eventbuf
 	mouse@ Mouse_PacketBuffer + eventbuf!
 
-	auto req
-	mouse@ Mouse_RequestListHead + @ req!
+	auto iop
+	mouse@ Mouse_RequestListHead + @ iop!
 
-	if (req@)
-		info@ req@ MouseRequest_Buffer + @ OSMousePacket_Info + !
-		eventtype@ req@ MouseRequest_Buffer + @ OSMousePacket_EventType + !
+	if (iop@)
+		auto iopl
+		iop@ IOPacketCurrentLocation iopl!
 
-		OSMousePacket_SIZEOF req@ MouseRequest_Buffer + +=
-		OSMousePacket_SIZEOF req@ MouseRequest_Length + -=
+		auto buf
+		iopl@ IOPacketLocationMappedBuffer buf!
 
-		if (req@ MouseRequest_Length + @ ~~)
+		info@
+		buf@ iopl@ IOPacketLocation_Offset + @ + OSMousePacket_Info + !
+
+		eventtype@
+		buf@ iopl@ IOPacketLocation_Offset + @ + OSMousePacket_EventType + !
+
+		OSMousePacket_SIZEOF iopl@ IOPacketLocation_Offset + +=
+		OSMousePacket_SIZEOF iopl@ IOPacketLocation_Length + -=
+
+		if (iopl@ IOPacketLocation_Length + @ ~~)
+			auto niop
+			iop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
 			// complete the client MDL.
 
 			0 // status
 			IOBOOSTMOUSE // priboost
-			req@ MouseRequest_MDL + @ // mdl
-			MmMDLComplete
+			iop@ // mdl
+			IOPacketComplete
 
 			// unlink the client request.
 
-			req@ MouseRequest_Next + @ req!
+			niop@ iop!
+			iop@ mouse@ Mouse_RequestListHead + !
 
-			req@ mouse@ Mouse_RequestListHead + !
-
-			if (req@)
-				0 req@ MouseRequest_Prev + !
+			if (iop@)
+				0 iop@ IOPacketHeader_DeviceQueuePrev + !
 			end else
 				0 mouse@ Mouse_RequestListTail + !
 			end

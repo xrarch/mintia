@@ -124,8 +124,6 @@ externptr MiEvictablePageListTail
 
 extern MiModifiedPageWriter { context1 context2 -- }
 
-externptr MiModifiedPageWriterThread
-
 // free page count threshold that counts as "dire", meaning the working set
 // trimmer will ignore working set lower limits and go woo wild.
 
@@ -391,3 +389,9 @@ extern MiWorkingSetEntryFree { wsli wsleptr process -- }
 extern MiWorkingSetEntryForceOut { vaddr pfdbe process -- }
 
 extern MiManageWorkingSets { -- success }
+
+
+// MDL stuff
+
+
+extern MiMDLZonesInit { -- }

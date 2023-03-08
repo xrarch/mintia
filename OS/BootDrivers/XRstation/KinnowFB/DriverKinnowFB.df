@@ -37,8 +37,8 @@ table DriverKinnowFBDispatch
 	0                                    // open
 	0                                    // close
 	pointerof KinnowFBIOControl          // iocontrol
-	pointerof KinnowFBRead               // read
-	pointerof KinnowFBWrite              // write
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -55,8 +55,8 @@ table DriverKinnowFBDispatch
 	0                                    // delete device object
 	0                                    // reserved
 	0                                    // reserved
-	0                                    // reserved
-	0                                    // reserved
+	pointerof KinnowFBRead               // read
+	pointerof KinnowFBWrite              // write
 endtable
 
 table DriverKinnowFB
@@ -64,9 +64,8 @@ table DriverKinnowFB
 	IOVERSION_MINOR                      // ioversion minor
 
 	"kinnowfb"                           // name
-	OSFILETYPE_CHARDEVICE                // type
 	pointerof DriverKinnowFBDispatch     // dispatch table
-	KinnowCard_SIZEOF                    // extension size
+	0                                    // flags
 
 	0                                    // reserved
 	0                                    // reserved
@@ -134,6 +133,9 @@ fn (HALXRstationEBusCallbackF) KinnowFBEnumerate { slotid phyaddr -- }
 	itoa
 
 	auto ok
+
+	KinnowCard_SIZEOF // extensionsize
+	OSFILETYPE_CHARDEVICE // type
 	name@ // name
 	vramsize@ // sizeinbytes
 	DriverKinnowFB // driver
@@ -145,7 +147,7 @@ fn (HALXRstationEBusCallbackF) KinnowFBEnumerate { slotid phyaddr -- }
 	end
 
 	auto kinnowfb
-	dev@ IODeviceGetExtension kinnowfb!
+	dev@ IODevice_Extension + @ kinnowfb!
 
 	phyaddr@ kinnowfb@ KinnowCard_BaseAddress + !
 	screenparam@ 0xFFF & kinnowfb@ KinnowCard_Width + !
@@ -157,7 +159,7 @@ fn (IODispatchIOControlFunction) KinnowFBIOControl { arg2 arg1 access fcb lastmo
 	0 ok!
 
 	auto kinnowfb
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
+	fcb@ IOFileControlBlockGetDeviceObject IODevice_Extension + @ kinnowfb!
 
 	if (arg1@ OSVIDEOIOCONTROL_QUERY ==)
 		auto query
@@ -191,7 +193,7 @@ end
 
 fn (IODispatchGetPageAddressFunction) KinnowFBGetPageAddress { offset fcb -- phyaddr ok }
 	auto kinnowfb
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
+	fcb@ IOFileControlBlockGetDeviceObject IODevice_Extension + @ kinnowfb!
 
 	if (offset@ kinnowfb@ KinnowCard_VRAMSize + @ >=)
 		"KinnowFBGetPageAddress: beyond end of VRAM\n" KeCrash
@@ -205,39 +207,42 @@ const IOUNIT (PAGESIZE 4 *)
 const IOUNITOFFSETMASK (IOUNIT 1 -)
 const IOUNITNUMBERMASK (IOUNITOFFSETMASK ~)
 
-fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) KinnowFBRead { iopl -- done ok }
+	0 ok!
+	1 done!
+
 	auto kinnowfb
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject IODevice_Extension + @ kinnowfb!
 
-	auto vramsize
-	kinnowfb@ KinnowCard_VRAMSize + @ vramsize!
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
-	if (offset@ vramsize@ >=)
-		0 ok!
-		0 mdl@ MmMDLHeader_Length + !
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
+
+	if (offset@ kinnowfb@ KinnowCard_VRAMSize + @ >=)
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
-	auto lastmode
-	mdl@ MmMDLHeader_ModeB + gb lastmode!
-
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+	auto buf
+	iopl@ IOPacketLocationVirtualBuffer buf!
 
 	auto length
-	mdl@ MmMDLHeader_Length + @ length!
+	iopl@ IOPacketLocation_Length + @ length!
 
-	vramsize@ offset@ -
+	kinnowfb@ KinnowCard_VRAMSize + @ offset@ -
 	length@
 	min length!
 
-	length@ mdl@ MmMDLHeader_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 	auto bytesread
 	0 bytesread!
@@ -258,16 +263,21 @@ fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags offset mdl fcb -
 		MmIORegionMap ok! vaddr!
 
 		if (ok@)
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 
-		if (lastmode@ USERMODE ==)
-			buffer@ // dest
+		if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_USERMODE &)
+			buf@ // dest
 			vaddr@ pageoff@ + // src
 			m@ // size
 			KeSafeCopyOut ok!
 		end else
-			buffer@ // dest
+			buf@ // dest
 			vaddr@ pageoff@ + // src
 			m@ // size
 			memcpy
@@ -278,47 +288,61 @@ fn (IODispatchReadFunction) KinnowFBRead { timeout flags kflags offset mdl fcb -
 		MmIORegionUnmap
 
 		if (ok@)
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 
-		m@ buffer +=
+		m@ buf +=
 		m@ bytesread +=
 		m@ offset +=
 	end
 
 	0 // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	iop@ // iop
+	IOPacketCompleteLow
 end
 
-fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) KinnowFBWrite { iopl -- done ok }
+	0 ok!
+	1 done!
+
 	auto kinnowfb
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension kinnowfb!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject IODevice_Extension + @ kinnowfb!
 
-	auto vramsize
-	kinnowfb@ KinnowCard_VRAMSize + @ vramsize!
+	auto iop
+	iopl@ IOPacketFromLocation iop!
 
-	if (offset@ vramsize@ >=)
+	auto offset
+	iopl@ IOPacketLocation_Offset + @ offset!
+
+	if (offset@ kinnowfb@ KinnowCard_VRAMSize + @ >=)
 		STATUS_END_OF_DISK ok!
+
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
 
-	auto lastmode
-	mdl@ MmMDLHeader_ModeB + gb lastmode!
-
-	auto buffer
-	mdl@ MmMDLHeader_VirtualAddress + @ buffer!
+	auto buf
+	iopl@ IOPacketLocationVirtualBuffer buf!
 
 	auto length
-	mdl@ MmMDLHeader_Length + @ length!
+	iopl@ IOPacketLocation_Length + @ length!
 
-	vramsize@ offset@ -
+	kinnowfb@ KinnowCard_VRAMSize + @ offset@ -
 	length@
 	min length!
 
-	length@ mdl@ MmMDLHeader_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 
 	auto byteswritten
 	0 byteswritten!
@@ -339,17 +363,22 @@ fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags offset mdl fcb -- ok }
 		MmIORegionMap ok! vaddr!
 
 		if (ok@)
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 
-		if (lastmode@ USERMODE ==)
+		if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_USERMODE &)
 			vaddr@ pageoff@ + // dest
-			buffer@ // src
+			buf@ // src
 			m@ // size
 			KeSafeCopyIn ok!
 		end else
 			vaddr@ pageoff@ + // dest
-			buffer@ // src
+			buf@ // src
 			m@ // size
 			memcpy
 		end
@@ -359,16 +388,21 @@ fn (IODispatchWriteFunction) KinnowFBWrite { flags kflags offset mdl fcb -- ok }
 		MmIORegionUnmap
 
 		if (ok@)
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
 			return
 		end
 
-		m@ buffer +=
+		m@ buf +=
 		m@ byteswritten +=
 		m@ offset +=
 	end
 
 	0 // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	iop@ // iop
+	IOPacketCompleteLow
 end

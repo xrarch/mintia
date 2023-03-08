@@ -217,6 +217,21 @@ fn IOiIncrementAsyncIOCount { fcb -- }
 	ipl@ KeIPLLower
 end
 
+fn IOiDecrementAsyncIOCount { fcb -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 fcb@ IOFileControlBlock_AsyncIOCount + -=
+
+	if (fcb@ IOFileControlBlock_AsyncIOCount + @ ~~)
+		0 // priboost
+		fcb@ IOFileControlBlock_AsyncIOEvent + // event
+		KeEventSignal
+	end
+
+	ipl@ KeIPLLower
+end
+
 fn IOReadWriteAsync { requestblock flags length offset buffer fileobject functioncode -- ok }
 	fnsection "PAGE$text"
 
@@ -336,6 +351,8 @@ fn IOReadWriteAsync { requestblock flags length offset buffer fileobject functio
 end
 
 fn (KeAPCFunctionSpecial) IOiUserAsyncAPCRoutine { normalfunc context1 context2 apc -- }
+	fnsection "PAGE$text"
+
 	auto iop
 	context1@@ iop!
 
@@ -389,24 +406,7 @@ fn (KeAPCFunctionSpecial) IOiUserAsyncAPCRoutine { normalfunc context1 context2 
 		ls@ ns@ IOPacketHeaderUserAsync_ThreadListPrev + !
 	end
 
-	// decrement the AsyncIOCount on the FCB, if it reaches 0, signal the
-	// notification event.
-
-	auto fcb
-	iop@ IOPacketHeaderUserAsync_FileObject + @ IOFile_FileControlBlock + @ fcb!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	1 fcb@ IOFileControlBlock_AsyncIOCount + -=
-
-	if (fcb@ IOFileControlBlock_AsyncIOCount + @ ~~)
-		0 // priboost
-		fcb@ IOFileControlBlock_AsyncIOEvent + // event
-		KeEventSignal
-	end
-
-	ipl@ KeIPLLower
+	iop@ IOPacketHeaderUserAsync_FileObject + @ IOFile_FileControlBlock + @ IOiDecrementAsyncIOCount
 
 	iop@ IOPacketHeaderUserAsync_FileObject + @ ObObjectDereferenceByPointer drop
 

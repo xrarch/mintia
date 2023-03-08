@@ -31,7 +31,7 @@
 
 #include "../../Common/Common.h"
 
-extern MmMPWAssessTransfers { transfer1 -- }
+extern MmMPWAssessTransfers { transfersize transfer1 -- }
 
 var IOSwapPagesUsed 0
 public IOSwapPagesUsed
@@ -60,6 +60,7 @@ struct IOiPageFile
 	4 Priority
 	4 Number
 	4 Next
+	4 TransferSize
 endstruct
 
 buffer IOiPageFileCreationMutex KeMutex_SIZEOF
@@ -280,12 +281,15 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	auto stacksize
 	fcb@ IOFileControlBlock_StackDepth + @ stacksize!
 
+	auto transfersize
+	IOTransfer_SIZEOF IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + transfersize!
+
 	// do an inline allocation of the pagefile, two transfer structures, and
 	// the bitmap.
 
 	auto pagefile
 	IOiPageFile_SIZEOF
-	IOTransfer_SIZEOF IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + 2 * +
+	transfersize@ 2 * +
 	maxpages@ 7 + 3 >> + // bytes
 	'SwFi' // tag
 	CANBLOCK // flags
@@ -299,6 +303,8 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 		return
 	end
 
+	transfersize@ pagefile@ IOiPageFile_TransferSize + !
+
 	auto transfer1
 	pagefile@ IOiPageFile_SIZEOF + transfer1!
 
@@ -307,14 +313,14 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	MmMPWAnonTransferInitialize
 
 	auto transfer2
-	transfer1@ IOTransfer_SIZEOF + IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + transfer2!
+	transfer1@ transfersize@ + transfer2!
 
 	pagefile@ // pagefile
 	transfer2@ // transfer
 	MmMPWAnonTransferInitialize
 
 	auto bitmap
-	transfer2@ IOTransfer_SIZEOF + IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + bitmap!
+	transfer2@ transfersize@ + bitmap!
 
 	// initialize the bitmap
 	maxpages@ // sizeinbits
@@ -455,7 +461,9 @@ fn IOPageFileRelease { pages offset pagefile -- }
 
 	if (MmAnonTransfersAvailable@ ~~
 		pagefile@ IOiPageFile_CurrentSize + @ pagefile@ IOiPageFile_UsedCount + @ - IOPAGEFILEFREELOW >= ||)
-		pagefile@ IOiPageFile_SIZEOF + MmMPWAssessTransfers
+		pagefile@ IOiPageFile_TransferSize + @ // transfersize
+		pagefile@ IOiPageFile_SIZEOF + // transfer1
+		MmMPWAssessTransfers
 	end
 
 	ipl@ KeIPLLower
@@ -483,7 +491,9 @@ fn IOSwapPageFree { pno pagefile -- }
 
 	if (MmAnonTransfersAvailable@ ~~
 		pagefile@ IOiPageFile_CurrentSize + @ pagefile@ IOiPageFile_UsedCount + @ - IOPAGEFILEFREELOW >= ||)
-		pagefile@ IOiPageFile_SIZEOF + MmMPWAssessTransfers
+		pagefile@ IOiPageFile_TransferSize + @ // transfersize
+		pagefile@ IOiPageFile_SIZEOF + // transfer1
+		MmMPWAssessTransfers
 	end
 
 	ipl@ KeIPLLower
@@ -887,7 +897,9 @@ fn IOiPageFileTryExtend { extension pagefile -- realextension }
 
 	0 pagefile@ IOiPageFile_Hint + !
 
-	pagefile@ IOiPageFile_SIZEOF + MmMPWAssessTransfers
+	pagefile@ IOiPageFile_TransferSize + @ // transfersize
+	pagefile@ IOiPageFile_SIZEOF + // transfer1
+	MmMPWAssessTransfers
 
 	ipl@ KeIPLLower
 end

@@ -31,13 +31,10 @@
 #include "MmInternal.h"
 
 buffer MiMDLZoneSmall MmZoneHeader_SIZEOF
-buffer MiMDLZone      MmZoneHeader_SIZEOF
 
-const SMALLPAGES 2
-const LARGEPAGES (IOMAXCLUSTERMAX PAGESHIFT >>)
+const SMALLPAGES 8
 
 const SMALLMDLS 40
-const LARGEMDLS 16
 
 rosection "INIT$text"
 
@@ -60,7 +57,7 @@ fn MiMDLZoneInit { count pagecount zone -- }
 	MmAllocWithTag ok! chunk!
 
 	if (ok@)
-		"MiMDLZonesInit: failed to create packet zones\n" KeCrash
+		"MiMDLZonesInit: failed to create MDL zones\n" KeCrash
 	end
 
 	mdlsize@ count@ * MMZONEOVERHEAD + // bytes
@@ -76,11 +73,6 @@ fn MiMDLZonesInit { -- }
 	SMALLMDLS // count
 	SMALLPAGES // pagecount
 	MiMDLZoneSmall // zone
-	MiMDLZoneInit
-
-	LARGEMDLS // count
-	LARGEPAGES // pagecount
-	MiMDLZone // zone
 	MiMDLZoneInit
 end
 
@@ -103,9 +95,6 @@ end
 fn MmMDLAllocate { length vaddr kflags -- mdl ok }
 	// try pretty hard not to call this since it puts IO integrity at the
 	// mercy of the memory manager.
-	//
-	// it is sadly necessary for some stuff like non-contiguous disk transfers
-	// from filesystem drivers.
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC >=)
@@ -113,27 +102,19 @@ fn MmMDLAllocate { length vaddr kflags -- mdl ok }
 		end
 	end
 
-	auto bytes
-	vaddr@ length@ MmMDLGetSize bytes!
-
 	auto pages
 	vaddr@ PAGEOFFSETMASK & length@ + PAGEOFFSETMASK + PAGESHIFT >> pages!
 
-	auto zone
-	0 zone!
 	0 mdl!
 
-	if (pages@ SMALLPAGES <=)
-		MiMDLZoneSmall zone!
-	end elseif (pages@ LARGEPAGES <=)
-		MiMDLZone zone!
-	end
+	auto zone
+	0 zone!
 
-	if (zone@)
+	if (pages@ SMALLPAGES <=)
 		auto rs
 		HALCPUInterruptDisable rs!
 
-		zone@ MmZoneAllocate ok! mdl!
+		MiMDLZoneSmall MmZoneAllocate ok! mdl!
 
 		rs@ HALCPUInterruptRestore
 
@@ -141,11 +122,15 @@ fn MmMDLAllocate { length vaddr kflags -- mdl ok }
 			// no MDLs left in the zone.
 
 			0 mdl!
-			0 zone!
+		end else
+			1 zone!
 		end
 	end
 
 	if (mdl@ ~~)
+		auto bytes
+		vaddr@ length@ MmMDLGetSize bytes!
+
 		auto flags
 		CANBLOCK flags!
 
@@ -217,22 +202,12 @@ fn MmMDLFree { mdl -- }
 	end
 
 	if (mdl@ MmMDLHeader_Flags + @ MMMDL_ZONEMDL &)
-		auto pages
-		mdl@ MmMDLHeader_VirtualAddress + @ PAGEOFFSETMASK &
-		mdl@ MmMDLHeader_Length + @ + PAGEOFFSETMASK + PAGESHIFT >> pages!
-
 		auto rs
 		HALCPUInterruptDisable rs!
 
-		if (pages@ SMALLPAGES <=)
-			mdl@ // ptr
-			MiMDLZoneSmall // zoneheader
-			MmZoneFree
-		end else
-			mdl@ // ptr
-			MiMDLZone // zoneheader
-			MmZoneFree
-		end
+		mdl@ // ptr
+		MiMDLZoneSmall // zoneheader
+		MmZoneFree
 
 		rs@ HALCPUInterruptRestore
 	end else

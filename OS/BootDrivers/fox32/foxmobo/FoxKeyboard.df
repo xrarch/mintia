@@ -50,22 +50,12 @@ struct Keyboard
 	4 RequestListTail
 endstruct
 
-struct KeyboardRequest
-	4 Next
-	4 Prev
-
-	4 Keyboard
-	4 MDL
-	4 Buffer
-	4 Length
-endstruct
-
 table DriverKeyboardDispatch
 	0                                    // open
 	0                                    // close
 	0                                    // iocontrol
-	pointerof DriverKeyboardRead         // read
-	0                                    // write
+	0                                    // reserved
+	0                                    // reserved
 	0                                    // system control
 	0                                    // parse
 	0                                    // create
@@ -82,7 +72,7 @@ table DriverKeyboardDispatch
 	0                                    // delete device object
 	0                                    // reclaim fcb
 	pointerof DriverKeyboardCancel       // cancel request
-	0                                    // reserved
+	pointerof DriverKeyboardRead         // read
 	0                                    // reserved
 endtable
 
@@ -124,7 +114,7 @@ fn Fox32KeyboardInit { -- }
 	end
 
 	auto keyboard
-	dev@ IODeviceGetExtension keyboard!
+	dev@ IODevice_Extension + @ keyboard!
 
 	0 keyboard@ Keyboard_States + !
 	0 keyboard@ Keyboard_PendingArrowKey + !
@@ -146,38 +136,57 @@ end
 
 rosection "text"
 
-fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl fcb -- ok }
+fn (IODispatchEnqueueIOPFunction) DriverKeyboardRead { iopl -- done ok }
+	1 done!
 	0 ok!
 
 	auto keyboard
-	fcb@ IOFileControlBlockGetDeviceObject IODeviceGetExtension keyboard!
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlockGetDeviceObject IODevice_Extension + @ keyboard!
 
-	if (mdl@ MmMDLHeader_Length + @ ~~)
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	if (iopl@ IOPacketLocation_Length + @ ~~)
 		0 // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
+		iop@ // iop
+		IOPacketCompleteLow
 
 		return
 	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
 
 	1 // lockforwrite
 	mdl@ // mdl
 	MmMDLPin ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
-
-	auto buf
 
 	mdl@ MmMDLMap ok!
 
 	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
 		return
 	end
 
-	mdl@ MmMDLHeader_MappedAddress + @ buf!
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	auto length
+	iopl@ IOPacketLocation_Length + @ length!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -188,8 +197,8 @@ fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl
 	auto bytecnt
 	keyboard@ Keyboard_WriteIndex + @ rp@ - bytecnt!
 
-	if (mdl@ MmMDLHeader_Length + @ bytecnt@ <)
-		mdl@ MmMDLHeader_Length + @ bytecnt!
+	if (length@ bytecnt@ <)
+		length@ bytecnt!
 	end
 
 	if (bytecnt@)
@@ -221,81 +230,78 @@ fn (IODispatchReadFunction) DriverKeyboardRead { timeout flags kflags offset mdl
 		bytecnt@ keyboard@ Keyboard_Remaining + +=
 	end
 
-	if (bytecnt@ mdl@ MmMDLHeader_Length + @ ~=)
-		if (timeout@)
+	if (bytecnt@ length@ ~=)
+		if (iop@ IOPacketHeader_Timeout + @)
 			// enqueue
 
 			STATUS_OTHER_CONDITION ok!
 
-			auto ior
-			mdl@ MmMDLHeader_DriverGoWild + ior!
+			bytecnt@ iopl@ IOPacketLocation_Offset + !
+			keyboard@ iopl@ IOPacketLocation_Context + !
 
-			keyboard@ ior@ KeyboardRequest_Keyboard + !
-			mdl@ ior@ KeyboardRequest_MDL + !
-			buf@ bytecnt@ + ior@ KeyboardRequest_Buffer + !
-			mdl@ MmMDLHeader_Length + @ bytecnt@ - ior@ KeyboardRequest_Length + !
-
-			0 ior@ KeyboardRequest_Next + !
+			0 iop@ IOPacketHeader_DeviceQueueNext + !
 
 			auto t
 			keyboard@ Keyboard_RequestListTail + @ t!
 
-			t@ ior@ KeyboardRequest_Prev + !
+			t@ iop@ IOPacketHeader_DeviceQueuePrev + !
 
 			if (t@ ~~)
-				ior@ keyboard@ Keyboard_RequestListHead + !
-				ior@ keyboard@ Keyboard_RequestListTail + !
+				iop@ keyboard@ Keyboard_RequestListHead + !
 			end else
-				ior@ t@ KeyboardRequest_Next + !
+				iop@ t@ IOPacketHeader_DeviceQueueNext + !
 			end
+
+			iop@ keyboard@ Keyboard_RequestListTail + !
+
+			iop@ IOPacketWasEnqueued
 		end else
-			bytecnt@ mdl@ MmMDLHeader_Length + !
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 		end
 	end
 
 	ipl@ KeIPLLower
 
-	if (ok@ ~~)
-		0 // status
+	if (ok@ STATUS_OTHER_CONDITION ~=)
+		ok@ // status
 		0 // priboost
-		mdl@ // mdl
-		MmMDLComplete
-	end elseif (ok@ STATUS_OTHER_CONDITION ==)
-		// this means the request was enqueued successfully, so report success
+		iop@ // iop
+		IOPacketCompleteLow
+	end else
 		0 ok!
 	end
 end
 
-fn (IODispatchCancelFunction) DriverKeyboardCancel { mdl -- }
+fn (IODispatchCancelFunction) DriverKeyboardCancel { iop -- }
+	auto iopl
+	iop@ IOPacketCurrentLocation iopl!
+
+	auto keyboard
+	iopl@ IOPacketLocation_Context + @ keyboard!
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	auto ior
-	mdl@ MmMDLHeader_DriverGoWild + ior!
-
-	if (mdl@ MmMDLHeader_Flags + @ MMMDL_COMPLETE &)
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_COMPLETE &)
 		// already completed, nothing to do
 		ipl@ KeIPLLower
 		return
 	end
 
-	auto keyboard
-	ior@ KeyboardRequest_Keyboard + @ keyboard!
-
 	auto ls
 	auto ns
 
-	ior@ KeyboardRequest_Prev + @ ls!
-	ior@ KeyboardRequest_Next + @ ns!
+	iop@ IOPacketHeader_DeviceQueuePrev + @ ls!
+	iop@ IOPacketHeader_DeviceQueueNext + @ ns!
 
 	if (ls@)
-		ns@ ls@ KeyboardRequest_Next + !
+		ns@ ls@ IOPacketHeader_DeviceQueueNext + !
 	end else
 		ns@ keyboard@ Keyboard_RequestListHead + !
 	end
 
 	if (ns@)
-		ls@ ns@ KeyboardRequest_Prev + !
+		ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
 	end else
 		ls@ keyboard@ Keyboard_RequestListTail + !
 	end
@@ -304,8 +310,8 @@ fn (IODispatchCancelFunction) DriverKeyboardCancel { mdl -- }
 
 	STATUS_IO_CANCELLED // status
 	0 // priboost
-	mdl@ // mdl
-	MmMDLComplete
+	iop@ // iop
+	IOPacketCompleteLow
 end
 
 fn Fox32KeyboardPoll { -- }
@@ -327,30 +333,44 @@ fn Fox32KeyboardPoll { -- }
 		end
 
 		if (scan@ -2 ~=)
-			auto req
-			Fox32Keyboard@ Keyboard_RequestListHead + @ req!
+			if (scan@ 0x8000 &)
+				scan@ 0xFF & 0x80 | scan!
+			end
 
-			if (req@)
-				scan@ req@ KeyboardRequest_Buffer + @ sb
-				1 req@ KeyboardRequest_Buffer + +=
-				1 req@ KeyboardRequest_Length + -=
+			auto iop
+			Fox32Keyboard@ Keyboard_RequestListHead + @ iop!
 
-				if (req@ KeyboardRequest_Length + @ ~~)
+			if (iop@)
+				auto iopl
+				iop@ IOPacketCurrentLocation iopl!
+
+				auto buf
+				iopl@ IOPacketLocationMappedBuffer buf!
+
+				scan@
+				buf@ iopl@ IOPacketLocation_Offset + @ + sb
+
+				1 iopl@ IOPacketLocation_Offset + +=
+				1 iopl@ IOPacketLocation_Length + -=
+
+				if (iopl@ IOPacketLocation_Length + @ ~~)
+					auto niop
+					iop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
 					// complete the client MDL.
 
 					0 // status
 					IOBOOSTKEYBOARD // priboost
-					req@ KeyboardRequest_MDL + @ // mdl
-					MmMDLComplete
+					iop@ // mdl
+					IOPacketComplete
 
 					// unlink the client request.
 
-					req@ KeyboardRequest_Next + @ req!
+					niop@ iop!
+					iop@ Fox32Keyboard@ Keyboard_RequestListHead + !
 
-					req@ Fox32Keyboard@ Keyboard_RequestListHead + !
-
-					if (req@)
-						0 req@ KeyboardRequest_Prev + !
+					if (iop@)
+						0 iop@ IOPacketHeader_DeviceQueuePrev + !
 					end else
 						0 Fox32Keyboard@ Keyboard_RequestListTail + !
 					end

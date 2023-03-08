@@ -32,8 +32,8 @@ struct IOPacketHeader // IOPH
 
 	// packet type:
 	//  - NORMAL: synchronous user IO, page-in IO, associated (fragment) IO, etc.
-	//  - USERASYNC: asynchronous user IO (needs special completion)
 	//  - PAGING: asynchronous page-out IO (needs special completion)
+	//  - USERASYNC: asynchronous user IO (needs special completion)
 
 	1 TypeB
 
@@ -188,6 +188,8 @@ extern IOPacketFree { iop -- }
 extern IOPacketAllocateForFile { mode type kflags fcb iopflags -- ioplzero iop ok }
 extern IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 extern IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzero }
+
+extern IOPacketFinishEitherContext { iop -- }
 
 extern IOPacketWasEnqueued { iop -- }
 

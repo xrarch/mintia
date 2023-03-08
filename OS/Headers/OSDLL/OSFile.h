@@ -10,6 +10,7 @@ const OSFILEFLAG_CREATEDIR   8
 const OSFILEFLAG_MUSTCREATE  16
 const OSFILEFLAG_EXCLUSIVE   32
 const OSFILEFLAG_PAGEFILE    64
+const OSFILEFLAG_APPENDONLY  128 // atomic append
 
 // set of flags that are reserved for system usage
 const OSFILEFLAG_KERNELSET   OSFILEFLAG_PAGEFILE

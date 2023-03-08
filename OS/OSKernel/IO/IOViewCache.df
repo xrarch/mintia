@@ -529,7 +529,7 @@ fn VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
 	offset@ FILEVIEWOFFSETMASK & vaddr +=
 end
 
-fn VcFileWrite { flags length offset buf fcb -- byteswritten ok }
+fn VcFileWrite { fileflags flags length offset buf fcb -- byteswritten ok }
 	fnsection "PAGE$text"
 
 	0 byteswritten!
@@ -589,21 +589,39 @@ fn VcFileWrite { flags length offset buf fcb -- byteswritten ok }
 		if (offset@ length@ + bytesize@ >)
 			// ga grow tha file
 
-			fcb@ IOFileControlBlockUnlock
+			if (fileflags@ OSFILEFLAG_APPENDONLY &)
+				length@ // newsize
+				2 // growing
+				0 // keeplocked
+				1 // zero
+				flags@ // flags
+				fcb@ // fcb
+				IOFileControlBlockTruncate ok! oldsize!
 
-			offset@ length@ + // newsize
-			1 // growing
-			1 // keeplocked
-			1 // zero
-			flags@ // flags
-			fcb@ // fcb
-			IOFileControlBlockTruncate ok! oldsize!
+				if (ok@)
+					fcb@ IOFileControlBlockUnlock
 
-			if (ok@)
-				// don't unlock FCB, IOFileControlBlockTruncate leaves it
-				// unlocked in case of error.
+					return
+				end
 
-				return
+				oldsize@ offset!
+			end else
+				fcb@ IOFileControlBlockUnlock
+
+				offset@ length@ + // newsize
+				1 // growing
+				1 // keeplocked
+				1 // zero
+				flags@ // flags
+				fcb@ // fcb
+				IOFileControlBlockTruncate ok! oldsize!
+
+				if (ok@)
+					// don't unlock FCB, IOFileControlBlockTruncate leaves it
+					// unlocked in case of error.
+
+					return
+				end
 			end
 		end
 	end

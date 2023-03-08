@@ -6,7 +6,7 @@ const IOPTYPE_USERASYNC     3
 
 const IOPFLAG_ZONEIOP  1  // the IOP was drawn from one of the pre-allocated zones.
 const IOPFLAG_FREEIOP  2  // the IOP should be freed upon completion.
-const IOPFLAG_FREEMDL  4  // the MDL in the zeroth IOPL should be freed upon completion.
+const IOPFLAG_COMPLMDL 4  // the MDL should be completed when the IOP is.
 const IOPFLAG_QUOTA    8  // quota has been charged for this IOP.
 const IOPFLAG_USERMODE 16 // the IOP represents a usermode request (either sync or async).
 const IOPFLAG_COMPLETE 32 // the IOP has been completed

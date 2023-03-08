@@ -52,6 +52,7 @@ externptr MmPageFreeCountLow
 externptr MmPageFreeCountSufficient
 externptr MmSectionObjectType
 externptr MmBalanceSetManagerThread
+externptr MmModifiedPageWriterThread
 
 externptr MmPageFaultCount
 externptr MmTotalWorkingSetSize

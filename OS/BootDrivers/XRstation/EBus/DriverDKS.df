@@ -42,6 +42,7 @@ struct Disk
 	4 Blocks
 	4 RequestListHead
 	4 RequestListTail
+	4 CurrentRequest
 endstruct
 
 const DKSKFLAG_READ 0x80000000
@@ -144,6 +145,7 @@ fn private CreateDisk { name blocks type id offset -- dev }
 	blocks@ disk@ Disk_Blocks + !
 	0 disk@ Disk_RequestListHead + !
 	0 disk@ Disk_RequestListTail + !
+	0 disk@ Disk_CurrentRequest + !
 
 	if (type@ DKS_REALDISK ==)
 		disk@ [id@]DKSRealDisks!
@@ -284,7 +286,7 @@ fn DKSComplete { id -- }
 	end
 
 	auto iop
-	disk@ Disk_RequestListHead + @ iop!
+	disk@ Disk_CurrentRequest + @ iop!
 
 	if (DEBUGCHECKS)
 		if (iop@ ~~)
@@ -309,9 +311,6 @@ fn DKSComplete { id -- }
 		iopl@ IOPacketLocation_Length + @ ==)
 		// complete, start next one
 
-		auto niop
-		iop@ IOPacketHeader_DeviceQueueNext + @ niop!
-
 		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
 			iopl@ IOPacketLocation_OffsetInMDL + @ // offset
 			iopl@ IOPacketLocation_Length + @ // length
@@ -326,16 +325,26 @@ fn DKSComplete { id -- }
 		iop@ // iop
 		IOPacketComplete
 
-		niop@ iop!
-
-		iop@ disk@ Disk_RequestListHead + !
+		disk@ Disk_RequestListHead + @ iop!
+		iop@ disk@ Disk_CurrentRequest + !
 
 		if (iop@ ~~)
-			0 disk@ Disk_RequestListTail + !
+			// no pending requests, we are done.
 			return
-		end else
-			iop@ IOPacketCurrentLocation iopl!
 		end
+
+		auto n
+		iop@ IOPacketHeader_DeviceQueueNext + @ n!
+
+		n@ disk@ Disk_RequestListHead + !
+
+		if (n@)
+			0 n@ IOPacketHeader_DeviceQueuePrev + !
+		end else
+			0 disk@ Disk_RequestListTail + !
+		end
+
+		iop@ IOPacketCurrentLocation iopl!
 	end
 
 	auto rs
@@ -447,28 +456,24 @@ fn DKSBlockTransferCommand { disk iopl -- ok }
 	0 iop@ IOPacketHeader_DeviceQueueNext + !
 	0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
-	auto t
-	realdisk@ Disk_RequestListTail + @ t!
+	if (realdisk@ Disk_CurrentRequest + @ ~~)
+		// no pending requests, start the disk.
 
-	if (t@ ~~)
-		iop@ realdisk@ Disk_RequestListTail + !
-		iop@ realdisk@ Disk_RequestListHead + !
+		iop@ realdisk@ Disk_CurrentRequest + !
 
 		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_WRITE ==)
-			rs@ HALCPUInterruptRestore
+			ipl@ KeIPLLower
 
 			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
 			iopl@ IOPacketLocationMappedBuffer // src
 			DKSBLOCKSIZE // len
 			memcpy
 
-			HALCPUInterruptDisable rs!
+			IPLDPC KeIPLRaise ipl!
 		end
-
-		// no pending requests, start the disk
 
 		id@ DKSPORTA HALXRstationCitronOutl
 		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
@@ -480,12 +485,75 @@ fn DKSBlockTransferCommand { disk iopl -- ok }
 		end else
 			DKSCMDWRITE DKSPORTCMD HALXRstationCitronCommandASyncIdle
 		end
-	end else
-		iop@ t@ IOPacketHeader_DeviceQueueNext + !
-		iop@ realdisk@ Disk_RequestListTail + !
+
+		ipl@ KeIPLLower
+
+		return
 	end
 
-	rs@ HALCPUInterruptRestore
+	auto t
+	realdisk@ Disk_RequestListHead + @ t!
+
+	if (t@ ~~)
+		iop@ realdisk@ Disk_RequestListHead + !
+		iop@ realdisk@ Disk_RequestListTail + !
+
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	// insertion sort our request into the queue.
+
+	auto p
+	auto n
+
+	while (t@)
+		auto otheriopl
+		t@ IOPacketCurrentLocation otheriopl!
+
+		if (otheriopl@ IOPacketLocation_Offset + @
+			iopl@ IOPacketLocation_Offset + @ >)
+
+			"mid " Printf
+
+			// this request has a greater offset than ours, so we will insert
+			// ourselves before it on the queue.
+
+			t@ IOPacketHeader_DeviceQueuePrev + @ p!
+			
+			if (p@)
+				iop@ p@ IOPacketHeader_DeviceQueueNext + !
+			end else
+				iop@ realdisk@ Disk_RequestListHead + !
+			end
+
+			p@ iop@ IOPacketHeader_DeviceQueuePrev + !
+
+			t@ iop@ IOPacketHeader_DeviceQueueNext + !
+			iop@ t@ IOPacketHeader_DeviceQueuePrev + !
+
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		t@ IOPacketHeader_DeviceQueueNext + @ t!
+	end
+
+	"tail " Printf
+
+	// there were no requests on the list with a greater starting offset, so
+	// we go at the tail.
+
+	realdisk@ Disk_RequestListTail + @ t!
+
+	t@ iop@ IOPacketHeader_DeviceQueuePrev + !
+	iop@ t@ IOPacketHeader_DeviceQueueNext + !
+
+	iop@ realdisk@ Disk_RequestListTail + !
+
+	ipl@ KeIPLLower
 end
 
 fn (IODispatchIOControlFunction) DriverDKSIOControl { arg2 arg1 access fcb lastmode -- ret ok }

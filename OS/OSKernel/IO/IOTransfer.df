@@ -200,7 +200,24 @@ fn IOMDLTransfer { iop completionroutine functioncode flags kflags mdl offset fc
 	end
 end
 
-fn IOReadWriteAsync { context flags length offset buffer portobject fileobject functioncode -- ok }
+fn IOiIncrementAsyncIOCount { fcb -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto oldcount
+	fcb@ IOFileControlBlock_AsyncIOCount + @ oldcount!
+	oldcount@ 1 + fcb@ IOFileControlBlock_AsyncIOCount + !
+
+	if (oldcount@ ~~)
+		// clear the event
+		fcb@ IOFileControlBlock_AsyncIOEvent + // event
+		KeEventReset drop
+	end
+
+	ipl@ KeIPLLower
+end
+
+fn IOReadWriteAsync { requestblock flags length offset buffer fileobject functioncode -- ok }
 	fnsection "PAGE$text"
 
 	if (DEBUGCHECKS)
@@ -209,7 +226,191 @@ fn IOReadWriteAsync { context flags length offset buffer portobject fileobject f
 		end
 	end
 
-	"NY(R)I\n" KeCrash
+	auto mdl
+	length@ // length
+	buffer@ // vaddr
+	0 // kflags
+	MmMDLAllocateWithQuota ok! mdl!
+
+	if (ok@)
+		return
+	end
+
+	MMMDL_FREE mdl@ MmMDLHeader_Flags + |=
+
+	auto iop
+	auto iopl
+
+	USERMODE // mode
+	IOPTYPE_USERASYNC // type
+	0 // kflags
+	fileobject@ IOFile_FileControlBlock + @ // fcb
+	IOPFLAG_COMPLMDL IOPFLAG_QUOTA | IOPFLAG_FREEIOP | // iopflags
+	IOPacketAllocateForFile ok! iop! iopl!
+
+	if (ok@)
+		mdl@ MmMDLFree
+
+		return
+	end
+
+	auto msg
+	0 msg!
+
+	// initialize the completion APC.
+
+	KeThreadCurrent@ // thread
+	pointerof IOiUserAsyncAPCRoutine // specialfunc
+	0 // normalfunc
+	iop@ IOPacketHeaderUserAsync_CompletionAPC + // apc
+	KeAPCInitialize
+
+	if (requestblock@ OSRequest_PortHandle + @)
+		// allocate a completion message from the port object.
+
+		requestblock@ OSRequest_Context + @ // context
+		requestblock@ OSRequest_PortHandle + @ // portobject
+		IPCPortAllocateCompletionMessage ok! msg!
+
+		if (ok@)
+			mdl@ MmMDLFree
+
+			iop@ IOPacketFree
+
+			return
+		end
+
+		requestblock@ OSRequest_PortHandle + @ ObObjectReferenceByPointer drop
+	end
+
+	if (requestblock@ OSRequest_EventHandle + @)
+		requestblock@ OSRequest_EventHandle + @ ObObjectReferenceByPointer drop
+	end
+
+	fileobject@ ObObjectReferenceByPointer drop
+
+	msg@ iop@ IOPacketHeaderUserAsync_CompletionMessage + !
+
+	fileobject@ iop@ IOPacketHeaderUserAsync_FileObject + !
+
+	requestblock@ OSRequest_EventHandle + @ iop@ IOPacketHeader_Event + !
+	requestblock@ OSRequest_StatusBlock + @ iop@ IOPacketHeaderUserAsync_UserStatusBlock + !
+
+	mdl@ iop@ IOPacketHeader_MDL + !
+
+	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+	length@ iopl@ IOPacketLocation_Length + !
+	offset@ iopl@ IOPacketLocation_Offset + !
+	flags@ iopl@ IOPacketLocation_Flags + !
+
+	functioncode@ iopl@ IOPacketLocation_FunctionCodeB + sb
+
+	fileobject@ IOFile_FileControlBlock + @ IOiIncrementAsyncIOCount
+
+	// place on thread's pending I/O list.
+	// raise to IPLAPC to block out completion APCs.
+
+	0 iop@ IOPacketHeaderUserAsync_ThreadListPrev + !
+
+	auto ipl
+	IPLAPC KeIPLRaise ipl!
+
+	auto h
+	KeThreadCurrent@ PsThread_IOListHead + @ h!
+
+	h@ iop@ IOPacketHeaderUserAsync_ThreadListNext + !
+
+	if (h@)
+		iop@ h@ IOPacketHeaderUserAsync_ThreadListPrev + !
+	end
+
+	iop@ KeThreadCurrent@ PsThread_IOListHead + !
+
+	ipl@ KeIPLLower
+
+	iop@ IOPacketEnqueue ok!
+
+	// the completion APC will take care of all rundown, even in an error,
+	// such as dereferencing the event, port, and file objects, and removing
+	// the IOP from the thread's pending I/O list.
+end
+
+fn (KeAPCFunctionSpecial) IOiUserAsyncAPCRoutine { normalfunc context1 context2 apc -- }
+	auto iop
+	context1@@ iop!
+
+	// copy out I/O status block
+
+	if (iop@ IOPacketHeaderUserAsync_UserStatusBlock + @)
+		iop@ IOPacketHeaderUserAsync_UserStatusBlock + @ // dest
+		iop@ IOPacketHeader_StatusBlock + // src
+		OSStatusBlock_SIZEOF // size
+		KeSafeCopyOut drop
+	end
+
+	auto msg
+	iop@ IOPacketHeaderUserAsync_CompletionMessage + @ msg!
+
+	if (msg@)
+		// both of these helper functions, IPCPort*, dereference the port
+		// object for us.
+
+		if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_DOCOMPLT &)
+			// the requestor is expecting a message.
+
+			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + @ // bytes
+			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ // status
+			msg@ // msg
+			IPCPortSendCompletionMessage
+		end else
+			// the requestor should not be expecting a message.
+
+			msg@ IPCCompletionMessageFree
+		end
+	end
+
+	// dequeue this request from the thread's outstanding IO list.
+	// no synchronization is required because we are running at IPLAPC
+	// and only this thread can manipulate this list.
+
+	auto ls
+	iop@ IOPacketHeaderUserAsync_ThreadListPrev + @ ls!
+
+	auto ns
+	iop@ IOPacketHeaderUserAsync_ThreadListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ IOPacketHeaderUserAsync_ThreadListNext + !
+	end else
+		ns@ KeThreadCurrent@ PsThread_IOListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ IOPacketHeaderUserAsync_ThreadListPrev + !
+	end
+
+	// decrement the AsyncIOCount on the FCB, if it reaches 0, signal the
+	// notification event.
+
+	auto fcb
+	iop@ IOPacketHeaderUserAsync_FileObject + @ IOFile_FileControlBlock + @ fcb!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	1 fcb@ IOFileControlBlock_AsyncIOCount + -=
+
+	if (fcb@ IOFileControlBlock_AsyncIOCount + @ ~~)
+		0 // priboost
+		fcb@ IOFileControlBlock_AsyncIOEvent + // event
+		KeEventSignal
+	end
+
+	ipl@ KeIPLLower
+
+	iop@ IOPacketHeaderUserAsync_FileObject + @ ObObjectDereferenceByPointer drop
+
+	iop@ IOPacketFinishEitherContext
 end
 
 fn IOReadWrite { timeout flags length offset buffer fileobject functioncode -- bytes ok }

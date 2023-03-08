@@ -56,6 +56,7 @@ struct IOPacketHeader // IOPH
 	2 IOCountI
 
 	// status block that will be copied out upon completion.
+	// fits Status and Length fields.
 
 	8 StatusBlock
 

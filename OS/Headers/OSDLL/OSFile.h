@@ -57,9 +57,19 @@ struct OSStatusBlock
 	4 Length
 endstruct
 
+struct OSRequest
+	4 PortHandle
+	4 EventHandle
+	4 StatusBlock
+	4 Context
+	8 Reserved
+endstruct
+
 externptr OSStdIn
 externptr OSStdOut
 externptr OSStdErr
+
+extern OSRequestInitialize { requestblock -- }
 
 extern OSSetUMask { umask -- }
 extern OSGetUMask { -- umask }

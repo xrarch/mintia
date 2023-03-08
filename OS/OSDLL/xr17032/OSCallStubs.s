@@ -579,7 +579,6 @@ OSFileReadAsync:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
-	mov  a1, long [sp + 12]
 
 	li   t0, 47
 	sys  0
@@ -596,7 +595,6 @@ OSFileWriteAsync:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
-	mov  a1, long [sp + 12]
 
 	li   t0, 48
 	sys  0

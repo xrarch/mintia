@@ -1,4 +1,4 @@
-fnptr IOFilesystemMountFunction { deviceobject -- fsdeviceobject ok }
+fnptr IOFilesystemMountFunction { flags deviceobject -- fsdeviceobject ok }
 fnptr IOFilesystemUnmountFunction { fsdeviceobject -- ok }
 fnptr IOFilesystemFlushFunction { shutdown fsdeviceobject -- ok }
 fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags fsdeviceobject -- ok }

@@ -898,7 +898,7 @@ OSTOSFileFlush:
 	ret
 
 OSTOSFileReadAsync:
-	subi sp, sp, 16
+	subi sp, sp, 12
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
@@ -910,20 +910,17 @@ OSTOSFileReadAsync:
 
 	mov  t0, long [s17 + 24] ;a0
 	mov  long [sp + 8], t0
-
-	mov  t0, long [s17 + 28] ;a1
-	mov  long [sp + 12], t0
 
 	jal  OSFileReadAsync
 
 	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
-	addi sp, sp, 16
+	addi sp, sp, 12
 	ret
 
 OSTOSFileWriteAsync:
-	subi sp, sp, 16
+	subi sp, sp, 12
 	mov  long [sp], lr
 	mov  a0, long [s17 + 4] ;t1
 	mov  a1, long [s17 + 8] ;t2
@@ -936,15 +933,12 @@ OSTOSFileWriteAsync:
 	mov  t0, long [s17 + 24] ;a0
 	mov  long [sp + 8], t0
 
-	mov  t0, long [s17 + 28] ;a1
-	mov  long [sp + 12], t0
-
 	jal  OSFileWriteAsync
 
 	mov  long [s17 + 4], a0 ;t1
 
 	mov  lr, long [sp]
-	addi sp, sp, 16
+	addi sp, sp, 12
 	ret
 
 OSTOSFileCancelIO:

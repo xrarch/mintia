@@ -71,8 +71,8 @@ extern OSFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
 extern OSFileFlush { purge filehandle -- ok }
 
-extern OSFileReadAsync { context porthandle flags offset length buffer filehandle -- ok }
-extern OSFileWriteAsync { context porthandle flags offset length buffer filehandle -- ok }
+extern OSFileReadAsync { requestblock flags offset length buffer filehandle -- ok }
+extern OSFileWriteAsync { requestblock flags offset length buffer filehandle -- ok }
 extern OSFileCancelIO { wait filehandle -- ok }
 
 extern OSDirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }

@@ -43,7 +43,7 @@ struct IODevice
 	4 AttachedBy
 endstruct
 
-extern IOVolumeDeviceCreate { extensionsize sizeinbytes filesystem deviceobject -- mount fsdeviceobject ok }
+extern IOVolumeDeviceCreate { mountflags extensionsize sizeinbytes filesystem deviceobject -- mount fsdeviceobject ok }
 extern IOVolumeDeviceUninitialize { fsdeviceobject -- }
 
 extern IODeviceGetAttached { deviceobject -- attacheddeviceobject } 

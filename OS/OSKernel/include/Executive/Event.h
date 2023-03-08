@@ -11,3 +11,5 @@ extern ExEventPulseObject { eventobject -- }
 extern ExEventPulse { eventhandle -- ok }
 
 extern ExEventReadState { eventhandle -- signaled ok }
+
+externptr ExEventObjectType

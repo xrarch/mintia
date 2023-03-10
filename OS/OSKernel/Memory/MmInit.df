@@ -460,63 +460,6 @@ fn MmReclaimMemory { -- }
 
 	newlisthead@ HALResourceListHead!
 
-	// rebuild the DLL list on our own heap
-
-	auto start
-	auto sz
-	auto rs
-
-	auto name
-
-	0 newlisthead!
-
-	HALLoaderInfo@ LdrInfo_DLLListHead + @ current!
-
-	while (current@)
-		ComDLL_SIZEOF // bytes
-		'nDLL' // tag
-		MUSTSUCCEED // flags
-		MmAllocWithTag ok! new!
-
-		if (ok@)
-			ok@ "MmReclaimMemory: couldn't relocate DLL list (%i)\n" KeCrash
-		end
-
-		if (newlisthead@ ~~)
-			new@ newlisthead!
-		end else
-			new@ prev@ ComDLL_Next + !
-		end
-
-		new@ prev!
-
-		new@ // dest
-		current@ // src
-		ComDLL_SIZEOF // size
-		memcpy
-
-		current@ ComDLL_Name + @ strlen // bytes
-		'DLLN' // tag
-		MUSTSUCCEED // flags
-		MmAllocWithTag ok! name!
-
-		if (ok@)
-			ok@ "MmReclaimMemory: couldn't relocate DLL list (%i) 2\n" KeCrash
-		end
-
-		name@ // dest
-		current@ ComDLL_Name + @ // src
-		strcpy
-
-		name@ new@ ComDLL_Name + !
-
-		0 new@ ComDLL_Next + !
-
-		current@ ComDLL_Next + @ current!
-	end
-
-	newlisthead@ HALLoaderInfo@ LdrInfo_DLLListHead + !
-
 	// iterate the sections of all the DLLs and build a list of unwireable
 	// regions.
 
@@ -534,6 +477,7 @@ fn MmReclaimMemory { -- }
 		head@ XLOFFHeader_SectionCount + @ sz!
 
 		while (sz@)
+			auto name
 			sectionheader@ XLOFFSectionHeader_NameOffset + @
 			head@ XLOFFHeader_StringTableOffset + @ + head@ + name!
 
@@ -542,7 +486,14 @@ fn MmReclaimMemory { -- }
 			auto type
 			0 type!
 
-			if (name@ "INIT" 4 strncmp)
+			if (sectionheader@ XLOFFSectionHeader_Flags + @ XLOFF_SECTIONFLAG_DEFERREDFREE &)
+				// this module failed to load and the bootloader left it to us
+				// to free its sections.
+
+				MMUNWIRE_FREE type!
+				pages@ MiFreedBootPageCount +=
+				pages@ MiWiredBootPageCount -=
+			end elseif (name@ "INIT" 4 strncmp)
 				MMUNWIRE_FREE type!
 				pages@ MiFreedBootPageCount +=
 				pages@ MiWiredBootPageCount -=
@@ -576,6 +527,67 @@ fn MmReclaimMemory { -- }
 
 		current@ ComDLL_Next + @ current!
 	end
+
+	// rebuild the DLL list on our own heap
+
+	auto start
+	auto sz
+	auto rs
+
+	0 newlisthead!
+
+	HALLoaderInfo@ LdrInfo_DLLListHead + @ current!
+
+	while (current@)
+		if (current@ ComDLL_LoadCount + @ ~~)
+			// this module failed to load and the bootloader left it to us to
+			// notify the system operator at runtime.
+
+			// TODO that, somehow
+
+			current@ ComDLL_Next + @ current!
+
+			continue
+		end
+
+		auto namelen
+		current@ ComDLL_Name + @ strlen 1 + namelen!
+
+		ComDLL_SIZEOF namelen@ + // bytes
+		'nDLL' // tag
+		MUSTSUCCEED // flags
+		MmAllocWithTag ok! new!
+
+		if (ok@)
+			ok@ "MmReclaimMemory: couldn't relocate DLL list (%i)\n" KeCrash
+		end
+
+		if (newlisthead@ ~~)
+			new@ newlisthead!
+		end else
+			new@ prev@ ComDLL_Next + !
+		end
+
+		new@ prev!
+
+		new@ // dest
+		current@ // src
+		ComDLL_SIZEOF // size
+		memcpy
+
+		new@ ComDLL_SIZEOF + // dest
+		current@ ComDLL_Name + @ // src
+		namelen@ // sz
+		memcpy
+
+		new@ ComDLL_SIZEOF + new@ ComDLL_Name + !
+
+		0 new@ ComDLL_Next + !
+
+		current@ ComDLL_Next + @ current!
+	end
+
+	newlisthead@ HALLoaderInfo@ LdrInfo_DLLListHead + !
 
 	auto desc
 	HALLoaderInfo@ LdrInfo_MemoryDescriptorListHead + @ desc!

@@ -1488,10 +1488,7 @@ fn CoDuplexReadTransmitCharacter { duplex -- c ok }
 		auto bufsize
 		header@ CoDuplexBuffer_Size + @ bufsize!
 
-		auto bufmask
-		bufsize@ 1 - bufmask!
-
-		bufp@ rp@ bufmask@ & + gb c!
+		bufp@ rp@ bufsize@ 1 - & + gb c!
 
 		rp@ 1 + header@ CoDuplexBuffer_ReadIndex + !
 		1 header@ CoDuplexBuffer_RemainingSpace + +=
@@ -2247,37 +2244,43 @@ fn CoDuplexClientWrite { iopl -- ok }
 
 		STATUS_OTHER_CONDITION ok!
 	end else
-		auto txfunc
-		duplex@ CoDuplex_TXFunc + @ txfunc!
+		auto header
+		duplex@ CoDuplex_TransmitBuffer + header!
 
-		if (txfunc@)
-			while (1)
-				if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
-					DONE_NORMAL done |=
-					break
+		if (header@ CoDuplexBuffer_WriteIndex + @ header@ CoDuplexBuffer_ReadIndex + @ - ~~)
+			// only write directly to device if the ringbuffer is empty,
+			// otherwise characters may be written out of order in certain
+			// conditions.
+
+			auto txfunc
+			duplex@ CoDuplex_TXFunc + @ txfunc!
+
+			if (txfunc@)
+				while (1)
+					if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
+						DONE_NORMAL done |=
+						break
+					end
+
+					buf@ bytecnt@ + gb // c
+					txfunc@ // txfunc
+					duplex@ // duplex
+					CoDuplexTXCharacter ok!
+
+					if (ok@ ~~)
+						break
+					end
+
+					0 ok!
+
+					1 bytecnt +=
 				end
-
-				buf@ bytecnt@ + gb // c
-				txfunc@ // txfunc
-				duplex@ // duplex
-				CoDuplexTXCharacter ok!
-
-				if (ok@ ~~)
-					break
-				end
-
-				0 ok!
-
-				1 bytecnt +=
 			end
 		end
 
 		// try to satisfy as many server reads as possible.
 		// then resort to filling the transmit buffer. then, if we still have
 		// characters, enqueue our own request.
-
-		auto header
-		duplex@ CoDuplex_TransmitBuffer + header!
 
 		auto rp
 
@@ -2397,8 +2400,6 @@ fn CoDuplexClientWrite { iopl -- ok }
 						buf@ bytecnt@ + // src
 						rp@ // sz
 						memcpy
-
-						rp@ bufwritten!
 					end else
 						// crosses the boundary, do two copies
 
@@ -2411,9 +2412,9 @@ fn CoDuplexClientWrite { iopl -- ok }
 						buf@ bytecnt@ + bufsize@ index@ bufsize@ 1 - & - + // src
 						endp@ bufsize@ 1 - & // sz
 						memcpy
-
-						rp@ bufwritten!
 					end
+
+					rp@ bufwritten!
 				end else
 					// the geometry of what this does is 1-dimensional but
 					// still too complicated for me to feel like writing a

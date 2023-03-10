@@ -122,8 +122,8 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		// later. Why? Well, it's because the user page tables are paged, but
 		// system ones arent. To synchronize the user page tables correctly,
 		// we need to hold this mutex across MiPTEPin and MiPTEUnpin calls,
-		// but these are never called for system faults, so we don't need to
-		// lock this mutex yet.
+		// but these are never called for system faults, since the system page
+		// tables are static, so we don't need to lock this mutex yet.
 		//
 		// Incidentally, it's also actually incorrect and leads to deadlock if
 		// we lock the system VAD list unconditionally here (due to reasons
@@ -169,8 +169,31 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 			1 refaults +=
 
 			// Call MiSatisfyFault to handle the fault. It may return a status
-			// of STATUS_REFAULT, which indicates we need to try again. This
-			// is needed for several synchronization-related reasons.
+			// of STATUS_REFAULT instead of a signal value, which indicates we
+			// need to loop and try the whole fault again. We could simply
+			// return all the way back out of the page fault and fault again,
+			// but instead we avoid the overhead of exception handling, and
+			// can also avoid the overhead of re-locking the VAD list mutex.
+			// This is useful for several reasons:
+			//
+			//  o The page was invalid, and this was a write fault. The page
+			//    was made valid, but not writable, and to avoid the overhead
+			//    of a second dirty fault, we just loop here.
+			//
+			//  o There was a "collided fault", in which we faulted on the
+			//    exact same page as another thread in this process, or as
+			//    another thread in the system (if faulting on system space),
+			//    and had to block on the first thread completing the I/O.
+			//    There's no immediately decent way to hold any certainty on
+			//    the state of the PTE after that occurs without repeating all
+			//    of this processing, so that's what we do.
+			//
+			//  o Something forced us to block for some other reason, which
+			//    has invalidated all of the crunching we did on the vm
+			//    structures, so we have to repeat all of that (the above is
+			//    one case of this).
+			//
+			//  o Any other reason that appears (non-exhaustive list).
 
 			kernelmapping@ // kernelmapping
 			writing@ // writing

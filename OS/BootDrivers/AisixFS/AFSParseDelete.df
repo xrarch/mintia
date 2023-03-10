@@ -33,12 +33,17 @@
 
 #include "AisixFS.h"
 
-fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparsepath object ok }
+fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparsepath ok }
 	0 reparsepath!
 	0 ok!
 
-	auto fullpath
-	path@ fullpath!
+	auto path
+	fileobject@ IOFile_OpenedPath + @ path!
+
+	if (path@ ~~)
+		STATUS_NOT_FOUND ok!
+		return
+	end
 
 	auto pcomp
 	60 alloc pcomp!
@@ -63,7 +68,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 		initialfcb@ AFSFCBReference
 
-		if (flags@ OSFILEFLAG_CREATE &)
+		if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
 			initialfcb@ IOFileControlBlockLock ok!
 		end else
 			initialfcb@ IOFileControlBlockLockShared ok!
@@ -178,7 +183,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					end
 				end
 
-				if (flags@ OSFILEFLAG_CREATE &)
+				if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
 					nextfcb@ IOFileControlBlockLock ok!
 				end else
 					nextfcb@ IOFileControlBlockLockShared ok!
@@ -205,7 +210,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			if (ok@)
 				if (ok@ STATUS_NOT_FOUND ==)
 					if (path@ gb ~~)
-						if (flags@ OSFILEFLAG_CREATE &)
+						if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
 							ACCESS_WRITE // access
 							fcbdata@ AFSFCBData_Permissions + @ // permbits
 							fcbdata@ AFSFCBData_UID + @ // owninguid
@@ -214,12 +219,11 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 							FSCheckAccess ok!
 
 							if (ok@ ~~)
+								fileobject@ // fileobject
 								process@ // process
-								fullpath@ // fullpath
-								flags@ // flags
 								pcomp@ // name
 								initialfcb@ // dirfcb
-								AFSCreateFile ok! object!
+								AFSCreateFile ok!
 							end
 						end
 					end
@@ -234,7 +238,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 			// found the entry!
 
 			if (path@ gb 0 ==)
-				flags@ // flags
+				fileobject@ IOFile_Flags + @ // flags
 				dirent@ AFSDirEnt_INum + @ // inum
 				initialfcb@ IOFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
@@ -274,7 +278,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 					end
 				end
 
-				if (flags@ OSFILEFLAG_CREATE &)
+				if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
 					nextfcb@ IOFileControlBlockLock ok!
 				end else
 					nextfcb@ IOFileControlBlockLockShared ok!
@@ -298,7 +302,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 
 	// at this point the FCB should be refed but unlocked
 
-	if (flags@ OSFILEFLAG_MUSTCREATE &)
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_MUSTCREATE &)
 		initialfcb@ AFSFCBDereference
 
 		STATUS_ALREADY_EXISTS ok!
@@ -306,7 +310,7 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 		return
 	end
 
-	if (flags@ OSFILEFLAG_CREATEDIR &)
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATEDIR &)
 		if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
 			initialfcb@ AFSFCBDereference
 
@@ -316,43 +320,32 @@ fn (IODispatchParseFunction) AFSParse { flags path initialfcb process -- reparse
 		end
 	end
 
-	fullpath@ // fullpath
-	flags@ // flags
-	initialfcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
+	fileobject@ // fileobject
 	process@ // process
 	initialfcb@ // fcb
-	AFSCreateFileObject ok! object!
+	AFSFillFileObject
 
 	if (ok@)
 		initialfcb@ AFSFCBDereference
 	end
 end
 
-fn AFSCreateFileObject { fullpath flags permissions process fcb -- object ok }
+fn AFSFillFileObject { fileobject process fcb -- }
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
 
-	mount@ // mount
-	AFSMountReference drop
+	mount@ AFSMountReference drop
 
-	fullpath@ // openedpath
-	flags@ // flags
-	fcb@ IOFileControlBlockGetContext AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
 	fcb@ // fcb
-	IOFileCreateObject ok! object!
-
-	if (ok@)
-		fcb@ IOFileControlBlockGetMount // mount
-		AFSMountDereference drop
-
-		return
-	end
-
-	fcb@ IOFileControlBlockGetContext AFSFCBData_UID + @ // uid
-	fcb@ IOFileControlBlockGetContext AFSFCBData_GID + @ // gid
-	object@ // object
+	fcbdata@ AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
+	fcbdata@ AFSFCBData_UID + @ // uid
+	fcbdata@ AFSFCBData_GID + @ // gid
+	fileobject@ // fileobject
 	mount@ // mount
-	FSFileObjectSetSecurity
+	FSFileObjectFill
 end
 
 fn AFSVerifyName { name -- ok }
@@ -392,7 +385,7 @@ fn AFSVerifyName { name -- ok }
 	end
 end
 
-fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
+fn AFSCreateFile { fileobject process name dirfcb -- ok }
 	name@ AFSVerifyName ok!
 
 	if (ok@)
@@ -418,7 +411,7 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 
 	// fill in fields
 
-	if (flags@ OSFILEFLAG_CREATEDIR &)
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATEDIR &)
 		2 inode@ AFSINode_type + !
 	end else
 		1 inode@ AFSINode_type + !
@@ -463,7 +456,7 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 	// grab FCB for inode
 
 	auto fcb
-	flags@ // flags
+	fileobject@ IOFile_Flags + @ // flags
 	inum@ // inum
 	mount@ // mount
 	AFSFCBRead ok! fcb!
@@ -484,19 +477,10 @@ fn AFSCreateFile { process fullpath flags name dirfcb -- object ok }
 
 	// create object with FCB
 
-	fullpath@ // fullpath
-	flags@ // flags
-	KeThreadCurrent@ PsThreadGetFilePermissions ACCESS_ALL_ALL & // permissions
+	fileobject@ // fileobject
 	process@ // process
 	fcb@ // fcb
-	AFSCreateFileObject ok! object!
-
-	if (ok@)
-		0 inode@ AFSINode_type + !
-		0 dirent@ AFSDirEnt_INum + !
-
-		fcb@ AFSFCBDelete
-	end
+	AFSFillFileObject
 
 	ibcb@ VcBufferDirty
 	ibcb@ VcBufferDecrementMapCount drop
@@ -509,7 +493,7 @@ end
 
 fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	auto fcb
-	object@ IOFileGetFileControlBlock fcb!
+	object@ IOFile_FileControlBlock + @ fcb!
 
 	auto mount
 	fcb@ IOFileControlBlockGetMount mount!
@@ -517,11 +501,11 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
-	if (object@ IOFileGetContext AFSFILECONTEXT_WRITABLE &)
+	if (object@ IOFile_Context + @ AFSFILECONTEXT_WRITABLE &)
 		-1 afsdata@ AFSData_WritableFiles + KeInterlockedIncrement drop
 	end
 
-	if (object@ IOFileGetContext AFSFILECONTEXT_UPDATEONCLOSE &)
+	if (object@ IOFile_Context + @ AFSFILECONTEXT_UPDATEONCLOSE &)
 		fcb@ AFSINodeUpdate
 	end
 

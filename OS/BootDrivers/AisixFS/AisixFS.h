@@ -145,7 +145,7 @@ extern AFSPinChain { lookuptable blkno mount -- }
 extern AFSOpen { access fileobject -- ok }
 extern AFSClose { access fileobject -- ok }
 
-extern AFSParse { flags path initialfcb process -- reparsepath object ok }
+extern AFSParse { fileobject initialfcb process -- reparsepath ok }
 extern AFSDeleteObject { object -- ok }
 extern AFSReadWriteFile { iopl -- done ok }
 

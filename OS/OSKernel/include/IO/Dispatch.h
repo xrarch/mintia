@@ -2,7 +2,7 @@ fnptr IODispatchOpenFunction { access fileobject -- ok }
 fnptr IODispatchCloseFunction { access fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg2 arg1 access fcb lastmode -- ret ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
-fnptr IODispatchParseFunction { flags path initialfcb process -- reparsepath object ok }
+fnptr IODispatchParseFunction { fileobject initialfcb process -- reparsepath ok }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
 fnptr IODispatchPokeFunction { poketype object -- }
 fnptr IODispatchSetSecurityFunction { uid gid permissions object -- ok }

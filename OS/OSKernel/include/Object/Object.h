@@ -78,8 +78,7 @@ extern ObObjectQuery { objecthandle query -- ok }
 extern ObHandleDuplicateObject { handle access srcprocessobject destprocessobject -- newhandle ok }
 extern ObHandleDuplicate { handle access srcprocesshandle destprocesshandle -- newhandle ok }
 
-extern ObObjectSetUID { uid object -- }
-extern ObObjectSetGID { gid object -- }
+extern ObObjectSetUIDGIDPermissions { uid gid permissions object -- }
 
 extern ObSetSecurityObject { uid gid permissions object -- ok }
 extern ObSetSecurity { uid gid permissions handle -- ok }

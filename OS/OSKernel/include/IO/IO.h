@@ -28,11 +28,20 @@ extern IOFileCancelIOObject { wait fileobject -- ok }
 extern IOFileCancelIO { wait filehandle -- ok }
 
 struct IOFile
+	// transparent part of IOFile
+	// after stabilization of the ABI, the offsets of these fields must never
+	// change since they are accessed directly by drivers.
+
 	4 FileControlBlock
-	4 Offset
 	4 Flags
 	4 Context
 	4 OpenedPath
+
+	// opaque part of IOFile
+	// the offsets of these can change freely as they may only be accessed by
+	// the kernel itself.
+
+	4 Offset
 endstruct
 
 struct IOFileControlBlockPaged
@@ -120,15 +129,7 @@ extern IOFileControlBlockTruncate { newsize growing keeplocked zero flags fcb --
 
 extern IOFileControlBlockCacheCheck { fcb -- cacheblock ok }
 
-extern IOFileGetFileControlBlock { fileobject -- fcb }
-
 extern IOFileControlBlockDestroyCache { writeout fcb -- }
-
-extern IOFileGetContext { fileobject -- context }
-extern IOFileSetContext { context fileobject -- }
-
-extern IOFileSetContextFlag { mask fileobject -- }
-extern IOFileClearContextFlag { mask fileobject -- }
 
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }

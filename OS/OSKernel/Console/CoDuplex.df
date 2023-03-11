@@ -250,6 +250,10 @@ end
 fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanent name permissions -- duplexobject fileobject ok }
 	fnsection "PAGE$text"
 
+	if (flags@ OSDUPLEXFLAG_PIPE &)
+		OSDUPLEXFLAG_SIMPLEX flags |=
+	end
+
 	if (flags@ OSDUPLEXFLAG_CONSOLE &)
 		if (flags@ OSDUPLEXFLAG_SIMPLEX &)
 			STATUS_INVALID_ARGUMENT ok!
@@ -649,16 +653,18 @@ const DONE_NORMAL 1
 const DONE_CTRLD  2
 const DONE_LF     4
 
-fn CoDuplexCookedCopy { dest src sz -- bytecnt done }
+fn CoDuplexCookedCopy { dest src sz ctrld -- bytecnt done }
 	0 done!
 	0 bytecnt!
 
 	while (sz@)
 		1 bytecnt +=
 
-		if (src@ gb 4 ==) // ^D
-			DONE_CTRLD done!
-			return
+		if (ctrld@)
+			if (src@ gb 4 ==) // ^D
+				DONE_CTRLD done!
+				return
+			end
 		end
 
 		src@ gb dest@ sb
@@ -1044,7 +1050,13 @@ fn CoDuplexClientRead { iopl -- ok }
 			if (rp@ bufmask@ ~ & rp@ bytecnt@ + 1 - bufmask@ ~ & ==)
 				// doesn't cross the boundary, do a single copy
 
-				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_PIPE &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bytecnt@ // sz
+					0 // ctrld
+					CoDuplexCookedCopy done |= bytecnt!
+				end elseif (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 					buf@ // dest
 					bufp@ rp@ bufmask@ & + // src
 					bytecnt@ // sz
@@ -1053,12 +1065,31 @@ fn CoDuplexClientRead { iopl -- ok }
 					buf@ // dest
 					bufp@ rp@ bufmask@ & + // src
 					bytecnt@ // sz
+					1 // ctrld
 					CoDuplexCookedCopy done |= bytecnt!
 				end
 			end else
 				// crosses the boundary, do two copies
 
-				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				auto bc
+
+				if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_PIPE &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					0 // ctrld
+					CoDuplexCookedCopy done |= bc!
+
+					if (done@ ~~)
+						buf@ bufsize@ rp@ bufmask@ & - + // dest
+						bufp@ // src
+						rp@ bytecnt@ + bufmask@ & // sz
+						0 // ctrld
+						CoDuplexCookedCopy done |= bc +=
+					end
+
+					bc@ bytecnt!
+				end elseif (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
 					buf@ // dest
 					bufp@ rp@ bufmask@ & + // src
 					bufsize@ rp@ bufmask@ & - // sz
@@ -1069,17 +1100,17 @@ fn CoDuplexClientRead { iopl -- ok }
 					rp@ bytecnt@ + bufmask@ & // sz
 					memcpy
 				end else
-					auto bc
-
 					buf@ // dest
 					bufp@ rp@ bufmask@ & + // src
 					bufsize@ rp@ bufmask@ & - // sz
+					1 // ctrld
 					CoDuplexCookedCopy done |= bc!
 
 					if (done@ ~~)
 						buf@ bufsize@ rp@ bufmask@ & - + // dest
 						bufp@ // src
 						rp@ bytecnt@ + bufmask@ & // sz
+						1 // ctrld
 						CoDuplexCookedCopy done |= bc +=
 					end
 
@@ -2080,11 +2111,20 @@ fn CoDuplexServerWriteRaw { iopl -- ok }
 				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
 			end
 
-			header@ CoDuplexBuffer_UserBuffer + @
-			header@ CoDuplexBuffer_UserBufferIndex + @ + // dest
-			buf@ bytecnt@ + // src
-			rp@ // sz
-			memcpy
+			if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_PIPE &)
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + // dest
+				buf@ bytecnt@ + // src
+				rp@ // sz
+				0 // ctrld
+				CoDuplexCookedCopy clientdone |= rp!
+			end else
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + // dest
+				buf@ bytecnt@ + // src
+				rp@ // sz
+				memcpy
+			end
 
 			rp@ header@ CoDuplexBuffer_UserBufferIndex + +=
 			rp@ bytecnt +=

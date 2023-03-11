@@ -1,0 +1,149 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn Usage { -- }
+	"usage: tee [-ai] [file ...]\n" OSGetStdErr FPrintf
+end
+
+var AFlag 0 // append
+var IFlag 0 // ignore SIGINT
+
+const CATUNIT 32768
+buffer CatBuffer (CATUNIT OSPAGESIZE 2 / +)
+
+fn Main { ... -- ret }
+	0 ret!
+
+	auto catfd
+	auto ok
+
+	auto i
+	1 i!
+
+	auto chk
+	2 chk!
+
+	if (argc@ 2 >=)
+		auto sw
+		[1]argv@ sw!
+
+		if (sw@ gb '-' ==)
+			2 i!
+			3 chk!
+
+			1 sw +=
+
+			while (sw@ gb 0 ~=)
+				if (sw@ gb 'a' ==)
+					1 AFlag!
+				end elseif (sw@ gb 'i' ==)
+					1 IFlag!
+				end else
+					Usage
+					-1 OSExit
+				end
+
+				1 sw +=
+			end
+		end
+	end
+
+	if (IFlag@)
+		OSSIGNALACTION_IGNORE // action
+		OSSIGNAL_INT // signum
+		OSSignalSetAction drop
+	end
+
+	auto fcount
+	argc@ chk@ - 2 + fcount!
+
+	if (fcount@ ~~)
+		return
+	end
+
+	auto fdtable
+	fcount@ 8 * OSHeapAllocate ok! fdtable!
+
+	if (ok@)
+		ok@ OSStatusGetName "tee: failed to allocate handle buffer: %s\n" OSError
+	end
+
+	auto flags
+	0 flags!
+
+	if (AFlag@)
+		OSFILEFLAG_APPENDONLY flags!
+	end
+
+	0 i!
+
+	auto path
+
+	while (i@ fcount@ <)
+		if (i@)
+			[i@ 2 - chk@ +]argv@ path!
+
+			OSDEFAULTFILEPERMISSIONS // permissions
+			flags@ // flags
+			ACCESS_WRITE // access
+			path@ // path
+			OSFileCreate ok! fdtable@ i@ 8 * + !
+
+			if (ok@)
+				ok@ OSStatusGetName path@ "tee: failed to open %s: %s\n" OSError
+			end
+
+			path@ fdtable@ i@ 8 * + 4 + !
+		end else
+			OSGetStdOut fdtable@!
+			"stdout" fdtable@ 4 + !
+		end
+
+		1 i +=
+	end
+
+	auto buf
+	CatBuffer OSPAGEOFFSETMASK + OSPAGENUMBERMASK & buf!
+
+	auto bytes
+	auto byteswritten
+
+	while (1)
+		OSWAIT_TIMEOUTINFINITE // timeout
+		OSACCESSFLAG_RETURNANY // flags
+		CATUNIT // length
+		buf@ // buffer
+		OSGetStdIn // filehandle
+		OSFileRead ok! bytes!
+
+		if (ok@)
+			ok@ OSStatusGetName "tee: couldn't read stdin: %s\n" OSError
+		end
+
+		if (bytes@ ~~)
+			break
+		end
+
+		0 i!
+
+		while (i@ fcount@ <)
+			auto handle
+			fdtable@ i@ 8 * + @ handle!
+
+			fdtable@ i@ 8 * + 4 + @ path!
+
+			0 // flags
+			bytes@ // length
+			buf@ // buffer
+			handle@ // filehandle
+			OSFileWrite ok! drop
+
+			if (ok@)
+				ok@ OSStatusGetName path@ "tee: couldn't write %s: %s\n" OSError
+			end
+
+			1 i +=
+		end
+	end
+end

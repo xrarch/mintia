@@ -94,7 +94,7 @@ ifndef PROJECT
 	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(LIBRARIES) $(COMMANDS)
 endif
 
-all: $(PROJECT) | $(shell rm -f DELTA)
+all: $(PROJECT) | $(DISTIMAGE) $(shell rm -f DELTA)
 	$(FSTOOL) wdf / DELTA
 	rm -f DELTA
 

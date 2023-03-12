@@ -11,7 +11,7 @@ fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
 fnptr IODispatchReadDirectoryFunction { seek dirent fcb -- nextseek ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
-fnptr IODispatchCancelFunction { iop -- }
+fnptr IODispatchCancelFunction { iop -- ok }
 
 fnptr IODispatchEnqueueIOPFunction { iopl -- done ok }
 

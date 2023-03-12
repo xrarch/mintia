@@ -60,6 +60,8 @@ PLATFORMS := XRstation fox32
 
 include $(PLATFORM).mk
 
+export DELTA := $(REPO)/DELTA.$(ARCHITECTURE).$(CHKFRE)
+
 export SYSCALLGEN := $(SDK)/gensyscalls.sh $(ARCHITECTURE)
 
 export HALBIN   := $(BUILDROOT)/$(SYSROOT)/HAL$(PLATFORM).dll.$(ARCHITECTURE).$(CHKFRE)
@@ -94,9 +96,9 @@ ifndef PROJECT
 	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(LIBRARIES) $(COMMANDS)
 endif
 
-all: $(PROJECT) | $(DISTIMAGE) $(shell rm -f DELTA)
-	$(FSTOOL) wdf / DELTA
-	rm -f DELTA
+all: $(PROJECT) | $(DISTIMAGE) $(shell rm -f $(DELTA))
+	$(FSTOOL) wdf / $(DELTA)
+	rm -f $(DELTA)
 
 update:
 	$(FSTOOL) udf / ExecManifest.$(PLATFORM) .$(ARCHITECTURE).$(CHKFRE)
@@ -117,7 +119,7 @@ $(DISTIMAGE): | $(REPO)/build
 $(DFLIBBIN): $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o | $(DISTIMAGE)
 	cp $(SDK)/lib/$(ARCHITECTURE)/dfrt/dfrt.f.o $(DFLIBBIN)
 	$(LNK) move $(DFLIBBIN) base=0x80300000
-	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(REPO)/DELTA
+	echo "mintia/Dragonfruit.dll $(DFLIBBIN) 493" >> $(DELTA)
 
 $(BOOTCODE): | $(DISTIMAGE)
 	make -C OS/$@
@@ -158,7 +160,7 @@ cleanupall:
 	done
 
 cleanup:
-	rm -f DELTA
+	rm -f $(DELTA)
 	rm -f $(DISTIMAGE)
 	rm -f $(DFLIBBIN)
 

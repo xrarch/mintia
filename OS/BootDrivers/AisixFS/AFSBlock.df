@@ -32,6 +32,8 @@
 #include "AisixFS.h"
 
 fn AFSBlockBitmapReadFAT { mount -- ok }
+	fnsection "PAGE$text"
+
 	// read the entire FAT page-by-page to construct an in-memory bitmap of
 	// free blocks. assumes disks will be a reasonable size (100-500MB) or
 	// else this bitmap will be too large to fit in kernel pool and mounting
@@ -177,6 +179,8 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 end
 
 fn AFSBlockBitmapInitialize { mount -- ok }
+	fnsection "PAGE$text"
+
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
@@ -212,6 +216,8 @@ fn AFSBlockBitmapInitialize { mount -- ok }
 end
 
 fn AFSBlockBitmapUninitialize { mount -- }
+	fnsection "PAGE$text"
+
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
@@ -225,6 +231,8 @@ fn AFSBlockBitmapUninitialize { mount -- }
 end
 
 fn AFSBlockBitmapLockUnalertable { mount -- }
+	fnsection "PAGE$text"
+
 	KERNELMODE // waitmode
 	0 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
@@ -233,6 +241,8 @@ fn AFSBlockBitmapLockUnalertable { mount -- }
 end
 
 fn AFSBlockBitmapUnlock { mount -- }
+	fnsection "PAGE$text"
+
 	0 // abandon
 	mount@ IOMount_Extension + @ AFSData_FreeBlockBitmapMutex + // mutex
 	KeMutexRelease drop
@@ -296,6 +306,8 @@ fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 end
 
 fn AFSBlockDeallocateChain { first blkno mount -- }
+	fnsection "PAGE$text"
+
 	mount@ AFSBlockBitmapLockUnalertable
 
 	auto fatbcb
@@ -374,6 +386,8 @@ fn AFSBlockDeallocateChain { first blkno mount -- }
 end
 
 fn AFSBlockAllocateChain { pintable blocks lastblkno zero mount -- startblkno ok }
+	fnsection "PAGE$text"
+
 	mount@ AFSBlockBitmapLockUnalertable
 
 	auto afsdata
@@ -651,7 +665,32 @@ fn AFSBlockMap { blkoff fcb kflags -- blkno ok }
 	rs@ HALCPUInterruptRestore
 end
 
+fn AFSUpdateHint { fcbnp link op -- }
+	// nonpaged helper function
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (op@)
+		// we grew the file above zero size, so we want to make sure the hint
+		// points to the new first block correctly.
+
+		if (fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + @ ~~)
+			link@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
+		end
+	end else
+		// we shrunk the file, so we want to reset the hint.
+
+		0 fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + !
+		link@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
+	end
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
+	fnsection "PAGE$text"
+
 	auto fcbdata
 	fcb@ IOFileControlBlockGetContext fcbdata!
 
@@ -707,8 +746,6 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 		walkstart@ blkno!
 	end
 
-	auto rs
-
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	if (newblocks@ oldblocks@ <)
@@ -732,10 +769,10 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 			0xFFFFFFFF fcbdata@ AFSFCBData_FirstFATLink + !
 		end
 
-		HALCPUInterruptDisable rs!
-		0 fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + !
-		firstlink@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
-		rs@ HALCPUInterruptRestore
+		fcbnp@ // fcbnp
+		firstlink@ // link
+		0 // op
+		AFSUpdateHint
 	end else
 		auto startblock
 
@@ -759,13 +796,10 @@ fn AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 
 			startblock@ fcbdata@ AFSFCBData_FirstFATLink + !
 
-			HALCPUInterruptDisable rs!
-
-			if (fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + @ ~~)
-				startblock@ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
-			end
-
-			rs@ HALCPUInterruptRestore
+			fcbnp@ // fcbnp
+			startblock@ // link
+			1 // op
+			AFSUpdateHint
 		end
 
 		if (zero@)

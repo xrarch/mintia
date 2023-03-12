@@ -15,6 +15,7 @@ buffer AmsMemoryInformation OSMemoryInformation_SIZEOF
 public AmsMemoryInformation
 
 var AmsApiPort 0
+public AmsApiPort
 
 var AmsUsersDirectory 0
 public AmsUsersDirectory
@@ -230,9 +231,16 @@ table AmsApiDispatchTable
 	pointerof AmsApiCreateGroup        // AMSAPI_CREATE_GROUP
 	pointerof AmsApiEditUser           // AMSAPI_EDIT_USER
 	pointerof AmsApiEditGroup          // AMSAPI_EDIT_GROUP
+	pointerof AmsApiEndUserSessions    // AMSAPI_END_USER_SESSIONS
 endtable
 
-const AMSAPICOUNT 13
+const AMSAPICOUNT 14
+
+fn (AmsDispatchFunction) AmsApiEndUserSessions { msg client -- ok }
+	client@ AmsClient_SectionBase + @@ // uid
+	client@ AmsClient_ProcessHandle + @ // processhandle
+	AmsInternalEndUserSessions ok!
+end
 
 fn (AmsDispatchFunction) AmsApiQueryUIDByName { msg client -- ok }
 	auto name
@@ -318,30 +326,20 @@ fn (AmsDispatchFunction) AmsApiLogon { msg client -- ok }
 	AMSPASSWORDMAX 1 - // max
 	strncpy
 
-	auto processhandle
-	0 // access
-	client@ AmsClient_ClientID + @ // clientid
-	AmsApiPort@ // porthandle
-	OSPortOpenProcessByClientID ok! processhandle!
-
-	if (ok@)
-		return
-	end
-
 	auto flags
 	client@ AmsClient_SectionBase + @ AmsMessageLogon_Flags + @ flags!
 
-	auto obdirhandle
+	auto uid
+	client@ AmsClient_SectionBase + @ AmsMessageLogon_UID + @ uid!
 
+	auto obdirhandle
 	flags@ // flags
 	password@ // password
-	client@ AmsClient_SectionBase + @ AmsMessageLogon_UID + @ // uid
-	processhandle@ // processhandle
+	uid@ // uid
+	client@ AmsClient_ProcessHandle + @ // processhandle
 	AmsInternalLogon ok! obdirhandle!
 
 	if (ok@)
-		processhandle@ OSClose drop
-
 		return
 	end
 
@@ -349,15 +347,16 @@ fn (AmsDispatchFunction) AmsApiLogon { msg client -- ok }
 	obdirhandle@ // handle
 	-1 // access
 	OSCURRENTPROCESS // srcprocesshandle
-	processhandle@ // destprocesshandle
+	client@ AmsClient_ProcessHandle + @ // destprocesshandle
 	OSHandleDuplicate ok! desthandle!
 
-	processhandle@ OSClose drop
 	obdirhandle@ OSClose drop
 
 	if (ok@)
 		return
 	end
+
+	uid@ client@ AmsClient_LoggedOnAsUID + !
 
 	desthandle@ client@ AmsClient_SectionBase + @ AmsMessageLogon_UserObDirHandle + !
 end
@@ -379,23 +378,12 @@ fn (AmsDispatchFunction) AmsApiChangePassword { msg client -- ok }
 	AMSPASSWORDMAX 1 - // max
 	strncpy
 
-	auto processhandle
-	0 // access
-	client@ AmsClient_ClientID + @ // clientid
-	AmsApiPort@ // porthandle
-	OSPortOpenProcessByClientID ok! processhandle!
-
-	if (ok@)
-		return
-	end
-
+	client@ AmsClient_SectionBase + @ AmsMessageChangePassword_Flags + @ // flags
 	oldpassword@ // oldpassword
 	newpassword@ // newpassword
 	client@ AmsClient_SectionBase + @ AmsMessageChangePassword_UID + @ // uid
-	processhandle@ // processhandle
+	client@ AmsClient_ProcessHandle + @ // processhandle
 	AmsInternalChangePassword ok!
-
-	processhandle@ OSClose drop
 end
 
 fn (AmsDispatchFunction) AmsApiEnumerateUsers { msg client -- ok }
@@ -437,16 +425,6 @@ fn (AmsDispatchFunction) AmsApiEnumerateGroups { msg client -- ok }
 end
 
 fn (AmsDispatchFunction) AmsApiCreateUser { msg client -- ok }
-	auto processhandle
-	0 // access
-	client@ AmsClient_ClientID + @ // clientid
-	AmsApiPort@ // porthandle
-	OSPortOpenProcessByClientID ok! processhandle!
-
-	if (ok@)
-		return
-	end
-
 	auto kinfo
 	AmsUserInformation_SIZEOF alloc kinfo!
 
@@ -468,35 +446,21 @@ fn (AmsDispatchFunction) AmsApiCreateUser { msg client -- ok }
 	AmsUserInfoFix ok!
 
 	if (ok@)
-		processhandle@ OSClose drop
-
 		return
 	end
 
 	auto uid
 	kpassword@ // password
 	kinfo@ // info
-	processhandle@ // processhandle
+	client@ AmsClient_ProcessHandle + @ // processhandle
 	AmsUserCreate ok! uid!
 
 	if (ok@ ~~)
 		uid@ client@ AmsClient_SectionBase + @ AmsMessageCreateUser_UID + !
 	end
-
-	processhandle@ OSClose drop
 end
 
 fn (AmsDispatchFunction) AmsApiCreateGroup { msg client -- ok }
-	auto processhandle
-	0 // access
-	client@ AmsClient_ClientID + @ // clientid
-	AmsApiPort@ // porthandle
-	OSPortOpenProcessByClientID ok! processhandle!
-
-	if (ok@)
-		return
-	end
-
 	auto kinfo
 	AmsGroupInformation_SIZEOF alloc kinfo!
 
@@ -510,34 +474,20 @@ fn (AmsDispatchFunction) AmsApiCreateGroup { msg client -- ok }
 	AmsGroupInfoFix ok!
 
 	if (ok@)
-		processhandle@ OSClose drop
-
 		return
 	end
 
 	auto gid
 	kinfo@ // info
-	processhandle@ // processhandle
+	client@ AmsClient_ProcessHandle + @ // processhandle
 	AmsGroupCreate ok! gid!
 
 	if (ok@ ~~)
 		gid@ client@ AmsClient_SectionBase + @ AmsMessageCreateGroup_GID + !
 	end
-
-	processhandle@ OSClose drop
 end
 
 fn (AmsDispatchFunction) AmsApiEditUser { msg client -- ok }
-	auto processhandle
-	0 // access
-	client@ AmsClient_ClientID + @ // clientid
-	AmsApiPort@ // porthandle
-	OSPortOpenProcessByClientID ok! processhandle!
-
-	if (ok@)
-		return
-	end
-
 	auto uid
 	client@ AmsClient_SectionBase + @ AmsMessageEditUser_UID + @ uid!
 
@@ -546,7 +496,7 @@ fn (AmsDispatchFunction) AmsApiEditUser { msg client -- ok }
 
 	if (delete@)
 		uid@ // uid
-		processhandle@ // processhandle
+		client@ AmsClient_ProcessHandle + @ // processhandle
 		AmsUserDelete ok!
 	end else
 		auto kinfo
@@ -562,31 +512,17 @@ fn (AmsDispatchFunction) AmsApiEditUser { msg client -- ok }
 		AmsUserInfoFix ok!
 
 		if (ok@)
-			processhandle@ OSClose drop
-
 			return
 		end
 	
 		kinfo@ // info
 		uid@ // uid
-		processhandle@ // processhandle
+		client@ AmsClient_ProcessHandle + @ // processhandle
 		AmsUserEdit ok!
 	end
-
-	processhandle@ OSClose drop
 end
 
 fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
-	auto processhandle
-	0 // access
-	client@ AmsClient_ClientID + @ // clientid
-	AmsApiPort@ // porthandle
-	OSPortOpenProcessByClientID ok! processhandle!
-
-	if (ok@)
-		return
-	end
-
 	auto gid
 	client@ AmsClient_SectionBase + @ AmsMessageEditGroup_GID + @ gid!
 
@@ -595,7 +531,7 @@ fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
 
 	if (delete@)
 		gid@ // gid
-		processhandle@ // processhandle
+		client@ AmsClient_ProcessHandle + @ // processhandle
 		AmsGroupDelete ok!
 	end else
 		auto kinfo
@@ -611,18 +547,14 @@ fn (AmsDispatchFunction) AmsApiEditGroup { msg client -- ok }
 		AmsGroupInfoFix ok!
 
 		if (ok@)
-			processhandle@ OSClose drop
-
 			return
 		end
 
 		kinfo@ // info
 		gid@ // gid
-		processhandle@ // processhandle
+		client@ AmsClient_ProcessHandle + @ // processhandle
 		AmsGroupEdit ok!
 	end
-
-	processhandle@ OSClose drop
 end
 
 fn AmsUserInfoFix { allowempty info -- ok }

@@ -11,6 +11,40 @@
 
 #include "AmsServer.h"
 
+fn AmsInternalEndUserSessions { uid processhandle -- ok }
+	auto pinfo
+	OSObjectQuery_SIZEOF alloc pinfo!
+
+	processhandle@ // handle
+	pinfo@ // query
+	OSQuery ok!
+
+	if (ok@)
+		return
+	end
+
+	if (pinfo@ OSObjectQuery_UID + @ uid@ ~=)
+		if (uid@ UID_SYSTEM ==)
+			STATUS_PERMISSION_DENIED ok!
+
+			return
+		end
+
+		SYSTEMPERMISSION_ADMIN // permission
+		processhandle@ // processhandle
+		OSCheckPermission ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 // excludedprocess
+	OSSIGNAL_TERM // signal
+	uid@ // uid
+	AmsClientSignalByUID
+end
+
 fn AmsUserCreate { password info processhandle -- uid ok }
 	SYSTEMPERMISSION_ADMIN // permission
 	processhandle@ // processhandle
@@ -175,6 +209,13 @@ fn AmsUserDelete { uid processhandle -- ok }
 
 	userptr@ AmsDbUserDelete
 
+	// boot off any sessions under this UID.
+
+	OSNONE // excludedprocess
+	OSSIGNAL_TERM // signal
+	uid@ // uid
+	AmsClientSignalByUID
+
 	AmsDbUserWrite drop
 end
 
@@ -293,6 +334,12 @@ fn AmsUserEdit { info uid processhandle -- ok }
 
 	if (info@ AmsUserInformation_RestrictionLevel + @ -1 ~=)
 		// set restriction level
+
+		if (uid@ UID_SYSTEM ==)
+			// don't let anyone forbid the system user from logging in
+
+			AMSRESTRICT_NOLOG ~ info@ AmsUserInformation_RestrictionLevel + &=
+		end
 
 		info@ AmsUserInformation_RestrictionLevel + @ // value
 		"restrict" // property

@@ -11,6 +11,8 @@
 
 #include "AmsServer.h"
 
+var AmsClientListHead 0
+
 fn AmsClientCreate { cid -- client ok }
 	AmsClient_SIZEOF // bytes
 	OSHeapAllocate ok! client!
@@ -21,10 +23,37 @@ fn AmsClientCreate { cid -- client ok }
 
 	cid@ // cid
 	client@ // client
-	AmsClientInitialize
+	AmsClientInitialize ok!
+
+	if (ok@)
+		client@ OSHeapFree
+	end
 end
 
 fn AmsClientDelete { client -- }
+	// close process handle
+
+	client@ AmsClient_ProcessHandle + @ OSClose drop
+
+	// remove from list
+
+	auto n
+	client@ AmsClient_Next + @ n!
+
+	if (n@)
+		client@ AmsClient_Prev + @ n@ AmsClient_Prev + !
+	end
+
+	client@ AmsClient_Prev + @ n!
+
+	if (n@)
+		client@ AmsClient_Next + @ n@ AmsClient_Next + !
+	end else // no prev means we were the head
+		client@ AmsClient_Next + @ AmsClientListHead!
+	end
+
+	// unmap section
+
 	if (client@ AmsClient_SectionBase + @)
 		AMSSECTIONSIZE OSPAGEOFFSETMASK + OSPAGENUMBERMASK & // length
 		client@ AmsClient_SectionBase + @ // vaddr
@@ -32,11 +61,50 @@ fn AmsClientDelete { client -- }
 		OSUnmapView drop
 	end
 
+	// free client object
+
 	client@ OSHeapFree
 end
 
-fn AmsClientInitialize { cid client -- }
+fn AmsClientInitialize { cid client -- ok }
+	auto processhandle
+	ACCESS_EXEC ACCESS_WRITE | // access
+	cid@ // clientid
+	AmsApiPort@ // porthandle
+	OSPortOpenProcessByClientID ok! processhandle!
+
+	if (ok@)
+		return
+	end
+
+	processhandle@ client@ AmsClient_ProcessHandle + !
+
+	-1 client@ AmsClient_LoggedOnAsUID + !
+
 	cid@ client@ AmsClient_ClientID + !
 	0 client@ AmsClient_SectionBase + !
 	0 client@ AmsClient_Flags + !
+
+	// add to list
+
+	AmsClientListHead@ client@ AmsClient_Next + !
+	0 client@ AmsClient_Prev + !
+	client@ AmsClientListHead!
+end
+
+fn AmsClientSignalByUID { excludedprocess signal uid -- }
+	auto client
+	AmsClientListHead@ client!
+
+	while (client@)
+		if (client@ AmsClient_LoggedOnAsUID + @ uid@ ==)
+			if (client@ AmsClient_ProcessHandle + @ excludedprocess@ ~=)
+				signal@ // signal
+				client@ AmsClient_ProcessHandle + @ // processhandle
+				OSProcessSignal drop
+			end
+		end
+
+		client@ AmsClient_Next + @ client!
+	end
 end

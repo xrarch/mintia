@@ -9,7 +9,7 @@ extern AmsQueryGIDByName { name -- gid ok }
 extern AmsQueryByUID { info uid -- ok }
 extern AmsQueryByGID { info gid -- ok }
 extern AmsLogon { flags password uid -- obdirhandle ok }
-extern AmsChangePassword { oldpassword newpassword uid -- ok }
+extern AmsChangePassword { flags oldpassword newpassword uid -- ok }
 
 extern AmsEmumerateUsers { -- enumeration ok }
 extern AmsEmumerateGroups { -- enumeration ok }
@@ -31,11 +31,16 @@ extern AmsDeleteGroup { gid -- ok }
 extern AmsEditUser { info uid -- ok }
 extern AmsEditGroup { info gid -- ok }
 
+extern AmsEndUserSessions { uid -- ok }
+
 const AMSPASSWORDMAX 32
 const AMSNAMEMAX     32
 
 const AMSRESTRICT_NORMAL 0
+const AMSRESTRICT_NOLOG  1
 const AMSRESTRICT_PASSWD 8
+
+const AMSCHANGEPASSWORD_ENDSESSIONS 1
 
 struct AmsUserInformation
 	4 GID

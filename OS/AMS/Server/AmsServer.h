@@ -1,4 +1,10 @@
 struct AmsClient
+	4 Next
+	4 Prev
+
+	4 LoggedOnAsUID
+	4 ProcessHandle
+
 	4 ClientID
 	4 SectionBase
 	4 Flags
@@ -8,12 +14,12 @@ const AMSCLIENTFLAG_IMPERSONATING 1
 
 extern AmsClientCreate { cid -- client ok }
 extern AmsClientDelete { client -- }
-extern AmsClientInitialize { cid client -- }
+extern AmsClientSignalByUID { excludedprocess signal uid -- }
 
 extern AmsUserGetRestrictionLevel { userptr -- level }
 
 extern AmsInternalLogon { flags password uid processhandle -- obdirhandle ok }
-extern AmsInternalChangePassword { oldpassword newpassword uid processhandle -- ok }
+extern AmsInternalChangePassword { flags oldpassword newpassword uid processhandle -- ok }
 
 const AMSPASSWORDHASHLENGTH OSSIMPLECRYPT_HASHLENGTH
 
@@ -21,6 +27,8 @@ extern AmsGeneratePasswordHash { userpass hash -- }
 
 extern AmsInternalEmumerateUsers { context max buf -- nextcontext count ok }
 extern AmsInternalEmumerateGroups { context max buf -- nextcontext count ok }
+
+extern AmsInternalEndUserSessions { uid processhandle -- ok }
 
 extern AmsQueryByUserPtr { info userptr -- ok }
 extern AmsQueryByGroupPtr { info groupptr -- ok }
@@ -69,3 +77,4 @@ extern AmsUserEdit { info uid processhandle -- ok }
 
 externptr AmsMemoryInformation
 externptr AmsUsersDirectory
+externptr AmsApiPort

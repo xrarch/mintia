@@ -26,6 +26,7 @@ struct AmsMessageChangePassword
 	4 UID
 	AMSPASSWORDMAX OldPassword
 	AMSPASSWORDMAX NewPassword
+	4 Flags
 endstruct
 
 const AMSSECTIONSIZE 4096
@@ -75,3 +76,4 @@ const AMSAPI_CREATE_USER         9
 const AMSAPI_CREATE_GROUP        10
 const AMSAPI_EDIT_USER           11
 const AMSAPI_EDIT_GROUP          12
+const AMSAPI_END_USER_SESSIONS   13

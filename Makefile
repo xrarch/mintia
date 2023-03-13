@@ -163,6 +163,7 @@ cleanup:
 	rm -f $(DELTA)
 	rm -f $(DISTIMAGE)
 	rm -f $(DFLIBBIN)
+	rm -f OS/OSLoader/$(PLATFORM)/bootcode/.new
 
 	for dir in $(COMMANDS); do \
 		make -C $$dir cleanup; \

@@ -184,7 +184,7 @@ extern PsProcessSignalActivation { activationstatus -- ok }
 extern PsProcessWaitForActivationObject { timeout processobject -- activationstatus ok }
 extern PsProcessWaitForActivation { timeout processhandle -- activationstatus ok }
 
-extern PsProcessCreateDeleteLock { processobject -- ok }
+extern PsProcessCreateDeleteLock { alertable processobject -- ok }
 extern PsProcessCreateDeleteAcquireCheck { needsthread processobject -- ok }
 extern PsProcessCreateDeleteUnlock { processobject -- }
 

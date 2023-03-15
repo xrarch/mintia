@@ -227,6 +227,25 @@ fn (ObTypeDeleteFunction) PsiJobObjectDelete { object -- }
 	parentjobobject@ ObObjectDereferenceByPointer drop
 end
 
+fn PsiJobInherit { destprocessobject srcprocessobject -- }
+	fnsection "PAGE$text"
+
+	0 // alertable
+	srcprocessobject@ // processobject
+	PsProcessCreateDeleteLock drop
+
+	auto jobobject
+	srcprocessobject@ PsProcess_PagedArea + @ PsProcessPaged_Job + @ jobobject!
+
+	if (jobobject@)
+		jobobject@ ObObjectReferenceByPointer drop
+	end
+
+	jobobject@ destprocessobject@ PsProcess_PagedArea + @ PsProcessPaged_Job + !
+
+	srcprocessobject@ PsProcessCreateDeleteUnlock
+end
+
 fn PsJobCreateObject { parentjobobject signalonclose flags permissions name -- jobobject ok }
 	fnsection "PAGE$text"
 
@@ -350,13 +369,18 @@ end
 fn PsiJobRemoveProcess { toancestor processobject -- ok }
 	fnsection "PAGE$text"
 
-	// assumes process createdelete lock is held and that the hierarchy lock
-	// is held.
+	0 ok!
+
+	auto paged
+	processobject@ PsProcess_PagedArea + @ paged!
+
+	// assumes process createdelete lock is held. if toancestor is set, then
+	// the hierarchy lock should also be held.
 	// if toancestor is nonzero, and the process's job has a parent job, the
 	// process will be automatically reassigned to that job.
 
 	auto jobobject
-	processobject@ PsProcess_PagedArea + @ PsProcessPaged_Job + @ jobobject!
+	paged@ PsProcessPaged_Job + @ jobobject!
 
 	if (jobobject@ ~~)
 		STATUS_PROCESS_NO_JOB ok!
@@ -364,7 +388,41 @@ fn PsiJobRemoveProcess { toancestor processobject -- ok }
 		return
 	end
 
+	0 jobobject@ PsiJobLock drop
 
+	// remove the process from the job's process list
+
+	auto ls
+	paged@ PsProcessPaged_JobListPrev + @ ls!
+
+	auto ns
+	paged@ PsProcessPaged_JobListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ PsProcess_PagedArea + @ PsProcessPaged_JobListNext + !
+	end else
+		ns@ jobobject@ PsiJob_ProcessListHead + !
+	end
+
+	if (ns@)
+		ls@ ns@ PsProcess_PagedArea + @ PsProcessPaged_JobListPrev + !
+	end
+
+	jobobject@ PsiJobUnlock
+
+	0 paged@ PsProcessPaged_Job + !
+	0 paged@ PsProcessPaged_JobListNext + !
+	0 paged@ PsProcessPaged_JobListPrev + !
+
+	if (toancestor@)
+		if (jobobject@ PsiJob_ParentJob + @)
+			processobject@ // processobject
+			jobobject@ PsiJob_ParentJob + @ // jobobject
+			PsiJobAddProcess ok!
+		end
+	end
+
+	jobobject@ ObObjectDereferenceByPointer drop
 end
 
 fn PsiJobAddProcess { processobject jobobject -- ok }
@@ -381,8 +439,11 @@ fn PsiJobAddProcess { processobject jobobject -- ok }
 		return
 	end
 
+	auto paged
+	processobject@ PsProcess_PagedArea + @ paged!
+
 	auto currentjob
-	processobject@ PsProcess_PagedArea + @ PsProcessPaged_Job + @ currentjob!
+	paged@ PsProcessPaged_Job + @ currentjob!
 
 	if (currentjob@)
 		// the process already has a job. check if its job is related to the
@@ -395,22 +456,20 @@ fn PsiJobAddProcess { processobject jobobject -- ok }
 			return
 		end
 
-		1 PsiJobHierarchyLock ok!
+		// lock the hierarchy lock to avoid the process escaping an atomic
+		// propagated signal during the window of time where it has no job.
 
-		if (ok@)
-			return
-		end
+		0 PsiJobHierarchyLock drop
+
+		// remove the process from its job object now, before we lock the new
+		// job. otherwise we will get an arbitrary lock ordering.
+
+		0 // toancestor
+		processobject@ // processobject
+		PsiJobRemoveProcess drop
 	end
 
-	1 jobobject@ PsiJobLock ok!
-
-	if (ok@)
-		if (currentjob@)
-			PsiJobHierarchyUnlock
-		end
-
-		return
-	end
+	0 jobobject@ PsiJobLock drop
 
 	// double check if job terminated since that might have changed since we
 	// locked it.
@@ -427,25 +486,29 @@ fn PsiJobAddProcess { processobject jobobject -- ok }
 		return
 	end
 
-	if (currentjob@)
-		// remove the process from its current job.
+	// add process to new job object.
+	// add to head of job process list.
 
-		0 // toancestor
-		processobject@ // processobject
-		PsiJobRemoveProcess drop
+	auto h
+	jobobject@ PsiJob_ProcessListHead + @ h!
+
+	h@ paged@ PsProcessPaged_JobListNext + !
+
+	if (h@)
+		processobject@ h@ PsProcess_PagedArea + @ PsProcessPaged_JobListPrev + !
 	end
 
-	// add process to new job object.
+	processobject@ jobobject@ PsiJob_ProcessListHead + !
 
-
-
-	// reference the job object.
-
-	jobobject@ ObObjectReferenceByPointer drop
+	jobobject@ paged@ PsProcessPaged_Job + !
 
 	jobobject@ PsiJobUnlock
 
 	if (currentjob@)
 		PsiJobHierarchyUnlock
 	end
+
+	// reference the job object.
+
+	jobobject@ ObObjectReferenceByPointer drop
 end

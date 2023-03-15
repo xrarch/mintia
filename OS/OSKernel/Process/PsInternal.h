@@ -11,3 +11,6 @@ extern PsiProcessObjectDelete { object -- }
 extern PsiThreadObjectDelete { object -- }
 
 extern PsiJobInit { -- }
+
+extern PsiJobInherit { destprocessobject srcprocessobject -- ok }
+extern PsiJobRemoveProcess { toancestor processobject -- ok }

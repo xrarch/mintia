@@ -48,7 +48,7 @@ endstruct
 
 const PSJOBFLAG_TERMINATED 1
 
-const PSMAXJOBDEPTH 16
+const PSMAXJOBDEPTH 10
 
 rosection "INIT$text"
 
@@ -227,12 +227,16 @@ fn (ObTypeDeleteFunction) PsiJobObjectDelete { object -- }
 	parentjobobject@ ObObjectDereferenceByPointer drop
 end
 
-fn PsiJobInherit { destprocessobject srcprocessobject -- }
+fn PsiJobInherit { destprocessobject srcprocessobject -- ok }
 	fnsection "PAGE$text"
 
-	0 // alertable
+	1 // alertable
 	srcprocessobject@ // processobject
-	PsProcessCreateDeleteLock drop
+	PsProcessCreateDeleteLock ok!
+
+	if (ok@)
+		return
+	end
 
 	auto jobobject
 	srcprocessobject@ PsProcess_PagedArea + @ PsProcessPaged_Job + @ jobobject!
@@ -241,9 +245,17 @@ fn PsiJobInherit { destprocessobject srcprocessobject -- }
 		jobobject@ ObObjectReferenceByPointer drop
 	end
 
-	jobobject@ destprocessobject@ PsProcess_PagedArea + @ PsProcessPaged_Job + !
-
 	srcprocessobject@ PsProcessCreateDeleteUnlock
+
+	if (jobobject@ ~~)
+		return
+	end
+
+	destprocessobject@ // processobject
+	jobobject@ // jobobject
+	PsiJobAddProcess ok!
+
+	jobobject@ ObObjectDereferenceByPointer drop
 end
 
 fn PsJobCreateObject { parentjobobject signalonclose flags permissions name -- jobobject ok }
@@ -298,7 +310,7 @@ fn PsJobCreateObject { parentjobobject signalonclose flags permissions name -- j
 		curproc@ PsProcess_PagedArea + @ PsProcessPaged_Job + @ parentjobobject!
 
 		if (parentjobobject@ ~~)
-			// current process has no job.
+			// current process has no job, nothing to inherit.
 
 			return
 		end
@@ -420,6 +432,11 @@ fn PsiJobRemoveProcess { toancestor processobject -- ok }
 			jobobject@ PsiJob_ParentJob + @ // jobobject
 			PsiJobAddProcess ok!
 		end
+	end elseif (jobobject@ PsiJob_ProcessListHead + @ ~~)
+		// job object transitioned to zero processes.
+		// do termination processing.
+
+
 	end
 
 	jobobject@ ObObjectDereferenceByPointer drop
@@ -428,10 +445,12 @@ end
 fn PsiJobAddProcess { processobject jobobject -- ok }
 	fnsection "PAGE$text"
 
-	// assumes process createdelete lock is held.
+	// assumes process createdelete lock is held and checked.
 	// the process might "hop" jobs, and if it does, we need the hierarchy lock
 	// held. in order to preserve the lock ordering, this requires some tedious
 	// dancing around.
+
+	0 ok!
 
 	if (jobobject@ PsiJob_StatusFlags + @ PSJOBFLAG_TERMINATED &)
 		STATUS_JOB_IS_TERMINATED ok!
@@ -446,6 +465,10 @@ fn PsiJobAddProcess { processobject jobobject -- ok }
 	paged@ PsProcessPaged_Job + @ currentjob!
 
 	if (currentjob@)
+		if (currentjob@ jobobject@ ==)
+			return
+		end
+
 		// the process already has a job. check if its job is related to the
 		// requested job, and fail the request if it isn't.
 		// this is to prevent break-out from job hierarchy.

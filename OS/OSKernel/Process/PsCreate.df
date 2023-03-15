@@ -61,8 +61,8 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 		1 initial!
 	end
 
-	if (creationflags@ OSPROCESS_DETACHCONSOLE &)
-		SYSTEMPERMISSION_DETACHCONSOLE // permission
+	if (creationflags@ OSPROCESS_DETACHJOB &)
+		SYSTEMPERMISSION_DETACHJOB // permission
 		KeProcessCurrent // process
 		SeProcessCheckPermission ok!
 
@@ -256,6 +256,35 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 	processobject@ // process
 	KeProcessInitialize
 
+	if (initial@ ~~
+		creationflags@ OSPROCESS_DETACHJOB & ~~ &&)
+
+		processobject@ // destprocessobject
+		parentprocess@ // srcprocessobject
+		PsiJobInherit ok!
+
+		if (ok@)
+			processobject@ KeProcessUninitialize
+
+			pid@ // handle
+			PsProcessTable@ // handletable
+			1 // locked
+			ExHandleDelete drop drop drop
+
+			PsProcessTable@ ExHandleTableUnlock
+
+			0 handletable@ ExHandleTableDelete
+
+			quotablock@ MmQuotaBlockDereference
+
+			paged@ MmFree
+
+			processobject@ ObObjectDeallocate
+
+			return
+		end
+	end
+
 	sectionobject@ // sectionobject
 	processobject@ // process
 	MmProcessInitialize ok!
@@ -264,15 +293,19 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 		processobject@ KeProcessUninitialize
 
 		if (initial@ ~~)
+			0 // toancestor
+			processobject@ // processobject
+			PsiJobRemoveProcess drop
+
 			pid@ // handle
 			PsProcessTable@ // handletable
 			1 // locked
 			ExHandleDelete drop drop drop
 
 			PsProcessTable@ ExHandleTableUnlock
-		end
 
-		0 handletable@ ExHandleTableDelete
+			0 handletable@ ExHandleTableDelete
+		end
 
 		quotablock@ MmQuotaBlockDereference
 
@@ -290,16 +323,16 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 	processobject@ // process
 	PsProcessInsert
 
-	if (initial@ ~~)
-		PsProcessTable@ ExHandleTableUnlock
-	end
-
 	if (creationflags@ OSPROCESS_DETACHCONSOLE & ~~)
 		// inherit the console group
 
 		parentprocess@ // parent
 		processobject@ // process
 		PsiProcessInheritConsole
+	end
+
+	if (initial@ ~~)
+		PsProcessTable@ ExHandleTableUnlock
 	end
 
 	1 PsProcessCreationCount KeInterlockedIncrement drop

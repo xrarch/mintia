@@ -27,43 +27,22 @@
 fn ObHandleDuplicateObject { handle access srcprocessobject destprocessobject -- newhandle ok }
 	fnsection "PAGE$text"
 
-	auto destlocked
-	0 destlocked!
-
 	auto currentproc
 	KeProcessCurrent currentproc!
 
-	if (currentproc@ destprocessobject@ ~=)
+	auto locked
+	0 locked!
+
+	if (currentproc@ srcprocessobject@ ~=)
 		1 // needsthread
-		destprocessobject@ // processobject
+		srcprocessobject@ // processobject
 		PsProcessCreateDeleteAcquireCheck ok!
 
 		if (ok@)
 			return
 		end
 
-		1 destlocked!
-	end
-
-	auto srclocked
-	0 srclocked!
-
-	if (currentproc@ srcprocessobject@ ~=)
-		if (destprocessobject@ srcprocessobject@ ~=)
-			1 // needsthread
-			srcprocessobject@ // processobject
-			PsProcessCreateDeleteAcquireCheck ok!
-
-			if (ok@)
-				if (destlocked@)
-					destprocessobject@ PsProcessCreateDeleteUnlock
-				end
-
-				return
-			end
-
-			1 srclocked!
-		end
+		1 locked!
 	end
 
 	auto object
@@ -74,26 +53,17 @@ fn ObHandleDuplicateObject { handle access srcprocessobject destprocessobject --
 	srcprocessobject@ // process
 	ObObjectReferenceByHandleProcess ok! object! oldaccess!
 
+	if (locked@)
+		srcprocessobject@ PsProcessCreateDeleteUnlock
+		0 locked!
+	end
+
 	if (ok@)
-		if (srclocked@)
-			srcprocessobject@ PsProcessCreateDeleteUnlock
-		end
-
-		if (destlocked@)
-			destprocessobject@ PsProcessCreateDeleteUnlock
-		end
-
 		return
 	end
 
 	if (oldaccess@ ACCESS_NOINHERIT &)
-		if (srclocked@)
-			srcprocessobject@ PsProcessCreateDeleteUnlock
-		end
-
-		if (destlocked@)
-			destprocessobject@ PsProcessCreateDeleteUnlock
-		end
+		object@ ObObjectDereferenceByPointer drop
 
 		STATUS_PERMISSION_DENIED ok!
 
@@ -105,17 +75,29 @@ fn ObHandleDuplicateObject { handle access srcprocessobject destprocessobject --
 	end elseif (oldaccess@ access@ | oldaccess@ ~=)
 		// not a subset
 
-		if (srclocked@)
-			srcprocessobject@ PsProcessCreateDeleteUnlock
-		end
-
-		if (destlocked@)
-			destprocessobject@ PsProcessCreateDeleteUnlock
-		end
+		object@ ObObjectDereferenceByPointer drop
 
 		STATUS_PERMISSION_DENIED ok!
 
 		return
+	end
+
+	// now lock the destination process.
+	// we don't lock both of them in order to avoid deadlock issues due to
+	// arbitrary lock ordering.
+
+	if (currentproc@ destprocessobject@ ~=)
+		1 // needsthread
+		destprocessobject@ // processobject
+		PsProcessCreateDeleteAcquireCheck ok!
+
+		if (ok@)
+			object@ ObObjectDereferenceByPointer drop
+
+			return
+		end
+
+		1 locked!
 	end
 
 	1 // nocheck
@@ -124,26 +106,14 @@ fn ObHandleDuplicateObject { handle access srcprocessobject destprocessobject --
 	destprocessobject@ // process
 	ObObjectOpenProcess ok! newhandle!
 
+	if (locked@)
+		destprocessobject@ PsProcessCreateDeleteUnlock
+	end
+
 	if (ok@)
-		if (srclocked@)
-			srcprocessobject@ PsProcessCreateDeleteUnlock
-		end
-
-		if (destlocked@)
-			destprocessobject@ PsProcessCreateDeleteUnlock
-		end
-
 		object@ ObObjectDereferenceByPointer drop
 
 		return
-	end
-
-	if (srclocked@)
-		srcprocessobject@ PsProcessCreateDeleteUnlock
-	end
-
-	if (destlocked@)
-		destprocessobject@ PsProcessCreateDeleteUnlock
 	end
 end
 

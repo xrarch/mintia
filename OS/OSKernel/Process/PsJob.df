@@ -135,13 +135,20 @@ fn (ObTypeCloseFunction) PsiJobObjectClose { lasthandlecount access object proce
 
 	// signal all of the processes in the job.
 
+	0 PsiJobHierarchyLock drop
+
+	1 // propagate
 	object@ PsiJob_SignalOnClose + @ // signal
 	object@ // jobobject
-	PsJobSignalObject
+	PsiJobSignalObject
+
+	PsiJobHierarchyUnlock
 end
 
-fn PsJobSignalObject { signal jobobject -- }
+fn PsiJobSignalObject { propagate signal jobobject -- }
 	fnsection "PAGE$text"
+
+	// if propagate is nonzero, assumes hierarchy lock is held.
 
 	0 jobobject@ PsiJobLock drop
 
@@ -161,6 +168,20 @@ fn PsJobSignalObject { signal jobobject -- }
 	end
 
 	jobobject@ PsiJobUnlock
+
+	if (propagate@)
+		auto subjob
+		jobobject@ PsiJob_SubJobListHead + @ subjob!
+
+		while (subjob@)
+			1 // propagate
+			signal@ // signal
+			subjob@ // jobobject
+			PsiJobSignalObject
+
+			subjob@ PsiJob_NextJob + @ subjob!
+		end
+	end
 end
 
 fn (ObTypeDeleteFunction) PsiJobObjectDelete { object -- }
@@ -376,6 +397,9 @@ fn PsiJobAddProcess { processobject jobobject -- ok }
 
 		return
 	end
+
+	// double check if job terminated since that might have changed since we
+	// locked it.
 
 	if (jobobject@ PsiJob_StatusFlags + @ PSJOBFLAG_TERMINATED &)
 		jobobject@ PsiJobUnlock

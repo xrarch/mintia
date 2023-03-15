@@ -93,5 +93,8 @@ const STATUS_GROUP_EXISTS             -91
 const STATUS_REPARSE_MAXIMUM          -92
 const STATUS_SYNTAX_ERROR             -93
 const STATUS_IO_ERROR                 -94
+const STATUS_JOB_IS_TERMINATED        -95
+const STATUS_PROCESS_HAS_JOB          -96
+const STATUS_PROCESS_NO_JOB           -97
 
 extern OSStatusGetName { status -- name }

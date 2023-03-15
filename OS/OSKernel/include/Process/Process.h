@@ -61,6 +61,12 @@ struct PsProcessPaged // contains things that only need to be accessed at IPLLOW
 
 	4 QuotaBlock
 
+	// jobs
+
+	4 Job
+	4 JobListNext
+	4 JobListPrev
+
 	// virtual memory
 
 	4 VADTreeRoot

@@ -9,3 +9,5 @@ extern PsiThreadExit { -- }
 
 extern PsiProcessObjectDelete { object -- }
 extern PsiThreadObjectDelete { object -- }
+
+extern PsiJobInit { -- }

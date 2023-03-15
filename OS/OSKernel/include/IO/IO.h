@@ -21,7 +21,7 @@ externptr IOFileTypeObject
 
 extern IOFileCreateObject { openedpath flags permissions fcb -- fileobject ok }
 extern IOFileOpenObject { access object process -- ok }
-extern IOFileCloseObject { access object process -- }
+extern IOFileCloseObject { lasthandlecount access object process -- }
 extern IOFileDeleteObject { object -- }
 extern IOFileSetSecurityObject { uid gid permissions object -- ok }
 extern IOFileCancelIOObject { wait fileobject -- ok }

@@ -14,7 +14,7 @@ struct ObTypeInitializer
 endstruct
 
 fnptr ObTypeOpenFunction { access object process -- ok }
-fnptr ObTypeCloseFunction { access object process -- }
+fnptr ObTypeCloseFunction { lasthandlecount access object process -- }
 fnptr ObTypeDeleteFunction { object -- }
 fnptr ObTypeParseFunction { flags path initialobject process -- reparsepath object ok }
 fnptr ObTypeSetSecurityFunction { uid gid permissions object -- ok }

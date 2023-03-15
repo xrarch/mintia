@@ -143,7 +143,7 @@ extern AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 extern AFSPinChain { lookuptable blkno mount -- }
 
 extern AFSOpen { access fileobject -- ok }
-extern AFSClose { access fileobject -- ok }
+extern AFSClose { lasthandlecount access fileobject -- ok }
 
 extern AFSParse { fileobject initialfcb process -- reparsepath ok }
 extern AFSDeleteObject { object -- ok }

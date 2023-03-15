@@ -1,5 +1,5 @@
 fnptr IODispatchOpenFunction { access fileobject -- ok }
-fnptr IODispatchCloseFunction { access fileobject -- ok }
+fnptr IODispatchCloseFunction { lasthandlecount access fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg2 arg1 access fcb lastmode -- ret ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { fileobject initialfcb process -- reparsepath ok }

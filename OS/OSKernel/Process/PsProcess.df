@@ -34,23 +34,32 @@ fn PsProcessSignalObject { signal processobject -- ok }
 		return
 	end
 
-	1 // needsthread
-	processobject@ // processobject
-	PsProcessCreateDeleteAcquireCheck ok!
-
-	if (ok@)
-		return
-	end
-
 	if (signal@ OSSIGNAL_KILL ==)
-		137 processobject@ KeProcess_KilledStatus + !
+		// lock the createdelete lock to make sure that this termination is
+		// atomic with respect to thread creation (i.e., thread creation will
+		// be denied after this point & all existing threads are guaranteed to
+		// receive an OSSIGNAL_KILL).
+
+		1 // needsthread
+		processobject@ // processobject
+		PsProcessCreateDeleteAcquireCheck ok!
+
+		if (ok@)
+			return
+		end
+
+		if (processobject@ KeProcess_KilledStatus + @ ~~)
+			137 processobject@ KeProcess_KilledStatus + !
+		end
 	end
 
 	signal@ // signal
 	processobject@ // process
 	KeProcessSignal ok!
 
-	processobject@ PsProcessCreateDeleteUnlock
+	if (signal@ OSSIGNAL_KILL ==)
+		processobject@ PsProcessCreateDeleteUnlock
+	end
 end
 
 fn PsProcessSignal { signal processhandle -- ok }

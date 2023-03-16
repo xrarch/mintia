@@ -103,6 +103,7 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_Signals + !
 	0 thread@ KeThread_SignalAcceptMask + !
+	0 thread@ KeThread_SignalDeliverOnWaitMask + !
 
 	0 thread@ KeThread_TrapFrame + !
 
@@ -272,13 +273,16 @@ fn KeThreadResume { thread -- }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadMaskSignal { signal thread -- ok }
-	if (signal@ ~~)
+fn KeThreadDeliverOnWaitSignal { signal thread -- ok }
+	auto sigabs
+	signal@ abs sigabs!
+
+	if (sigabs@ ~~)
 		STATUS_INVALID_ARGUMENT ok!
 		return
 	end
 
-	if (signal@ 32 >=)
+	if (sigabs@ 32 >=)
 		STATUS_INVALID_ARGUMENT ok!
 		return
 	end
@@ -286,32 +290,57 @@ fn KeThreadMaskSignal { signal thread -- ok }
 	0 ok!
 
 	auto rs
-	HALCPUInterruptDisable rs!
-	1 signal@ << ~ thread@ KeThread_SignalAcceptMask + &=
-	rs@ HALCPUInterruptRestore
+
+	if (signal@ z<)
+		// un deliver on wait the signal
+
+		HALCPUInterruptDisable rs!
+		1 sigabs@ << ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
+		rs@ HALCPUInterruptRestore
+	end else
+		// deliver on wait the signal
+
+		HALCPUInterruptDisable rs!
+		1 sigabs@ << thread@ KeThread_SignalDeliverOnWaitMask + |=
+		rs@ HALCPUInterruptRestore
+	end
 end
 
-fn KeThreadUnmaskSignal { signal thread -- ok }
-	if (signal@ ~~)
+fn KeThreadMaskSignal { signal thread -- ok }
+	auto sigabs
+	signal@ abs sigabs!
+
+	if (sigabs@ ~~)
 		STATUS_INVALID_ARGUMENT ok!
 		return
 	end
 
-	if (signal@ 32 >=)
+	if (sigabs@ 32 >=)
 		STATUS_INVALID_ARGUMENT ok!
 		return
 	end
 
 	0 ok!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	if (signal@ z<)
+		// unmask the signal
 
-	1 signal@ << thread@ KeThread_SignalAcceptMask + |=
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-	thread@ KiThreadWakeForSignal
+		1 sigabs@ << thread@ KeThread_SignalAcceptMask + |=
 
-	ipl@ KeIPLLower
+		thread@ KiThreadWakeForSignal
+
+		ipl@ KeIPLLower
+	end else
+		// mask the signal
+
+		auto rs
+		HALCPUInterruptDisable rs!
+		1 sigabs@ << ~ thread@ KeThread_SignalAcceptMask + &=
+		rs@ HALCPUInterruptRestore
+	end
 end
 
 fn KeThreadRundown { thread -- }
@@ -341,7 +370,7 @@ fn KeThreadRundown { thread -- }
 	ipl@ KeIPLLower
 end
 
-fn KeThreadIsKilled { mode alertable thread -- ok }
+fn KeThreadIsKilled { mode alertable waiting thread -- ok }
 	// gives the status code that should be returned for the thread's signal
 	// state. this only determines what should interrupt a syscall and be
 	// passed to OSDLL; actual signal dispatch and certain actions like core
@@ -393,7 +422,23 @@ fn KeThreadIsKilled { mode alertable thread -- ok }
 		return
 	end
 
-	if (thread@ KeThread_SignalAcceptMask + @ sig@ &)
+	if (waiting@)
+		// waiting, allow if accepted.
+
+		if (thread@ KeThread_SignalAcceptMask + @ sig@ &)
+			// clear pending signals from deliver-on-wait mask
+
+			sig@ ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
+
+			STATUS_SIGNALLED ok!
+		end
+	end elseif (thread@ KeThread_SignalAcceptMask + @
+				thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
+				sig@ &)
+
+		// not waiting, only allow if accepted and not specified as
+		// deliver-on-wait.
+
 		STATUS_SIGNALLED ok!
 	end
 end
@@ -427,7 +472,10 @@ fn KeThreadDispatchSignal { dispatchfunc trapframe -- }
 	IPLDPC KeIPLRaise ipl!
 
 	auto excsignals
-	thread@ KeThread_Signals + @ excsignals!
+	thread@ KeThread_Signals + @
+	thread@ KeThread_SignalAcceptMask + @ &
+	thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
+	excsignals!
 
 	auto signum
 	0 signum!
@@ -528,6 +576,10 @@ fn KiThreadWakeForSignal { thread -- }
 
 	if (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGALERTABLE ==)
 		// yes, wake it up
+
+		// but first, clear pending signals from deliver-on-wait mask
+
+		sig@ ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
 
 		status@ // waitstatus
 		0 // priboost

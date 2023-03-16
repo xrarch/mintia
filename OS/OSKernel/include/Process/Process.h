@@ -211,7 +211,7 @@ extern PsThreadTerminate { status threadhandle -- ok }
 extern PsThreadSignal { signal threadhandle -- ok }
 
 extern PsThreadMaskSignal { signal threadhandle -- ok }
-extern PsThreadUnmaskSignal { signal threadhandle -- ok }
+extern PsThreadDeliverOnWaitSignal { signal threadhandle -- ok }
 
 extern PsProcessGetUID { process -- uid }
 extern PsProcessGetGID { process -- gid }
@@ -220,6 +220,11 @@ extern PsProcessRemove { locked trim process -- }
 extern PsProcessInsert { locked trim process -- }
 
 extern PsSignalAllProcesses { signal -- }
+
+extern PsJobCreate { parentjobhandle signalonclose flags permissions name -- jobhandle ok }
+extern PsJobAddProcess { processhandle jobhandle -- ok }
+extern PsJobRemoveProcess { processhandle -- ok }
+extern PsJobSignal { propagate signal jobhandle -- ok }
 
 externptr PsProcessTable
 externptr PsReaperEvent

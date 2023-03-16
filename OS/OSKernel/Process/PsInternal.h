@@ -12,9 +12,5 @@ extern PsiThreadObjectDelete { object -- }
 
 extern PsiJobInit { -- }
 
-const PSJOB_REMOVE_TERMINATED 1
-const PSJOB_REMOVE_SWITCH     2
-const PSJOB_REMOVE_USER       3
-
 extern PsiJobInherit { destprocessobject srcprocessobject -- ok }
-extern PsiJobRemoveProcess { cause processobject -- ok }
+extern PsiJobIndicateProcessExit { processobject -- }

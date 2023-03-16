@@ -1,3 +1,7 @@
+//
+// This source module implements the TTY session manager (login.exe).
+//
+
 #include "<df>/dragonfruit.h"
 
 #include "<ll>/OSDLL/OS.h"
@@ -5,7 +9,111 @@
 
 #include "<ll>/OSDLL/OSConsoleControl.h"
 
-#include "<ll>/OSDLL/OSCrypt.h"
+fn Main { ... -- ret }
+	// do what launchtty.exe used to do
+
+	0 ret!
+
+	if (argc@ 2 <)
+		return
+	end
+
+	auto tty
+	[1]argv@ tty!
+
+	auto stdin
+
+	0 // flags
+	ACCESS_READ ACCESS_EXEC | // access
+	tty@ // path
+	OSFILETYPE_CHARDEVICE // ftype
+	OSFileOpen ret! stdin!
+
+	if (ret@)
+		return
+	end
+
+	stdin@ OSSetStdIn
+
+	auto handle
+
+	0 // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	tty@ // path
+	OSFILETYPE_CHARDEVICE // ftype
+	OSFileOpen ret! handle!
+
+	if (ret@)
+		return
+	end
+
+	handle@ OSSetStdOut
+
+	0 // flags
+	ACCESS_WRITE // access
+	tty@ // path
+	OSFILETYPE_CHARDEVICE // ftype
+	OSFileOpen ret! handle!
+
+	if (ret@)
+		return
+	end
+
+	handle@ OSSetStdErr
+
+	0 // arg2
+	OSCONSOLEIOCONTROL_RESETMODE // arg1
+	OSGetStdIn // filehandle
+	OSIOControl ret! drop
+
+	if (ret@)
+		return
+	end
+
+	UID_SYSTEM // uid
+	GID_SYSTEM // gid
+	ACCESS_OWNER_READ ACCESS_OWNER_WRITE | ACCESS_OWNER_EXEC | // permissions
+	handle@ // handle
+	OSSetSecurity ret!
+
+	if (ret@)
+		return
+	end
+
+	OSSIGNALACTION_IGNORE // action
+	OSSIGNAL_INT // signum
+	OSSignalSetAction drop
+
+	OSSIGNALACTION_IGNORE // action
+	OSSIGNAL_QUIT // signum
+	OSSignalSetAction drop
+
+	pointerof SignalTerm // action
+	OSSIGNAL_TERM // signum
+	OSSignalSetAction drop
+
+	100 OSThreadSleep drop
+
+	// make it so OSSIGNAL_TERM will only be delivered when we next wait.
+
+	OSSIGNAL_TERM // signal
+	OSCURRENTTHREAD // threadhandle
+	OSThreadDeliverOnWaitSignal drop
+
+	LoginMain ret!
+end
+
+fn (OSSignalHandler) SignalTerm { context signum -- }
+	// we receive this signal from amssrv when it decides to murder our
+	// session, and also from the kernel when it is shutting down.
+
+	// re-mark this signal as deliver-on-wait since that gets cleared when it
+	// is delivered.
+
+	OSSIGNAL_TERM // signal
+	OSCURRENTTHREAD // threadhandle
+	OSThreadDeliverOnWaitSignal drop
+end
 
 var AmsInited 0
 
@@ -153,7 +261,7 @@ fn PrintFile { path -- ok }
 	end
 end
 
-fn Main { ... -- ret }
+fn LoginMain { -- ret }
 	0 ret!
 
 	"\n" Printf
@@ -263,6 +371,23 @@ fn Main { ... -- ret }
 end
 
 fn SpawnShell { obdirhandle uid gid shell -- ok }
+	// create a new job object to contain the session tree.
+	// indicate that if our handle to the job object closes, we want the
+	// system to atomically kill the entire job tree. this is the nuclear
+	// option for if login.exe dies somehow.
+
+	auto jhandle
+	OSNONE // parentjobhandle
+	OSSIGNAL_KILL // signalonclose
+	0 // flags
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSJobCreate ok! jhandle!
+
+	if (ok@)
+		return
+	end
+
 	auto phandle
 	auto thandle
 
@@ -282,6 +407,17 @@ fn SpawnShell { obdirhandle uid gid shell -- ok }
 	OSSpawn ok! phandle! thandle!
 
 	if (ok@)
+		return
+	end
+
+	phandle@ // processhandle
+	jhandle@ // jobhandle
+	OSJobAddProcess ok!
+
+	if (ok@)
+		phandle@ OSClose drop
+		thandle@ OSClose drop
+
 		return
 	end
 
@@ -333,4 +469,40 @@ fn SpawnShell { obdirhandle uid gid shell -- ok }
 	OSWaitForObject drop
 
 	phandle@ OSClose drop
+
+	// try to kill the session job in a friendly way.
+
+	1 // propagate
+	OSSIGNAL_TERM // signal
+	jhandle@ // jobhandle
+	OSJobSignal drop
+
+	// give it one second to clean up.
+
+	0 // alertable
+	1000 // timeout
+	jhandle@ // objecthandle
+	OSWaitForObject ok!
+
+	if (ok@)
+		// no more mister nice guy, time to pull out the big guns.
+		// this will atomically kill the job in a way that prevents the
+		// session from being able to create any more processes. thus the
+		// session's final termination is inevitable and we can wait
+		// infinitely and unalertably for that to happen.
+
+		1 // propagate
+		OSSIGNAL_KILL // signal
+		jhandle@ // jobhandle
+		OSJobSignal drop
+
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		jhandle@ // objecthandle
+		OSWaitForObject drop
+
+		0 ok!
+	end
+
+	jhandle@ OSClose drop
 end

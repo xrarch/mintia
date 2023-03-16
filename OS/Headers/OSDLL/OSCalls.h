@@ -142,7 +142,12 @@ extern OSThreadQuery { threadhandle query -- ok }
 
 extern OSThreadSignal { signal threadhandle -- ok }
 extern OSThreadMaskSignal { signal threadhandle -- ok }
-extern OSThreadUnmaskSignal { signal threadhandle -- ok }
+extern OSThreadDeliverOnWaitSignal { signal threadhandle -- ok }
+
+extern OSJobCreate { parentjobhandle signalonclose flags permissions name -- jobhandle ok }
+extern OSJobAddProcess { processhandle jobhandle -- ok }
+extern OSJobRemoveProcess { processhandle -- ok }
+extern OSJobSignal { propagate signal jobhandle -- ok }
 
 // Co
 extern OSSetSystemConsole { filehandle -- ok }

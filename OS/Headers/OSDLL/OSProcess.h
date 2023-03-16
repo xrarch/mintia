@@ -8,8 +8,6 @@ const OSPROCESS_NOINHERITH    32768
 
 const OSTHREAD_SUSPENDED 1
 
-const OSJOB_TERMINATEONCLOSE 1
-
 extern OSGetImageName { -- imagename }
 
 extern OSCreationBlockInitialize { creationparams -- }

@@ -105,6 +105,7 @@ struct KeThread
 
 	4 Signals
 	4 SignalAcceptMask
+	4 SignalDeliverOnWaitMask
 
 	4 TrapFrame
 
@@ -180,10 +181,10 @@ extern KeThreadTerminate { status thread -- }
 extern KeThreadSuspend { thread -- }
 extern KeThreadResume { thread -- }
 extern KeThreadMaskSignal { signal thread -- ok }
-extern KeThreadUnmaskSignal { signal thread -- ok }
+extern KeThreadDeliverOnWaitSignal { signal thread -- ok }
 extern KeThreadRundown { thread -- }
 extern KeThreadDispatchSignal { dispatchfunc trapframe -- }
-extern KeThreadIsKilled { mode alertable thread -- ok }
+extern KeThreadIsKilled { mode alertable waiting thread -- ok }
 extern KeThreadReady { thread -- }
 extern KeThreadBlock { status -- }
 extern KeThreadPriorityBoost { boost thread -- }

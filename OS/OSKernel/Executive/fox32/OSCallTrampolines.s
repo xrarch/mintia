@@ -99,7 +99,11 @@
 .extern OSThreadQuery
 .extern OSThreadSignal
 .extern OSThreadMaskSignal
-.extern OSThreadUnmaskSignal
+.extern OSThreadDeliverOnWaitSignal
+.extern OSJobCreate
+.extern OSJobAddProcess
+.extern OSJobRemoveProcess
+.extern OSJobSignal
 .extern OSSetSystemConsole
 .extern OSConsoleSignal
 .extern OSIsAConsole
@@ -115,7 +119,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 110
+	.dl 114
 
 OSCallTable:
 .global OSCallTable
@@ -217,19 +221,23 @@ OSCallTable:
 	.dl OSTOSThreadQuery                                 ;95
 	.dl OSTOSThreadSignal                                ;96
 	.dl OSTOSThreadMaskSignal                            ;97
-	.dl OSTOSThreadUnmaskSignal                          ;98
-	.dl OSTOSSetSystemConsole                            ;99
-	.dl OSTOSConsoleSignal                               ;100
-	.dl OSTOSIsAConsole                                  ;101
-	.dl OSTOSDuplexCreate                                ;102
-	.dl OSTOSCheckPermission                             ;103
-	.dl OSTOSGrantPermission                             ;104
-	.dl OSTOSPortCreate                                  ;105
-	.dl OSTOSPortConnect                                 ;106
-	.dl OSTOSPortAccept                                  ;107
-	.dl OSTOSPortSendAndWaitReceive                      ;108
-	.dl OSTOSPortSendAndWaitReply                        ;109
-	.dl OSTOSPortOpenProcessByClientID                   ;110
+	.dl OSTOSThreadDeliverOnWaitSignal                   ;98
+	.dl OSTOSJobCreate                                   ;99
+	.dl OSTOSJobAddProcess                               ;100
+	.dl OSTOSJobRemoveProcess                            ;101
+	.dl OSTOSJobSignal                                   ;102
+	.dl OSTOSSetSystemConsole                            ;103
+	.dl OSTOSConsoleSignal                               ;104
+	.dl OSTOSIsAConsole                                  ;105
+	.dl OSTOSDuplexCreate                                ;106
+	.dl OSTOSCheckPermission                             ;107
+	.dl OSTOSGrantPermission                             ;108
+	.dl OSTOSPortCreate                                  ;109
+	.dl OSTOSPortConnect                                 ;110
+	.dl OSTOSPortAccept                                  ;111
+	.dl OSTOSPortSendAndWaitReceive                      ;112
+	.dl OSTOSPortSendAndWaitReply                        ;113
+	.dl OSTOSPortOpenProcessByClientID                   ;114
 
 
 OSTOSConsolePutCharacter:
@@ -2546,7 +2554,7 @@ OSTOSThreadMaskSignal:
 	pop  fp
 	ret
 
-OSTOSThreadUnmaskSignal:
+OSTOSThreadDeliverOnWaitSignal:
 	push fp
 	mov  fp, sp
 
@@ -2558,7 +2566,112 @@ OSTOSThreadUnmaskSignal:
 	add  t0, 8 ;t2
 	mov  a1, [t0]
 
-	call OSThreadUnmaskSignal
+	call OSThreadDeliverOnWaitSignal
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	pop  fp
+	ret
+
+OSTOSJobCreate:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	mov  t0, s17
+	add  t0, 20 ;t5
+	push [t0]
+
+	call OSJobCreate
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  [t0], a1
+
+	add  sp, 4
+	pop  fp
+	ret
+
+OSTOSJobAddProcess:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	call OSJobAddProcess
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	pop  fp
+	ret
+
+OSTOSJobRemoveProcess:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	call OSJobRemoveProcess
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	pop  fp
+	ret
+
+OSTOSJobSignal:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	call OSJobSignal
 
 
 	mov  t0, s17

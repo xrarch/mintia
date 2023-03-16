@@ -378,7 +378,7 @@ fn PsJobCreateObject { parentjobobject signalonclose flags permissions name -- j
 	parentjobobject@ ObObjectReferenceByPointer drop
 end
 
-fn PsiJobRemoveProcess { toancestor processobject -- ok }
+fn PsiJobRemoveProcess { cause processobject -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
@@ -386,8 +386,8 @@ fn PsiJobRemoveProcess { toancestor processobject -- ok }
 	auto paged
 	processobject@ PsProcess_PagedArea + @ paged!
 
-	// assumes process createdelete lock is held. if toancestor is set, then
-	// the hierarchy lock should also be held.
+	// assumes process createdelete lock is held. if cause is
+	// PSJOB_REMOVE_USER, then the hierarchy lock should also be held.
 	// if toancestor is nonzero, and the process's job has a parent job, the
 	// process will be automatically reassigned to that job.
 
@@ -420,23 +420,35 @@ fn PsiJobRemoveProcess { toancestor processobject -- ok }
 		ls@ ns@ PsProcess_PagedArea + @ PsProcessPaged_JobListPrev + !
 	end
 
+	if (jobobject@ PsiJob_ProcessListHead + @ ~~
+		cause@ PSJOB_REMOVE_TERMINATED == &&)
+
+		// job object transitioned to zero processes.
+		// do termination processing.
+
+		PSJOBFLAG_TERMINATED jobobject@ PsiJob_StatusFlags + |=
+
+		// signal termination event
+
+		0 // priboost
+		jobobject@ PsiJob_TerminationEvent + // event
+		KeEventSignal
+	end
+
 	jobobject@ PsiJobUnlock
 
 	0 paged@ PsProcessPaged_Job + !
 	0 paged@ PsProcessPaged_JobListNext + !
 	0 paged@ PsProcessPaged_JobListPrev + !
 
-	if (toancestor@)
+	if (cause@ PSJOB_REMOVE_USER ==)
+		// move to parent job of old job object, if any.
+
 		if (jobobject@ PsiJob_ParentJob + @)
 			processobject@ // processobject
 			jobobject@ PsiJob_ParentJob + @ // jobobject
 			PsiJobAddProcess ok!
 		end
-	end elseif (jobobject@ PsiJob_ProcessListHead + @ ~~)
-		// job object transitioned to zero processes.
-		// do termination processing.
-
-
 	end
 
 	jobobject@ ObObjectDereferenceByPointer drop
@@ -487,7 +499,7 @@ fn PsiJobAddProcess { processobject jobobject -- ok }
 		// remove the process from its job object now, before we lock the new
 		// job. otherwise we will get an arbitrary lock ordering.
 
-		0 // toancestor
+		PSJOB_REMOVE_SWITCH // cause
 		processobject@ // processobject
 		PsiJobRemoveProcess drop
 	end

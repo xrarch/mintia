@@ -4,11 +4,6 @@ struct KeTime
 	4 MsPart
 endstruct
 
-const TIMEEARLIER 0
-const TIMEEQUALTO 1
-const TIMELATER 2
-
-extern KeTimeCompare { time1 time2 -- result }
 extern KeTimeAddMs { ms time -- }
 extern KeTimeSubMs { ms time -- }
 

@@ -24,6 +24,9 @@ public KiOldIPL
 var KiDispatchEvents 0
 public KiDispatchEvents
 
+var KiClockTicks 0
+public KiClockTicks
+
 fn KeIPLRaise { newipl -- oldipl }
 	KeIPLCurrent@ oldipl!
 
@@ -163,8 +166,10 @@ fn KiSoftwareInterruptRequest { ipl -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn KeClockTick { uptime interval trapframe -- }
+fn KeClockTick { interval trapframe -- }
 	// run from interrupt context.
+
+	auto cth
 
 	auto stats
 	KeStatistics stats!
@@ -173,28 +178,31 @@ fn KeClockTick { uptime interval trapframe -- }
 
 	1 stats@ OSStatistics_ClockTicks + +=
 
+	auto ticks
+	KiClockTicks@ 1 + ticks!
+	ticks@ KiClockTicks!
+
 	// update the amount of time spent at the previous IPL.
 
 	interval@ stats@ OSStatistics_IPLTimes + KiOldIPL@ 2 << + +=
 
-	auto cmp
-	KiTimerExpirationEarliest KeTime_SecPart + @ uptime@ KeTime_SecPart + @ - cmp!
+	// check if the earliest timer in the current calendar queue entry has
+	// expired.
 
-	if (cmp@ ~~)
-		if (KiTimerExpirationEarliest KeTime_MsPart + @ uptime@ KeTime_MsPart + @ <=)
+	if (KiTimerExpirationTicks@ ~~)
+		[ticks@ TIMERTABLESIZE 1 - & 1 << 1 +]KiTimerTable@ cth!
+
+		if (cth@ ticks@ <=)
+			cth@ KiTimerExpirationTicks!
 			KIDISPATCHIRQ_TIMER KiDispatchEvents |=
 			1 IPLDPC << KiPendingSoftwareInterrupts |=
 		end
-	end elseif (cmp@ z<)
-		KIDISPATCHIRQ_TIMER KiDispatchEvents |=
-		1 IPLDPC << KiPendingSoftwareInterrupts |=
 	end
 
 	if (KeDPCActive@)
 		interval@ stats@ OSStatistics_DPCTimeMs + +=
 	end
 
-	auto cth
 	KeThreadCurrent@ cth!
 
 	if (cth@ ~~)

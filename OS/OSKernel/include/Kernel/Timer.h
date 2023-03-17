@@ -4,7 +4,7 @@ struct KeTimer
 	4 Next
 	4 Prev
 	4 Enqueued
-	KeTime_SIZEOF ExpiryTime
+	4 ExpiryTicks
 	4 DPC
 endstruct
 

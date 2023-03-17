@@ -54,6 +54,15 @@ externptr KiDispatchEvents
 
 externptr KiQuantumUnitsDefault
 
-const KIDISPATCHIRQ_DPC        1
-const KIDISPATCHIRQ_TIMER      2
-const KIDISPATCHIRQ_QUANTUMEND 4
+externptr KiClockTicks
+
+externptr KiTimerTable
+externptr KiTimerExpirationTicks
+
+// must be a power of two
+
+const TIMERTABLESIZE 128
+
+const KIDISPATCHIRQ_TIMER      1
+const KIDISPATCHIRQ_QUANTUMEND 2
+const KIDISPATCHIRQ_DPC        4

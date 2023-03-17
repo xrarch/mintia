@@ -135,9 +135,9 @@ struct KeThread
 	1 WaitIPLB
 
 	1 WaitBlockCountB
-	1 WaitCountB
 	1 WasPreemptedB
 	1 QuantumEndCountB // since last voluntary block
+	1 AlignmentB
 endstruct
 
 const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)

@@ -25,7 +25,6 @@ struct KeDispatchWaitBlock
 	4 Prev
 	4 Next
 
-	4 WaitStatusReturn
 	4 WaitType
 
 	4 WaitIndex

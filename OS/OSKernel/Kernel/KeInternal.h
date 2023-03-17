@@ -11,7 +11,7 @@ extern KiThreadBasePrioritySet { priority thread -- }
 
 extern KiDispatchInitialize { name type dobject -- }
 
-extern KiDispatchSatisfyAll { waitstatus priboost object -- count }
+extern KiDispatchSatisfyAll { waitstatus priboost object -- }
 extern KiDispatchSatisfyFirst { waitstatus priboost object signal -- wokenthread }
 
 extern KiMutexOwnerSet { thread mutex -- }
@@ -29,7 +29,7 @@ extern KiIdleThreadEntry { -- }
 extern KiThreadSelect { thread -- nextthread }
 
 extern KiThreadWait { waitipl waitmode alertable explicitstatus -- ok }
-extern KiThreadWaitBlocksDequeue { thread -- }
+extern KiThreadWaitBlocksDequeue { satisfy thread -- }
 
 extern KiThreadYieldQuantum { -- }
 

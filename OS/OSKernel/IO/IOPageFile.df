@@ -912,14 +912,15 @@ fn IOiPageFileContract { -- }
 
 	if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ <)
 		// don't shrink pagefiles while pages are being dumped to disk
+
 		return
 	end
 
 	auto potentialcontraction
 	MmCommitLimit@ MmCommitUsage@ - potentialcontraction!
 
-	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION 2 * <)
-		// if commit usage is within 2 megabytes of the commit limit then it
+	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION <)
+		// if commit usage is within 512KB of the commit limit then it
 		// probably isn't worth it to bother scanning the pagefiles.
 
 		return
@@ -949,7 +950,7 @@ fn IOiPageFileContract { -- }
 		1 i +=
 	end
 
-	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION 2 * <)
+	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION <)
 		return
 	end
 
@@ -1018,53 +1019,55 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 		return
 	end
 
+	if (contraction@ MmCommitLimit@ >)
+		// this check is fine since the currently executing thread is the only
+		// one that is allowed to shrink the commit limit. others can grow it,
+		// but it can only be shrunk by this one worker thread.
+
+		return
+	end
+
 	while (contraction@ IOPAGEFILEMINIMUMEXTENSION >=)
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		if (contraction@ MmCommitLimit@ >)
-			ipl@ KeIPLLower
+		// only contract if the new commit limit would leave a margin of >=64
+		// pages from the current commit usage. this attempts to avoid
+		// excessive expansion and contraction cycles.
 
-			break
-		end
-
-		if (MmCommitLimit@ contraction@ - MmCommitUsage@ IOPAGEFILEMINIMUMEXTENSION 2 * + <)
-			ipl@ KeIPLLower
-
-			break
-		end
-
-		auto clear
-		contraction@ // runlength
-		pagefile@ IOiPageFile_CurrentSize + @ contraction@ - // index
-		pagefile@ IOiPageFile_BitmapHeader + // header
-		ComBitmapCheckClearBits clear!
-
-		if (clear@)
-			// chop!
-
+		if (MmCommitLimit@ contraction@ - MmCommitUsage@ 64 + >=)
+			auto clear
 			contraction@ // runlength
 			pagefile@ IOiPageFile_CurrentSize + @ contraction@ - // index
 			pagefile@ IOiPageFile_BitmapHeader + // header
-			ComBitmapSetBits
+			ComBitmapCheckClearBits clear!
 
-			contraction@ pagefile@ IOiPageFile_CurrentSize + -=
-			contraction@ IOSwapPagesCount -=
-			contraction@ MmCommitLimit -=
+			if (clear@)
+				// chop!
 
-			0 pagefile@ IOiPageFile_Hint + !
+				contraction@ // runlength
+				pagefile@ IOiPageFile_CurrentSize + @ contraction@ - // index
+				pagefile@ IOiPageFile_BitmapHeader + // header
+				ComBitmapSetBits
 
-			ipl@ KeIPLLower
+				contraction@ pagefile@ IOiPageFile_CurrentSize + -=
+				contraction@ IOSwapPagesCount -=
+				contraction@ MmCommitLimit -=
 
-			pagefile@ IOiPageFile_CurrentSize + @ PAGESHIFT << // newsize
-			0 // growing
-			0 // keeplocked
-			0 // zero
-			OSFILEFLAG_NOCACHE // flags
-			pagefile@ IOiPageFile_CapturedFCB + @ // fcb
-			IOFileControlBlockTruncate drop drop
+				0 pagefile@ IOiPageFile_Hint + !
 
-			return
+				ipl@ KeIPLLower
+
+				pagefile@ IOiPageFile_CurrentSize + @ PAGESHIFT << // newsize
+				0 // growing
+				0 // keeplocked
+				0 // zero
+				OSFILEFLAG_NOCACHE // flags
+				pagefile@ IOiPageFile_CapturedFCB + @ // fcb
+				IOFileControlBlockTruncate drop drop
+
+				return
+			end
 		end
 
 		ipl@ KeIPLLower

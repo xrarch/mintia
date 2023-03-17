@@ -1,8 +1,3 @@
-#include "<inc>/HALRTC.h"
-
-// needs KeTimer.h
-// needs KeDispatch.h
-
 const KERNELMODE 1
 const USERMODE   2
 
@@ -13,6 +8,9 @@ const PROCESSSTATE_TRANSITION 2
 const PROCESSSTATE_OUTSWAPPED 3
 
 const PRIORITIES 32
+
+const QUANTUMDEFAULTMS    20 // in milliseconds (next multiple of platform clock will be used)
+const QUANTUMUNITSPERTICK 2
 
 struct KeProcess
 	KEPROCESSNAMELEN Name
@@ -55,10 +53,6 @@ const THREADSTATUS_WAITINGUNALERTABLE 6 // thread is waiting unalertably
 const THREADSTATUS_TERMINATED         7 // thread yielded for the final time
 const THREADSTATUS_TRANSITION         8 // thread is in the global swap list
 const THREADSTATUS_STANDBY            9 // thread is currently the KiThreadNext
-
-const THREADDEFAULTQUANTUM 30 // in milliseconds. should divide evenly with QUANTUMUNITSPERTICK
-
-const QUANTUMUNITSPERTICK 3
 
 const KETHREADNAMELEN   16
 const KETHREADSTACKSIZE 4096
@@ -139,8 +133,6 @@ struct KeThread
 	1 QuantumEndCountB // since last voluntary block
 	1 AlignmentB
 endstruct
-
-const THREADDEFAULTQUANTUMUNITS (THREADDEFAULTQUANTUM HALRTCINTERVAL / QUANTUMUNITSPERTICK *)
 
 extern KeSafeCopyIn { dest src size -- ok }
 extern KeSafeCopyOut { dest src size -- ok }

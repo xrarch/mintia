@@ -1,7 +1,3 @@
-#ifndef _HALRTC_
-
-#define _HALRTC_
-
 fnptr HALRTCQueryF { time -- }
 fnptr HALUptimeQueryF { time -- }
 
@@ -10,17 +6,4 @@ extern HALUptimeQuery { time -- }
 
 externptr HALRTCQueryFunction
 externptr HALUptimeQueryFunction
-
-#ifdef FOX32
-
-const HALRTCINTERVAL 15
-
-#else
-#ifdef XRSTATION
-
-const HALRTCINTERVAL 10
-
-#endif
-#endif
-
-#endif
+externptr HALRTCInterval

@@ -52,6 +52,7 @@ LIBRARIES := OSDLL $(ULIBRARIES)
 
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \
+				BootDrivers/Fat \
 				KDebug
 
 COMMANDS := $(wildcard OS/Commands/*)

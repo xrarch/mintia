@@ -1,0 +1,204 @@
+//
+// Implements the FAT driver for MINTIA.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "Fat.h"
+
+datasection "text"
+
+table DriverFat
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"Fat"                                // name
+	pointerof DriverFatDispatch          // dispatch table
+	0                                    // flags
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverFatFilesystem
+	0                              // next
+	0                              // prev
+
+	pointerof DriverFat            // driver
+
+	pointerof DriverFatMount       // mountfunction
+	pointerof DriverFatUnmount     // unmountfunction
+	pointerof DriverFatFlush       // flushfunction
+	pointerof DriverFatUpdateFlags // updateflags
+	0                              // flags
+	pointerof DriverFatVolumeQuery // volumequery
+	pointerof FatFCBReclaim        // reclaimfunction
+
+	0                              // reserved
+	0                              // reserved
+	0                              // reserved
+	0                              // reserved
+	0                              // reserved
+	0                              // reserved
+	0                              // reserved
+endtable
+
+table DriverFatDispatch
+	pointerof FatOpen                    // open
+	pointerof FatClose                   // close
+	0                                    // iocontrol
+	0                                    // reserved
+	0                                    // reserved
+	pointerof FatUnlink                  // unlink
+	pointerof FatParse                   // parse
+	0                                    // reserved
+	0                                    // flush
+	pointerof FatDeleteObject            // delete object
+	pointerof FatPoke                    // poke
+	pointerof FatSetSecurity             // setsecurity
+	pointerof FatRename                  // rename
+	0                                    // readblock
+	0                                    // writeblock
+	pointerof FatTruncate                // truncate
+	pointerof FatReadDirectory           // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reserved
+	0                                    // cancel
+	pointerof FatReadWriteFile           // read
+	pointerof FatReadWriteFile           // write
+endtable
+public DriverFatDispatch
+
+datasection "data"
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	fnsection "PAGE$text"
+
+	if (stage@ STAGE_THREAD ==)
+		DriverFatFilesystem // filesystem
+		IOFilesystemRegister ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 ok!
+end
+
+fn (IOFilesystemMountFunction) DriverFatMount { flags deviceobject -- fsdeviceobject ok }
+	fnsection "PAGE$text"
+
+	if (1)
+		"hi!\n" Printf
+		STATUS_BAD_FILESYSTEM ok!
+		return
+	end
+
+	OSMOUNT_READONLY flags |=
+
+	deviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockCacheCheck ok! drop
+
+	if (ok@)
+		return
+	end
+
+	auto pageframe
+	auto bcb
+
+	0 // offset
+	deviceobject@ IODevice_FileControlBlock + @ // fcb
+	VcFileControlBlockMap ok! bcb! pageframe!
+
+	if (ok@)
+		return
+	end
+
+	bcb@ VcBufferDecrementMapCount drop
+
+	STATUS_NOT_SUPPORTED ok!
+end
+
+fn (IOFilesystemUnmountFunction) DriverFatUnmount { fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	if (fatdata@ FatData_FCBRefTotal + @)
+		STATUS_DEVICE_BUSY ok!
+
+		return
+	end
+
+	1 // destroy
+	mount@ // mount
+	FatFCBCacheFlush ok!
+
+	if (ok@)
+		return
+	end
+
+//	mount@ FatBlockBitmapUninitialize
+
+	mount@ FSVolumeFlush drop
+end
+
+fn (IOFilesystemFlushFunction) DriverFatFlush { shutdown fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	// "DriverAFSFlush: TODO\n" KeCrash
+
+	// I mean, we access the volume through the page cache,
+	// so we don't have anything to flush I don't think...
+
+	0 ok!
+end
+
+fn (IOFilesystemUpdateFlagsFunction) DriverFatUpdateFlags { newflags oldflags fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	STATUS_NOT_SUPPORTED ok!
+end
+
+fn (IOFilesystemVolumeQueryFunction) DriverFatVolumeQuery { query fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	auto fatdata
+	fsdeviceobject@ IODevice_RelevantMount + @ IOMount_Extension + @ fatdata!
+
+	fatdata@ FatData_VolSizeBytes + @ query@ OSMountInformation_VolumeCapacity + !
+	fatdata@ FatData_UsedBytes + @ query@ OSMountInformation_VolumeUsed + !
+
+	0 ok!
+end

@@ -1,6 +1,7 @@
 struct OSMountInformation
 	OBNAMEMAX VolumeName
 	OBNAMEMAX FilesystemName
+	OBNAMEMAX VolumeLabel
 	
 	4 Flags
 

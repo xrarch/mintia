@@ -41,6 +41,10 @@ struct IODevice
 	4 ConsoleHeader
 
 	4 AttachedBy
+
+	// pool-allocated label
+
+	4 Label
 endstruct
 
 extern IOVolumeDeviceCreate { mountflags extensionsize sizeinbytes filesystem deviceobject -- mount fsdeviceobject ok }
@@ -54,6 +58,9 @@ extern IODeviceCreateFileObject { flags deviceobject -- fileobject ok }
 extern IODeviceCreateEx { extensionsize type name sizeinbytes driver permissions permanent -- deviceobject ok }
 extern IODeviceCreate { extensionsize type name sizeinbytes driver permissions -- deviceobject ok }
 extern IODeviceDeleteFileObject { object -- ok }
+
+extern IODeviceSetLabel { label deviceobject -- ok }
+extern IODeviceGetLabel { deviceobject -- label }
 
 extern IODeviceDirectoryInsert { deviceobject -- ok }
 

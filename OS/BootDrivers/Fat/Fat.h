@@ -108,6 +108,9 @@ struct FatLFNEntry
 	4 Name3                       // 28
 endstruct
 
+const FAT32_ACTIVEFAT      0x0F
+const FAT32_MIRRORDISABLED 0x80
+
 const FAT_ORDINAL_LAST 0x40
 
 const FAT_ENTRY_FREE 0x00000000
@@ -144,6 +147,8 @@ struct FatData
 	4 FCBRefTotal
 
 	4 FatType
+	4 ClusterCount
+	4 DataStartSector
 
 	// decoded BPB
 
@@ -155,10 +160,9 @@ struct FatData
 	4 RootEntryCount
 	4 TotalSectors
 	4 FatSize
-	4 HiddenSectors
 	12 VolumeLabel
 	4 VolumeID
-	4 RootCluster
+	4 RootFirstCluster
 endstruct
 
 extern FatFCBCacheFlush { destroy mount -- ok }

@@ -113,37 +113,266 @@ fn (FDriverInit) DriverInit { stage -- ok }
 	0 ok!
 end
 
-fn (IOFilesystemMountFunction) DriverFatMount { flags deviceobject -- fsdeviceobject ok }
+fn FatDecodeBPB { fatdata bpb -- ok }
 	fnsection "PAGE$text"
 
-	if (1)
-		"hi!\n" Printf
-		STATUS_BAD_FILESYSTEM ok!
+	auto alignedbuf
+	4 alloc alignedbuf!
+
+	// decode the BPB and verify the filesystem while we're at it.
+
+	STATUS_BAD_FILESYSTEM ok!
+
+	// verify the JmpBoot
+
+	if (bpb@ gb 0xE9 ~=
+		bpb@ gb 0xEB ~= &&
+		bpb@ gb 0x49 ~= &&)
+
 		return
 	end
 
-	OSMOUNT_READONLY flags |=
+	if (bpb@ FatOnDiskBPB_MediaB + gb 0xF0 ~=
+		bpb@ FatOnDiskBPB_MediaB + gb 0xF8 ~= &&
+		bpb@ FatOnDiskBPB_MediaB + gb 0xF9 ~= &&
+		bpb@ FatOnDiskBPB_MediaB + gb 0xFB ~= &&
+		bpb@ FatOnDiskBPB_MediaB + gb 0xFC ~= &&
+		bpb@ FatOnDiskBPB_MediaB + gb 0xFD ~= &&
+		bpb@ FatOnDiskBPB_MediaB + gb 0xFE ~= &&
+		bpb@ FatOnDiskBPB_MediaB + gb 0xFF ~= &&)
 
-	deviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockCacheCheck ok! drop
+		return
+	end
+
+	auto clustercount
+	auto sectors
+	auto datastart
+	auto bits
+	auto bytespersector
+	auto sectorspercluster
+	auto rootentrycount
+	auto fatsize
+	auto fatcount
+	auto reservedsectorcount
+
+	bpb@ FatOnDiskBPB_ReservedSectorCountI + gi reservedsectorcount!
+
+	if (reservedsectorcount@ ~~)
+		return
+	end
+
+	bpb@ FatOnDiskBPB_FatCountB + gb fatcount!
+
+	if (fatcount@ ~~)
+		return
+	end
+
+	0 rootentrycount!
+
+	alignedbuf@ // dest
+	bpb@ FatOnDiskBPB_BytesPerSectorI_U + // src
+	2 // sz
+	memcpy
+
+	alignedbuf@ gi bytespersector!
+
+	bpb@ FatOnDiskBPB_SectorsPerClusterB + gb sectorspercluster!
+
+	auto bytespercluster
+	bytespersector@ sectorspercluster@ * bytespercluster!
+
+	if (bytespersector@ 128 ~=
+		bytespersector@ 256 ~= &&
+		bytespersector@ 512 ~= &&
+		bytespersector@ 1024 ~= &&
+		bytespersector@ 2048 ~= &&
+		bytespersector@ 4096 ~= &&)
+
+		return
+	end
+
+	if (sectorspercluster@ 1 ~=
+		sectorspercluster@ 2 ~= &&
+		sectorspercluster@ 4 ~= &&
+		sectorspercluster@ 8 ~= &&
+		sectorspercluster@ 16 ~= &&
+		sectorspercluster@ 32 ~= &&
+		sectorspercluster@ 64 ~= &&
+		sectorspercluster@ 128 ~= &&)
+
+		return
+	end
+
+	alignedbuf@ // dest
+	bpb@ FatOnDiskBPB_TotalSectors16I_U + // src
+	2 // sz
+	memcpy
+
+	alignedbuf@ gi sectors!
+
+	if (sectors@ ~~)
+		bpb@ FatOnDiskBPB_TotalSectors32 + @ sectors!
+	end elseif (bpb@ FatOnDiskBPB_TotalSectors32 + @)
+		// it's illegal for there to be both of these
+		return
+	end
+
+	0 bits!
+
+	if (bpb@ FatOnDiskBPB_FatSize16I + gi ~~)
+		// FAT32
+
+		if (bpb@ FatOnDiskBPB32_FilesystemVersionI + gi 0 ~=)
+			return
+		end
+
+		if (bpb@ FatOnDiskBPB32_ExtendedFlagsI + gi FAT32_MIRRORDISABLED &)
+			return
+		end
+
+		bpb@ FatOnDiskBPB32_FatSize32 + @ fatsize!
+
+		if (fatsize@ ~~)
+			return
+		end
+
+		fatcount@ fatsize@ * reservedsectorcount@ + datastart!
+
+		bpb@ FatOnDiskBPB32_RootCluster + @ fatdata@ FatData_RootFirstCluster + !
+
+		32 bits!
+	end else
+		// FAT12/16
+
+		bpb@ FatOnDiskBPB_FatSize16I + gi fatsize!
+
+		fatcount@ fatsize@ * reservedsectorcount@ + datastart!
+
+		// calculate the size of the root directory and offset the datastart
+		// by that amount. this means that on FAT12/16 we must access the root
+		// directory through the volume file.
+
+		alignedbuf@ // dest
+		bpb@ FatOnDiskBPB_RootEntryCountI_U + // src
+		2 // sz
+		memcpy
+
+		alignedbuf@ gi rootentrycount!
+
+		if (rootentrycount@ ~~)
+			return
+		end
+
+		datastart@ fatdata@ FatData_RootFirstCluster + !
+
+		rootentrycount@ FatDirectoryEntry_SIZEOF * bytespersector@ / datastart +=
+	end
+
+	sectors@ datastart@ -
+	sectorspercluster@ /
+	clustercount!
+
+	if (bits@ ~~)
+		// determine whether this is FAT12 or FAT16.
+
+		if (clustercount@ 4087 <)
+			12 bits!
+		end else
+			16 bits!
+		end
+	end
+
+	bits@ fatdata@ FatData_FatType + !
+	clustercount@ fatdata@ FatData_ClusterCount + !
+	datastart@ fatdata@ FatData_DataStartSector + !
+
+	bytespersector@ fatdata@ FatData_SectorSizeBytes + !
+	bytespercluster@ fatdata@ FatData_ClusterSizeBytes + !
+	reservedsectorcount@ fatdata@ FatData_ReservedSectorCount + !
+	fatcount@ fatdata@ FatData_FatCount + !
+	rootentrycount@ fatdata@ FatData_RootEntryCount + !
+	sectors@ fatdata@ FatData_TotalSectors + !
+	fatsize@ fatdata@ FatData_FatSize + !
+
+	// calculate shift value for cluster size
+
+	auto shift
+	0 shift!
+
+	while (shift@ 32 <)
+		if (1 shift@ << bytespercluster@ ==)
+			break
+		end
+
+		1 shift +=
+	end
+
+	if (shift@ 32 ==)
+		return
+	end
+
+	shift@ fatdata@ FatData_ClusterSizeShift + !
+
+	0 ok!
+end
+
+fn (IOFilesystemMountFunction) DriverFatMount { flags deviceobject -- fsdeviceobject ok }
+	fnsection "PAGE$text"
+
+	// for consistency reasons, we have to create our volume device object
+	// first thing. this is because if we were to decode the BPB using the
+	// underlying device's page cache, and we then update the BPB later, those
+	// changes will not be coherent with the underlying device and later
+	// mounts may fail in unexpected ways.
+
+	auto mount
+	flags@ // mountflags
+	FatData_SIZEOF // extensionsize
+	PAGENUMBERMASK // sizeinbytes
+	DriverFatFilesystem // filesystem
+	deviceobject@ // deviceobject
+	IOVolumeDeviceCreate ok! fsdeviceobject! mount!
 
 	if (ok@)
 		return
 	end
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
 
 	auto pageframe
 	auto bcb
 
 	0 // offset
-	deviceobject@ IODevice_FileControlBlock + @ // fcb
+	fsdeviceobject@ IODevice_FileControlBlock + @ // fcb
 	VcFileControlBlockMap ok! bcb! pageframe!
 
 	if (ok@)
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
 		return
 	end
 
-	bcb@ VcBufferDecrementMapCount drop
+	// we now have a viewcache window to the BPB.
+	// first, decode the BPB.
 
-	STATUS_NOT_SUPPORTED ok!
+	fatdata@ // fatdata
+	pageframe@ // bpb
+	FatDecodeBPB ok!
+
+	if (ok@ ~~)
+		fatdata@ FatData_FatType + @ "%d\n" Printf
+
+		STATUS_BAD_FILESYSTEM ok!
+	end
+
+	if (ok@)
+		bcb@ VcBufferDecrementMapCount drop
+
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		return
+	end
 end
 
 fn (IOFilesystemUnmountFunction) DriverFatUnmount { fsdeviceobject -- ok }
@@ -188,17 +417,36 @@ end
 fn (IOFilesystemUpdateFlagsFunction) DriverFatUpdateFlags { newflags oldflags fsdeviceobject -- ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_SUPPORTED ok!
+	STATUS_NOT_IMPLEMENTED ok!
 end
 
 fn (IOFilesystemVolumeQueryFunction) DriverFatVolumeQuery { query fsdeviceobject -- ok }
 	fnsection "PAGE$text"
 
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
 	auto fatdata
-	fsdeviceobject@ IODevice_RelevantMount + @ IOMount_Extension + @ fatdata!
+	mount@ IOMount_Extension + @ fatdata!
 
 	fatdata@ FatData_VolSizeBytes + @ query@ OSMountInformation_VolumeCapacity + !
 	fatdata@ FatData_UsedBytes + @ query@ OSMountInformation_VolumeUsed + !
+
+	auto label
+	fatdata@ FatData_VolumeLabel + label!
+
+	if (label@ gb ~~)
+		// volume label is empty, try device label
+
+		mount@ IOMount_UnderlyingDeviceObject + @ IODeviceGetLabel label!
+	end
+
+	if (label@)
+		query@ OSMountInformation_VolumeLabel + // dest
+		label@ // src
+		OBNAMEMAX 1 - // max
+		strncpy
+	end
 
 	0 ok!
 end

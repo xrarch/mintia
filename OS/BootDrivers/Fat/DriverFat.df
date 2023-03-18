@@ -294,9 +294,28 @@ fn FatDecodeBPB { fatdata bpb -- ok }
 	sectors@ fatdata@ FatData_TotalSectors + !
 	fatsize@ fatdata@ FatData_FatSize + !
 
+	auto shift
+
+	// calculate shift value for sector size
+
+	0 shift!
+
+	while (shift@ 32 <)
+		if (1 shift@ << bytespersector@ ==)
+			break
+		end
+
+		1 shift +=
+	end
+
+	if (shift@ 32 ==)
+		return
+	end
+
+	shift@ fatdata@ FatData_SectorSizeShift + !
+
 	// calculate shift value for cluster size
 
-	auto shift
 	0 shift!
 
 	while (shift@ 32 <)
@@ -360,19 +379,47 @@ fn (IOFilesystemMountFunction) DriverFatMount { flags deviceobject -- fsdeviceob
 	pageframe@ // bpb
 	FatDecodeBPB ok!
 
-	if (ok@ ~~)
-		fatdata@ FatData_FatType + @ "%d\n" Printf
-
-		STATUS_BAD_FILESYSTEM ok!
-	end
+	bcb@ VcBufferDecrementMapCount drop
 
 	if (ok@)
-		bcb@ VcBufferDecrementMapCount drop
-
 		fsdeviceobject@ IOVolumeDeviceUninitialize
 
 		return
 	end
+
+	// set the volume size
+
+	fatdata@ FatData_TotalSectors + @
+	fatdata@ FatData_SectorSizeShift + @ <<
+	fatdata@ FatData_VolSizeBytes + !
+
+	// reset some fields
+
+	0 fatdata@ FatData_UsedBytes + !
+	0 fatdata@ FatData_FCBRefTotal + !
+
+	// set the volume file's size to match the start of the data area.
+
+	fatdata@ FatData_DataStartSector + @
+	fatdata@ FatData_SectorSizeShift + @ <<
+	fsdeviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockSetSize
+
+	// create the root directory FCB.
+
+	mount@ FatRootDirectoryCreate ok!
+
+	if (ok@)
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		return
+	end
+
+	fatdata@ FatData_DataStartSector + @
+	fatdata@ FatData_SectorSizeShift + @ << "%d\n" Printf
+
+	fatdata@ FatData_RootEntryCount + @ "%d\n" Printf
+
+	fatdata@ FatData_RootFirstCluster + @ "%d\n" Printf
 end
 
 fn (IOFilesystemUnmountFunction) DriverFatUnmount { fsdeviceobject -- ok }

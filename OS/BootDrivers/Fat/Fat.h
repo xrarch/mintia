@@ -150,23 +150,61 @@ struct FatData
 	4 ClusterCount
 	4 DataStartSector
 
+	12 VolumeLabel
+
 	// decoded BPB
 
 	4 SectorSizeBytes
 	4 ClusterSizeBytes
 	4 ClusterSizeShift
+	4 SectorSizeShift
 	4 ReservedSectorCount
 	4 FatCount
 	4 RootEntryCount
 	4 TotalSectors
 	4 FatSize
-	12 VolumeLabel
 	4 VolumeID
 	4 RootFirstCluster
 endstruct
 
+struct FatFCBDataNonpaged
+	4 LastFATLinkClusterOff
+	4 LastFATLinkValue
+endstruct
+
+struct FatFCBData
+	// ExSplayTree node
+	4 Parent
+	4 LeftChild
+	4 RightChild
+	4 Value
+
+	4 FCB
+
+	4 ReclaimNext
+	4 ReclaimPrev
+
+	4 Name
+
+	4 ParentDirFCB
+	4 DirentOffset
+
+	4 StartingCluster
+
+	4 InitialFlags
+	4 References
+
+	4 Flags
+
+	4 Nonpaged
+endstruct
+
 extern FatFCBCacheFlush { destroy mount -- ok }
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
+
+extern FatRootDirectoryCreate { mount -- ok }
+extern FatFCBCreate { flags filetype mount -- fcb ok }
+extern FatFCBDelete { writeout fcb -- }
 
 extern FatReadWriteFile { iopl -- done ok }
 extern FatReadDirectory { seek dirent fcb -- nextseek ok }
@@ -180,4 +218,4 @@ extern FatRename { srcname srcfcb destname destfcb -- ok }
 extern FatPoke { poketype object -- }
 extern FatSetSecurity { uid gid permissions object -- ok }
 
-extern FatBlockMap { fileoffset fcb kflags -- blkno ok }
+extern FatBlockMap { fileoffset fcb kflags -- voloffset ok }

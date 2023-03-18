@@ -50,3 +50,99 @@ fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -
 
 	0 actualcount!
 end
+
+fn FatFCBCreate { flags filetype mount -- fcb ok }
+	fnsection "PAGE$text"
+
+	if (flags@ OSFILEFLAG_PAGEFILE &)
+		mount@ IOMount_FsDeviceObject + @ // devobj
+		filetype@ // filetype
+		0 // flags
+		IOFileControlBlockCreate ok! fcb!
+	end else
+		mount@ IOMount_FsDeviceObject + @ // devobj
+		filetype@ // filetype
+		IOFCBFLAG_PAGED // flags
+		IOFileControlBlockCreate ok! fcb!
+	end
+
+	if (ok@)
+		return
+	end
+
+	auto fcbdata
+	if (flags@ OSFILEFLAG_PAGEFILE & ~~)
+		FatFCBData_SIZEOF // bytes
+		'FFCp' // tag
+		PAGED // flags
+		MmAllocWithTag ok! fcbdata!
+	end else
+		FatFCBData_SIZEOF // bytes
+		'FFCX' // tag
+		0 // flags
+		MmAllocWithTag ok! fcbdata!
+	end
+
+	if (ok@)
+		-1 // writeout
+		fcb@ // fcb
+		IOFileControlBlockDelete drop
+
+		return
+	end
+
+	auto fcbnp
+	FatFCBDataNonpaged_SIZEOF // bytes
+	'FFCn' // tag
+	0 // flags
+	MmAllocWithTag ok! fcbnp!
+
+	if (ok@)
+		fcbdata@ MmFree
+
+		-1 // writeout
+		fcb@ // fcb
+		IOFileControlBlockDelete drop
+
+		return
+	end
+
+	fcbnp@ fcbdata@ FatFCBData_Nonpaged + !
+	fcbdata@ fcb@ IOFileControlBlockSetContext
+
+	0 fcbdata@ FatFCBData_Parent + !
+	0 fcbdata@ FatFCBData_LeftChild + !
+	0 fcbdata@ FatFCBData_RightChild + !
+	0 fcbdata@ FatFCBData_Value + !
+
+	fcb@ fcbdata@ FatFCBData_FCB + !
+
+	0 fcbdata@ FatFCBData_ReclaimNext + !
+	0 fcbdata@ FatFCBData_ReclaimPrev + !
+
+	0 fcbdata@ FatFCBData_Name + !
+
+	0 fcbdata@ FatFCBData_ParentDirFCB + !
+	0 fcbdata@ FatFCBData_DirentOffset + !
+
+	-1 fcbdata@ FatFCBData_StartingCluster + !
+
+	flags@ fcbdata@ FatFCBData_InitialFlags + !
+	1 fcbdata@ FatFCBData_References + !
+
+	0 fcbdata@ FatFCBData_Flags + !
+end
+
+fn FatFCBDelete { writeout fcb -- }
+	fnsection "PAGE$text"
+
+	auto fcbdata
+	fcb@ IOFileControlBlockGetContext fcbdata!
+
+	writeout@ // writeout
+	fcb@ // fcb
+	IOFileControlBlockDelete drop
+
+	fcbdata@ FatFCBData_Nonpaged + @ MmFree
+	fcbdata@ MmFree
+end

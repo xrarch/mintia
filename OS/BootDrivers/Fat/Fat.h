@@ -212,6 +212,11 @@ struct FatFCBData
 	4 Nonpaged
 endstruct
 
+const FATFILECONTEXT_UPDATEONCLOSE 1
+const FATFILECONTEXT_WRITABLE      2
+
+const FATFILEFLAG_DELETE 1
+
 extern FatFCBCacheFlush { destroy mount -- ok }
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 

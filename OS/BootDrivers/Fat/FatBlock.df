@@ -31,6 +31,36 @@
 
 #include "Fat.h"
 
+fn FatWalkFAT { startcount startcluster mount kflags -- cluster ok }
+	startcluster@ cluster!
+
+	auto fatbcb
+	0 fatbcb!
+
+	auto fattype
+	mount@ IOMount_Extension + @ FatData_FatType + @ fattype!
+
+	0 ok!
+
+	while (startcount@)
+		fattype@ // fattype
+		cluster@ // index
+		mount@ // mount
+		fatbcb@ // lastbcb
+		FatLookupEntryByIndex ok! cluster! drop fatbcb!
+
+		if (ok@)
+			break
+		end
+
+		1 startcount -=
+	end
+
+	if (fatbcb@)
+		fatbcb@ VcBufferDecrementMapCount drop
+	end
+end
+
 fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 	// convert a file offset within an FCB to an absolute volume offset.
 
@@ -40,7 +70,78 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 	// things up. if thats not the case, we have to start at the first cluster
 	// number.
 
-	STATUS_NOT_IMPLEMENTED ok!
+	0 ok!
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto mount
+	fcb@ IOFileControlBlock_Paged + @
+	IOFileControlBlockPaged_DeviceObject + @
+	IODevice_RelevantMount + @ mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	fatdata@ FatData_ClusterSizeShift + @ fileoffset >>=
+
+	auto firstlink
+	fcbdata@ FatFCBData_StartingCluster + @ firstlink!
+
+	if (fileoffset@ 0 ==)
+		// bit of a fast path
+
+		firstlink@ 2 -
+		fatdata@ FatData_ClusterSizeShift + @ <<
+		fatdata@ FatData_DataStartByteOffset + @ + voloffset!
+
+		return
+	end
+
+	auto fcbnp
+	fcbdata@ FatFCBData_Nonpaged + @ fcbnp!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto lastlookup
+	fcbnp@ FatFCBDataNonpaged_LastFATLinkClusterOff + @ lastlookup!
+
+	auto walkcount
+	auto walkstart
+
+	if (fileoffset@ lastlookup@ >)
+		fileoffset@ lastlookup@ - walkcount!
+		fcbnp@ FatFCBDataNonpaged_LastFATLinkValue + @ walkstart!
+	end else
+		fileoffset@ walkcount!
+		firstlink@ walkstart!
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	walkcount@ // startcount
+	walkstart@ // startcluster
+	mount@ // mount
+	kflags@ // kflags
+	FatWalkFAT ok! voloffset!
+
+	if (ok@)
+		return
+	end
+
+	HALCPUInterruptDisable rs!
+
+	if (fileoffset@ lastlookup@ >= fileoffset@ 8 >= ||)
+		fileoffset@ fcbnp@ FatFCBDataNonpaged_LastFATLinkClusterOff + !
+		voloffset@ fcbnp@ FatFCBDataNonpaged_LastFATLinkValue + !
+	end
+
+	rs@ HALCPUInterruptRestore
+
+	voloffset@ 2 -
+	fatdata@ FatData_ClusterSizeShift + @ <<
+	fatdata@ FatData_DataStartByteOffset + @ + voloffset!
 end
 
 fn FatInterpretEntry { entry fattype -- meaning }

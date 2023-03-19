@@ -153,6 +153,7 @@ struct FatData
 	4 FatType
 	4 ClusterCount
 	4 DataStartSector
+	4 DataStartByteOffset
 
 	12 VolumeLabel
 

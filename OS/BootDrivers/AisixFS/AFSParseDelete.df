@@ -51,16 +51,16 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 	60 alloc pcomp!
 
 	auto mount
-	initialfcb@ IOFileControlBlockGetMount mount!
+	initialfcb@ FSFileControlBlockGetMount mount!
 
 	if (path@ gb)
-		if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+		if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			STATUS_NOT_A_DIRECTORY ok!
 
 			return
 		end
 
-		if (initialfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+		if (initialfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
 			initialfcb@ IOFileControlBlockCacheCheck ok! drop
 
 			if (ok@)
@@ -95,7 +95,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 			end
 
 			auto fcbdata
-			initialfcb@ IOFileControlBlockGetContext fcbdata!
+			initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 			// more path, traverse
 
@@ -157,15 +157,15 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 
 			if (pcomp@ ".." strcmp)
 				auto iparent
-				initialfcb@ IOFileControlBlockGetContext AFSFCBData_IParent + @ iparent!
+				initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_IParent + @ iparent!
 
-				if (iparent@ initialfcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ ==)
+				if (iparent@ initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_INum + @ ==)
 					continue
 				end
 
 				0 // flags
 				iparent@ // inum
-				initialfcb@ IOFileControlBlockGetMount // mount
+				initialfcb@ FSFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
 
 				initialfcb@ IOFileControlBlockUnlock
@@ -175,7 +175,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 					return
 				end
 
-				if (nextfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+				if (nextfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
 					nextfcb@ IOFileControlBlockCacheCheck ok! drop
 
 					if (ok@)
@@ -242,12 +242,12 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 			if (path@ gb 0 ==)
 				fileobject@ IOFile_Flags + @ // flags
 				dirent@ AFSDirEnt_INum + @ // inum
-				initialfcb@ IOFileControlBlockGetMount // mount
+				initialfcb@ FSFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
 			end else
 				0 // flags
 				dirent@ AFSDirEnt_INum + @ // inum
-				initialfcb@ IOFileControlBlockGetMount // mount
+				initialfcb@ FSFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
 			end
 
@@ -261,7 +261,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 			end
 
 			if (path@ gb)
-				if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+				if (nextfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 					nextfcb@ AFSFCBDereference
 
 					STATUS_NOT_A_DIRECTORY ok!
@@ -270,8 +270,8 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 				end
 			end
 
-			if (nextfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
-				if (nextfcb@ IOFileControlBlockGetCacheInfoBlock ~~)
+			if (nextfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ==)
+				if (nextfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
 					nextfcb@ IOFileControlBlockCacheCheck ok! drop
 
 					if (ok@)
@@ -294,7 +294,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 
 			nextfcb@ initialfcb!
 
-			if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+			if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 				break
 			end
 		end
@@ -313,7 +313,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 	end
 
 	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATEDIR &)
-		if (initialfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+		if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			initialfcb@ AFSFCBDereference
 
 			STATUS_ALREADY_EXISTS ok!
@@ -336,12 +336,12 @@ fn AFSFillFileObject { fileobject process fcb -- }
 	fnsection "PAGE$text"
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	mount@ AFSMountReference drop
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	fcb@ // fcb
 	fcbdata@ AFSFCBData_Permissions + @ ACCESS_ALL_ALL & // permissions
@@ -401,7 +401,7 @@ fn AFSCreateFile { fileobject process name dirfcb -- ok }
 	end
 
 	auto mount
-	dirfcb@ IOFileControlBlockGetMount mount!
+	dirfcb@ FSFileControlBlockGetMount mount!
 
 	// allocate inode
 
@@ -427,7 +427,7 @@ fn AFSCreateFile { fileobject process name dirfcb -- ok }
 
 	KeThreadCurrent@ PsThreadGetFilePermissions ACCESS_ALL_ALL & inode@ AFSINode_permissions + !
 	KeProcessCurrent PsProcessGetUID inode@ AFSINode_uid + !
-	dirfcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ inode@ AFSINode_iparent + !
+	dirfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_INum + @ inode@ AFSINode_iparent + !
 
 	auto time
 	KeTime_SIZEOF alloc time!
@@ -506,7 +506,7 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	object@ IOFile_FileControlBlock + @ fcb!
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!

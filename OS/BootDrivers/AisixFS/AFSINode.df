@@ -181,8 +181,13 @@ fn (IODispatchPokeFunction) AFSPoke { poketype object -- }
 
 		0 time@ KeTime_MsPart + !
 
-		if (fcb@ IOFileControlBlockGetModifyTime KeTime_SecPart + @ time@ KeTime_SecPart + @ ~=)
-			time@ fcb@ IOFileControlBlockSetModifyTime
+		if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime +
+			KeTime_SecPart + @ time@ KeTime_SecPart + @ ~=)
+
+			fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime + // dest
+			time@ // src
+			KeTime_SIZEOF // sz
+			memcpy
 
 			if (object@ IOFile_Context + @ AFSFILECONTEXT_UPDATEONCLOSE & ~~)
 				// wasn't already marked update-on-close, so do that now.
@@ -208,10 +213,10 @@ fn (IODispatchSetSecurityFunction) AFSSetSecurity { uid gid permissions object -
 	object@ IOFile_FileControlBlock + @ fcb!
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
 		STATUS_READONLY_FILESYSTEM ok!
@@ -244,18 +249,24 @@ fn AFSINodeUpdateModificationTime { fcb -- }
 
 	time@ HALRTCQuery
 
-	if (fcb@ IOFileControlBlockGetModifyTime KeTime_SecPart + @ time@ KeTime_SecPart + @ ~=)
-		time@ fcb@ IOFileControlBlockSetModifyTime
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime +
+		KeTime_SecPart + @ time@ KeTime_SecPart + @ ~=)
+
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime + // dest
+		time@ // src
+		KeTime_SIZEOF // sz
+		memcpy
+
 		fcb@ AFSINodeUpdate
 	end
 end
 
 fn AFSINodeUpdate { fcb -- }
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto inum
 	fcbdata@ AFSFCBData_INum + @ inum!
@@ -278,12 +289,12 @@ fn AFSINodeUpdate { fcb -- }
 		ok@ "AFSINodeUpdate: couldn't read inode (%i)\n" KeCrash
 	end
 
-	fcb@ IOFileControlBlockGetSize inode@ AFSINode_bytesize + !
+	fcb@ IOFileControlBlock_SizeInBytes + @ inode@ AFSINode_bytesize + !
 	fcbdata@ AFSFCBData_FirstFATLink + @ inode@ AFSINode_startblock + !
 	fcbdata@ AFSFCBData_IParent + @ inode@ AFSINode_iparent + !
 	fcbdata@ AFSFCBData_Permissions + @ inode@ AFSINode_permissions + !
 	fcbdata@ AFSFCBData_UID + @ inode@ AFSINode_uid + !
-	fcb@ IOFileControlBlockGetModifyTime KeTime_SecPart + @ inode@ AFSINode_timestamp + !
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime + KeTime_SecPart + @ inode@ AFSINode_timestamp + !
 
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop
@@ -318,13 +329,13 @@ fn AFSFCBRemove { fcb buckethead -- }
 	// assumes fcb cache bucket is locked.
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto n
 	fcbdata@ AFSFCBData_NextFCB + @ n!
 
 	if (n@)
-		fcbdata@ AFSFCBData_PrevFCB + @ n@ IOFileControlBlockGetContext AFSFCBData_PrevFCB + !
+		fcbdata@ AFSFCBData_PrevFCB + @ n@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_PrevFCB + !
 	end else // no next means we were the tail
 		fcbdata@ AFSFCBData_PrevFCB + @ buckethead@ 4 + !
 	end
@@ -332,7 +343,7 @@ fn AFSFCBRemove { fcb buckethead -- }
 	fcbdata@ AFSFCBData_PrevFCB + @ n!
 
 	if (n@)
-		fcbdata@ AFSFCBData_NextFCB + @ n@ IOFileControlBlockGetContext AFSFCBData_NextFCB + !
+		fcbdata@ AFSFCBData_NextFCB + @ n@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_NextFCB + !
 	end else // no prev means we were the head
 		fcbdata@ AFSFCBData_NextFCB + @ buckethead@!
 	end
@@ -345,7 +356,7 @@ fn AFSFCBInsert { fcb buckethead -- }
 	// assumes fcb cache bucket is locked.
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto n
 	buckethead@@ n!
@@ -354,7 +365,7 @@ fn AFSFCBInsert { fcb buckethead -- }
 	n@ fcbdata@ AFSFCBData_NextFCB + !
 
 	if (n@)
-		fcb@ n@ IOFileControlBlockGetContext AFSFCBData_PrevFCB + !
+		fcb@ n@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_PrevFCB + !
 	end else // no head, set tail
 		fcb@ buckethead@ 4 + !
 	end
@@ -426,7 +437,7 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 
 		while (fcb@)
 			auto fcbdata
-			fcb@ IOFileControlBlockGetContext fcbdata!
+			fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 			auto nextfcb
 			fcbdata@ AFSFCBData_NextFCB + @ nextfcb!
@@ -485,13 +496,13 @@ fn AFSDelete { fcb -- }
 	IOFileControlBlockDestroyCache
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto bucket
 	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
@@ -579,7 +590,7 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount fsdeviceobject
 			break
 		end
 
-		fcb@ IOFileControlBlockGetContext fcbdata!
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 		fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
 
 		// we have selected an FCB and locked the appropriate cache bucket.
@@ -618,13 +629,13 @@ fn AFSFCBDelete { fcb -- }
 	// incremented again by removing its name from the directory tree.
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto bucket
 	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
@@ -652,7 +663,7 @@ fn AFSFCBReference { fcb -- }
 	fnsection "PAGE$text"
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	0 mount@ AFSFCBCacheLock drop
 
@@ -667,13 +678,13 @@ fn AFSFCBReferenceLockHeld { fcb -- }
 	// assumes the FCB cache lock is held
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto oldcount
 	fcbdata@ AFSFCBData_References + @ oldcount!
@@ -690,13 +701,13 @@ fn AFSFCBReferenceLockHeld { fcb -- }
 		fcbdata@ AFSFCBData_ReclaimNext + @ ns!
 
 		if (ls@)
-			ns@ ls@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
+			ns@ ls@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_ReclaimNext + !
 		end else
 			ns@ afsdata@ AFSData_ReclaimableListHead + !
 		end
 
 		if (ns@)
-			ls@ ns@ IOFileControlBlockGetContext AFSFCBData_ReclaimPrev + !
+			ls@ ns@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_ReclaimPrev + !
 		end else
 			ls@ afsdata@ AFSData_ReclaimableListTail + !
 		end
@@ -709,7 +720,7 @@ fn AFSFCBDereference { fcb -- }
 	fnsection "PAGE$text"
 
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
@@ -717,7 +728,7 @@ fn AFSFCBDereference { fcb -- }
 	0 mount@ AFSFCBCacheLock drop
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto oldcount
 	fcbdata@ AFSFCBData_References + @ oldcount!
@@ -751,7 +762,7 @@ fn AFSFCBDereference { fcb -- }
 				0 fcbdata@ AFSFCBData_ReclaimNext + !
 
 				t@ fcbdata@ AFSFCBData_ReclaimPrev + !
-				fcb@ t@ IOFileControlBlockGetContext AFSFCBData_ReclaimNext + !
+				fcb@ t@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_ReclaimNext + !
 				fcb@ afsdata@ AFSData_ReclaimableListTail + !
 			end
 
@@ -804,11 +815,11 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 	buckethead@@ fcb!
 
 	while (fcb@)
-		if (fcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ inum@ ==)
+		if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_INum + @ inum@ ==)
 			break
 		end
 
-		fcb@ IOFileControlBlockGetContext AFSFCBData_NextFCB + @ fcb!
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_NextFCB + @ fcb!
 	end
 
 	auto bcb
@@ -932,14 +943,26 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 		0 fcbnp@ AFSFCBDataNonpaged_LastFATLinkBlkOff + !
 		ptr@ AFSINode_startblock + @ fcbnp@ AFSFCBDataNonpaged_LastFATLinkValue + !
 
-		fcbdata@ fcb@ IOFileControlBlockSetContext
+		fcbdata@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + !
 
-		ptr@ AFSINode_bytesize + @ fcb@ IOFileControlBlockSetSize
+		ptr@ AFSINode_bytesize + @ fcb@ IOFileControlBlock_SizeInBytes + !
 
 		ptr@ AFSINode_timestamp + @ time@ KeTime_SecPart + !
-		time@ fcb@ IOFileControlBlockSetAccessTime
-		time@ fcb@ IOFileControlBlockSetModifyTime
-		time@ fcb@ IOFileControlBlockSetChangeTime
+
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_AccessTime + // dest
+		time@ // src
+		KeTime_SIZEOF // sz
+		memcpy
+
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ModifyTime + // dest
+		time@ // src
+		KeTime_SIZEOF // sz
+		memcpy
+
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_ChangeTime + // dest
+		time@ // src
+		KeTime_SIZEOF // sz
+		memcpy
 
 		bcb@ VcBufferDecrementMapCount drop
 
@@ -951,7 +974,7 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 	end else
 		// found the FCB, it was in the cache already!
 
-		fcb@ IOFileControlBlockGetContext fcbdata!
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 		if (flags@ OSFILEFLAG_PAGEFILE &)
 			if (fcbdata@ AFSFCBData_InitialFlags + @ OSFILEFLAG_PAGEFILE & ~~)

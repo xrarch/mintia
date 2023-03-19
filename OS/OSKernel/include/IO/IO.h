@@ -45,6 +45,8 @@ struct IOFile
 endstruct
 
 struct IOFileControlBlockPaged
+// transparent
+
 	4 Flags
 	4 FileType
 	4 DeviceObject
@@ -53,21 +55,28 @@ struct IOFileControlBlockPaged
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
 	KeTime_SIZEOF ChangeTime
+
+// opaque
+
 endstruct
 
 // sort of like a unix vnode
 struct IOFileControlBlock
-	4 Paged
-
-	ExRwLock_SIZEOF RwLock
-
-	KeEvent_SIZEOF AsyncIOEvent
-	4 AsyncIOCount
+// transparent
 
 	4 CacheInfoBlock
 	4 DispatchTable
 	4 SizeInBytes
 	4 StackDepth
+
+	4 Paged
+
+// opaque
+
+	ExRwLock_SIZEOF RwLock
+
+	KeEvent_SIZEOF AsyncIOEvent
+	4 AsyncIOCount
 endstruct
 
 const IOFCBFLAG_PAGED      1
@@ -95,27 +104,6 @@ const IOCACHEZEROMAX (512 1024 *)
 
 const IOAVERAGEFCBCONTEXTNP    16
 const IOAVERAGEFCBCONTEXTPAGED 96
-
-extern IOFileControlBlockGetFlags { fcb -- flags }
-extern IOFileControlBlockGetContext { fcb -- context }
-extern IOFileControlBlockSetContext { context fcb -- }
-extern IOFileControlBlockGetMount { fcb -- mount }
-extern IOFileControlBlockGetDeviceObject { fcb -- devobj }
-extern IOFileControlBlockGetType { fcb -- filetype }
-extern IOFileControlBlockGetSize { fcb -- size }
-extern IOFileControlBlockSetSize { size fcb -- }
-extern IOFileControlBlockGetCacheInfoBlock { fcb -- cacheblock }
-extern IOFileControlBlockIsPinned { fcb -- pinned }
-
-extern IOFileControlBlockSetAccessTime { time fcb -- }
-extern IOFileControlBlockSetModifyTime { time fcb -- }
-extern IOFileControlBlockSetChangeTime { time fcb -- }
-
-extern IOFileControlBlockGetAccessTime { fcb -- time }
-extern IOFileControlBlockGetModifyTime { fcb -- time }
-extern IOFileControlBlockGetChangeTime { fcb -- time }
-
-extern IOFileControlBlockGetSizeof { -- sizeof }
 
 extern IOFileControlBlockCreate { devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }

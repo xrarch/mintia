@@ -136,7 +136,7 @@ fn IOFileTruncate { newsize growing handle -- oldsize ok }
 	auto fcb
 	fileobject@ IOFile_FileControlBlock + @ fcb!
 
-	if (fcb@ IOFileControlBlockGetFlags IOFCBFLAG_SYSTEMFILE &)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Flags + @ IOFCBFLAG_SYSTEMFILE &)
 		fileobject@ ObObjectDereferenceByPointer drop
 
 		STATUS_FORBIDDEN_OPERATION ok!
@@ -145,7 +145,7 @@ fn IOFileTruncate { newsize growing handle -- oldsize ok }
 	end
 
 	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_NOCACHE & ~~)
-		if (fcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ~=)
+		if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_CHARDEVICE ~=)
 			// try to initiate caching to make truncation more efficient
 
 			fcb@ IOFileControlBlockCacheCheck drop drop
@@ -283,13 +283,13 @@ fn IOFileAccessValidate { length buffer fileobject write -- fcb ok }
 		end
 	end
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ==)
 		STATUS_IS_A_DIRECTORY ok!
 
 		return
 	end
 
-	if (fcb@ IOFileControlBlockGetFlags IOFCBFLAG_SYSTEMFILE &)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Flags + @ IOFCBFLAG_SYSTEMFILE &)
 		STATUS_FORBIDDEN_OPERATION ok!
 
 		return
@@ -394,7 +394,7 @@ fn IOFileReadWriteObject { timeout flags length buffer fileobject functioncode -
 
 	0 bytes!
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ==)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_CHARDEVICE ==)
 		// always bypass cache for character devices -- call directly into driver.
 
 		if (DEBUGCHECKS)
@@ -669,7 +669,7 @@ fn IOFileReadWriteAsyncObject { requestblock flags offset length buffer fileobje
 		return
 	end
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ~=)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_CHARDEVICE ~=)
 		fcb@ IOFileControlBlockLockShared ok!
 
 		if (ok@)
@@ -690,7 +690,7 @@ fn IOFileReadWriteAsyncObject { requestblock flags offset length buffer fileobje
 	functioncode@ // functioncode
 	IOReadWriteAsync ok!
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_CHARDEVICE ~=)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_CHARDEVICE ~=)
 		fcb@ IOFileControlBlockUnlock
 	end
 
@@ -799,34 +799,16 @@ fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok
 	// some sanity checks for silly situations that the FS driver shouldn't
 	// have to worry about
 
-	if (srcfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+	if (srcfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 		STATUS_NOT_A_DIRECTORY ok!
 
 		return
 	end
 
-	if (destfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+	if (destfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 		STATUS_NOT_A_DIRECTORY ok!
 
 		return
-	end
-
-	// make sure the directory fcbs have cacheblocks
-
-	if (srcfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		srcfcb@ IOFileControlBlockCacheCheck ok! drop
-
-		if (ok@)
-			return
-		end
-	end
-
-	if (destfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		destfcb@ IOFileControlBlockCacheCheck ok! drop
-
-		if (ok@)
-			return
-		end
 	end
 
 	srcfcb@ IOFileControlBlockLock ok!
@@ -918,20 +900,10 @@ fn IODirectoryUnlinkObject { name fileobject -- ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 		STATUS_NOT_A_DIRECTORY ok!
 
 		return
-	end
-
-	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		// make sure the directory fcb has a cacheblock
-
-		fcb@ IOFileControlBlockCacheCheck ok! drop
-
-		if (ok@)
-			return
-		end
 	end
 
 	fcb@ IOFileControlBlockLock ok!
@@ -1007,23 +979,9 @@ fn IODirectoryReadObject { dirent fileobject -- ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 		STATUS_NOT_A_DIRECTORY ok!
 
-		return
-	end
-
-	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		fcb@ IOFileControlBlockCacheCheck ok! drop
-
-		if (ok@)
-			return
-		end
-	end
-
-	fcb@ IOFileControlBlockLockShared ok!
-
-	if (ok@)
 		return
 	end
 
@@ -1031,6 +989,4 @@ fn IODirectoryReadObject { dirent fileobject -- ok }
 	dirent@ // dirent
 	fcb@ // fcb
 	readfunc@ IODispatchReadDirectoryFunction ok! fileobject@ IOFile_Offset + !
-
-	fcb@ IOFileControlBlockUnlock
 end

@@ -33,29 +33,20 @@ fn AFSDirectoryAllocateEntry { fcb -- dirent bcb ok }
 	// FCB is locked by caller
 
 	if (DEBUGCHECKS)
-		if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+		if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			// should have been caught by the IO system code
 			"AFSDirectoryAllocateEntry: not a directory\n" KeCrash
 		end
 	end
 
-	auto cacheblock
-	fcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"AFSDirectoryAllocateEntry: no cacheblock\n" KeCrash
-		end
-	end
-
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto byteoff
 	0 byteoff!
 
 	auto bytesize
-	fcb@ IOFileControlBlockGetSize bytesize!
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 	auto pageno
 	byteoff@ FILEVIEWSHIFT >> pageno!
@@ -138,29 +129,20 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 	// FCB is locked by caller
 
 	if (DEBUGCHECKS)
-		if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+		if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			// should have been caught by the IO system code
 			"AFSDirectoryGetEntry: not a directory\n" KeCrash
 		end
 	end
 
-	auto cacheblock
-	fcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"AFSDirectoryGetEntry: no cacheblock\n" KeCrash
-		end
-	end
-
 	auto mount
-	fcb@ IOFileControlBlockGetMount mount!
+	fcb@ FSFileControlBlockGetMount mount!
 
 	auto byteoff
 	seek@ AFSDirEnt_SIZEOF * byteoff!
 
 	auto bytesize
-	fcb@ IOFileControlBlockGetSize bytesize!
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 	auto pageno
 	byteoff@ FILEVIEWSHIFT >> pageno!
@@ -230,6 +212,14 @@ end
 fn (IODispatchReadDirectoryFunction) AFSReadDirectory { seek dirent fcb -- nextseek ok }
 	fnsection "PAGE$text"
 
+	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		fcb@ IOFileControlBlockCacheCheck ok! drop
+
+		if (ok@)
+			return
+		end
+	end
+
 	fcb@ IOFileControlBlockLockShared ok!
 
 	if (ok@)
@@ -260,29 +250,20 @@ fn AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }
 	fnsection "PAGE$text"
 
 	if (DEBUGCHECKS)
-		if (dirfcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+		if (dirfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			// should have been caught by the IO system code
 			"AFSDirectoryFindEntry: not a directory\n" KeCrash
 		end
 	end
 
-	auto cacheblock
-	dirfcb@ IOFileControlBlockGetCacheInfoBlock cacheblock!
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"AFSDirectoryFindEntry: no cacheblock\n" KeCrash
-		end
-	end
-
 	auto mount
-	dirfcb@ IOFileControlBlockGetMount mount!
+	dirfcb@ FSFileControlBlockGetMount mount!
 
 	auto byteoff
 	0 byteoff!
 
 	auto bytesize
-	dirfcb@ IOFileControlBlockGetSize bytesize!
+	dirfcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
 
 	auto pageno
 	byteoff@ FILEVIEWSHIFT >> pageno!
@@ -369,7 +350,7 @@ fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
 	auto iparent
 
 	auto fcbdata
-	searchfcb@ IOFileControlBlockGetContext fcbdata!
+	searchfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	0 iparent!
 
@@ -399,7 +380,7 @@ fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
 			return
 		end
 
-		nextfcb@ IOFileControlBlockGetContext fcbdata!
+		nextfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 		nextfcb@ searchfcb!
 	end
 
@@ -410,6 +391,14 @@ end
 
 fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	fnsection "PAGE$text"
+
+	if (dirfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		dirfcb@ IOFileControlBlockCacheCheck ok! drop
+
+		if (ok@)
+			return
+		end
+	end
 
 	name@ AFSVerifyName ok!
 
@@ -433,7 +422,7 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	end
 
 	auto mount
-	dirfcb@ IOFileControlBlockGetMount mount!
+	dirfcb@ FSFileControlBlockGetMount mount!
 
 	auto fcb
 	0 // flags
@@ -448,9 +437,9 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	end
 
 	auto fcbdata
-	fcb@ IOFileControlBlockGetContext fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
-	if (fcb@ IOFileControlBlockGetFlags IOFCBFLAG_SYSTEMFILE &)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Flags + @ IOFCBFLAG_SYSTEMFILE &)
 		bcb@ VcBufferDecrementMapCount drop
 		fcb@ AFSFCBDereference
 
@@ -459,7 +448,7 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ==)
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ==)
 		if (fcbdata@ AFSFCBData_References + @ 1 >)
 			// unlinking directories is forbidden if anyone could possibly
 			// add new entries to it afterwards.
@@ -506,10 +495,26 @@ end
 fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok }
 	fnsection "PAGE$text"
 
-	auto mount
-	srcfcb@ IOFileControlBlockGetMount mount!
+	if (srcfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		srcfcb@ IOFileControlBlockCacheCheck ok! drop
 
-	if (destfcb@ IOFileControlBlockGetMount mount@ ~=)
+		if (ok@)
+			return
+		end
+	end
+
+	if (destfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		destfcb@ IOFileControlBlockCacheCheck ok! drop
+
+		if (ok@)
+			return
+		end
+	end
+
+	auto mount
+	srcfcb@ FSFileControlBlockGetMount mount!
+
+	if (destfcb@ FSFileControlBlockGetMount mount@ ~=)
 		STATUS_CROSS_VOLUME ok!
 		return
 	end
@@ -590,7 +595,7 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 
 	if (srcfcb@ destfcb@ ~=)
 		auto filetype
-		filefcb@ IOFileControlBlockGetType filetype!
+		filefcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ filetype!
 
 		if (filetype@ OSFILETYPE_DIRECTORY ==)
 			// make sure it won't create a cycle by walking from the
@@ -659,9 +664,9 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 
 	if (renamelocked@)
 		auto fcbdata
-		filefcb@ IOFileControlBlockGetContext fcbdata!
+		filefcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
-		destfcb@ IOFileControlBlockGetContext AFSFCBData_INum + @ fcbdata@ AFSFCBData_IParent + !
+		destfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_INum + @ fcbdata@ AFSFCBData_IParent + !
 
 		filefcb@ AFSINodeUpdate
 

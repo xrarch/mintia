@@ -91,7 +91,7 @@ fn FatInterpretEntry { entry fattype -- meaning }
 	FAT_ENTRY_EOC meaning!
 end
 
-fn FatLookupEntryByCluster { fattype cluster mount lastbcb -- bcb vaddr value ok }
+fn FatLookupEntryByIndex { fattype index mount lastbcb -- bcb vaddr value ok }
 	0 ok!
 
 	// make sure not to overwrite the caller's lastbcb in case of an error
@@ -102,7 +102,7 @@ fn FatLookupEntryByCluster { fattype cluster mount lastbcb -- bcb vaddr value ok
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
 
-	if (cluster@ fatdata@ FatData_ClusterCount + @ >=)
+	if (index@ fatdata@ FatData_ClusterCount + @ 2 + >=)
 		STATUS_FILE_CORRUPT ok!
 
 		return
@@ -117,15 +117,15 @@ fn FatLookupEntryByCluster { fattype cluster mount lastbcb -- bcb vaddr value ok
 
 		// volfileoffset += cluster * 1.5
 
-		cluster@ cluster@ 1 >> + volfileoffset +=
+		index@ index@ 1 >> + volfileoffset +=
 	end elseif (fattype@ 16 ==)
 		// FAT16
 
-		cluster@ 1 << volfileoffset +=
+		index@ 1 << volfileoffset +=
 	end else
 		// FAT32
 
-		cluster@ 2 << volfileoffset +=
+		index@ 2 << volfileoffset +=
 	end
 
 	if (lastbcb@)
@@ -163,7 +163,7 @@ fn FatLookupEntryByCluster { fattype cluster mount lastbcb -- bcb vaddr value ok
 		vaddr@ gb value!
 		vaddr@ 1 + gb 8 << value |=
 
-		if (cluster@ 1 &)
+		if (index@ 1 &)
 			4 value >>=
 		end else
 			0x0FFF value &=
@@ -199,10 +199,10 @@ fn FatClusterChainMeasureLength { cluster mount -- length ok }
 		1 length +=
 
 		fattype@ // fattype
-		cluster@ // cluster
+		cluster@ // index
 		mount@ // mount
 		lastbcb@ // lastbcb
-		FatLookupEntryByCluster ok! cluster! drop lastbcb!
+		FatLookupEntryByIndex ok! cluster! drop lastbcb!
 
 		if (ok@)
 			break
@@ -270,10 +270,10 @@ fn FatClusterBitmapReadFAT { mount -- ok }
 	while (clusterno@ clusters@ <)
 		auto value
 		fattype@ // fattype
-		clusterno@ // cluster
+		clusterno@ 2 + // index
 		mount@ // mount
 		lastbcb@ // lastbcb
-		FatLookupEntryByCluster ok! value! drop lastbcb!
+		FatLookupEntryByIndex ok! value! drop lastbcb!
 
 		if (ok@)
 			if (lastbcb@)
@@ -292,7 +292,7 @@ fn FatClusterBitmapReadFAT { mount -- ok }
 				fatdata@ FatData_FreeClusterBitmap + // header
 				ComBitmapSetBits
 
-				0 runtype!
+				FAT_ENTRY_FREE runtype!
 				1 runlength!
 				clusterno@ runstart!
 			end else
@@ -345,7 +345,7 @@ fn FatClusterBitmapInitialize { mount -- ok }
 	mount@ IOMount_Extension + @ fatdata!
 
 	auto clusters
-	fatdata@ FatData_ClusterCount + @ 2 + clusters!
+	fatdata@ FatData_ClusterCount + @ clusters!
 
 	0 fatdata@ FatData_FreeClusterHint + !
 

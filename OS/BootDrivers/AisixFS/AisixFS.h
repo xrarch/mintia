@@ -31,6 +31,7 @@ struct AFSData
 	4 IStart
 	4 ICount
 	4 VolSize
+	4 DataStart
 
 	4 UsedBlocks
 

@@ -86,7 +86,7 @@ endstruct
 
 struct FatDirectoryEntry
 	11 Name83                     // 0
-	1 AttributesB                 // 11
+	1 AttributeB                 // 11
 	1 NTReservedB                 // 12
 	1 CreationTimeTenthB          // 13
 	2 CreationTimeI               // 14
@@ -216,6 +216,8 @@ extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 
 extern FatClusterChainMeasureLength { cluster mount -- length ok }
 extern FatFCBMeasureSize { fcb -- ok }
+
+extern FatRootDirectoryFindVolumeLabel { mount -- }
 
 extern FatClusterBitmapInitialize { mount -- ok }
 extern FatClusterBitmapUninitialize { mount -- }

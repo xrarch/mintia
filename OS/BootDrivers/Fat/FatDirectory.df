@@ -45,6 +45,213 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	STATUS_NOT_IMPLEMENTED ok!
 end
 
+fn FatDirectoryGetRawEntry { seek fcb lastbcb -- fatdirent bcb nextseek ok }
+	fnsection "PAGE$text"
+
+	// make sure not to overwrite the caller's lastbcb in case of an error
+	// return.
+
+	lastbcb@ bcb!
+
+	// get the next non-empty raw entry from the directory
+	// ignores LFN etc
+
+	// FCB is locked by caller
+
+	if (DEBUGCHECKS)
+		if (fcb@ IOFileControlBlockGetType OSFILETYPE_DIRECTORY ~=)
+			// should have been caught by the IO system code
+			"FatDirectoryGetEntry: not a directory\n" KeCrash
+		end
+	end
+
+	auto mount
+	fcb@ IOFileControlBlockGetMount mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto bytesize
+	fcb@ IOFileControlBlockGetSize bytesize!
+
+	auto byteoff
+	seek@ FatDirectoryEntry_SIZEOF * byteoff!
+
+	auto mapfcb
+
+	if (fatdata@ FatData_FatType + @ 32 ~=)
+		// FAT12/16 access the root directory thru the volume file
+
+		fatdata@ FatData_RootFirstCluster + @ // actually the first sector
+		fatdata@ FatData_SectorSizeShift + @ << byteoff +=
+
+		fatdata@ FatData_RootFirstCluster + @
+		fatdata@ FatData_SectorSizeShift + @ << bytesize +=
+
+		mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ mapfcb!
+	end else
+		fcb@ mapfcb!
+	end
+
+	auto pageno
+	byteoff@ FILEVIEWSHIFT >> pageno!
+
+	auto curpageno
+	auto data
+
+	if (lastbcb@)
+		lastbcb@ VcBuffer_FileOffset + @ FILEVIEWSHIFT >> curpageno!
+		lastbcb@ VcBuffer_WindowAddress + @ byteoff@ FILEVIEWOFFSETMASK & + data!
+	end else
+		-1 curpageno!
+	end
+
+	while (byteoff@ bytesize@ <)
+		if (pageno@ curpageno@ ~=)
+			// must read in a new page
+
+			byteoff@ // offset
+			mapfcb@ // fcb
+			VcFileControlBlockMap ok! bcb! data!
+
+			if (ok@)
+				lastbcb@ bcb!
+				return
+			end
+
+			if (lastbcb@)
+				lastbcb@ VcBufferDecrementMapCount drop
+			end
+
+			bcb@ lastbcb!
+
+			pageno@ curpageno!
+		end
+
+		if (data@ gb FAT_DIRENT_FREE_ALL ==)
+			// there are no more dirents in this directory
+
+			break
+		end
+
+		if (data@ gb FAT_DIRENT_FREE ~=)
+			data@ fatdirent!
+
+			1 seek +=
+			seek@ nextseek!
+
+			0 ok!
+
+			return
+		end
+
+		FatDirectoryEntry_SIZEOF data +=
+		FatDirectoryEntry_SIZEOF byteoff +=
+		byteoff@ FILEVIEWSHIFT >> pageno!
+		1 seek +=
+	end
+
+	seek@ nextseek!
+	STATUS_END_OF_FILE ok!
+end
+
+fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- bcb nextseek ok }
+	fnsection "PAGE$text"
+
+	// return the next valid entry in the fs-independent dirent.
+	// deals with LFN.
+
+	lastbcb@ bcb!
+
+	auto fatdirent
+	seek@ // seek
+	fcb@ // fcb
+	bcb@ // lastbcb
+	FatDirectoryGetRawEntry ok! seek! bcb! fatdirent!
+
+	if (ok@)
+		return
+	end
+
+	// figure out what kind of entry this is.
+	// the cases we care about are normal short file name, and LFN.
+
+end
+
+fn FatRootDirectoryFindVolumeLabel { mount -- }
+	fnsection "PAGE$text"
+
+	auto ok
+
+	auto fatdirent
+
+	auto fcb
+	mount@ IOMount_RootFCB + @ fcb!
+
+	auto bcb
+	0 bcb!
+
+	auto seek
+	0 seek!
+
+	while (1)
+		seek@ // seek
+		fcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetRawEntry ok! seek! bcb! fatdirent!
+
+		if (ok@)
+			break
+		end
+
+		auto attr
+		fatdirent@ FatDirectoryEntry_AttributeB + gb attr!
+
+		if (attr@ FAT_ATTR_LFN ~=
+			attr@ FAT_ATTR_VOLUME_ID & &&)
+
+			// found it. copy it
+
+			auto label
+			mount@ IOMount_Extension + @ FatData_VolumeLabel + label!
+
+			auto lastcharpos
+			0 lastcharpos!
+
+			auto i
+			0 i!
+
+			while (i@ 11 <)
+				fatdirent@ gb label@ sb
+
+				if (fatdirent@ gb ~~)
+					break
+				end
+
+				if (fatdirent@ gb 0x20 ~=)
+					label@ lastcharpos!
+				end
+
+				1 label +=
+				1 fatdirent +=
+				1 i +=
+			end
+
+			if (lastcharpos@)
+				0 lastcharpos@ 1 + sb
+			end else
+				0 mount@ IOMount_Extension + @ FatData_VolumeLabel + sb
+			end
+
+			break
+		end
+	end
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
+end
+
 fn FatRootDirectoryCreate { mount -- ok }
 	fnsection "PAGE$text"
 

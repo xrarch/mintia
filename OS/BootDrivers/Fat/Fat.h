@@ -1,3 +1,5 @@
+#include "../../Common/Common.h"
+
 const MBR_SIGNATURE 0xAA55
 
 // the on-disk BPB is full of unaligned fields, so for convenience, it is
@@ -113,9 +115,10 @@ const FAT32_MIRRORDISABLED 0x80
 
 const FAT_ORDINAL_LAST 0x40
 
-const FAT_ENTRY_FREE 0x00000000
-const FAT_ENTRY_BAD  0xFFFFFFF7
-const FAT_ENTRY_EOF  0xFFFFFFFF
+const FAT_ENTRY_FREE      0x00000000
+const FAT_ENTRY_RESERVED  0x0FFFFFF0
+const FAT_ENTRY_BAD       0x0FFFFFF7
+const FAT_ENTRY_EOC       0x0FFFFFFF
 
 const FAT_DIRENT_FREE       0xE5
 const FAT_DIRENT_FREE_KANJI 0x05
@@ -145,12 +148,21 @@ struct FatData
 	4 UsedBytes
 
 	4 FCBRefTotal
+	4 WritableFiles
 
 	4 FatType
 	4 ClusterCount
 	4 DataStartSector
 
 	12 VolumeLabel
+
+	KeMutex_SIZEOF FCBCacheMutex
+	KeMutex_SIZEOF RenameMutex
+
+	KeMutex_SIZEOF FreeClusterBitmapMutex
+	ComBitmapHeader_SIZEOF FreeClusterBitmap
+	4 FreeClusterHint
+
 
 	// decoded BPB
 
@@ -168,8 +180,8 @@ struct FatData
 endstruct
 
 struct FatFCBDataNonpaged
-	4 LastFATLinkClusterOff
-	4 LastFATLinkValue
+	4 LastFATLinkClusterOff // offset within file last looked up, in clusters
+	4 LastFATLinkValue      // value of last look-up
 endstruct
 
 struct FatFCBData
@@ -177,7 +189,7 @@ struct FatFCBData
 	4 Parent
 	4 LeftChild
 	4 RightChild
-	4 Value
+	4 NameHash // splay tree value
 
 	4 FCB
 
@@ -201,6 +213,12 @@ endstruct
 
 extern FatFCBCacheFlush { destroy mount -- ok }
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
+
+extern FatClusterChainMeasureLength { cluster mount -- length ok }
+extern FatFCBMeasureSize { fcb -- ok }
+
+extern FatClusterBitmapInitialize { mount -- ok }
+extern FatClusterBitmapUninitialize { mount -- }
 
 extern FatRootDirectoryCreate { mount -- ok }
 extern FatFCBCreate { flags filetype mount -- fcb ok }

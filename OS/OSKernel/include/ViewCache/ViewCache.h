@@ -11,10 +11,9 @@ const VCBCBTYPE_PERMANENT 2 // pre-allocated as part of a cacheblock
 const VCBCBTYPE_LARGE     3 // allocated from nonpaged pool, mapped into POOLSPACE
 
 struct VcBuffer
-	4 FileControlBlock
+// transparent
 
-	4 ReclaimNext
-	4 ReclaimPrev
+	4 FileControlBlock
 
 	4 WindowAddress
 	4 Length
@@ -23,6 +22,11 @@ struct VcBuffer
 	4 LeftChild
 	4 RightChild
 	4 FileOffset // splay tree value
+
+// opaque
+
+	4 ReclaimNext
+	4 ReclaimPrev
 
 	4 Type
 

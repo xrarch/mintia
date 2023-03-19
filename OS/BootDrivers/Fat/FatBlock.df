@@ -42,3 +42,362 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 
 	STATUS_NOT_IMPLEMENTED ok!
 end
+
+fn FatInterpretEntry { entry fattype -- meaning }
+	if (fattype@ 32 ==)
+		0x0FFFFFFF entry &=
+	end elseif (fattype@ 12 ==)
+		if (DEBUGCHECKS)
+			if (entry@ 0xFFF >)
+				"FatInterpretEntry 12\n" KeCrash
+			end
+		end
+
+		if (entry@ 0xFF0 >=)
+			0x0FFFF000 entry |=
+		end
+	end else
+		if (DEBUGCHECKS)
+			if (entry@ 0xFFFF >)
+				"FatInterpretEntry 16\n" KeCrash
+			end
+		end
+
+		if (entry@ 0xFFF0 >=)
+			0x0FFF0000 entry |=
+		end
+	end
+
+	if (entry@ FAT_ENTRY_FREE ==)
+		entry@ meaning!
+		return
+	end
+
+	if (entry@ FAT_ENTRY_RESERVED <)
+		entry@ meaning!
+		return
+	end
+
+	if (entry@ FAT_ENTRY_BAD <)
+		FAT_ENTRY_RESERVED meaning!
+		return
+	end
+
+	if (entry@ FAT_ENTRY_BAD ==)
+		entry@ meaning!
+		return
+	end
+
+	FAT_ENTRY_EOC meaning!
+end
+
+fn FatLookupEntryByCluster { fattype cluster mount lastbcb -- bcb vaddr value ok }
+	0 ok!
+
+	// make sure not to overwrite the caller's lastbcb in case of an error
+	// return.
+
+	lastbcb@ bcb!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	if (cluster@ fatdata@ FatData_ClusterCount + @ >=)
+		STATUS_FILE_CORRUPT ok!
+
+		return
+	end
+
+	auto volfileoffset
+	fatdata@ FatData_ReservedSectorCount + @
+	fatdata@ FatData_SectorSizeShift + @ << volfileoffset!
+
+	if (fattype@ 12 ==)
+		// FAT12
+
+		// volfileoffset += cluster * 1.5
+
+		cluster@ cluster@ 1 >> + volfileoffset +=
+	end elseif (fattype@ 16 ==)
+		// FAT16
+
+		cluster@ 1 << volfileoffset +=
+	end else
+		// FAT32
+
+		cluster@ 2 << volfileoffset +=
+	end
+
+	if (lastbcb@)
+		if (volfileoffset@ FILEVIEWNUMBERMASK &
+			lastbcb@ VcBuffer_FileOffset + @ ==)
+
+			lastbcb@ bcb!
+			bcb@ VcBuffer_WindowAddress + @ volfileoffset@ FILEVIEWOFFSETMASK & + vaddr!
+		end else
+			volfileoffset@ // offset
+			mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+			VcFileControlBlockMap ok! bcb! vaddr!
+
+			if (ok@)
+				lastbcb@ bcb!
+				return
+			end
+
+			lastbcb@ VcBufferDecrementMapCount drop
+		end
+	end else
+		volfileoffset@ // offset
+		mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+		VcFileControlBlockMap ok! bcb! vaddr!
+
+		if (ok@)
+			lastbcb@ bcb!
+			return
+		end
+	end
+
+	if (fattype@ 12 ==)
+		// FAT12
+
+		vaddr@ gb value!
+		vaddr@ 1 + gb 8 << value |=
+
+		if (cluster@ 1 &)
+			4 value >>=
+		end else
+			0x0FFF value &=
+		end
+	end elseif (fattype@ 16 ==)
+		// FAT16
+
+		vaddr@ gi value!
+	end else
+		// FAT32
+
+		vaddr@@ value!
+	end
+end
+
+fn FatClusterChainMeasureLength { cluster mount -- length ok }
+	fnsection "PAGE$text"
+
+	// measure the length of the cluster chain starting at the given cluster.
+	// as a side effect, it also validates the integrity of the cluster chain.
+
+	auto fattype
+	mount@ IOMount_Extension + @ FatData_FatType + @ fattype!
+
+	auto lastbcb
+	0 lastbcb!
+
+	0 length!
+
+	0 ok!
+
+	while (1)
+		1 length +=
+
+		fattype@ // fattype
+		cluster@ // cluster
+		mount@ // mount
+		lastbcb@ // lastbcb
+		FatLookupEntryByCluster ok! cluster! drop lastbcb!
+
+		if (ok@)
+			break
+		end
+
+		auto meaning
+		cluster@ // entry
+		fattype@ // fattype
+		FatInterpretEntry meaning!
+
+		if (meaning@ FAT_ENTRY_EOC ==)
+			break
+		end elseif (meaning@ FAT_ENTRY_FREE ==)
+			STATUS_FILE_CORRUPT ok!
+			break
+		end elseif (meaning@ FAT_ENTRY_RESERVED >=)
+			STATUS_FILE_CORRUPT ok!
+			break
+		end
+	end
+
+	if (lastbcb@)
+		lastbcb@ VcBufferDecrementMapCount drop
+	end
+end
+
+fn FatClusterBitmapReadFAT { mount -- ok }
+	fnsection "PAGE$text"
+
+	// read the entire FAT page-by-page to construct an in-memory bitmap of
+	// free clusters. assumes disks will be a reasonable size (100-500MB) or
+	// else this bitmap will be too large to fit in kernel pool and mounting
+	// the volume will fail. could probably be made more flexible.
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto clusters
+	fatdata@ FatData_ClusterCount + @ clusters!
+
+	auto usedclusters
+	0 usedclusters!
+
+	auto runlength
+	0 runlength!
+
+	auto runtype
+	1 runtype!
+
+	auto runstart
+	0 runstart!
+
+	auto clusterno
+	0 clusterno!
+
+	auto lastbcb
+	0 lastbcb!
+
+	auto fattype
+	fatdata@ FatData_FatType + @ fattype!
+
+	auto volfcb
+	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ volfcb!
+
+	while (clusterno@ clusters@ <)
+		auto value
+		fattype@ // fattype
+		clusterno@ // cluster
+		mount@ // mount
+		lastbcb@ // lastbcb
+		FatLookupEntryByCluster ok! value! drop lastbcb!
+
+		if (ok@)
+			if (lastbcb@)
+				lastbcb@ VcBufferDecrementMapCount drop
+			end
+
+			return
+		end
+
+		if (value@ FAT_ENTRY_FREE ==)
+			if (runtype@)
+				runlength@ usedclusters +=
+
+				runlength@ // runlength
+				runstart@ // index
+				fatdata@ FatData_FreeClusterBitmap + // header
+				ComBitmapSetBits
+
+				0 runtype!
+				1 runlength!
+				clusterno@ runstart!
+			end else
+				1 runlength +=
+			end
+		end elseif (runtype@ FAT_ENTRY_FREE ==)
+			runlength@ // runlength
+			runstart@ // index
+			fatdata@ FatData_FreeClusterBitmap + // header
+			ComBitmapClearBits
+
+			1 runtype!
+			1 runlength!
+			clusterno@ runstart!
+		end else
+			1 runlength +=
+		end
+
+		1 clusterno +=
+	end
+
+	if (runlength@)
+		if (runtype@)
+			runlength@ usedclusters +=
+
+			runlength@ // runlength
+			runstart@ // index
+			fatdata@ FatData_FreeClusterBitmap + // header
+			ComBitmapSetBits
+		end else
+			runlength@ // runlength
+			runstart@ // index
+			fatdata@ FatData_FreeClusterBitmap + // header
+			ComBitmapClearBits
+		end
+	end
+
+	if (lastbcb@)
+		lastbcb@ VcBufferDecrementMapCount drop
+	end
+
+	usedclusters@ fatdata@ FatData_ClusterSizeShift + @ <<
+	fatdata@ FatData_UsedBytes + !
+end
+
+fn FatClusterBitmapInitialize { mount -- ok }
+	fnsection "PAGE$text"
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto clusters
+	fatdata@ FatData_ClusterCount + @ 2 + clusters!
+
+	0 fatdata@ FatData_FreeClusterHint + !
+
+	auto bmpsz
+	clusters@ 7 + 3 >> bmpsz!
+
+	auto bmp
+	bmpsz@ // size
+	'Fatb' // tag
+	PAGED // flags
+	MmAllocWithTag ok! bmp!
+
+	if (ok@)
+		return
+	end
+
+	clusters@ // sizeinbits
+	bmp@ // data
+	fatdata@ FatData_FreeClusterBitmap + // header
+	ComBitmapInitialize
+
+	"FatClusterBitmapMutex" // name
+	KERNELMODE // mode
+	fatdata@ FatData_FreeClusterBitmapMutex + // mutex
+	KeMutexInitialize
+
+	mount@ FatClusterBitmapReadFAT ok!
+end
+
+fn FatClusterBitmapUninitialize { mount -- }
+	fnsection "PAGE$text"
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	fatdata@ FatData_FreeClusterBitmap + ComBitmapGetData MmFree
+end
+
+fn FatClusterBitmapLock { mount -- }
+	fnsection "PAGE$text"
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMount_Extension + @ FatData_FreeClusterBitmapMutex + // object
+	KeThreadWaitForObject drop
+end
+
+fn FatClusterBitmapUnlock { mount -- }
+	fnsection "PAGE$text"
+
+	0 // abandon
+	mount@ IOMount_Extension + @ FatData_FreeClusterBitmapMutex + // mutex
+	KeMutexRelease drop
+end

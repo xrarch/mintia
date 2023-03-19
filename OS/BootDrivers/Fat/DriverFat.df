@@ -389,20 +389,43 @@ fn (IOFilesystemMountFunction) DriverFatMount { flags deviceobject -- fsdeviceob
 
 	// set the volume size
 
-	fatdata@ FatData_TotalSectors + @
-	fatdata@ FatData_SectorSizeShift + @ <<
+	fatdata@ FatData_ClusterCount + @
+	fatdata@ FatData_ClusterSizeShift + @ <<
 	fatdata@ FatData_VolSizeBytes + !
 
 	// reset some fields
 
 	0 fatdata@ FatData_UsedBytes + !
 	0 fatdata@ FatData_FCBRefTotal + !
+	0 fatdata@ FatData_VolumeLabel + sb
+
+	0 fatdata@ FatData_WritableFiles + !
+
+	"FatRenameMutex" // name
+	KERNELMODE // mode
+	fatdata@ FatData_RenameMutex + // mutex
+	KeMutexInitialize
+
+	"FatFCBCacheMutex" // name
+	KERNELMODE // mode
+	fatdata@ FatData_FCBCacheMutex + // mutex
+	KeMutexInitialize
 
 	// set the volume file's size to match the start of the data area.
 
 	fatdata@ FatData_DataStartSector + @
 	fatdata@ FatData_SectorSizeShift + @ <<
 	fsdeviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockSetSize
+
+	// initialize the cluster bitmap.
+
+	mount@ FatClusterBitmapInitialize ok!
+
+	if (ok@)
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		return
+	end
 
 	// create the root directory FCB.
 
@@ -445,7 +468,7 @@ fn (IOFilesystemUnmountFunction) DriverFatUnmount { fsdeviceobject -- ok }
 		return
 	end
 
-//	mount@ FatBlockBitmapUninitialize
+	mount@ FatClusterBitmapUninitialize
 
 	mount@ FSVolumeFlush drop
 end

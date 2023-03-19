@@ -186,11 +186,13 @@ struct FatFCBDataNonpaged
 endstruct
 
 struct FatFCBData
-	// ExSplayTree node
-	4 Parent
+	// ExSplayTree node; keep the next four fields at the beginning.
+	4 ParentFCBData // splay tree parent
 	4 LeftChild
 	4 RightChild
 	4 NameHash // splay tree value
+
+	4 ParentDirDCBData
 
 	4 FCB
 
@@ -199,7 +201,6 @@ struct FatFCBData
 
 	4 Name
 
-	4 ParentDirFCB
 	4 DirentOffset
 
 	4 StartingCluster
@@ -210,6 +211,20 @@ struct FatFCBData
 	4 Flags
 
 	4 Nonpaged
+endstruct
+
+struct FatDCBData
+	FatFCBData_SIZEOF Common
+
+	4 SplayTreeRoot
+
+	ComBitmapHeader_SIZEOF DirentBitmapHeader
+	4 DirentHint
+
+	// used to track where the first 0x00 name entry is since it indicates
+	// that there are no more entries forthcoming
+
+	4 LastDirentOffset
 endstruct
 
 const FATFILECONTEXT_UPDATEONCLOSE 1

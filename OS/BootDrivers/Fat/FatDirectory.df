@@ -45,7 +45,7 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	STATUS_NOT_IMPLEMENTED ok!
 end
 
-fn FatDirectoryGetRawEntry { seek fcb lastbcb -- fatdirent bcb nextseek ok }
+fn FatDirectoryGetRawEntry { skipempty seek fcb lastbcb -- fatdirent bcb nextseek ok }
 	fnsection "PAGE$text"
 
 	// make sure not to overwrite the caller's lastbcb in case of an error
@@ -137,13 +137,24 @@ fn FatDirectoryGetRawEntry { seek fcb lastbcb -- fatdirent bcb nextseek ok }
 			pageno@ curpageno!
 		end
 
-		if (data@ gb FAT_DIRENT_FREE_ALL ==)
-			// there are no more dirents in this directory
+		if (skipempty@)
+			if (data@ gb FAT_DIRENT_FREE_ALL ==)
+				// there are no more dirents in this directory
 
-			break
-		end
+				break
+			end
 
-		if (data@ gb FAT_DIRENT_FREE ~=)
+			if (data@ gb FAT_DIRENT_FREE ~=)
+				data@ fatdirent!
+
+				1 seek +=
+				seek@ nextseek!
+
+				0 ok!
+
+				return
+			end
+		end else
 			data@ fatdirent!
 
 			1 seek +=
@@ -173,6 +184,7 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- bcb nextseek ok }
 	lastbcb@ bcb!
 
 	auto fatdirent
+	1 // skipempty
 	seek@ // seek
 	fcb@ // fcb
 	bcb@ // lastbcb
@@ -204,6 +216,7 @@ fn FatRootDirectoryFindVolumeLabel { mount -- }
 	0 seek!
 
 	while (1)
+		1 // skipempty
 		seek@ // seek
 		fcb@ // fcb
 		bcb@ // lastbcb
@@ -284,7 +297,7 @@ fn FatRootDirectoryCreate { mount -- ok }
 
 	// set root directory as its own parent
 
-	fcb@ fcbdata@ FatFCBData_ParentDirFCB + !
+	fcb@ fcbdata@ FatFCBData_ParentDirDCBData + !
 
 	fatdata@ FatData_RootFirstCluster + @ fcbdata@ FatFCBData_StartingCluster + !
 
@@ -308,4 +321,20 @@ fn FatRootDirectoryCreate { mount -- ok }
 	end
 
 	fcb@ mount@ IOMount_RootFCB + !
+end
+
+fn FatDirectoryFCBInitialize { fcb -- ok }
+	fnsection "PAGE$text"
+
+	// should be called on a new directory FCB after the size has been
+	// determined (and cluster chain checked for validity) with
+	// FatFCBMeasureSize.
+	// constructs the dirent bitmap and initializes the child splay tree.
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	0 fcbdata@ FatDCBData_SplayTreeRoot + !
+	
+
 end

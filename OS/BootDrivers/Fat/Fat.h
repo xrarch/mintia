@@ -224,7 +224,9 @@ struct FatDCBData
 	// used to track where the first 0x00 name entry is since it indicates
 	// that there are no more entries forthcoming
 
-	4 LastDirentOffset
+	4 LastDirentIndex
+
+	4 FreeDirentCount
 endstruct
 
 const FATFILECONTEXT_UPDATEONCLOSE 1

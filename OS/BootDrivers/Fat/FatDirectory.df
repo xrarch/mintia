@@ -321,6 +321,18 @@ fn FatRootDirectoryCreate { mount -- ok }
 	end
 
 	fcb@ mount@ IOMount_RootFCB + !
+
+	fcb@ FatDirectoryFCBInitialize ok!
+
+	if (ok@)
+		0 mount@ IOMount_RootFCB + !
+
+		-1 // writeout
+		fcb@ // fcb
+		FatFCBDelete
+
+		return
+	end
 end
 
 fn FatDirectoryFCBInitialize { fcb -- ok }
@@ -335,6 +347,138 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	0 fcbdata@ FatDCBData_SplayTreeRoot + !
+	0 fcbdata@ FatDCBData_DirentHint + !
+	-1 fcbdata@ FatDCBData_LastDirentIndex + !
 	
+	auto size
+	fcb@ IOFileControlBlock_SizeInBytes + @ size!
 
+	auto entries
+	size@ FatDirectoryEntry_SIZEOF / entries!
+
+	auto bmpsz
+	entries@ 7 + 3 >> bmpsz!
+
+	auto bmp
+	bmpsz@ // size
+	'FDEB' // tag
+	PAGED // flags
+	MmAllocWithTag ok! bmp!
+
+	if (ok@)
+		return
+	end
+
+	entries@ // sizeinbits
+	bmp@ // data
+	fcbdata@ FatDCBData_DirentBitmapHeader + // header
+	ComBitmapInitialize
+
+	// iterate all of the directory entries and fill the dirent bitmap
+	// appropriately.
+
+	auto runlength
+	0 runlength!
+
+	auto runtype
+	1 runtype!
+
+	auto runstart
+	0 runstart!
+
+	auto seek
+	0 seek!
+
+	auto bcb
+	0 bcb!
+
+	auto free
+	0 free!
+
+	while (1)
+		auto dirent
+		0 // skipempty
+		seek@ // seek
+		fcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetRawEntry ok! seek! bcb! dirent!
+
+		if (ok@)
+			break
+		end
+
+		if (dirent@ gb FAT_DIRENT_FREE ==
+			dirent@ gb 0 == ||)
+
+			if (runtype@)
+				runlength@ // runlength
+				runstart@ // index
+				fcbdata@ FatDCBData_DirentBitmapHeader + // header
+				ComBitmapSetBits
+
+				0 runtype!
+				1 runlength!
+				seek@ 1 - runstart!
+			end else
+				1 runlength +=
+			end
+
+			if (dirent@ gb 0 ==)
+				// there are no more dirents.
+
+				entries@ seek@ - 1 - runlength +=
+
+				seek@ 1 - fcbdata@ FatDCBData_LastDirentIndex + !
+
+				break
+			end
+		end elseif (runtype@ ~~)
+			runlength@ free +=
+
+			runlength@ // runlength
+			runstart@ // index
+			fcbdata@ FatDCBData_DirentBitmapHeader + // header
+			ComBitmapClearBits
+
+			1 runtype!
+			1 runlength!
+			seek@ 1 - runstart!
+		end else
+			1 runlength +=
+		end
+	end
+
+	if (ok@ STATUS_END_OF_FILE ==)
+		0 ok!
+	end
+
+	if (ok@)
+		bmp@ MmFree
+	end elseif (runlength@)
+		if (runtype@)
+			runlength@ // runlength
+			runstart@ // index
+			fcbdata@ FatDCBData_DirentBitmapHeader + // header
+			ComBitmapSetBits
+		end else
+			runlength@ free +=
+
+			runlength@ // runlength
+			runstart@ // index
+			fcbdata@ FatDCBData_DirentBitmapHeader + // header
+			ComBitmapClearBits
+		end
+	end
+
+	fcbdata@ FatDCBData_DirentBitmapHeader +
+	ComBitmapDump
+
+	fcbdata@ FatDCBData_LastDirentIndex + @
+	free@ "dir: %d free, %d last\n" Printf
+
+	free@ fcbdata@ FatDCBData_FreeDirentCount + !
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
 end

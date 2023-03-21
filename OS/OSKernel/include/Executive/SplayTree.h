@@ -11,7 +11,7 @@ struct ExSplayTreeNode
 	4 EndValue // only used for some things
 endstruct
 
-extern ExSplayTreeInsert { insertat node rootptr -- }
+extern ExSplayTreeInsert { node rootptr -- }
 extern ExSplayTreeRemove { node rootptr -- }
 
 extern ExSplayTreeSplay { node rootptr -- }
@@ -27,6 +27,8 @@ extern ExSplayTreeFindNodeByValueRange { value rootptr -- node }
 extern ExSplayTreeFindFirstContainingNode { value endvalue root -- node }
 
 extern ExSplayTreeFindEmptyRange { size root -- prevnode value }
+
+fnptr ExSplayTreeComparisonF { node1 node2 -- cmp }
 
 #ifdef DEBUGCHECKS
 

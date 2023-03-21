@@ -164,7 +164,6 @@ struct FatData
 	ComBitmapHeader_SIZEOF FreeClusterBitmap
 	4 FreeClusterHint
 
-
 	// decoded BPB
 
 	4 SectorSizeBytes
@@ -190,16 +189,14 @@ struct FatFCBData
 	4 ParentFCBData // splay tree parent
 	4 LeftChild
 	4 RightChild
-	4 NameHash // splay tree value
+	4 Name // splay tree value
 
-	4 ParentDirDCBData
+	4 ParentDirDCB
 
 	4 FCB
 
 	4 ReclaimNext
 	4 ReclaimPrev
-
-	4 Name
 
 	4 DirentOffset
 
@@ -207,6 +204,7 @@ struct FatFCBData
 
 	4 InitialFlags
 	4 References
+	4 SavedPermissions
 
 	4 Flags
 
@@ -240,17 +238,29 @@ extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 extern FatClusterChainMeasureLength { cluster mount -- length ok }
 extern FatFCBMeasureSize { fcb -- ok }
 
+extern FatFCBCacheLock { alertable mount -- ok }
+extern FatFCBCacheUnlock { mount -- }
+
 extern FatRootDirectoryFindVolumeLabel { mount -- }
 
 extern FatClusterBitmapInitialize { mount -- ok }
 extern FatClusterBitmapUninitialize { mount -- }
 
 extern FatRootDirectoryCreate { mount -- ok }
-extern FatFCBCreate { flags filetype mount -- fcb ok }
+extern FatFCBCreate { name flags filetype mount -- fcb ok }
 extern FatFCBDelete { writeout fcb -- }
+
+extern FatDirectoryFCBInitialize { fcb -- ok }
 
 extern FatFCBReference { fcb -- }
 extern FatFCBDereference { fcb -- }
+
+extern FatDirectoryFindEntry { name fcb -- seek shortdirent bcb ok }
+
+extern FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
+extern FatDirectoryInsertCachedChild { childfcb fcb mount -- }
+
+extern FatFCBCreateFromDirent { name flags dirfcb seek shortdirent mount -- fcb ok }
 
 extern FatFileUpdate { fcb -- }
 

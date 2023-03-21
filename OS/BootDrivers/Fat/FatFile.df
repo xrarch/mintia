@@ -27,6 +27,24 @@
 
 #include "Fat.h"
 
+fn FatFCBCacheLock { alertable mount -- ok }
+	fnsection "PAGE$text"
+
+	KERNELMODE // waitmode
+	alertable@ // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMount_Extension + @ FatData_FCBCacheMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn FatFCBCacheUnlock { mount -- }
+	fnsection "PAGE$text"
+
+	0 // abandon
+	mount@ IOMount_Extension + @ FatData_FCBCacheMutex + // mutex
+	KeMutexRelease drop
+end
+
 fn (IODispatchPokeFunction) FatPoke { poketype object -- }
 	// this function gives us a chance to update timestamps when an operation
 	// occurs that might bypass us entirely i.e. a fully cached read or write.
@@ -36,7 +54,25 @@ end
 fn (IODispatchSetSecurityFunction) FatSetSecurity { uid gid permissions object -- ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	if (uid@ -1 ~=)
+		STATUS_NOT_SUPPORTED ok!
+		return
+	end
+
+	if (gid@ -1 ~=)
+		STATUS_NOT_SUPPORTED ok!
+		return
+	end
+
+	if (permissions@ -1 ==)
+		0 ok!
+		return
+	end
+
+	permissions@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_SavedPermissions + !
 end
 
 fn FatFCBCacheFlush { destroy mount -- ok }
@@ -51,8 +87,78 @@ fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -
 	0 actualcount!
 end
 
-fn FatFCBCreate { flags filetype mount -- fcb ok }
+fn FatFCBCreateFromDirent { name flags dirfcb seek shortdirent mount -- fcb ok }
 	fnsection "PAGE$text"
+
+	auto firstcluster
+	shortdirent@ FatDirectoryEntry_FirstClusterLowI + gi firstcluster!
+
+	if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==)
+		shortdirent@ FatDirectoryEntry_FirstClusterHighI + gi 16 << firstcluster |=
+	end
+
+	auto filetype
+
+	if (shortdirent@ FatDirectoryEntry_AttributeB + gb FAT_ATTR_DIRECTORY &)
+		OSFILETYPE_DIRECTORY filetype!
+	end else
+		OSFILETYPE_FILE filetype!
+	end
+
+	name@ // name
+	flags@ // flags
+	filetype@ // filetype
+	mount@ // mount
+	FatFCBCreate ok! fcb!
+
+	if (ok@)
+		return
+	end
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	firstcluster@ fcbdata@ FatFCBData_StartingCluster + !
+
+	shortdirent@ FatDirectoryEntry_FileSizeBytes + @ fcb@ IOFileControlBlock_SizeInBytes + !
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		fcb@ FatFCBMeasureSize ok!
+
+		if (ok@)
+			-1 // writeout
+			fcb@ // fcb
+			FatFCBDelete
+
+			return
+		end
+
+		fcb@ FatDirectoryFCBInitialize ok!
+
+		if (ok@)
+			-1 // writeout
+			fcb@ // fcb
+			FatFCBDelete
+
+			return
+		end
+	end
+
+	seek@ FatDirectoryEntry_SIZEOF * fcbdata@ FatFCBData_DirentOffset + !
+	dirfcb@ fcbdata@ FatFCBData_ParentDirDCB + !
+
+	dirfcb@ FatFCBReference
+end
+
+fn FatFCBCreate { name flags filetype mount -- fcb ok }
+	fnsection "PAGE$text"
+
+	auto namelen
+	0 namelen!
+
+	if (name@)
+		name@ strlen 1 + namelen!
+	end
 
 	if (flags@ OSFILEFLAG_PAGEFILE &)
 		mount@ IOMount_FsDeviceObject + @ // devobj
@@ -73,18 +179,18 @@ fn FatFCBCreate { flags filetype mount -- fcb ok }
 	auto fcbdata
 	if (flags@ OSFILEFLAG_PAGEFILE & ~~)
 		if (filetype@ OSFILETYPE_DIRECTORY ==)
-			FatDCBData_SIZEOF // bytes
+			FatDCBData_SIZEOF namelen@ + // bytes
 			'FDCp' // tag
 			PAGED // flags
 			MmAllocWithTag ok! fcbdata!
 		end else
-			FatFCBData_SIZEOF // bytes
+			FatFCBData_SIZEOF namelen@ + // bytes
 			'FFCp' // tag
 			PAGED // flags
 			MmAllocWithTag ok! fcbdata!
 		end
 	end else
-		FatFCBData_SIZEOF // bytes
+		FatFCBData_SIZEOF namelen@ + // bytes
 		'FFCX' // tag
 		0 // flags
 		MmAllocWithTag ok! fcbdata!
@@ -114,15 +220,20 @@ fn FatFCBCreate { flags filetype mount -- fcb ok }
 		return
 	end
 
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		OSDEFAULTDIRPERMISSIONS fcbdata@ FatFCBData_SavedPermissions + !
+	end else
+		OSDEFAULTFILEPERMISSIONS fcbdata@ FatFCBData_SavedPermissions + !
+	end
+
 	fcbnp@ fcbdata@ FatFCBData_Nonpaged + !
 	fcbdata@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + !
 
 	0 fcbdata@ FatFCBData_ParentFCBData + !
 	0 fcbdata@ FatFCBData_LeftChild + !
 	0 fcbdata@ FatFCBData_RightChild + !
-	0 fcbdata@ FatFCBData_NameHash + !
 
-	0 fcbdata@ FatFCBData_ParentDirDCBData + !
+	0 fcbdata@ FatFCBData_ParentDirDCB + !
 
 	fcb@ fcbdata@ FatFCBData_FCB + !
 
@@ -130,6 +241,26 @@ fn FatFCBCreate { flags filetype mount -- fcb ok }
 	0 fcbdata@ FatFCBData_ReclaimPrev + !
 
 	0 fcbdata@ FatFCBData_Name + !
+
+	if (namelen@)
+		if (filetype@ OSFILETYPE_DIRECTORY ==)
+			fcbdata@ FatDCBData_SIZEOF + // dest
+			name@ // src
+			namelen@ // sz
+			memcpy
+
+			fcbdata@ FatDCBData_SIZEOF +
+			fcbdata@ FatFCBData_Name + !
+		end else
+			fcbdata@ FatFCBData_SIZEOF + // dest
+			name@ // src
+			namelen@ // sz
+			memcpy
+
+			fcbdata@ FatFCBData_SIZEOF +
+			fcbdata@ FatFCBData_Name + !
+		end
+	end
 
 	0 fcbdata@ FatFCBData_DirentOffset + !
 
@@ -142,6 +273,15 @@ fn FatFCBCreate { flags filetype mount -- fcb ok }
 
 	-1 fcbnp@ FatFCBDataNonpaged_LastFATLinkClusterOff + !
 	0 fcbnp@ FatFCBDataNonpaged_LastFATLinkValue + !
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		// initialize the fields that need tear-down to zero.
+
+		0 // sizeinbits
+		0 // data
+		fcbdata@ FatDCBData_DirentBitmapHeader + // header
+		ComBitmapInitialize
+	end
 end
 
 fn FatFCBDelete { writeout fcb -- }
@@ -149,6 +289,21 @@ fn FatFCBDelete { writeout fcb -- }
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	if (fcbdata@ FatFCBData_ParentDirDCB + @)
+		fcbdata@ FatFCBData_ParentDirDCB + @ FatFCBDereference
+	end
+
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @
+		OSFILETYPE_DIRECTORY ==)
+
+		auto bmp
+		fcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData bmp!
+
+		if (bmp@)
+			bmp@ MmFree
+		end
+	end
 
 	writeout@ // writeout
 	fcb@ // fcb
@@ -175,9 +330,6 @@ fn FatFCBMeasureSize { fcb -- ok }
 	if (ok@)
 		return
 	end
-
-	length@
-	mount@ IOMount_Extension + @ FatData_ClusterSizeShift + @ << "%d bytes\n" Printf
 
 	length@
 	mount@ IOMount_Extension + @ FatData_ClusterSizeShift + @ <<

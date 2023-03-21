@@ -52,21 +52,36 @@ fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparse
 	auto mount
 	initialfcb@ FSFileControlBlockGetMount mount!
 
+	initialfcb@ IOFileControlBlockLock ok!
+
 	while (path@ gb)
 		fileobject@ // fileobject
 		path@ // path
 		initialfcb@ // fcb
 		mount@ // mount
+		process@ // process
 		FatCrunchPathComponent ok! initialfcb! path!
 
 		if (ok@)
-			initialfcb@ FatFCBDereference
+			if (initialfcb@ ~~)
+				// FatCrunchPathComponent already cleaned up.
 
-			return
+				return
+			end
+
+			break
 		end
 	end
 
+	initialfcb@ IOFileControlBlockUnlock
+
 	// at this point the FCB should be refed but unlocked
+
+	if (ok@)
+		initialfcb@ FatFCBDereference
+
+		return
+	end
 
 	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_MUSTCREATE &)
 		initialfcb@ FatFCBDereference
@@ -87,7 +102,6 @@ fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparse
 	end
 
 	fileobject@ // fileobject
-	process@ // process
 	initialfcb@ // fcb
 	FatFillFileObject
 end
@@ -122,7 +136,7 @@ fn (IODispatchDeleteObjectFunction) FatDeleteObject { object -- ok }
 	0 ok!
 end
 
-fn FatFillFileObject { fileobject process fcb -- }
+fn FatFillFileObject { fileobject fcb -- }
 	fnsection "PAGE$text"
 
 	auto mount
@@ -131,7 +145,7 @@ fn FatFillFileObject { fileobject process fcb -- }
 	mount@ FatMountReference
 
 	fcb@ // fcb
-	OSDEFAULTDIRPERMISSIONS // permissions
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_SavedPermissions + @ // permissions
 	UID_SYSTEM // uid
 	GID_SYSTEM // gid
 	fileobject@ // fileobject
@@ -139,13 +153,16 @@ fn FatFillFileObject { fileobject process fcb -- }
 	FSFileObjectFill
 end
 
-fn FatCrunchPathComponent { fileobject path fcb mount -- nextpath nextfcb ok }
+fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfcb ok }
 	fnsection "PAGE$text"
 
 	0 ok!
 
 	fcb@ nextfcb!
 	path@ nextpath!
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto pcomp
 	256 alloc pcomp!
@@ -158,6 +175,32 @@ fn FatCrunchPathComponent { fileobject path fcb mount -- nextpath nextfcb ok }
 		// no more path, done
 
 		return
+	end
+
+	// more path. traverse
+
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
+		STATUS_NOT_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (process@)
+		// check traverse rights (on behalf of the CALLING process,
+		// not the receiver of the handle)
+
+		ACCESS_EXEC // access
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_SavedPermissions + @ // permbits
+		UID_SYSTEM // owninguid
+		GID_SYSTEM // owninggid
+		mount@ // mount
+		FSCheckAccess ok!
+
+		if (ok@)
+			// no rights
+
+			return
+		end
 	end
 
 	auto len
@@ -189,6 +232,159 @@ fn FatCrunchPathComponent { fileobject path fcb mount -- nextpath nextfcb ok }
 	if (pcomp@ "." strcmp)
 		return
 	end
+
+	if (pcomp@ ".." strcmp)
+		if (fcb@ mount@ IOMount_RootFCB + @ ==)
+			return
+		end
+
+		fcbdata@ FatFCBData_ParentDirDCB + @ nextfcb!
+
+		nextfcb@ FatFCBReference
+
+		fcb@ IOFileControlBlockUnlock
+		fcb@ FatFCBDereference
+
+		nextfcb@ IOFileControlBlockLock ok!
+
+		if (ok@)
+			nextfcb@ FatFCBDereference
+
+			0 nextfcb!
+		end
+
+		return
+	end
+
+	// hash the path component, and search the splay tree for the current DCB
+	// for that hashed name.
+
+	pcomp@ // name
+	fcb@ // fcb
+	mount@ // mount
+	FatDirectoryGetCachedChild ok! nextfcb!
+
+	if (ok@)
+		fcb@ nextfcb!
+
+		return
+	end
+
+	if (nextfcb@)
+		fcb@ IOFileControlBlockUnlock
+		fcb@ FatFCBDereference
+
+		nextfcb@ IOFileControlBlockLock ok!
+
+		if (ok@)
+			nextfcb@ FatFCBDereference
+
+			0 nextfcb!
+		end
+
+		return
+	end
+
+	fcb@ nextfcb!
+
+	// the FCB for this name doesn't exist.
+	// there are three cases at this point:
+	//
+	//  1. The file exists on disk and isn't cached yet.
+	//  2. The file does not exist on disk at all.
+	//  3. The file does not exist on disk, and we want to create it.
+	//
+	// We have to traverse the directory now and acquire an FCB.
+	// After that, we insert it into the parent directory's cache.
+
+	auto bcb
+	auto shortdirent
+	auto seek
+
+	pcomp@ // name
+	fcb@ // fcb
+	FatDirectoryFindEntry ok! bcb! shortdirent! seek!
+
+	if (ok@)
+		if (ok@ STATUS_NOT_FOUND ~=)
+			return
+		end
+
+		if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE & ~~)
+			return
+		end
+
+		if (path@ gb)
+			return
+		end
+
+		ACCESS_WRITE // access
+		fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_SavedPermissions + @ // permbits
+		UID_SYSTEM // owninguid
+		GID_SYSTEM // owninggid
+		mount@ // mount
+		FSCheckAccess ok!
+
+		if (ok@)
+			return
+		end
+
+		fileobject@ // fileobject
+		pcomp@ // name
+		fcb@ // dirfcb
+		FatCreateFile ok! nextfcb!
+
+		fcb@ IOFileControlBlockUnlock
+		fcb@ FatFCBDereference
+
+		if (ok@ ~~)
+			nextfcb@ IOFileControlBlockLock ok!
+
+			if (ok@)
+				nextfcb@ FatFCBDereference
+
+				0 nextfcb!
+			end
+		end
+
+		return
+	end
+
+	pcomp@ // name
+	fileobject@ IOFile_Flags + @ // flags
+	fcb@ // dirfcb
+	seek@ // seek
+	shortdirent@ // shortdirent
+	mount@ // mount
+	FatFCBCreateFromDirent ok! nextfcb!
+
+	if (ok@)
+		fcb@ nextfcb!
+
+		return
+	end
+
+	nextfcb@ // childfcb
+	fcb@ // fcb
+	mount@ // mount
+	FatDirectoryInsertCachedChild
+
+	fcb@ IOFileControlBlockUnlock
+	fcb@ FatFCBDereference
+
+	nextfcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		nextfcb@ FatFCBDereference
+
+		0 nextfcb!
+	end
+end
+
+fn FatCreateFile { fileobject name dirfcb -- fcb ok }
+	fnsection "PAGE$text"
+
+	OSFILEFLAG_MUSTCREATE ~ fileobject@ IOFile_Flags + &=
 
 	STATUS_NOT_IMPLEMENTED ok!
 end

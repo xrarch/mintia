@@ -480,6 +480,19 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent 
 	end
 
 	0 dest@ sb
+
+	// skip . and .. since mintia handles these specially and so these dirents
+	// are not relevant to our driver.
+
+	if (dirent@ OSDirectoryEntry_Name + "." strcmp)
+		-1 ok!
+		return
+	end
+
+	if (dirent@ OSDirectoryEntry_Name + ".." strcmp)
+		-1 ok!
+		return
+	end
 end
 
 fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok }
@@ -538,6 +551,42 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok
 		if (ok@ ~~)
 			break
 		end
+	end
+end
+
+fn FatDirectoryFindEntry { name fcb -- seek shortdirent bcb ok }
+	fnsection "PAGE$text"
+
+	auto dirent
+	OSDirectoryEntry_SIZEOF alloc dirent!
+
+	0 seek!
+
+	0 bcb!
+
+	while (1)
+		seek@ // seek
+		dirent@ // dirent
+		fcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetEntry ok! seek! bcb! shortdirent!
+
+		if (ok@)
+			break
+		end
+
+		if (name@ dirent@ OSDirectoryEntry_Name + strcmp)
+			1 seek -=
+			return
+		end
+	end
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
+
+	if (ok@ STATUS_END_OF_FILE ==)
+		STATUS_NOT_FOUND ok!
 	end
 end
 
@@ -625,6 +674,7 @@ fn FatRootDirectoryCreate { mount -- ok }
 	mount@ IOMount_Extension + @ fatdata!
 
 	auto fcb
+	0 // name
 	0 // flags
 	OSFILETYPE_DIRECTORY // filetype
 	mount@ // mount
@@ -636,10 +686,6 @@ fn FatRootDirectoryCreate { mount -- ok }
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
-
-	// set root directory as its own parent
-
-	fcb@ fcbdata@ FatFCBData_ParentDirDCBData + !
 
 	fatdata@ FatData_RootFirstCluster + @ fcbdata@ FatFCBData_StartingCluster + !
 
@@ -674,39 +720,6 @@ fn FatRootDirectoryCreate { mount -- ok }
 		FatFCBDelete
 
 		return
-	end
-
-	// test code begin
-
-	auto dirent
-	OSDirectoryEntry_SIZEOF alloc dirent!
-
-	auto seek
-	0 seek!
-
-	auto bcb
-	0 bcb!
-
-	while (1)
-		seek@ // seek
-		dirent@ // dirent
-		fcb@ // fcb
-		bcb@ // bcb
-		FatDirectoryGetEntry ok! seek! bcb!
-
-		if (ok@)
-			if (ok@ STATUS_END_OF_FILE ==)
-				0 ok!
-			end
-
-			break
-		end
-
-		dirent@ OSDirectoryEntry_Name + "%s\n" Printf
-	end
-
-	if (bcb@)
-		bcb@ VcBufferDecrementMapCount drop
 	end
 end
 
@@ -827,9 +840,7 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 		0 ok!
 	end
 
-	if (ok@)
-		bmp@ MmFree
-	end elseif (runlength@)
+	if (runlength@)
 		if (runtype@)
 			runlength@ // runlength
 			runstart@ // index
@@ -845,16 +856,185 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 		end
 	end
 
-	fcbdata@ FatDCBData_DirentBitmapHeader +
-	ComBitmapDump
+	free@ fcbdata@ FatDCBData_FreeDirentCount + !
 
-	bmp@ MmBlockChargeGet
-	fcbdata@ FatDCBData_LastDirentIndex + @
-	free@ "dir: %d free, %d last, %d bmpsz\n" Printf
+//	fcbdata@ FatDCBData_DirentBitmapHeader +
+//	ComBitmapDump
+
+//	bmp@ MmBlockChargeGet
+//	fcbdata@ FatDCBData_LastDirentIndex + @
+//	free@ "dir: %d free, %d last, %d bmpsz\n" Printf
 
 	free@ fcbdata@ FatDCBData_FreeDirentCount + !
 
 	if (bcb@)
 		bcb@ VcBufferDecrementMapCount drop
 	end
+end
+
+const NAME_EQUAL   0
+const NAME_LESS    1
+const NAME_GREATER 2
+
+fn FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
+	fnsection "PAGE$text"
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	1 // alertable
+	mount@ // mount
+	FatFCBCacheLock ok!
+
+	if (ok@)
+		return
+	end
+
+	// copypasted from ExSplayTreeFindNodeByValue and adapted for string
+	// comparisons
+
+	auto childfcbdata
+	fcbdata@ FatDCBData_SplayTreeRoot + @ childfcbdata!
+
+	while (1)
+		if (childfcbdata@ ~~)
+			break
+		end
+
+		auto cmp
+		name@ childfcbdata@ ExSplayTreeNode_Value + @ FatNameCompare cmp!
+
+		if (cmp@ NAME_LESS ==)
+			childfcbdata@ ExSplayTreeNode_LeftChild + @ childfcbdata!
+		end elseif (cmp@ NAME_GREATER ==)
+			childfcbdata@ ExSplayTreeNode_RightChild + @ childfcbdata!
+		end else
+			childfcbdata@ // node
+			fcbdata@ FatDCBData_SplayTreeRoot + // rootptr
+			ExSplayTreeSplay
+
+			break
+		end
+	end
+
+	if (childfcbdata@ ~~)
+		mount@ FatFCBCacheUnlock
+
+		0 childfcb!
+
+		return
+	end
+
+	childfcbdata@ FatFCBData_FCB + @ childfcb!
+	childfcb@ FatFCBReference
+
+	mount@ FatFCBCacheUnlock
+end
+
+fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
+	fnsection "PAGE$text"
+
+	auto rootptr
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatDCBData_SplayTreeRoot + rootptr!
+
+	auto childfcbdata
+	childfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ childfcbdata!
+
+	0 childfcbdata@ ExSplayTreeNode_LeftChild + !
+	0 childfcbdata@ ExSplayTreeNode_RightChild + !
+
+	auto name
+	childfcbdata@ ExSplayTreeNode_Value + @ name!
+
+	0 // alertable
+	mount@ // mount
+	FatFCBCacheLock drop
+
+	auto parent
+	rootptr@@ parent!
+
+	if (parent@ ~~)
+		childfcbdata@ rootptr@!
+		0 childfcbdata@ ExSplayTreeNode_Parent + !
+
+		mount@ FatFCBCacheUnlock
+
+		return
+	end
+
+	auto level
+	0 level!
+
+	while (1)
+		if (level@ 8 ==)
+			parent@ rootptr@ ExSplayTreeSplay
+			0 level!
+		end
+
+		1 level +=
+
+		auto cmp
+		name@ parent@ ExSplayTreeNode_Value + @ FatNameCompare cmp!
+
+		if (cmp@ NAME_LESS ==)
+			if (parent@ ExSplayTreeNode_LeftChild + @)
+				parent@ ExSplayTreeNode_LeftChild + @ parent!
+			end else
+				childfcbdata@ parent@ ExSplayTreeNode_LeftChild + !
+				parent@ childfcbdata@ ExSplayTreeNode_Parent + !
+				break
+			end
+		end else
+			if (parent@ ExSplayTreeNode_RightChild + @)
+				parent@ ExSplayTreeNode_RightChild + @ parent!
+			end else
+				childfcbdata@ parent@ ExSplayTreeNode_RightChild + !
+				parent@ childfcbdata@ ExSplayTreeNode_Parent + !
+				break
+			end
+		end
+	end
+
+	mount@ FatFCBCacheUnlock
+end
+
+fn FatNameCompare { name1 name2 -- cmp }
+	fnsection "PAGE$text"
+
+	auto n1len
+	name1@ strlen n1len!
+
+	auto n2len
+	name2@ strlen n2len!
+
+	auto minlen
+	n1len@ n2len@ min minlen!
+
+	while (minlen@)
+		if (name1@ gb name2@ gb >)
+			NAME_GREATER cmp!
+			return
+		end
+
+		if (name1@ gb name2@ gb <)
+			NAME_LESS cmp!
+			return
+		end
+
+		1 minlen -=
+		1 name1 +=
+		1 name2 +=
+	end
+
+	if (n1len@ n2len@ ==)
+		NAME_EQUAL cmp!
+		return
+	end
+
+	if (n1len@ n2len@ <)
+		NAME_LESS cmp!
+		return
+	end
+
+	NAME_GREATER cmp!
 end

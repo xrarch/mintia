@@ -175,6 +175,23 @@ fn FatDirectoryGetRawEntry { skipempty seek fcb lastbcb -- fatdirent bcb nextsee
 	STATUS_END_OF_FILE ok!
 end
 
+fn FatDirectoryGetLFNEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek ok }
+	fnsection "PAGE$text"
+
+	// parse the LFN entries and assemble the name into the fs-independent
+	// dirent. the first LFN entry is supplied in fatdirent, subsequent ones
+	// we have to get ourselves.
+
+end
+
+fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek ok }
+	fnsection "PAGE$text"
+
+	// parse the short entry and assemble the name into the fs-independent
+	// dirent.
+
+end
+
 fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- bcb nextseek ok }
 	fnsection "PAGE$text"
 
@@ -183,20 +200,52 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- bcb nextseek ok }
 
 	lastbcb@ bcb!
 
-	auto fatdirent
-	1 // skipempty
-	seek@ // seek
-	fcb@ // fcb
-	bcb@ // lastbcb
-	FatDirectoryGetRawEntry ok! seek! bcb! fatdirent!
+	while (1)
+		auto fatdirent
+		1 // skipempty
+		seek@ // seek
+		fcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetRawEntry ok! seek! bcb! fatdirent!
 
-	if (ok@)
-		return
+		if (ok@)
+			break
+		end
+
+		// figure out what kind of entry this is.
+		// the cases we care about are normal short file name, and LFN.
+		// we loop in case the entry turns out to be corrupted and the routine
+		// we call to parse it decides to skip over it.
+
+		auto attr
+		fatdirent@ FatDirectoryEntry_AttributeB + gb attr!
+
+		if (attr@ FAT_ATTR_LFN_MASK & FAT_ATTR_LFN ==)
+			dirent@ // dirent
+			fatdirent@ // fatdirent
+			seek@ // seek
+			fcb@ // fcb
+			bcb@ // lastbcb
+			FatDirectoryGetLFNEntry ok! nextseek! bcb!
+		end else
+			dirent@ // dirent
+			fatdirent@ // fatdirent
+			seek@ // seek
+			fcb@ // fcb
+			bcb@ // lastbcb
+			FatDirectoryGetShortEntry ok! nextseek! bcb!
+		end
+
+		// loop until ok either indicates EOF or success.
+
+		if (ok@ STATUS_END_OF_FILE ==)
+			break
+		end
+
+		if (ok@ ~~)
+			break
+		end
 	end
-
-	// figure out what kind of entry this is.
-	// the cases we care about are normal short file name, and LFN.
-
 end
 
 fn FatRootDirectoryFindVolumeLabel { mount -- }
@@ -229,7 +278,7 @@ fn FatRootDirectoryFindVolumeLabel { mount -- }
 		auto attr
 		fatdirent@ FatDirectoryEntry_AttributeB + gb attr!
 
-		if (attr@ FAT_ATTR_LFN ~=
+		if (attr@ FAT_ATTR_LFN_MASK & FAT_ATTR_LFN ~=
 			attr@ FAT_ATTR_VOLUME_ID & &&)
 
 			// found it. copy it
@@ -473,8 +522,9 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 	fcbdata@ FatDCBData_DirentBitmapHeader +
 	ComBitmapDump
 
+	bmp@ MmBlockChargeGet
 	fcbdata@ FatDCBData_LastDirentIndex + @
-	free@ "dir: %d free, %d last\n" Printf
+	free@ "dir: %d free, %d last, %d bmpsz\n" Printf
 
 	free@ fcbdata@ FatDCBData_FreeDirentCount + !
 

@@ -811,17 +811,30 @@ fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok
 		return
 	end
 
-	srcfcb@ IOFileControlBlockLock ok!
+	// make sure the FCB locks always have a consistent ordering.
+
+	auto lock1
+	auto lock2
+
+	if (srcfcb@ destfcb@ <)
+		srcfcb@ lock1!
+		destfcb@ lock2!
+	end else
+		srcfcb@ lock2!
+		destfcb@ lock1!
+	end
+
+	lock1@ IOFileControlBlockLock ok!
 
 	if (ok@)
 		return
 	end
 
-	if (srcfcb@ destfcb@ ~=)
-		destfcb@ IOFileControlBlockLock ok!
+	if (lock1@ lock2@ ~=)
+		lock2@ IOFileControlBlockLock ok!
 
 		if (ok@)
-			srcfcb@ IOFileControlBlockUnlock
+			lock1@ IOFileControlBlockUnlock
 
 			return
 		end
@@ -833,11 +846,11 @@ fn IODirectoryRenameObject { srcname srcfileobject destname destfileobject -- ok
 	destfcb@ // destfcb
 	renamefunc@ IODispatchRenameFunction ok!
 
-	if (srcfcb@ destfcb@ ~=)
-		destfcb@ IOFileControlBlockUnlock
+	if (lock1@ lock2@ ~=)
+		lock2@ IOFileControlBlockUnlock
 	end
 
-	srcfcb@ IOFileControlBlockUnlock
+	lock1@ IOFileControlBlockUnlock
 end
 
 fn IODirectoryUnlink { name filehandle -- ok }

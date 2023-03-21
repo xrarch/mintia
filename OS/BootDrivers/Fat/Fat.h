@@ -198,7 +198,8 @@ struct FatFCBData
 	4 ReclaimNext
 	4 ReclaimPrev
 
-	4 DirentOffset
+	4 LongDirentOffset
+	4 ShortDirentOffset
 
 	4 StartingCluster
 
@@ -250,17 +251,17 @@ extern FatRootDirectoryCreate { mount -- ok }
 extern FatFCBCreate { name flags filetype mount -- fcb ok }
 extern FatFCBDelete { writeout fcb -- }
 
-extern FatDirectoryFCBInitialize { fcb -- ok }
+extern FatDirectoryFCBInitializeAllocation { fcb -- ok }
 
 extern FatFCBReference { fcb -- }
 extern FatFCBDereference { fcb -- }
 
-extern FatDirectoryFindEntry { name fcb -- seek shortdirent bcb ok }
+extern FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
 
 extern FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 extern FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 
-extern FatFCBCreateFromDirent { name flags dirfcb seek shortdirent mount -- fcb ok }
+extern FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
 
 extern FatFileUpdate { fcb -- }
 

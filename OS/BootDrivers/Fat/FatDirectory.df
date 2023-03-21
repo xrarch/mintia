@@ -30,6 +30,21 @@
 fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nextseek ok }
 	fnsection "PAGE$text"
 
+	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		auto mount
+		fcb@ FSFileControlBlockGetMount mount!
+
+		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
+			fcb@ mount@ IOMount_RootFCB + @ ~= ||)
+
+			fcb@ IOFileControlBlockCacheCheck ok! drop
+
+			if (ok@)
+				return
+			end
+		end
+	end
+
 	fcb@ IOFileControlBlockLockShared ok!
 
 	if (ok@)
@@ -45,7 +60,7 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nexts
 	dirent@ // dirent
 	fcb@ // fcb
 	bcb@ // lastbcb
-	FatDirectoryGetEntry ok! nextseek! bcb! drop
+	FatDirectoryGetEntry ok! nextseek! drop bcb! drop
 
 	fcb@ IOFileControlBlockUnlock
 
@@ -495,7 +510,7 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent 
 	end
 end
 
-fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok }
+fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb longseek nextseek ok }
 	fnsection "PAGE$text"
 
 	// return the next valid entry in the fs-independent dirent.
@@ -505,6 +520,8 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok
 	seek@ nextseek!
 
 	while (1)
+		0 longseek!
+
 		auto fatdirent
 		1 // skipempty
 		nextseek@ // seek
@@ -525,6 +542,8 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok
 		fatdirent@ FatDirectoryEntry_AttributeB + gb attr!
 
 		if (attr@ FAT_ATTR_LFN_MASK & FAT_ATTR_LFN ==)
+			nextseek@ 1 - longseek!
+
 			dirent@ // dirent
 			fatdirent@ // fatdirent
 			nextseek@ // seek
@@ -554,29 +573,29 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok
 	end
 end
 
-fn FatDirectoryFindEntry { name fcb -- seek shortdirent bcb ok }
+fn FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
 	fnsection "PAGE$text"
 
 	auto dirent
 	OSDirectoryEntry_SIZEOF alloc dirent!
 
-	0 seek!
+	0 shortdirentseek!
 
 	0 bcb!
 
 	while (1)
-		seek@ // seek
+		shortdirentseek@ // shortdirentseek
 		dirent@ // dirent
 		fcb@ // fcb
 		bcb@ // lastbcb
-		FatDirectoryGetEntry ok! seek! bcb! shortdirent!
+		FatDirectoryGetEntry ok! shortdirentseek! longdirentseek! bcb! shortdirent!
 
 		if (ok@)
 			break
 		end
 
 		if (name@ dirent@ OSDirectoryEntry_Name + strcmp)
-			1 seek -=
+			1 shortdirentseek -=
 			return
 		end
 	end
@@ -709,34 +728,33 @@ fn FatRootDirectoryCreate { mount -- ok }
 	end
 
 	fcb@ mount@ IOMount_RootFCB + !
-
-	fcb@ FatDirectoryFCBInitialize ok!
-
-	if (ok@)
-		0 mount@ IOMount_RootFCB + !
-
-		-1 // writeout
-		fcb@ // fcb
-		FatFCBDelete
-
-		return
-	end
 end
 
-fn FatDirectoryFCBInitialize { fcb -- ok }
+fn FatDirectoryFCBInitializeAllocation { fcb -- ok }
 	fnsection "PAGE$text"
 
-	// should be called on a new directory FCB after the size has been
-	// determined (and cluster chain checked for validity) with
-	// FatFCBMeasureSize.
-	// constructs the dirent bitmap and initializes the child splay tree.
+	// should be called on a directory FCB the first time someone tries to
+	// allocate or deallocate entries within the directory.
+	// constructs the dirent bitmap.
+
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
-	0 fcbdata@ FatDCBData_SplayTreeRoot + !
-	0 fcbdata@ FatDCBData_DirentHint + !
-	-1 fcbdata@ FatDCBData_LastDirentIndex + !
+	if (fcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData)
+		fcb@ IOFileControlBlockUnlock
+
+		// already initialized
+
+		0 ok!
+
+		return
+	end
 	
 	auto size
 	fcb@ IOFileControlBlock_SizeInBytes + @ size!
@@ -754,6 +772,8 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 	MmAllocWithTag ok! bmp!
 
 	if (ok@)
+		fcb@ IOFileControlBlockUnlock
+
 		return
 	end
 
@@ -856,7 +876,14 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 		end
 	end
 
-	free@ fcbdata@ FatDCBData_FreeDirentCount + !
+	if (ok@)
+		bmp@ MmFree
+
+		0 // sizeinbits
+		0 // data
+		fcbdata@ FatDCBData_DirentBitmapHeader + // header
+		ComBitmapInitialize
+	end
 
 //	fcbdata@ FatDCBData_DirentBitmapHeader +
 //	ComBitmapDump
@@ -870,6 +897,8 @@ fn FatDirectoryFCBInitialize { fcb -- ok }
 	if (bcb@)
 		bcb@ VcBufferDecrementMapCount drop
 	end
+
+	fcb@ IOFileControlBlockUnlock
 end
 
 const NAME_EQUAL   0

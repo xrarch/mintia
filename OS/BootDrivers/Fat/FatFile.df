@@ -87,7 +87,7 @@ fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -
 	0 actualcount!
 end
 
-fn FatFCBCreateFromDirent { name flags dirfcb seek shortdirent mount -- fcb ok }
+fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
 	fnsection "PAGE$text"
 
 	auto firstcluster
@@ -132,19 +132,10 @@ fn FatFCBCreateFromDirent { name flags dirfcb seek shortdirent mount -- fcb ok }
 
 			return
 		end
-
-		fcb@ FatDirectoryFCBInitialize ok!
-
-		if (ok@)
-			-1 // writeout
-			fcb@ // fcb
-			FatFCBDelete
-
-			return
-		end
 	end
 
-	seek@ FatDirectoryEntry_SIZEOF * fcbdata@ FatFCBData_DirentOffset + !
+	longdirentseek@ FatDirectoryEntry_SIZEOF * fcbdata@ FatFCBData_LongDirentOffset + !
+	shortdirentseek@ FatDirectoryEntry_SIZEOF * fcbdata@ FatFCBData_ShortDirentOffset + !
 	dirfcb@ fcbdata@ FatFCBData_ParentDirDCB + !
 
 	dirfcb@ FatFCBReference
@@ -262,7 +253,8 @@ fn FatFCBCreate { name flags filetype mount -- fcb ok }
 		end
 	end
 
-	0 fcbdata@ FatFCBData_DirentOffset + !
+	0 fcbdata@ FatFCBData_LongDirentOffset + !
+	0 fcbdata@ FatFCBData_ShortDirentOffset + !
 
 	0 fcbdata@ FatFCBData_StartingCluster + !
 
@@ -275,7 +267,10 @@ fn FatFCBCreate { name flags filetype mount -- fcb ok }
 	0 fcbnp@ FatFCBDataNonpaged_LastFATLinkValue + !
 
 	if (filetype@ OSFILETYPE_DIRECTORY ==)
-		// initialize the fields that need tear-down to zero.
+		0 fcbdata@ FatDCBData_SplayTreeRoot + !
+		0 fcbdata@ FatDCBData_DirentHint + !
+		-1 fcbdata@ FatDCBData_LastDirentIndex + !
+		0 fcbdata@ FatDCBData_FreeDirentCount + !
 
 		0 // sizeinbits
 		0 // data
@@ -296,6 +291,12 @@ fn FatFCBDelete { writeout fcb -- }
 
 	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @
 		OSFILETYPE_DIRECTORY ==)
+
+		if (DEBUGCHECKS)
+			if (fcbdata@ FatDCBData_SplayTreeRoot + @)
+				"FatFCBDelete: directory cache had children\n" KeCrash
+			end
+		end
 
 		auto bmp
 		fcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData bmp!

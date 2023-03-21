@@ -249,6 +249,14 @@ extern FatRootDirectoryCreate { mount -- ok }
 extern FatFCBCreate { flags filetype mount -- fcb ok }
 extern FatFCBDelete { writeout fcb -- }
 
+extern FatFCBReference { fcb -- }
+extern FatFCBDereference { fcb -- }
+
+extern FatFileUpdate { fcb -- }
+
+extern FatMountReference { mount -- }
+extern FatMountDereference { mount -- }
+
 extern FatReadWriteFile { iopl -- done ok }
 extern FatReadDirectory { seek dirent fcb -- nextseek ok }
 extern FatOpen { access fileobject -- ok }

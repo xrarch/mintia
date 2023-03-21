@@ -30,7 +30,28 @@
 fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nextseek ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	fcb@ IOFileControlBlockLockShared ok!
+
+	if (ok@)
+		return
+	end
+
+	auto bcb
+	0 bcb!
+
+	auto fatdirent
+
+	seek@ // seek
+	dirent@ // dirent
+	fcb@ // fcb
+	bcb@ // lastbcb
+	FatDirectoryGetEntry ok! nextseek! bcb! drop
+
+	fcb@ IOFileControlBlockUnlock
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
 end
 
 fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
@@ -176,7 +197,7 @@ fn FatDirectoryGetRawEntry { skipempty seek fcb lastbcb -- fatdirent bcb nextsee
 	STATUS_END_OF_FILE ok!
 end
 
-fn FatDirectoryGetLFNEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek ok }
+fn FatDirectoryGetLFNEntry { dirent fatdirent seek fcb lastbcb -- shortdirent bcb nextseek ok }
 	fnsection "PAGE$text"
 
 	lastbcb@ bcb!
@@ -208,7 +229,7 @@ fn FatDirectoryGetLFNEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek o
 		return
 	end
 
-	if (ordinal@ 20 >=)
+	if (ordinal@ 20 >)
 		// corrupted LFN entry, skip
 		return
 	end
@@ -325,6 +346,8 @@ fn FatDirectoryGetLFNEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek o
 	// we should now have the short entry in fatdirent.
 	// first lets confirm its a valid short entry.
 
+	fatdirent@ shortdirent!
+
 	if (fatdirent@ gb FAT_DIRENT_FREE ==
 		fatdirent@ gb FAT_DIRENT_FREE_ALL == ||)
 
@@ -394,12 +417,14 @@ fn FatLFNChecksum { shortname -- checksum }
 	end
 end
 
-fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek ok }
+fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent bcb nextseek ok }
 	fnsection "PAGE$text"
 
 	lastbcb@ bcb!
 	seek@ nextseek!
 	0 ok!
+
+	fatdirent@ shortdirent!
 
 	// parse the short entry and assemble the name into the fs-independent
 	// dirent. this is pretty easy for short entries.
@@ -457,7 +482,7 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- bcb nextseek
 	0 dest@ sb
 end
 
-fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- bcb nextseek ok }
+fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb nextseek ok }
 	fnsection "PAGE$text"
 
 	// return the next valid entry in the fs-independent dirent.
@@ -492,14 +517,14 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- bcb nextseek ok }
 			nextseek@ // seek
 			fcb@ // fcb
 			bcb@ // lastbcb
-			FatDirectoryGetLFNEntry ok! nextseek! bcb!
+			FatDirectoryGetLFNEntry ok! nextseek! bcb! shortdirent!
 		end elseif (attr@ FAT_ATTR_VOLUME_ID & ~~)
 			dirent@ // dirent
 			fatdirent@ // fatdirent
 			nextseek@ // seek
 			fcb@ // fcb
 			bcb@ // lastbcb
-			FatDirectoryGetShortEntry ok! nextseek! bcb!
+			FatDirectoryGetShortEntry ok! nextseek! bcb! shortdirent!
 		end else
 			-1 ok!
 		end

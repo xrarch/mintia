@@ -36,12 +36,159 @@
 fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparsepath ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	0 reparsepath!
+	0 ok!
+
+	auto path
+	fileobject@ IOFile_OpenedPath + @ path!
+
+	if (path@ ~~)
+		STATUS_NOT_FOUND ok!
+		return
+	end
+
+	initialfcb@ FatFCBReference
+
+	auto mount
+	initialfcb@ FSFileControlBlockGetMount mount!
+
+	while (path@ gb)
+		fileobject@ // fileobject
+		path@ // path
+		initialfcb@ // fcb
+		mount@ // mount
+		FatCrunchPathComponent ok! initialfcb! path!
+
+		if (ok@)
+			initialfcb@ FatFCBDereference
+
+			return
+		end
+	end
+
+	// at this point the FCB should be refed but unlocked
+
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_MUSTCREATE &)
+		initialfcb@ FatFCBDereference
+
+		STATUS_ALREADY_EXISTS ok!
+
+		return
+	end
+
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATEDIR &)
+		if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
+			initialfcb@ FatFCBDereference
+
+			STATUS_ALREADY_EXISTS ok!
+
+			return
+		end
+	end
+
+	fileobject@ // fileobject
+	process@ // process
+	initialfcb@ // fcb
+	FatFillFileObject
 end
 
 fn (IODispatchDeleteObjectFunction) FatDeleteObject { object -- ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	auto mount
+	fcb@ FSFileControlBlockGetMount mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	if (object@ IOFile_Context + @ FATFILECONTEXT_WRITABLE &)
+		-1 fatdata@ FatData_WritableFiles + KeInterlockedIncrement drop
+	end
+
+	if (object@ IOFile_Context + @ FATFILECONTEXT_UPDATEONCLOSE &)
+		fcb@ FatFileUpdate
+	end
+
+	// the FCB may or may not stop existing after we deref it here, so don't
+	// touch it again.
+
+	fcb@ FatFCBDereference
+
+	mount@ FatMountDereference
+
+	0 ok!
 end
 
+fn FatFillFileObject { fileobject process fcb -- }
+	fnsection "PAGE$text"
+
+	auto mount
+	fcb@ FSFileControlBlockGetMount mount!
+
+	mount@ FatMountReference
+
+	fcb@ // fcb
+	OSDEFAULTDIRPERMISSIONS // permissions
+	UID_SYSTEM // uid
+	GID_SYSTEM // gid
+	fileobject@ // fileobject
+	mount@ // mount
+	FSFileObjectFill
+end
+
+fn FatCrunchPathComponent { fileobject path fcb mount -- nextpath nextfcb ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	fcb@ nextfcb!
+	path@ nextpath!
+
+	auto pcomp
+	256 alloc pcomp!
+
+	while (nextpath@ gb '/' ==)
+		1 nextpath +=
+	end
+
+	if (nextpath@ gb ~~)
+		// no more path, done
+
+		return
+	end
+
+	auto len
+	0 len!
+
+	while (1)
+		if (nextpath@ gb '/' ==)
+			break
+		end
+
+		if (nextpath@ gb 0 ==)
+			break
+		end
+
+		if (len@ 255 >=)
+			STATUS_NAME_TOO_LONG ok!
+
+			return
+		end
+
+		nextpath@ gb pcomp@ len@ + sb
+
+		1 len +=
+		1 nextpath +=
+	end
+
+	0 pcomp@ len@ + sb
+
+	if (pcomp@ "." strcmp)
+		return
+	end
+
+	STATUS_NOT_IMPLEMENTED ok!
+end

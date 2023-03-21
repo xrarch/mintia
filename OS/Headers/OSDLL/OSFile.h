@@ -37,7 +37,7 @@ const OSDEFAULTDIRPERMISSIONS  511
 const OSFILEPATHMAX 256
 
 struct OSDirectoryEntry
-	256 Name
+	288 Name
 	32  Reserved
 endstruct
 

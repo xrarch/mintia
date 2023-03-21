@@ -105,7 +105,7 @@ struct FatLFNEntry
 	1 AttributesB                 // 11
 	1 TypeB                       // 12
 	1 ChecksumB                   // 13
-	14 Name2                      // 14
+	12 Name2                      // 14
 	2 FirstClusterLowI            // 26
 	4 Name3                       // 28
 endstruct

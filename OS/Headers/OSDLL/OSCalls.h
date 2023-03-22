@@ -132,6 +132,7 @@ extern OSSetQuota { quota processhandle -- ok }
 extern OSQuotaQuery { query processhandle -- ok }
 
 extern OSThreadSetFilePermissions { filepermissions -- ok }
+extern OSThreadGetFilePermissions { -- filepermissions ok }
 extern OSThreadSleep { ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }

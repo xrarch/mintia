@@ -90,6 +90,7 @@
 .extern OSSetQuota
 .extern OSQuotaQuery
 .extern OSThreadSetFilePermissions
+.extern OSThreadGetFilePermissions
 .extern OSThreadSleep
 .extern OSThreadCreate
 .extern OSThreadTerminate
@@ -119,7 +120,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 114
+	.dl 115
 
 OSCallTable:
 .global OSCallTable
@@ -212,32 +213,33 @@ OSCallTable:
 	.dl OSTOSSetQuota                                    ;86
 	.dl OSTOSQuotaQuery                                  ;87
 	.dl OSTOSThreadSetFilePermissions                    ;88
-	.dl OSTOSThreadSleep                                 ;89
-	.dl OSTOSThreadCreate                                ;90
-	.dl OSTOSThreadTerminate                             ;91
-	.dl OSTOSThreadSuspend                               ;92
-	.dl OSTOSThreadResume                                ;93
-	.dl OSTOSThreadReadStatus                            ;94
-	.dl OSTOSThreadQuery                                 ;95
-	.dl OSTOSThreadSignal                                ;96
-	.dl OSTOSThreadMaskSignal                            ;97
-	.dl OSTOSThreadDeliverOnWaitSignal                   ;98
-	.dl OSTOSJobCreate                                   ;99
-	.dl OSTOSJobAddProcess                               ;100
-	.dl OSTOSJobRemoveProcess                            ;101
-	.dl OSTOSJobSignal                                   ;102
-	.dl OSTOSSetSystemConsole                            ;103
-	.dl OSTOSConsoleSignal                               ;104
-	.dl OSTOSIsAConsole                                  ;105
-	.dl OSTOSDuplexCreate                                ;106
-	.dl OSTOSCheckPermission                             ;107
-	.dl OSTOSGrantPermission                             ;108
-	.dl OSTOSPortCreate                                  ;109
-	.dl OSTOSPortConnect                                 ;110
-	.dl OSTOSPortAccept                                  ;111
-	.dl OSTOSPortSendAndWaitReceive                      ;112
-	.dl OSTOSPortSendAndWaitReply                        ;113
-	.dl OSTOSPortOpenProcessByClientID                   ;114
+	.dl OSTOSThreadGetFilePermissions                    ;89
+	.dl OSTOSThreadSleep                                 ;90
+	.dl OSTOSThreadCreate                                ;91
+	.dl OSTOSThreadTerminate                             ;92
+	.dl OSTOSThreadSuspend                               ;93
+	.dl OSTOSThreadResume                                ;94
+	.dl OSTOSThreadReadStatus                            ;95
+	.dl OSTOSThreadQuery                                 ;96
+	.dl OSTOSThreadSignal                                ;97
+	.dl OSTOSThreadMaskSignal                            ;98
+	.dl OSTOSThreadDeliverOnWaitSignal                   ;99
+	.dl OSTOSJobCreate                                   ;100
+	.dl OSTOSJobAddProcess                               ;101
+	.dl OSTOSJobRemoveProcess                            ;102
+	.dl OSTOSJobSignal                                   ;103
+	.dl OSTOSSetSystemConsole                            ;104
+	.dl OSTOSConsoleSignal                               ;105
+	.dl OSTOSIsAConsole                                  ;106
+	.dl OSTOSDuplexCreate                                ;107
+	.dl OSTOSCheckPermission                             ;108
+	.dl OSTOSGrantPermission                             ;109
+	.dl OSTOSPortCreate                                  ;110
+	.dl OSTOSPortConnect                                 ;111
+	.dl OSTOSPortAccept                                  ;112
+	.dl OSTOSPortSendAndWaitReceive                      ;113
+	.dl OSTOSPortSendAndWaitReply                        ;114
+	.dl OSTOSPortOpenProcessByClientID                   ;115
 
 
 OSTOSConsolePutCharacter:
@@ -1530,6 +1532,19 @@ OSTOSThreadSetFilePermissions:
 	jal  OSThreadSetFilePermissions
 
 	mov  long [s17 + 4], a0 ;t1
+
+	mov  lr, long [sp]
+	addi sp, sp, 4
+	ret
+
+OSTOSThreadGetFilePermissions:
+	subi sp, sp, 4
+	mov  long [sp], lr
+
+	jal  OSThreadGetFilePermissions
+
+	mov  long [s17 + 4], a0 ;t1
+	mov  long [s17 + 8], a1 ;t2
 
 	mov  lr, long [sp]
 	addi sp, sp, 4

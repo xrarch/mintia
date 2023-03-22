@@ -227,7 +227,22 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 			// so send the signal.
 
 			if (signal@ z<)
-				OSSIGNAL_KILL signal!
+				// the signal is actually a status code.
+				// stash the status code where the thread can find it and send
+				// an OSSIGNAL_IOERR.
+
+				signal@ KeThreadCurrent@ PsThread_FileCreationPermissions + !
+
+				OSSIGNAL_IOERR signal!
+			end else
+				// the signal is a segfault. indicate to the thread whether it
+				// is a read or write fault.
+
+				if (writing@)
+					STATUS_FAULT_WRITE KeThreadCurrent@ PsThread_FileCreationPermissions + !
+				end else
+					STATUS_FAULT KeThreadCurrent@ PsThread_FileCreationPermissions + !
+				end
 			end
 
 			if (signal@ OSSIGNAL_KILL ==)
@@ -263,10 +278,17 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 				// status.
 
 				if (signal@ z>)
-					STATUS_FAULT // ok
-					abort@ // abort
-					trapframe@ // tf
-					HALCPUTrapFrameAbort
+					if (writing@)
+						STATUS_FAULT_WRITE // ok
+						abort@ // abort
+						trapframe@ // tf
+						HALCPUTrapFrameAbort
+					end else
+						STATUS_FAULT // ok
+						abort@ // abort
+						trapframe@ // tf
+						HALCPUTrapFrameAbort
+					end
 				end else
 					signal@ // ok
 					abort@ // abort

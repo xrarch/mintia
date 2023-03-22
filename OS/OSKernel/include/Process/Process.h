@@ -104,7 +104,7 @@ struct PsThread
 
 	KeEvent_SIZEOF TerminationEvent
 
-	4 FileCreationPermissions
+	4 FileCreationPermissions // also stashes the thread's last paging error
 endstruct
 
 struct PsOSDLLInfo

@@ -164,6 +164,9 @@ struct FatData
 	ComBitmapHeader_SIZEOF FreeClusterBitmap
 	4 FreeClusterHint
 
+	4 ReclaimableListHead
+	4 ReclaimableListTail
+
 	// decoded BPB
 
 	4 SectorSizeBytes
@@ -198,8 +201,8 @@ struct FatFCBData
 	4 ReclaimNext
 	4 ReclaimPrev
 
-	4 LongDirentOffset
-	4 ShortDirentOffset
+	4 LongDirentSeek
+	4 ShortDirentSeek
 
 	4 StartingCluster
 
@@ -236,6 +239,8 @@ const FATFILEFLAG_DELETE 1
 extern FatFCBCacheFlush { destroy mount -- ok }
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 
+extern FatDirectoryRemoveCachedChild { childfcb mount -- }
+
 extern FatClusterChainMeasureLength { cluster mount -- length ok }
 extern FatFCBMeasureSize { fcb -- ok }
 
@@ -247,6 +252,10 @@ extern FatRootDirectoryFindVolumeLabel { mount -- }
 extern FatClusterBitmapInitialize { mount -- ok }
 extern FatClusterBitmapUninitialize { mount -- }
 
+extern FatDeallocateChain { first clusterno mount -- }
+
+extern FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
+
 extern FatRootDirectoryCreate { mount -- ok }
 extern FatFCBCreate { name flags filetype mount -- fcb ok }
 extern FatFCBDelete { writeout fcb -- }
@@ -254,12 +263,15 @@ extern FatFCBDelete { writeout fcb -- }
 extern FatDirectoryFCBInitializeAllocation { fcb -- ok }
 
 extern FatFCBReference { fcb -- }
+extern FatFCBReferenceLockHeld { fcb -- }
 extern FatFCBDereference { fcb -- }
 
 extern FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
 
 extern FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 extern FatDirectoryInsertCachedChild { childfcb fcb mount -- }
+
+extern FatDirectoryGetRawEntry { skipempty seek fcb lastbcb -- fatdirent bcb nextseek ok }
 
 extern FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
 

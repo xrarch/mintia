@@ -11,7 +11,7 @@ extern HALCPUMapSwitch { asid pgtb -- }
 extern HALCPURunInContextNoInterrupts { handler stack arg1 arg0 -- ret0 ret1 }
 extern HALCPUEnterUserMode { teb exitfunc context ustack entryfunc -- }
 extern HALCPUIsUserTrapFrame { tf -- user }
-extern HALCPUTrapFrameAbort { abort tf -- }
+extern HALCPUTrapFrameAbort { ok abort tf -- }
 
 extern HALCPUASIDRegister { asid -- }
 extern HALCPUASIDUnregister { asid -- }

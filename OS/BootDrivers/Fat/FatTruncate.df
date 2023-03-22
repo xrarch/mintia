@@ -34,7 +34,61 @@
 fn (IODispatchTruncateFunction) FatTruncate { newsize zero flags fcb -- ok }
 	fnsection "PAGE$text"
 
-	// add or remove blocks from file specified by FCB according to newsize.
+	// add or remove clusters from file specified by FCB according to newsize.
 
-	STATUS_NOT_IMPLEMENTED ok!
+	auto oldsize
+	fcb@ IOFileControlBlock_SizeInBytes + @ oldsize!
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto fatdata
+	fcb@ FSFileControlBlockGetMount IOMount_Extension + @ fatdata!
+
+	auto oldclusters
+	oldsize@ fatdata@ FatData_ClusterSizeBytes + @ 1 - +
+	fatdata@ FatData_ClusterSizeShift + @ >> oldclusters!
+
+	auto newclusters
+	newsize@ fatdata@ FatData_ClusterSizeBytes + @ 1 - +
+	fatdata@ FatData_ClusterSizeShift + @ >> newclusters!
+
+	0 ok!
+
+	if (newclusters@ oldclusters@ ==)
+		// no blocks to allocate or release, just set size and return
+
+		if (newsize@ oldsize@ ~=)
+			newsize@ fcb@ IOFileControlBlock_SizeInBytes + !
+
+			fcb@ FatFileUpdate
+		end
+
+		return
+	end
+
+	if (zero@ ~~)
+		if (newsize@ oldsize@ >)
+			if (newsize@ fatdata@ FatData_ClusterSizeBytes + @ 1 - &)
+				2 zero!
+			end
+		end
+	end
+
+	newsize@ fcb@ IOFileControlBlock_SizeInBytes + !
+
+	newclusters@ // newclusters
+	oldclusters@ // oldclusters
+	zero@ // zero
+	flags@ // flags
+	fcb@ // fcb
+	FatClusterTruncate ok!
+
+	if (ok@)
+		// failed to truncate blocks, reset size
+
+		oldsize@ fcb@ IOFileControlBlock_SizeInBytes + !
+	end else
+		fcb@ FatFileUpdate
+	end
 end

@@ -134,11 +134,13 @@ fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek sho
 		end
 	end
 
-	longdirentseek@ FatDirectoryEntry_SIZEOF * fcbdata@ FatFCBData_LongDirentOffset + !
-	shortdirentseek@ FatDirectoryEntry_SIZEOF * fcbdata@ FatFCBData_ShortDirentOffset + !
-	dirfcb@ fcbdata@ FatFCBData_ParentDirDCB + !
+	longdirentseek@ fcbdata@ FatFCBData_LongDirentSeek + !
+	shortdirentseek@ fcbdata@ FatFCBData_ShortDirentSeek + !
 
-	dirfcb@ FatFCBReference
+	fcb@ // childfcb
+	dirfcb@ // fcb
+	mount@ // mount
+	FatDirectoryInsertCachedChild
 end
 
 fn FatFCBCreate { name flags filetype mount -- fcb ok }
@@ -253,8 +255,8 @@ fn FatFCBCreate { name flags filetype mount -- fcb ok }
 		end
 	end
 
-	0 fcbdata@ FatFCBData_LongDirentOffset + !
-	0 fcbdata@ FatFCBData_ShortDirentOffset + !
+	0 fcbdata@ FatFCBData_LongDirentSeek + !
+	0 fcbdata@ FatFCBData_ShortDirentSeek + !
 
 	0 fcbdata@ FatFCBData_StartingCluster + !
 
@@ -285,8 +287,16 @@ fn FatFCBDelete { writeout fcb -- }
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
+	if (DEBUGCHECKS)
+		if (fcbdata@ FatFCBData_References + @ 1 ~=)
+			fcbdata@ FatFCBData_References + @ "FatFCBDelete: FCB had %d references\n" KeCrash
+		end
+	end
+
 	if (fcbdata@ FatFCBData_ParentDirDCB + @)
-		fcbdata@ FatFCBData_ParentDirDCB + @ FatFCBDereference
+		fcb@ // childfcb
+		fcb@ FSFileControlBlockGetMount // mount
+		FatDirectoryRemoveCachedChild
 	end
 
 	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @
@@ -340,9 +350,122 @@ end
 fn FatFCBReference { fcb -- }
 	fnsection "PAGE$text"
 
+	auto mount
+	fcb@ FSFileControlBlockGetMount mount!
+
+	0 mount@ FatFCBCacheLock drop
+
+	fcb@ FatFCBReferenceLockHeld
+
+	mount@ FatFCBCacheUnlock
+end
+
+fn FatFCBReferenceLockHeld { fcb -- }
+	fnsection "PAGE$text"
+
+	// assumes the FCB cache lock is held
+
+	auto mount
+	fcb@ FSFileControlBlockGetMount mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto oldcount
+	fcbdata@ FatFCBData_References + @ oldcount!
+
+	oldcount@ 1 + fcbdata@ FatFCBData_References + !
+
+	if (oldcount@ ~~)
+		// remove from reclaimable list
+
+		auto ls
+		fcbdata@ FatFCBData_ReclaimPrev + @ ls!
+
+		auto ns
+		fcbdata@ FatFCBData_ReclaimNext + @ ns!
+
+		if (ls@)
+			ns@ ls@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_ReclaimNext + !
+		end else
+			ns@ fatdata@ FatData_ReclaimableListHead + !
+		end
+
+		if (ns@)
+			ls@ ns@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_ReclaimPrev + !
+		end else
+			ls@ fatdata@ FatData_ReclaimableListTail + !
+		end
+
+		IOFileControlBlockDecrementReclaimable
+	end
 end
 
 fn FatFCBDereference { fcb -- }
+	fnsection "PAGE$text"
+
+	auto mount
+	fcb@ FSFileControlBlockGetMount mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	0 mount@ FatFCBCacheLock drop
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto oldcount
+	fcbdata@ FatFCBData_References + @ oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ ~~)
+			"FatFCBDereference: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - fcbdata@ FatFCBData_References + !
+
+	if (oldcount@ 1 ==)
+		if (fcbdata@ FatFCBData_Flags + @ FATFILEFLAG_DELETE & ~~)
+			// insert into reclaimable list
+
+			auto t
+			fatdata@ FatData_ReclaimableListTail + @ t!
+
+			if (t@ ~~)
+				0 fcbdata@ FatFCBData_ReclaimNext + !
+				0 fcbdata@ FatFCBData_ReclaimPrev + !
+
+				fcb@ fatdata@ FatData_ReclaimableListHead + !
+				fcb@ fatdata@ FatData_ReclaimableListTail + !
+			end else
+				0 fcbdata@ FatFCBData_ReclaimNext + !
+
+				t@ fcbdata@ FatFCBData_ReclaimPrev + !
+				fcb@ t@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_ReclaimNext + !
+				fcb@ fatdata@ FatData_ReclaimableListTail + !
+			end
+
+			IOFileControlBlockIncrementReclaimable
+		end
+	end
+
+	mount@ FatFCBCacheUnlock
+
+	if (oldcount@ 1 ==)
+		if (fcbdata@ FatFCBData_Flags + @ FATFILEFLAG_DELETE &)
+			// delete the file on disk
+
+			fcb@ FatFileDelete
+		end
+	end
+end
+
+fn FatFileDelete { fcb -- }
 	fnsection "PAGE$text"
 
 end
@@ -350,4 +473,45 @@ end
 fn FatFileUpdate { fcb -- }
 	fnsection "PAGE$text"
 
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto dirfcb
+	fcbdata@ FatFCBData_ParentDirDCB + @ dirfcb!
+
+	if (dirfcb@ ~~)
+		return
+	end
+
+	// it's okay to fiddle with the dirent here, since the FCB is already part
+	// of the parent directory's splay tree, which means nobody is going to be
+	// looking at this dirent directly.
+
+	auto bcb
+	auto fatdirent
+
+	auto ok
+	0 // skipempty
+	fcbdata@ FatFCBData_ShortDirentSeek + @ // seek
+	dirfcb@ // fcb
+	0 // lastbcb
+	FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+
+	if (ok@)
+		return
+	end
+
+	// re-encode the relevant fcbdata fields into the dirent
+
+	auto firstcluster
+	fcbdata@ FatFCBData_StartingCluster + @ firstcluster!
+
+	firstcluster@ 0xFFFF & fatdirent@ FatDirectoryEntry_FirstClusterLowI + si
+	firstcluster@ 16 >> fatdirent@ FatDirectoryEntry_FirstClusterHighI + si
+
+	fcb@ IOFileControlBlock_SizeInBytes + @
+	fatdirent@ FatDirectoryEntry_FileSizeBytes + !
+
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
 end

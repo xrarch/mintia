@@ -324,7 +324,7 @@ fn FatLookupEntryByIndex { dirty fattype index mount lastbcb -- bcb vaddr value 
 	end
 end
 
-fn FatClusterChainMeasureLength { cluster mount -- length ok }
+fn FatClusterChainValidate { mustlen cluster mount -- length ok }
 	fnsection "PAGE$text"
 
 	// measure the length of the cluster chain starting at the given cluster.
@@ -372,6 +372,12 @@ fn FatClusterChainMeasureLength { cluster mount -- length ok }
 
 	if (lastbcb@)
 		lastbcb@ VcBufferDecrementMapCount drop
+	end
+
+	if (mustlen@ -1 ~=)
+		if (length@ mustlen@ ~=)
+			STATUS_FILE_CORRUPT ok!
+		end
 	end
 end
 
@@ -650,6 +656,21 @@ fn FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
 			end
 		end
 
+		if (fcbdata@ FatFCBData_Flags + @ FATFILEFLAG_VALIDATED & ~~)
+			oldclusters@ newclusters@ - // length
+			clusterno@ // cluster
+			mount@ // mount
+			FatClusterChainValidate ok! drop
+
+			if (ok@)
+				KeThreadCurrent@ KeThreadAcceptKill drop
+
+				return
+			end
+
+			FATFILEFLAG_VALIDATED fcbdata@ FatFCBData_Flags + |=
+		end
+
 		if (newclusters@)
 			1 // first
 			clusterno@ // clusterno
@@ -766,6 +787,9 @@ fn FatDeallocateChain { first clusterno mount -- }
 	auto fattype
 	fatdata@ FatData_FatType + @ fattype!
 
+	auto clustercount
+	fatdata@ FatData_ClusterCount + @ clustercount!
+
 	mount@ FatClusterBitmapLock
 
 	while (1)
@@ -780,6 +804,9 @@ fn FatDeallocateChain { first clusterno mount -- }
 			STATUS_FILE_CORRUPT ok!
 			break
 		end elseif (meaning@ FAT_ENTRY_RESERVED >=)
+			STATUS_FILE_CORRUPT ok!
+			break
+		end elseif (clusterno@ 2 - clustercount@ >=)
 			STATUS_FILE_CORRUPT ok!
 			break
 		end

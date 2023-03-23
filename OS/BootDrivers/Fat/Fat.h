@@ -234,14 +234,15 @@ endstruct
 const FATFILECONTEXT_UPDATEONCLOSE 1
 const FATFILECONTEXT_WRITABLE      2
 
-const FATFILEFLAG_DELETE 1
+const FATFILEFLAG_DELETE    1
+const FATFILEFLAG_VALIDATED 2
 
 extern FatFCBCacheFlush { destroy mount -- ok }
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 
 extern FatDirectoryRemoveCachedChild { childfcb mount -- }
 
-extern FatClusterChainMeasureLength { cluster mount -- length ok }
+extern FatClusterChainValidate { mustlen cluster mount -- length ok }
 extern FatFCBMeasureSize { fcb -- ok }
 
 extern FatFCBCacheLock { alertable mount -- ok }

@@ -54,6 +54,8 @@ struct MclpValue
 
 	4 Length
 
+	4 TokFlags
+
 	4 Contents
 
 	4 HeapCookie
@@ -131,8 +133,8 @@ extern MclpEvaluateValueTruthiness { value -- tru }
 
 extern MclpSpawnCommand { stdin stdout stderr builtin node machine -- processhandle ok }
 
-extern MclpValueNewX { heapcookie len contents type -- value ok }
-extern MclpValueNew { len contents type -- value ok }
+extern MclpValueNewX { tokflag heapcookie len contents type -- value ok }
+extern MclpValueNew { tokflag len contents type -- value ok }
 extern MclpRefValue { value -- }
 extern MclpFreeValue { value -- }
 

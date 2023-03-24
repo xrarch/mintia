@@ -50,7 +50,11 @@ struct OSFileInformation
 	4 MTimeMsPart
 	4 CTimeSecPart
 	4 CTimeMsPart
-	48 Reserved
+
+	4 CreationTimeSecPart
+	4 CreationTimeMsPart
+
+	40 Reserved
 endstruct
 
 struct OSStatusBlock

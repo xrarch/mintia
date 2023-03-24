@@ -55,6 +55,7 @@ struct IOFileControlBlockPaged
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
 	KeTime_SIZEOF ChangeTime
+	KeTime_SIZEOF CreationTime
 
 // opaque
 

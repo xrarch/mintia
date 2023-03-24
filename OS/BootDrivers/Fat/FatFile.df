@@ -115,8 +115,11 @@ fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek sho
 		return
 	end
 
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
+
 	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcbp@ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	firstcluster@ fcbdata@ FatFCBData_StartingCluster + !
 
@@ -133,6 +136,23 @@ fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek sho
 			return
 		end
 	end
+
+	auto timestamp
+	shortdirent@ FatDirectoryEntry_CreationDateI + gi FatDateToUnix timestamp!
+	shortdirent@ FatDirectoryEntry_CreationTimeI + gi FatTimeToUnix timestamp +=
+
+	shortdirent@ FatDirectoryEntry_CreationTimeTenthB + gb 10 / timestamp +=
+
+	timestamp@ fcbp@ IOFileControlBlockPaged_CreationTime + KeTime_SecPart + !
+
+	shortdirent@ FatDirectoryEntry_ModificationDateI + gi FatDateToUnix timestamp!
+	shortdirent@ FatDirectoryEntry_ModificationTimeI + gi FatTimeToUnix timestamp +=
+
+	timestamp@ fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_SecPart + !
+
+	shortdirent@ FatDirectoryEntry_AccessDateI + gi FatDateToUnix timestamp!
+
+	timestamp@ fcbp@ IOFileControlBlockPaged_AccessTime + KeTime_SecPart + !
 
 	longdirentseek@ fcbdata@ FatFCBData_LongDirentSeek + !
 	shortdirentseek@ fcbdata@ FatFCBData_ShortDirentSeek + !
@@ -517,4 +537,73 @@ fn FatFileUpdate { fcb -- }
 
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop
+end
+
+datasection "PAGE$text"
+
+table FatMonthDays
+	0 31 59 90 120 151 181 212 243 273 304 334
+endtable
+
+datasection "data"
+
+const SECSPERMIN      60
+const SECSPERHOUR     (SECSPERMIN 60 *)
+const SECSPERDAY      (SECSPERHOUR 24 *)
+const SECSPERYEAR     (SECSPERDAY 365 *)
+const SECSPERLEAPYEAR (SECSPERYEAR SECSPERDAY +)
+
+fn FatDateToUnix { date -- timestamp }
+	fnsection "PAGE$text"
+
+	// convert a 16 bit FAT datestamp to a corresponding unix timestamp.
+
+	auto day
+	date@ 31 & 1 - day!
+
+	auto month
+	date@ 5 >> 15 & 1 - month!
+
+	if (month@ 12 >=)
+		0 timestamp!
+		return
+	end
+
+	// add an offset of 10 years to normalize it against the unix epoch.
+
+	auto years
+	date@ 9 >> 127 & 10 + years!
+
+	[month@]FatMonthDays@ SECSPERDAY * timestamp!
+
+	day@ SECSPERDAY * timestamp +=
+
+	auto baseyear
+	1970 baseyear!
+
+	while (years@)
+		if (baseyear@ 3 & ~~)
+			SECSPERLEAPYEAR timestamp +=
+		end else
+			SECSPERYEAR timestamp +=
+		end
+
+		1 baseyear +=
+		1 years -=
+	end
+end
+
+fn FatTimeToUnix { time -- timeoffset }
+	fnsection "PAGE$text"
+
+	time@ 31 & 1 << timeoffset!
+
+	auto min
+	time@ 5 >> 63 & min!
+
+	auto hour
+	time@ 11 >> 15 & hour!
+
+	min@ 60 * timeoffset +=
+	hour@ 3600 * timeoffset +=
 end

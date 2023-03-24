@@ -40,6 +40,8 @@ extern MmInitPhysicalCommit { -- }
 
 extern MmThrottle { -- }
 
+extern MmPageFrameZero { offset phyaddr -- }
+
 extern MmPFDBEToPhysicalAddress { pfdbe -- phyaddr }
 
 externptr MmModifiedPageEvent

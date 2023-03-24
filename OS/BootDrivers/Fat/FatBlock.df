@@ -777,7 +777,197 @@ end
 fn FatAllocateChain { clusters lastcluster zero mount -- startcluster ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto fattype
+	fatdata@ FatData_FatType + @ fattype!
+
+	mount@ FatClusterBitmapLock
+
+	auto run
+
+	auto clusterno
+	fatdata@ FatData_FreeClusterHint + @ // hint
+	clusters@ // runlength
+	fatdata@ FatData_FreeClusterBitmap + // header
+	ComBitmapFindRun ok! clusterno!
+
+	if (ok@ ~~)
+		// we were able to allocate the whole thing in one run!
+
+		clusters@ // runlength
+		clusterno@ // index
+		fatdata@ FatData_FreeClusterBitmap + // header
+		ComBitmapSetBits
+
+		clusterno@ fatdata@ FatData_FreeClusterHint + !
+
+		clusters@ fatdata@ FatData_ClusterSizeShift + @ <<
+		fatdata@ FatData_UsedBytes + +=
+
+		2 clusterno +=
+
+		// don't need to keep the bitmap locked since we don't need to use it
+		// now that we already found a big run.
+
+		1 run!
+	end else
+		// need to allocate one cluster at a time.
+
+		0 run!
+	end
+
+	auto fatbcb
+	0 fatbcb!
+
+	auto volfcb
+	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ volfcb!
+
+	auto first
+	auto vaddr
+
+	// if we fail and need to undo the allocation chain we already did,
+	// does FatDeallocateChain need to write back a 0xFFFFFFFF or not?
+	// we decide that here.
+
+	if (lastcluster@ -1 ==)
+		0 first!
+		-1 startcluster!
+	end else
+		1 // dirty
+		fattype@ // fattype
+		lastcluster@ // clusterno
+		mount@ // mount
+		fatbcb@ // lastbcb
+		FatLookupEntryByIndex ok! drop vaddr! fatbcb!
+
+		if (DEBUGCHECKS)
+			// if there was a problem with the chain, it should have been
+			// found by now.
+
+			if (ok@)
+				ok@ "FatAllocateChain: failed to read FAT block (%i)\n" KeCrash
+			end
+		end
+
+		1 first!
+		lastcluster@ startcluster!
+	end
+
+	auto killstart
+	lastcluster@ killstart!
+
+	auto i
+	0 i!
+
+	while (i@ clusters@ <)
+		if (run@ ~~)
+			// allocate next cluster
+
+			fatdata@ FatData_FreeClusterHint + @ // hint
+			1 // runlength
+			fatdata@ FatData_FreeClusterBitmap + // header
+			ComBitmapFindRun ok! clusterno!
+
+			if (ok@)
+				// no space left on disk.
+				// undo the allocations we already did.
+
+				if (fatbcb@)
+					fatbcb@ VcBufferDirty
+
+					fatbcb@ VcBufferDecrementMapCount drop
+				end
+
+				if (killstart@ -1 ~=)
+					first@ // first
+					killstart@ // clusterno
+					mount@ // mount
+					FatDeallocateChain
+				end
+
+				mount@ FatClusterBitmapUnlock
+
+				STATUS_END_OF_DISK ok!
+
+				return
+			end
+
+			1 // runlength
+			clusterno@ // index
+			fatdata@ FatData_FreeClusterBitmap + // header
+			ComBitmapSetBits
+
+			clusterno@ fatdata@ FatData_FreeClusterHint + !
+
+			2 clusterno +=
+
+			fatdata@ FatData_ClusterSizeBytes + @
+			fatdata@ FatData_UsedBytes + +=
+		end
+
+		if (startcluster@ -1 ~=)
+			lastcluster@ // index
+			clusterno@ // value
+			fattype@ // fattype
+			vaddr@ // vaddr
+			FatSetEntry
+		end else
+			clusterno@ killstart!
+			clusterno@ startcluster!
+		end
+
+		1 // dirty
+		fattype@ // fattype
+		clusterno@ // clusterno
+		mount@ // mount
+		fatbcb@ // lastbcb
+		FatLookupEntryByIndex ok! drop vaddr! fatbcb!
+
+		if (ok@)
+			if (fatbcb@)
+				fatbcb@ VcBufferDirty
+
+				fatbcb@ VcBufferDecrementMapCount drop
+			end
+
+			if (killstart@ -1 ~=)
+				first@ // first
+				killstart@ // clusterno
+				mount@ // mount
+				FatDeallocateChain
+			end
+
+			mount@ FatClusterBitmapUnlock
+
+			STATUS_END_OF_DISK ok!
+
+			return
+		end
+
+		clusterno@ // index
+		FAT_ENTRY_EOC // value
+		fattype@ // fattype
+		vaddr@ // vaddr
+		FatSetEntry
+
+		clusterno@ lastcluster!
+
+		if (run@)
+			1 clusterno +=
+		end
+
+		1 i +=
+	end
+
+	if (fatbcb@)
+		fatbcb@ VcBufferDirty
+
+		fatbcb@ VcBufferDecrementMapCount drop
+	end
+
+	mount@ FatClusterBitmapUnlock
 end
 
 fn FatDeallocateChain { first clusterno mount -- }

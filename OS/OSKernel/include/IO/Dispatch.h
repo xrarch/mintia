@@ -1,6 +1,7 @@
 fnptr IODispatchOpenFunction { access fileobject -- ok }
 fnptr IODispatchCloseFunction { lasthandlecount access fileobject -- ok }
 fnptr IODispatchIOControlFunction { arg2 arg1 access fcb lastmode -- ret ok }
+fnptr IODispatchSetFileFunction { info fileobject -- ok }
 fnptr IODispatchUnlinkFunction { name dirfcb -- ok }
 fnptr IODispatchParseFunction { fileobject initialfcb process -- reparsepath ok }
 fnptr IODispatchDeleteObjectFunction { object -- ok }
@@ -19,7 +20,7 @@ struct IODispatchTable
 	4 Open                    // 0
 	4 Close                   // 1
 	4 IOControl               // 2
-	4 Reserved8               // 3
+	4 SetFile                 // 3
 	4 Reserved9               // 4
 	4 Unlink                  // 5
 	4 Parse                   // 6

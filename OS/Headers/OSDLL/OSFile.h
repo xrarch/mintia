@@ -76,6 +76,8 @@ externptr OSStdErr
 
 extern OSRequestInitialize { requestblock -- }
 
+extern OSFileInformationInitialize { info -- }
+
 extern OSSetUMask { umask -- }
 extern OSGetUMask { -- umask }
 

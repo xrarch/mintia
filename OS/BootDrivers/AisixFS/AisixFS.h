@@ -155,6 +155,8 @@ extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 extern AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }
 
+extern AFSSetFile { info fileobject -- ok }
+
 extern AFSVerifyName { name -- ok }
 
 extern AFSUnlink { name dirfcb -- ok }

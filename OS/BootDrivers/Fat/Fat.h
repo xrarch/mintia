@@ -263,6 +263,8 @@ extern FatFCBDelete { writeout fcb -- }
 
 extern FatDirectoryFCBInitializeAllocation { fcb -- ok }
 
+extern FatSetFile { info fileobject -- ok }
+
 extern FatFCBReference { fcb -- }
 extern FatFCBReferenceLockHeld { fcb -- }
 extern FatFCBDereference { fcb -- }

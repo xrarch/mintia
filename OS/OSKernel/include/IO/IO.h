@@ -123,6 +123,8 @@ extern IOFileControlBlockDestroyCache { writeout fcb -- }
 extern IOFileInformationQueryObject { fileobject query -- ok }
 extern IOFileInformationQuery { filehandle query -- ok }
 
+extern IOFileSetInformation { info filehandle -- ok }
+
 extern IOTriggerWritebehind { -- }
 
 extern IOThreadRundown { -- }

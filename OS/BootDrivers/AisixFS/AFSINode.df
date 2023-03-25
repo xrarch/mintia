@@ -163,6 +163,46 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 	mount@ AFSINodeAllocationUnlock
 end
 
+fn (IODispatchSetFileFunction) AFSSetFile { info fileobject -- ok }
+	0 ok!
+
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
+
+	if (fcb@ FSFileControlBlockGetMount IOMount_Flags + @ OSMOUNT_READONLY &)
+		STATUS_READONLY_FILESYSTEM ok!
+
+		return
+	end
+
+	if (info@ OSFileInformation_MTimeMsPart + @ -1 ~=)
+		// set modify timestamp
+
+		info@ OSFileInformation_MTimeMsPart + @
+		fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_MsPart + !
+
+		info@ OSFileInformation_MTimeSecPart + @
+		fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_SecPart + !
+
+		if (fileobject@ IOFile_Context + @ AFSFILECONTEXT_UPDATEONCLOSE & ~~)
+			// wasn't already marked update-on-close, so do that now.
+
+			fcb@ IOFileControlBlockLock ok!
+
+			if (ok@)
+				return
+			end
+
+			AFSFILECONTEXT_UPDATEONCLOSE fileobject@ IOFile_Context + |=
+
+			fcb@ IOFileControlBlockUnlock
+		end
+	end
+end
+
 fn (IODispatchPokeFunction) AFSPoke { poketype object -- }
 	// this function gives us a chance to update timestamps when an operation
 	// occurs that might bypass us entirely i.e. a fully cached read or write.

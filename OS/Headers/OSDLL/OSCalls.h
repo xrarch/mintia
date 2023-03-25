@@ -74,6 +74,8 @@ extern OSFileRead { timeout flags length buffer filehandle -- bytesread ok }
 extern OSFileWrite { flags length buffer filehandle -- byteswritten ok }
 extern OSFileFlush { purge filehandle -- ok }
 
+extern OSFileSetInformation { info filehandle -- ok }
+
 extern OSFileReadAsync { requestblock flags offset length buffer filehandle -- ok }
 extern OSFileWriteAsync { requestblock flags offset length buffer filehandle -- ok }
 extern OSFileCancelIO { wait filehandle -- ok }

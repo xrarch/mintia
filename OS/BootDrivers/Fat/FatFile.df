@@ -146,7 +146,59 @@ end
 fn FatFCBCacheDestroy { mount -- ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	// We have to flush and free all of the FCBs that are in the cache.
+	// We can't do this with the mount's fcbdata list, because the FCBs are
+	// arranged in a tree that models the filesystem tree, and children nodes
+	// keep their parent node (the containing directory) referenced.
+	// Therefore, we have to do this from the leaves of the tree upwards.
+	// There is a convenient way to do this.
+	// Basically, we take FCBs off the head of the reclaimable list and we
+	// obliterate them until the reclaimable list is empty. This will get rid
+	// of all of the FCBs except the root FCB which we delete manually. This
+	// works because when all of the children of a tree node are gone, that
+	// node will become a leaf with a zero refcount and be placed on the
+	// reclaimable list as well.
+
+	0 ok!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	0 // alertable
+	mount@ // mount
+	FatFCBCacheLock drop
+
+	while (1)
+		auto fcbdata
+		fatdata@ FatData_ReclaimableListHead + @ fcbdata!
+
+		if (fcbdata@ ~~)
+			break
+		end
+
+		auto fcb
+		fcbdata@ FatFCBData_FCB + @ fcb!
+
+		fcb@ FatFCBReferenceLockHeld
+
+		1 // writeout
+		fcb@ // fcb
+		FatFCBDelete
+	end
+
+	mount@ FatFCBCacheUnlock
+
+	if (DEBUGCHECKS)
+		if (fatdata@ FatData_FCBDataListHead + @)
+			"FatFCBCacheDestroy: incomplete\n" KeCrash
+		end
+	end
+
+	1 // writeout
+	mount@ IOMount_RootFCB + @ // fcb
+	FatFCBDelete
+
+	0 mount@ IOMount_RootFCB + !
 end
 
 fn FatFCBCacheFlush { mount -- ok }
@@ -174,6 +226,8 @@ fn FatFCBCacheFlush { mount -- ok }
 	end
 
 	mount@ FatFCBCacheUnlock
+
+	mount@ IOMount_RootFCB + @ IOFileControlBlockFlush drop
 end
 
 fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
@@ -529,13 +583,13 @@ fn FatFCBReferenceLockHeld { fcb -- }
 		fcbdata@ FatFCBData_ReclaimNext + @ ns!
 
 		if (ls@)
-			ns@ ls@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_ReclaimNext + !
+			ns@ ls@ FatFCBData_ReclaimNext + !
 		end else
 			ns@ fatdata@ FatData_ReclaimableListHead + !
 		end
 
 		if (ns@)
-			ls@ ns@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_ReclaimPrev + !
+			ls@ ns@ FatFCBData_ReclaimPrev + !
 		end else
 			ls@ fatdata@ FatData_ReclaimableListTail + !
 		end
@@ -580,14 +634,14 @@ fn FatFCBDereference { fcb -- }
 				0 fcbdata@ FatFCBData_ReclaimNext + !
 				0 fcbdata@ FatFCBData_ReclaimPrev + !
 
-				fcb@ fatdata@ FatData_ReclaimableListHead + !
-				fcb@ fatdata@ FatData_ReclaimableListTail + !
+				fcbdata@ fatdata@ FatData_ReclaimableListHead + !
+				fcbdata@ fatdata@ FatData_ReclaimableListTail + !
 			end else
 				0 fcbdata@ FatFCBData_ReclaimNext + !
 
 				t@ fcbdata@ FatFCBData_ReclaimPrev + !
-				fcb@ t@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_ReclaimNext + !
-				fcb@ fatdata@ FatData_ReclaimableListTail + !
+				fcbdata@ t@ FatFCBData_ReclaimNext + !
+				fcbdata@ fatdata@ FatData_ReclaimableListTail + !
 			end
 
 			IOFileControlBlockIncrementReclaimable

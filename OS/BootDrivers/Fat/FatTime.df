@@ -1,0 +1,179 @@
+//
+// Implements time utilities for the FAT driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "Fat.h"
+
+datasection "PAGE$text"
+
+table FatMonthDaysIntoYear
+	0 31 59 90 120 151 181 212 243 273 304 334
+endtable
+
+table FatMonthDays
+	31 28 31 30 31 30 31 31 30 31 30 31
+endtable
+
+datasection "data"
+
+const SECSPERMIN      60
+const SECSPERHOUR     (SECSPERMIN 60 *)
+const SECSPERDAY      (SECSPERHOUR 24 *)
+const SECSPERYEAR     (SECSPERDAY 365 *)
+const SECSPERLEAPYEAR (SECSPERYEAR SECSPERDAY +)
+
+fn FatDateToUnix { date -- timestamp }
+	fnsection "PAGE$text"
+
+	// convert a 16 bit FAT datestamp to a corresponding unix timestamp.
+
+	auto day
+	date@ 31 & 1 - day!
+
+	auto month
+	date@ 5 >> 15 & 1 - month!
+
+	if (month@ 12 >=)
+		0 timestamp!
+		return
+	end
+
+	// add an offset of 10 years to normalize it against the unix epoch.
+
+	auto years
+	date@ 9 >> 127 & 10 + years!
+
+	[month@]FatMonthDaysIntoYear@ SECSPERDAY * timestamp!
+
+	day@ SECSPERDAY * timestamp +=
+
+	auto baseyear
+	1970 baseyear!
+
+	while (years@)
+		if (baseyear@ 3 & ~~)
+			SECSPERLEAPYEAR timestamp +=
+		end else
+			SECSPERYEAR timestamp +=
+		end
+
+		1 baseyear +=
+		1 years -=
+	end
+end
+
+fn FatTimeToUnix { time -- timeoffset }
+	fnsection "PAGE$text"
+
+	// convert 16-bit FAT timestamp to corresponding unix time offset
+
+	time@ 31 & 1 << timeoffset!
+
+	auto min
+	time@ 5 >> 63 & min!
+
+	auto hour
+	time@ 11 >> 15 & hour!
+
+	min@ 60 * timeoffset +=
+	hour@ 3600 * timeoffset +=
+end
+
+fn FatUnixToDate { timestamp -- date }
+	fnsection "PAGE$text"
+
+	// convert unix timestamp into corresponding FAT datestamp
+
+	auto year
+	1970 year!
+
+	while (timestamp@ SECSPERYEAR >=)
+		// very inefficient. O(n) where n is the number of years since 1970.
+		// i don't care.
+
+		if (year@ 3 & ~~)
+			if (timestamp@ SECSPERLEAPYEAR <)
+				break
+			end else
+				SECSPERLEAPYEAR timestamp -=
+			end
+		end else
+			SECSPERYEAR timestamp -=
+		end
+
+		1 year +=
+	end	
+
+	if (year@ 1980 <)
+		0 date!
+		return
+	end
+
+	1980 year -=
+
+	auto mday
+	timestamp@ SECSPERDAY / mday!
+
+	auto month
+	0 month!
+
+	while (1)
+		auto cmp
+		[month@]FatMonthDays@ cmp!
+
+		if (month@ 1 ==)
+			if (year@ 3 & ~~)
+				29 cmp!
+			end
+		end
+
+		if (mday@ cmp@ <)
+			break
+		end
+
+		cmp@ mday -=
+
+		1 month +=
+	end
+
+	1 mday +=
+
+	mday@ date!
+	month@ 1 + 5 << date |=
+	year@ 9 << date |=
+end
+
+fn FatUnixToTime { timestamp -- time }
+	fnsection "PAGE$text"
+
+	SECSPERDAY timestamp %=
+
+	auto sec
+	timestamp@ SECSPERMIN % sec!
+
+	auto hour
+	timestamp@ SECSPERHOUR / hour!
+
+	auto min
+	timestamp@ SECSPERHOUR % SECSPERMIN / min!
+
+	sec@ 1 >> time!
+	min@ 5 << time |=
+	hour@ 11 << time |=
+end

@@ -294,3 +294,9 @@ extern FatPoke { poketype object -- }
 extern FatSetSecurity { uid gid permissions object -- ok }
 
 extern FatBlockMap { fileoffset fcb kflags -- voloffset ok }
+
+extern FatDateToUnix { date -- timestamp }
+extern FatTimeToUnix { time -- timeoffset }
+
+extern FatUnixToDate { timestamp -- date }
+extern FatUnixToTime { timestamp -- time }

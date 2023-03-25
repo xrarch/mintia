@@ -49,6 +49,22 @@ fn (IODispatchPokeFunction) FatPoke { poketype object -- }
 	// this function gives us a chance to update timestamps when an operation
 	// occurs that might bypass us entirely i.e. a fully cached read or write.
 
+	auto fcb
+	object@ IOFile_FileControlBlock + @ fcb!
+
+	if (fcb@ FSFileControlBlockGetMount IOMount_Flags + @ OSMOUNT_READONLY &)
+		return
+	end
+
+	if (poketype@ IOPOKE_WRITE ==)
+		fcb@ // fcb
+		object@ // fileobject
+		FatFileUpdateModifyTimestamp
+	end elseif (poketype@ IOPOKE_READ ==)
+		fcb@ // fcb
+		object@ // fileobject
+		FatFileUpdateAccessTimestamp
+	end
 end
 
 fn (IODispatchSetSecurityFunction) FatSetSecurity { uid gid permissions object -- ok }
@@ -515,8 +531,11 @@ end
 fn FatFileUpdate { fcb -- }
 	fnsection "PAGE$text"
 
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
+
 	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcbp@ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto dirfcb
 	fcbdata@ FatFCBData_ParentDirDCB + @ dirfcb!
@@ -554,75 +573,107 @@ fn FatFileUpdate { fcb -- }
 	fcb@ IOFileControlBlock_SizeInBytes + @
 	fatdirent@ FatDirectoryEntry_FileSizeBytes + !
 
+	// update timestamps
+
+	auto localtime
+	KeTime_SIZEOF alloc localtime!
+
+	auto stamp
+
+	localtime@ // desttime
+	fcbp@ IOFileControlBlockPaged_AccessTime + // srctime
+	KeRealTimeToLocalTime
+
+	localtime@ KeTime_SecPart + @ FatUnixToDate stamp!
+
+	stamp@ fatdirent@ FatDirectoryEntry_AccessDateI + si
+
+	localtime@ // desttime
+	fcbp@ IOFileControlBlockPaged_ModifyTime + // srctime
+	KeRealTimeToLocalTime
+
+	localtime@ KeTime_SecPart + @ FatUnixToDate stamp!
+
+	stamp@ fatdirent@ FatDirectoryEntry_ModificationDateI + si
+
+	localtime@ KeTime_SecPart + @ FatUnixToTime stamp!
+
+	stamp@ fatdirent@ FatDirectoryEntry_ModificationTimeI + si
+
+	localtime@ // desttime
+	fcbp@ IOFileControlBlockPaged_CreationTime + // srctime
+	KeRealTimeToLocalTime
+
+	localtime@ KeTime_SecPart + @ FatUnixToDate stamp!
+
+	stamp@ fatdirent@ FatDirectoryEntry_CreationDateI + si
+
+	localtime@ KeTime_SecPart + @ FatUnixToTime stamp!
+
+	stamp@ fatdirent@ FatDirectoryEntry_CreationTimeI + si
+
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop
 end
 
-datasection "PAGE$text"
-
-table FatMonthDays
-	0 31 59 90 120 151 181 212 243 273 304 334
-endtable
-
-datasection "data"
-
-const SECSPERMIN      60
-const SECSPERHOUR     (SECSPERMIN 60 *)
-const SECSPERDAY      (SECSPERHOUR 24 *)
-const SECSPERYEAR     (SECSPERDAY 365 *)
-const SECSPERLEAPYEAR (SECSPERYEAR SECSPERDAY +)
-
-fn FatDateToUnix { date -- timestamp }
+fn FatFileUpdateModifyTimestamp { fcb fileobject -- }
 	fnsection "PAGE$text"
 
-	// convert a 16 bit FAT datestamp to a corresponding unix timestamp.
+	auto time
+	KeTime_SIZEOF alloc time!
 
-	auto day
-	date@ 31 & 1 - day!
+	time@ KeTimeQuery
 
-	auto month
-	date@ 5 >> 15 & 1 - month!
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
 
-	if (month@ 12 >=)
-		0 timestamp!
-		return
-	end
+	if (time@ KeTime_SecPart + @
+		fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_SecPart + @ ~=)
 
-	// add an offset of 10 years to normalize it against the unix epoch.
+		fcbp@ IOFileControlBlockPaged_ModifyTime + // dest
+		time@ // src
+		KeTime_SIZEOF // sz
+		memcpy
 
-	auto years
-	date@ 9 >> 127 & 10 + years!
-
-	[month@]FatMonthDays@ SECSPERDAY * timestamp!
-
-	day@ SECSPERDAY * timestamp +=
-
-	auto baseyear
-	1970 baseyear!
-
-	while (years@)
-		if (baseyear@ 3 & ~~)
-			SECSPERLEAPYEAR timestamp +=
+		if (fileobject@)
+			FATFILECONTEXT_UPDATEONCLOSE fileobject@ IOFile_Context + |=
 		end else
-			SECSPERYEAR timestamp +=
+			fcb@ FatFileUpdate
 		end
-
-		1 baseyear +=
-		1 years -=
 	end
 end
 
-fn FatTimeToUnix { time -- timeoffset }
+fn FatFileUpdateAccessTimestamp { fcb fileobject -- }
 	fnsection "PAGE$text"
 
-	time@ 31 & 1 << timeoffset!
+	auto time
+	KeTime_SIZEOF alloc time!
 
-	auto min
-	time@ 5 >> 63 & min!
+	time@ KeTimeQuery
 
-	auto hour
-	time@ 11 >> 15 & hour!
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
 
-	min@ 60 * timeoffset +=
-	hour@ 3600 * timeoffset +=
+	// only update access timestamp if it is prior to the modify timestamp OR
+	// it is older than a day.
+
+	if (fcbp@ IOFileControlBlockPaged_AccessTime + KeTime_SecPart + @
+		fcbp@ IOFileControlBlockPaged_ModifyTime + KeTime_SecPart + @ <
+		time@ KeTime_SecPart + @ fcbp@ IOFileControlBlockPaged_AccessTime + KeTime_SecPart + @ - 86400 >= ||)
+
+		if (time@ KeTime_SecPart + @
+			fcbp@ IOFileControlBlockPaged_AccessTime + KeTime_SecPart + @ ~=)
+
+			fcbp@ IOFileControlBlockPaged_AccessTime + // dest
+			time@ // src
+			KeTime_SIZEOF // sz
+			memcpy
+
+			if (fileobject@)
+				FATFILECONTEXT_UPDATEONCLOSE fileobject@ IOFile_Context + |=
+			end else
+				fcb@ FatFileUpdate
+			end
+		end
+	end
 end

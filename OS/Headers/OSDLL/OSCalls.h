@@ -15,6 +15,9 @@ extern OSContinue { signum context -- }
 extern OSQueryTime { -- sec ms }
 extern OSQueryUptime { -- sec ms }
 
+extern OSTimeZoneGet { -- offset ok }
+extern OSTimeZoneSet { offset -- oldoffset ok }
+
 extern OSShutdownSystem { mode -- ok }
 
 extern OSVersion { query -- ok }

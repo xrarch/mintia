@@ -1,0 +1,178 @@
+//
+// Implements system time initialization.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "SystemInit.h"
+
+fn (OSTimeZoneEnumerateF) SiEnumerateTimeZones { context name offset -- ok }
+	name@ "%s " Printf
+
+	0 ok!
+end
+
+fn SiSetTimeZone { -- }
+	auto ok
+	auto offset
+
+	SiGetTimeZone ok! offset!
+
+	if (ok@)
+		SiPromptTimeZone ok! offset!
+
+		if (ok@)
+			return
+		end
+	end
+
+	offset@ OSTimeZoneSet drop drop
+end
+
+fn SiGetTimeZone { -- offset ok }
+	auto handle
+	0 // flags
+	ACCESS_READ // access
+	"/mintia/time.txt" // path
+	OSFILETYPE_FILE // ftype
+	OSFileOpen ok! handle!
+
+	if (ok@)
+		return
+	end
+
+	auto buf
+	32 alloc buf!
+
+	auto bytesread
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	31 // length
+	buf@ // buf
+	handle@ // filehandle
+	OSFileRead ok! bytesread!
+
+	handle@ OSClose drop
+
+	if (ok@)
+		return
+	end
+
+	if (bytesread@ ~~)
+		STATUS_END_OF_FILE ok!
+		return
+	end
+
+	auto i
+	0 i!
+
+	while (i@ bytesread@ <)
+		if (buf@ i@ + gb '\n' ==)
+			0 buf@ i@ + sb
+			break
+		end
+
+		1 i +=
+	end
+
+	0 buf@ i@ + sb
+
+	buf@ OSTimeZoneNameToOffset ok! offset!
+
+	if (ok@ ~~)
+		buf@ "Timezone is %s.\n" Printf
+	end
+end
+
+fn SiToUpper { str -- }
+	while (str@ gb)
+		if (str@ gb 'a' >= str@ gb 'z' <= &&)
+			str@ gb 32 - str@ sb
+		end
+
+		1 str +=
+	end
+end
+
+fn SiPromptTimeZone { -- offset ok }
+	// time.txt will be created by the setup program when that exists, but for
+	// now, we just prompt the user on first boot. that being said, this should
+	// probably stick around even after there is a setup program, since its
+	// convenient for distribution images.
+
+	auto buf
+	256 alloc buf!
+
+	"\nPlease enter the timezone. Recognized names are as follows.\n" Printf
+	"If the timezone is not on this list, you can enter it as UTC+HH:MM.\n" Printf
+	"This prompt should not reappear on subsequent boot-ups.\n\n" Printf
+
+	0 // context
+	pointerof SiEnumerateTimeZones // func
+	OSTimeZoneEnumerate drop
+
+	"\n\n" Printf
+
+	while (1)
+		"Enter timezone: " Printf
+
+		buf@ // s
+		255 // max
+		Gets
+
+		buf@ SiToUpper
+
+		buf@ OSTimeZoneNameToOffset ok! offset!
+
+		if (ok@ ~~)
+			break
+		end
+	end
+
+	'\n' Putc
+
+	auto handle
+	OSDEFAULTFILEPERMISSIONS // permissions
+	0 // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	"/mintia/time.txt"
+	OSFileCreate ok! handle!
+
+	if (ok@)
+		ok@ OSStatusGetName
+		"* WARNING: couldn't open or create /mintia/time.txt: %s\n" OSGetStdErr FPrintf
+
+		return
+	end
+
+	0 // newsize
+	0 // growing
+	handle@ // handle
+	OSFileTruncate drop drop
+
+	0 // flags
+	buf@ strlen // length
+	buf@ // buffer
+	handle@ // filehandle
+	OSFileWrite ok! drop
+
+	if (ok@)
+		handle@ OSClose drop
+
+		ok@ OSStatusGetName
+		"* WARNING: couldn't write /mintia/time.txt: %s\n" OSGetStdErr FPrintf
+
+		return
+	end
+
+	0 // flags
+	1 // length
+	"\n" // buffer
+	handle@ // filehandle
+	OSFileWrite drop drop
+
+	handle@ OSClose drop
+end

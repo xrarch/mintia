@@ -38,6 +38,47 @@ table DLLMonthDays
 	31 28 31 30 31 30 31 31 30 31 30 31
 endtable
 
+struct DLLTimeZone
+	4 Name
+	4 Offset
+endstruct
+
+table DLLTimeZones
+	// North American timezones
+
+	"AST"  (0 4 SECSPERHOUR * -)
+	"EST"  (0 5 SECSPERHOUR * -)
+	"CST"  (0 6 SECSPERHOUR * -)
+	"MST"  (0 7 SECSPERHOUR * -)
+	"PST"  (0 8 SECSPERHOUR * -)
+
+	// European timezones
+
+	"WET"  0
+	"CET"  (1 SECSPERHOUR *)
+	"EET"  (2 SECSPERHOUR *)
+
+	// Australian timezones
+
+	"AWST" (8 SECSPERHOUR *)
+	"ACST" (9 SECSPERHOUR * SECSPERHOUR 2 / +)
+	"AEST" (10 SECSPERHOUR *)
+
+	// in theory there would be other ones but i'm lazy
+
+	-1 -1
+endtable
+
+fn OSTimeLocalGet { ostime ms sec -- }
+	auto offset
+	OSTimeZoneGet drop offset!
+
+	ostime@ // ostime
+	ms@ // ms
+	sec@ offset@ + // sec
+	OSTimeUTCGet
+end
+
 fn OSTimeUTCGet { ostime ms sec -- }
 	ms@ ostime@ OSTime_Milliseconds + !
 
@@ -115,5 +156,199 @@ fn OSTimePrint { ostime showyear -- }
 		ostime@ OSTime_Minute + @
 		ostime@ OSTime_Hour + @
 		"%02d:%02d " Printf
+	end
+end
+
+fn DLLParseUTCOffset { str -- offset ok }
+	if (str@ gb ~~)
+		0 offset!
+		0 ok!
+		return
+	end
+
+	auto sign
+
+	if (str@ gb '+' ==)
+		1 sign!
+	end elseif (str@ gb '-' ==)
+		0 sign!
+	end else
+		-1 ok!
+		return
+	end
+
+	1 str +=
+
+	auto hr
+	16 alloc hr!
+
+	0 hr@ sb
+
+	auto min
+	16 alloc min!
+
+	0 min@ sb
+
+	auto switched
+	0 switched!
+
+	auto cur
+	hr@ cur!
+
+	while (str@ gb)
+		if (str@ gb ':' ==)
+			if (switched@)
+				-1 ok!
+				return
+			end
+
+			1 switched!
+
+			0 cur@ sb
+
+			min@ cur!
+		end elseif (str@ gb '0' >=
+					str@ gb '9' <= &&)
+
+			str@ gb cur@ sb
+			1 cur +=
+		end else
+			-1 ok!
+			return
+		end
+
+		1 str +=
+	end
+
+	0 cur@ sb
+
+	// trim leading zeroes so as not to look like octal
+
+	while (hr@ gb '0' ==)
+		1 hr +=
+	end
+
+	while (min@ gb '0' ==)
+		1 min +=
+	end
+
+	hr@ atoi SECSPERHOUR * offset!
+	min@ atoi SECSPERMIN * offset +=
+
+	if (sign@ ~~)
+		0 offset@ - offset!
+	end
+
+	0 ok!
+end
+
+fn OSTimeZoneNameToOffset { name -- offset ok }
+	if (name@ "UTC" 3 strncmp)
+		name@ 3 + DLLParseUTCOffset ok! offset!
+		return
+	end elseif (name@ "GMT" 3 strncmp)
+		name@ 3 + DLLParseUTCOffset ok! offset!
+		return
+	end
+
+	auto tz
+	DLLTimeZones tz!
+
+	while (tz@ DLLTimeZone_Name + @ -1 ~=)
+		if (name@ tz@ DLLTimeZone_Name + @ strcmp)
+			tz@ DLLTimeZone_Offset + @ offset!
+
+			0 ok!
+
+			return
+		end
+
+		DLLTimeZone_SIZEOF tz +=
+	end
+
+	-1 ok!
+end
+
+fn OSTimeZoneOffsetToName { offset namebuf -- }
+	auto tz
+	DLLTimeZones tz!
+
+	while (tz@ DLLTimeZone_Name + @ -1 ~=)
+		if (offset@ tz@ DLLTimeZone_Offset + @ ==)
+			namebuf@ // dest
+			tz@ DLLTimeZone_Name + @ // src
+			strcpy
+
+			return
+		end
+
+		DLLTimeZone_SIZEOF tz +=
+	end
+
+	// just put the name as an offset from UTC
+
+	auto absoffset
+	offset@ abs absoffset!
+
+	auto hr
+	absoffset@ 3600 / hr!
+
+	auto min
+	absoffset@ 60 / 60 % min!
+
+	if (offset@ z<)
+		namebuf@ // dest
+		"UTC-" // src
+		strcpy
+	end else
+		namebuf@ // dest
+		"UTC+" // src
+		strcpy
+	end
+
+	if (hr@ 10 <)
+		namebuf@ namebuf@ strlen + // dest
+		"0" // src
+		strcpy
+	end
+
+	hr@ // n
+	namebuf@ namebuf@ strlen + // str
+	itoa
+
+	if (min@)
+		namebuf@ namebuf@ strlen + // dest
+		":" // src
+		strcpy
+
+		if (min@ 10 <)
+			namebuf@ namebuf@ strlen + // dest
+			"0" // src
+			strcpy
+		end
+
+		min@ // n
+		namebuf@ namebuf@ strlen + // str
+		itoa
+	end
+end
+
+fn OSTimeZoneEnumerate { context func -- ok }
+	0 ok!
+
+	auto tz
+	DLLTimeZones tz!
+
+	while (tz@ DLLTimeZone_Name + @ -1 ~=)
+		context@ // context
+		tz@ DLLTimeZone_Name + @ // name
+		tz@ DLLTimeZone_Offset + @ // offset
+		func@ OSTimeZoneEnumerateF ok!
+
+		if (ok@)
+			return
+		end
+
+		DLLTimeZone_SIZEOF tz +=
 	end
 end

@@ -7,3 +7,4 @@ extern HALUptimeQuery { time -- }
 externptr HALRTCQueryFunction
 externptr HALUptimeQueryFunction
 externptr HALRTCInterval
+externptr HALRTCIsLocalTime

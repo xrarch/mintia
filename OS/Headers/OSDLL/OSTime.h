@@ -15,4 +15,13 @@ struct OSTime
 endstruct
 
 extern OSTimeUTCGet { ostime ms sec -- }
+extern OSTimeLocalGet { ostime ms sec -- }
 extern OSTimePrint { ostime showyear -- }
+
+extern OSTimeZoneNameToOffset { name -- offset ok }
+
+extern OSTimeZoneOffsetToName { offset namebuf -- }
+
+extern OSTimeZoneEnumerate { context func -- ok }
+
+fnptr OSTimeZoneEnumerateF { context name offset -- ok }

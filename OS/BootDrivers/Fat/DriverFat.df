@@ -424,6 +424,8 @@ fn (IOFilesystemMountFunction) DriverFatMount { flags deviceobject -- fsdeviceob
 
 	0 fatdata@ FatData_WritableFiles + !
 
+	0 fatdata@ FatData_FCBDataListHead + !
+
 	"FatRenameMutex" // name
 	KERNELMODE // mode
 	fatdata@ FatData_RenameMutex + // mutex
@@ -495,9 +497,7 @@ fn (IOFilesystemUnmountFunction) DriverFatUnmount { fsdeviceobject -- ok }
 		return
 	end
 
-	1 // destroy
-	mount@ // mount
-	FatFCBCacheFlush ok!
+	mount@ FatFCBCacheDestroy ok!
 
 	if (ok@)
 		return
@@ -522,7 +522,38 @@ end
 fn (IOFilesystemUpdateFlagsFunction) DriverFatUpdateFlags { newflags oldflags fsdeviceobject -- ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	0 ok!
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
+	if (newflags@ OSMOUNT_READONLY &)
+		if (oldflags@ OSMOUNT_READONLY & ~~)
+			// volume is being downgraded to read-only.
+			// only allow if there are no writable files opened.
+
+			if (mount@ IOMount_Extension + @ FatData_WritableFiles + @)
+				STATUS_DEVICE_BUSY ok!
+
+				return
+			end
+
+			// flush all dirty pages to ensure the volume
+			// won't be written while read-only.
+
+			mount@ FatFCBCacheFlush ok!
+
+			if (ok@)
+				return
+			end
+
+			mount@ FSVolumeFlush ok!
+
+			if (ok@)
+				return
+			end
+		end
+	end
 end
 
 fn (IOFilesystemVolumeQueryFunction) DriverFatVolumeQuery { query fsdeviceobject -- ok }

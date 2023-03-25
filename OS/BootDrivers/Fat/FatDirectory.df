@@ -734,6 +734,7 @@ fn FatRootDirectoryCreate { mount -- ok }
 	end
 
 	fcb@ mount@ IOMount_RootFCB + !
+	fcbdata@ fatdata@ FatData_FCBDataListHead + !
 end
 
 fn FatDirectoryFCBInitializeAllocation { fcb -- ok }
@@ -989,12 +990,33 @@ fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 	auto name
 	childfcbdata@ ExSplayTreeNode_Value + @ name!
 
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
 	0 // alertable
 	mount@ // mount
 	FatFCBCacheLock drop
 
+	// add the childfcbdata to the mount's list of active fcbdatas.
+
+	auto h
+	fatdata@ FatData_FCBDataListHead + @ h!
+
+	h@ childfcbdata@ FatFCBData_NextFCBData + !
+	0 childfcbdata@ FatFCBData_PrevFCBData + !
+
+	if (h@)
+		childfcbdata@ h@ FatFCBData_PrevFCBData + !
+	end
+
+	childfcbdata@ fatdata@ FatData_FCBDataListHead + !
+
+	// make the childfcbdata point to the directory FCB.
+
 	fcb@ childfcbdata@ FatFCBData_ParentDirDCB + !
 	fcb@ FatFCBReferenceLockHeld
+
+	// insert the childfcbdata in the directory's splay tree.
 
 	auto parent
 	rootptr@@ parent!
@@ -1056,9 +1078,32 @@ fn FatDirectoryRemoveCachedChild { childfcb mount -- }
 	auto rootptr
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatDCBData_SplayTreeRoot + rootptr!
 
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
 	0 // alertable
 	mount@ // mount
 	FatFCBCacheLock drop
+
+	// remove the childfcbdata from the mount's list of active fcbdatas
+
+	auto n
+	childfcbdata@ FatFCBData_NextFCBData + @ n!
+
+	auto p
+	childfcbdata@ FatFCBData_PrevFCBData + @ p!
+
+	if (n@)
+		p@ n@ FatFCBData_PrevFCBData + !
+	end
+
+	if (p@)
+		n@ p@ FatFCBData_NextFCBData + !
+	end else // no prev means we were the head
+		n@ fatdata@ FatData_FCBDataListHead + !
+	end
+
+	// remove the childfcbdata from the directory's splay tree.
 
 	childfcbdata@ // node
 	rootptr@ // rootptr

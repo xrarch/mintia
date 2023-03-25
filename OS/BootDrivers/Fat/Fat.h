@@ -167,6 +167,8 @@ struct FatData
 	4 ReclaimableListHead
 	4 ReclaimableListTail
 
+	4 FCBDataListHead
+
 	// decoded BPB
 
 	4 SectorSizeBytes
@@ -200,6 +202,9 @@ struct FatFCBData
 
 	4 ReclaimNext
 	4 ReclaimPrev
+
+	4 NextFCBData
+	4 PrevFCBData
 
 	4 LongDirentSeek
 	4 ShortDirentSeek
@@ -237,7 +242,9 @@ const FATFILECONTEXT_WRITABLE      2
 const FATFILEFLAG_DELETE    1
 const FATFILEFLAG_VALIDATED 2
 
-extern FatFCBCacheFlush { destroy mount -- ok }
+extern FatFCBCacheFlush { mount -- ok }
+extern FatFCBCacheDestroy { mount -- ok }
+
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 
 extern FatDirectoryRemoveCachedChild { childfcb mount -- }

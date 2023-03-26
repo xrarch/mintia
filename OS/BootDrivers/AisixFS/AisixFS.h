@@ -97,7 +97,7 @@ struct AFSINode
 	4 iparent
 	4 timestamp
 	4 startblock
-	4 reserved2
+	4 gid
 	4 bytesize
 endstruct
 

@@ -123,7 +123,7 @@ fn (IODispatchDeleteObjectFunction) FatDeleteObject { object -- ok }
 	end
 
 	if (object@ IOFile_Context + @ FATFILECONTEXT_UPDATEONCLOSE &)
-		fcb@ FatFileUpdate
+		fcb@ FatUpdateDirent
 	end
 
 	// the FCB may or may not stop existing after we deref it here, so don't
@@ -256,57 +256,15 @@ fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfc
 		return
 	end
 
-	// hash the path component, and search the splay tree for the current DCB
-	// for that hashed name.
-
+	fileobject@ IOFile_Flags + @ // flags
 	pcomp@ // name
-	fcb@ // fcb
+	fcb@ // dirfcb
 	mount@ // mount
-	FatDirectoryGetCachedChild ok! nextfcb!
+	FatDirectoryGetChildByName ok! nextfcb!
 
 	if (ok@)
 		fcb@ nextfcb!
 
-		return
-	end
-
-	if (nextfcb@)
-		fcb@ IOFileControlBlockUnlock
-		fcb@ FatFCBDereference
-
-		nextfcb@ IOFileControlBlockLock ok!
-
-		if (ok@)
-			nextfcb@ FatFCBDereference
-
-			0 nextfcb!
-		end
-
-		return
-	end
-
-	fcb@ nextfcb!
-
-	// the FCB for this name doesn't exist.
-	// there are three cases at this point:
-	//
-	//  1. The file exists on disk and isn't cached yet.
-	//  2. The file does not exist on disk at all.
-	//  3. The file does not exist on disk, and we want to create it.
-	//
-	// We have to traverse the directory now and acquire an FCB.
-	// After that, we insert it into the parent directory's cache.
-
-	auto bcb
-	auto shortdirent
-	auto shortdirentseek
-	auto longdirentseek
-
-	pcomp@ // name
-	fcb@ // fcb
-	FatDirectoryFindEntry ok! bcb! shortdirent! shortdirentseek! longdirentseek!
-
-	if (ok@)
 		if (ok@ STATUS_NOT_FOUND ~=)
 			return
 		end
@@ -315,7 +273,7 @@ fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfc
 			return
 		end
 
-		if (path@ gb)
+		if (nextpath@ gb)
 			return
 		end
 
@@ -338,7 +296,9 @@ fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfc
 		fcb@ IOFileControlBlockUnlock
 		fcb@ FatFCBDereference
 
-		if (ok@ ~~)
+		if (ok@)
+			0 nextfcb!
+		end else
 			nextfcb@ IOFileControlBlockLock ok!
 
 			if (ok@)
@@ -347,21 +307,6 @@ fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfc
 				0 nextfcb!
 			end
 		end
-
-		return
-	end
-
-	pcomp@ // name
-	fileobject@ IOFile_Flags + @ // flags
-	fcb@ // dirfcb
-	longdirentseek@ // longdirentseek
-	shortdirentseek@ // shortdirentseek
-	shortdirent@ // shortdirent
-	mount@ // mount
-	FatFCBCreateFromDirent ok! nextfcb!
-
-	if (ok@)
-		fcb@ nextfcb!
 
 		return
 	end

@@ -239,7 +239,6 @@ endstruct
 const FATFILECONTEXT_UPDATEONCLOSE 1
 const FATFILECONTEXT_WRITABLE      2
 
-const FATFILEFLAG_DELETE    1
 const FATFILEFLAG_VALIDATED 2
 
 extern FatFCBCacheFlush { mount -- ok }
@@ -264,6 +263,8 @@ extern FatDeallocateChain { first clusterno mount -- }
 
 extern FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
 
+extern FatTruncateToZero { fcb -- ok }
+
 extern FatRootDirectoryCreate { mount -- ok }
 extern FatFCBCreate { name flags filetype mount -- fcb ok }
 extern FatFCBDelete { writeout fcb -- }
@@ -281,11 +282,11 @@ extern FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortd
 extern FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 extern FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 
-extern FatDirectoryGetRawEntry { skipempty seek fcb lastbcb -- fatdirent bcb nextseek ok }
+extern FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
 
 extern FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
 
-extern FatFileUpdate { fcb -- }
+extern FatUpdateDirent { fcb -- }
 
 extern FatMountReference { mount -- }
 extern FatMountDereference { mount -- }
@@ -309,3 +310,5 @@ extern FatTimeToUnix { time -- timeoffset }
 
 extern FatUnixToDate { timestamp -- date }
 extern FatUnixToTime { timestamp -- time }
+
+extern FatVerifyName { name -- ok }

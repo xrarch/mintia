@@ -87,9 +87,13 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 - [x] Command-line interface over TTY.
 - [x] Fully multi-user.
 
+### Filesystems
+
+- [x] AisixFS custom filesystem.
+- [x] FAT12/16/32 read-write with long filename support.
+
 ## TODO
 
 - [ ] Window system.
-- [ ] FAT12/16/32 driver.
 - [ ] Self-hosting with a fully native toolchain.
 - [ ] Networking.

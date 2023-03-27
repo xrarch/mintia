@@ -86,7 +86,7 @@ endstruct
 
 struct FatDirectoryEntry
 	11 Name83                     // 0
-	1 AttributeB                 // 11
+	1 AttributeB                  // 11
 	1 NTReservedB                 // 12
 	1 CreationTimeTenthB          // 13
 	2 CreationTimeI               // 14
@@ -109,6 +109,9 @@ struct FatLFNEntry
 	2 FirstClusterLowI            // 26
 	4 Name3                       // 28
 endstruct
+
+const FAT_NTBYTE_NAMECASE 0x08
+const FAT_NTBYTE_EXTCASE  0x10
 
 const FAT32_ACTIVEFAT      0x0F
 const FAT32_MIRRORDISABLED 0x80
@@ -232,8 +235,6 @@ struct FatDCBData
 	// that there are no more entries forthcoming
 
 	4 LastDirentIndex
-
-	4 FreeDirentCount
 endstruct
 
 const FATFILECONTEXT_UPDATEONCLOSE 1
@@ -277,16 +278,23 @@ extern FatFCBReference { fcb -- }
 extern FatFCBReferenceLockHeld { fcb -- }
 extern FatFCBDereference { fcb -- }
 
-extern FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
-
 extern FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 extern FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 
 extern FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
 
+extern FatDirectoryBuildEntry { name dirfcb -- longdirentseek shortdirentseek entries seek bcb fatdirent ok }
+
 extern FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
 
 extern FatUpdateDirent { fcb -- }
+
+extern FatDirectoryAllocateEntries { entries fcb -- seek ok }
+extern FatDirectoryFindEntry { dirent includelong name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
+extern FatFreeDirents { updatebitmap count startseek dirfcb -- ok }
+extern FatFreeDirentsForFCB { fcb -- }
+
+extern FatDirectoryBuildDotEntries { fatdate fattime fcb dirfcb -- ok }
 
 extern FatMountReference { mount -- }
 extern FatMountDereference { mount -- }
@@ -303,6 +311,8 @@ extern FatRename { srcname srcfcb destname destfcb -- ok }
 extern FatPoke { poketype object -- }
 extern FatSetSecurity { uid gid permissions object -- ok }
 
+extern FatFileDelete { fcb -- }
+
 extern FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 
 extern FatDateToUnix { date -- timestamp }
@@ -311,4 +321,25 @@ extern FatTimeToUnix { time -- timeoffset }
 extern FatUnixToDate { timestamp -- date }
 extern FatUnixToTime { timestamp -- time }
 
+const NAME_EQUAL   0
+const NAME_LESS    1
+const NAME_GREATER 2
+
 extern FatVerifyName { name -- ok }
+extern FatNameCompare { name1 name2 -- cmp }
+extern FatLFNChecksum { shortname -- checksum }
+extern FatSetEntry { index value fattype vaddr -- }
+extern FatInterpretEntry { entry fattype -- meaning }
+extern FatStringCompareCaseInsensitive { str1 str2 -- eq }
+extern FatCalculateNameStuff { name -- ntbyte needslfn entries ok }
+extern FatInitializeGenerationContext { context -- }
+extern FatGenerateShortName { shortname longname context -- ok }
+extern FatConvertToShortName { shortname name -- }
+extern FatBuildDotEntry { name fatdate fattime fcb fatdirent -- }
+
+struct FatShortNameContext
+	4 Index
+	4 ShortNameLength
+	12 ShortName
+	8 Extension
+endstruct

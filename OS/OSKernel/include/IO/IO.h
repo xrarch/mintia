@@ -75,6 +75,7 @@ struct IOFileControlBlock
 // opaque
 
 	ExRwLock_SIZEOF RwLock
+	ExRwLock_SIZEOF PagingIORwLock
 
 	KeEvent_SIZEOF AsyncIOEvent
 	4 AsyncIOCount

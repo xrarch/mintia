@@ -271,6 +271,9 @@ end
 fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
 	fnsection "PAGE$text"
 
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
 	auto firstcluster
 	shortdirent@ FatDirectoryEntry_FirstClusterLowI + gi firstcluster!
 
@@ -305,18 +308,6 @@ fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek sho
 	firstcluster@ fcbdata@ FatFCBData_StartingCluster + !
 
 	shortdirent@ FatDirectoryEntry_FileSizeBytes + @ fcb@ IOFileControlBlock_SizeInBytes + !
-
-	if (filetype@ OSFILETYPE_DIRECTORY ==)
-		fcb@ FatFCBMeasureSize ok!
-
-		if (ok@)
-			-1 // writeout
-			fcb@ // fcb
-			FatFCBDelete
-
-			return
-		end
-	end
 
 	// read the timestamps.
 
@@ -361,6 +352,37 @@ fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek sho
 	dirfcb@ // fcb
 	mount@ // mount
 	FatDirectoryInsertCachedChild
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		if (firstcluster@ ~~)
+			// directory was either corrupted, or we just created it.
+			// either way, allocate a cluster for it.
+
+			fatdata@ FatData_ClusterSizeBytes + @ // newsize
+			1 // zero
+			0 // flags
+			fcb@ // fcb
+			FatTruncate ok!
+
+			if (ok@)
+				-1 // writeout
+				fcb@ // fcb
+				FatFCBDelete
+
+				return
+			end
+		end else
+			fcb@ FatFCBMeasureSize ok!
+
+			if (ok@)
+				-1 // writeout
+				fcb@ // fcb
+				FatFCBDelete
+
+				return
+			end
+		end
+	end
 end
 
 fn FatFCBCreate { name flags filetype mount -- fcb ok }
@@ -495,7 +517,6 @@ fn FatFCBCreate { name flags filetype mount -- fcb ok }
 		0 fcbdata@ FatDCBData_SplayTreeRoot + !
 		0 fcbdata@ FatDCBData_DirentHint + !
 		-1 fcbdata@ FatDCBData_LastDirentIndex + !
-		0 fcbdata@ FatDCBData_FreeDirentCount + !
 
 		0 // sizeinbits
 		0 // data
@@ -741,4 +762,35 @@ fn FatUpdateAccessTimestamp { fcb fileobject -- }
 			end
 		end
 	end
+end
+
+fn FatFileDelete { fcb -- }
+	fnsection "PAGE$text"
+
+	// remove all cache pages.
+	// this has to be done before we free the disk blocks, otherwise pageouts
+	// in progress will behave unpredictably.
+
+	0 // writeout
+	fcb@ // fcb
+	IOFileControlBlockDestroyCache
+
+	// free disk blocks.
+
+	auto ok
+	fcb@ FatTruncateToZero ok!
+
+	if (ok@)
+		return
+	end
+
+	// free dirent(s).
+
+	fcb@ FatFreeDirentsForFCB
+
+	// delete FCB.
+
+	-1 // writeout
+	fcb@ // fcb
+	FatFCBDelete
 end

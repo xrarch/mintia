@@ -62,6 +62,7 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nexts
 
 	auto fatdirent
 
+	1 // includelong
 	seek@ // seek
 	dirent@ // dirent
 	fcb@ // fcb
@@ -141,37 +142,49 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 		return
 	end
 
-	// remove all cache pages.
-	// this has to be done before we free the disk blocks, otherwise pageouts
-	// in progress will behave unpredictably.
+	if (fcbp@ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ==)
+		// check to make sure the directory is empty.
 
-	0 // writeout
-	fcb@ // fcb
-	IOFileControlBlockDestroyCache
+		fcb@ FatDirectoryCheckEmpty ok!
 
-	// free disk blocks.
+		if (ok@)
+			fcb@ FatFCBDereference
 
-	fcb@ FatTruncateToZero ok!
-
-	if (ok@)
-		return
+			return
+		end
 	end
 
-	// free dirent(s).
-
-	fcb@ FatFreeDirents
-
-	// delete FCB.
-
-	-1 // writeout
-	fcb@ // fcb
-	FatFCBDelete
+	fcb@ FatFileDelete
 end
 
 fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok }
 	fnsection "PAGE$text"
 
 	STATUS_NOT_IMPLEMENTED ok!
+end
+
+fn FatDirectoryCheckEmpty { dirfcb -- ok }
+	fnsection "PAGE$text"
+
+	auto bcb
+	0 // dirty
+	1 // skipempty
+	2 // seek
+	dirfcb@ // fcb
+	0 // lastbcb
+	FatDirectoryGetRawEntry ok! drop bcb! drop
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
+
+	if (ok@ STATUS_END_OF_FILE ==)
+		0 ok!
+	end elseif (ok@)
+		return
+	end else
+		STATUS_IS_A_DIRECTORY ok!
+	end
 end
 
 fn FatDirectoryGetRawEntry { dirty skipempty seek fcb lastbcb -- fatdirent bcb nextseek ok }
@@ -500,36 +513,6 @@ fn FatDirectoryGetLFNEntry { dirent fatdirent seek fcb lastbcb -- shortdirent bc
 	0 ok!
 end
 
-fn FatLFNChecksum { shortname -- checksum }
-	fnsection "PAGE$text"
-
-	shortname@ gb checksum!
-
-	auto i
-	1 i!
-
-	1 shortname +=
-
-	while (i@ 11 <)
-		if (checksum@ 1 &)
-			0x80
-			checksum@ 1 >> +
-			shortname@ gb +
-			checksum!
-		end else
-			0x00
-			checksum@ 1 >> +
-			shortname@ gb +
-			checksum!
-		end
-
-		0xFF checksum &=
-
-		1 i +=
-		1 shortname +=
-	end
-end
-
 fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent bcb nextseek ok }
 	fnsection "PAGE$text"
 
@@ -548,6 +531,11 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent 
 	auto src
 	fatdirent@ src!
 
+	auto ntbyte
+	fatdirent@ FatDirectoryEntry_NTReservedB + gb ntbyte!
+
+	auto c
+
 	auto i
 	0 i!
 
@@ -558,7 +546,15 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent 
 			break
 		end
 
-		src@ gb dest@ sb
+		src@ gb c!
+
+		if (ntbyte@ FAT_NTBYTE_NAMECASE &)
+			if (c@ 'A' >= c@ 'Z' <= &&)
+				32 c +=
+			end
+		end
+
+		c@ dest@ sb
 
 		1 src +=
 		1 dest +=
@@ -584,7 +580,15 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent 
 				break
 			end
 
-			src@ gb dest@ sb
+			src@ gb c!
+
+			if (ntbyte@ FAT_NTBYTE_EXTCASE &)
+				if (c@ 'A' >= c@ 'Z' <= &&)
+					32 c +=
+				end
+			end
+
+			c@ dest@ sb
 
 			1 dest +=
 			1 i +=
@@ -608,7 +612,7 @@ fn FatDirectoryGetShortEntry { dirent fatdirent seek fcb lastbcb -- shortdirent 
 	end
 end
 
-fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb longseek nextseek ok }
+fn FatDirectoryGetEntry { includelong seek dirent fcb lastbcb -- shortdirent bcb longseek nextseek ok }
 	fnsection "PAGE$text"
 
 	// return the next valid entry in the fs-independent dirent.
@@ -642,14 +646,19 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb longseek ne
 		fatdirent@ FatDirectoryEntry_AttributeB + gb attr!
 
 		if (attr@ FAT_ATTR_LFN_MASK & FAT_ATTR_LFN ==)
-			nextseek@ 1 - longseek!
+			if (includelong@ ~~)
+				-1 longseek!
+				-1 ok!
+			end else
+				nextseek@ 1 - longseek!
 
-			dirent@ // dirent
-			fatdirent@ // fatdirent
-			nextseek@ // seek
-			fcb@ // fcb
-			bcb@ // lastbcb
-			FatDirectoryGetLFNEntry ok! nextseek! bcb! shortdirent!
+				dirent@ // dirent
+				fatdirent@ // fatdirent
+				nextseek@ // seek
+				fcb@ // fcb
+				bcb@ // lastbcb
+				FatDirectoryGetLFNEntry ok! nextseek! bcb! shortdirent!
+			end
 		end elseif (attr@ FAT_ATTR_VOLUME_ID & ~~)
 			-1 longseek!
 
@@ -676,17 +685,19 @@ fn FatDirectoryGetEntry { seek dirent fcb lastbcb -- shortdirent bcb longseek ne
 	end
 end
 
-fn FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
+fn FatDirectoryFindEntry { dirent includelong name fcb -- longdirentseek shortdirentseek shortdirent bcb ok }
 	fnsection "PAGE$text"
 
-	auto dirent
-	OSDirectoryEntry_SIZEOF alloc dirent!
+	if (dirent@ ~~)
+		OSDirectoryEntry_SIZEOF alloc dirent!
+	end
 
 	0 shortdirentseek!
 
 	0 bcb!
 
 	while (1)
+		includelong@ // includelong
 		shortdirentseek@ // shortdirentseek
 		dirent@ // dirent
 		fcb@ // fcb
@@ -697,7 +708,7 @@ fn FatDirectoryFindEntry { name fcb -- longdirentseek shortdirentseek shortdiren
 			break
 		end
 
-		if (name@ dirent@ OSDirectoryEntry_Name + strcmp)
+		if (name@ dirent@ OSDirectoryEntry_Name + FatStringCompareCaseInsensitive)
 			1 shortdirentseek -=
 			return
 		end
@@ -841,23 +852,15 @@ fn FatDirectoryFCBInitializeAllocation { fcb -- ok }
 	// allocate or deallocate entries within the directory.
 	// constructs the dirent bitmap.
 
-	fcb@ IOFileControlBlockLock ok!
-
-	if (ok@)
-		return
-	end
-
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
-	if (fcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData)
-		fcb@ IOFileControlBlockUnlock
+	if (DEBUGCHECKS)
+		if (fcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData)
+			// already initialized
 
-		// already initialized
-
-		0 ok!
-
-		return
+			"FatDirectoryFCBInitializeAllocation: called twice\n" KeCrash
+		end
 	end
 	
 	auto size
@@ -865,6 +868,8 @@ fn FatDirectoryFCBInitializeAllocation { fcb -- ok }
 
 	auto entries
 	size@ FatDirectoryEntry_SIZEOF / entries!
+
+	entries@ fcbdata@ FatDCBData_LastDirentIndex + !
 
 	auto bmpsz
 	entries@ 7 + 3 >> bmpsz!
@@ -876,8 +881,6 @@ fn FatDirectoryFCBInitializeAllocation { fcb -- ok }
 	MmAllocWithTag ok! bmp!
 
 	if (ok@)
-		fcb@ IOFileControlBlockUnlock
-
 		return
 	end
 
@@ -998,18 +1001,10 @@ fn FatDirectoryFCBInitializeAllocation { fcb -- ok }
 //	fcbdata@ FatDCBData_LastDirentIndex + @
 //	free@ "dir: %d free, %d last, %d bmpsz\n" Printf
 
-	free@ fcbdata@ FatDCBData_FreeDirentCount + !
-
 	if (bcb@)
 		bcb@ VcBufferDecrementMapCount drop
 	end
-
-	fcb@ IOFileControlBlockUnlock
 end
-
-const NAME_EQUAL   0
-const NAME_LESS    1
-const NAME_GREATER 2
 
 fn FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 	fnsection "PAGE$text"
@@ -1205,47 +1200,6 @@ fn FatDirectoryRemoveCachedChild { childfcb mount -- }
 	fcb@ FatFCBDereference
 end
 
-fn FatNameCompare { name1 name2 -- cmp }
-	fnsection "PAGE$text"
-
-	auto n1len
-	name1@ strlen n1len!
-
-	auto n2len
-	name2@ strlen n2len!
-
-	auto minlen
-	n1len@ n2len@ min minlen!
-
-	while (minlen@)
-		if (name1@ gb name2@ gb >)
-			NAME_GREATER cmp!
-			return
-		end
-
-		if (name1@ gb name2@ gb <)
-			NAME_LESS cmp!
-			return
-		end
-
-		1 minlen -=
-		1 name1 +=
-		1 name2 +=
-	end
-
-	if (n1len@ n2len@ ==)
-		NAME_EQUAL cmp!
-		return
-	end
-
-	if (n1len@ n2len@ <)
-		NAME_LESS cmp!
-		return
-	end
-
-	NAME_GREATER cmp!
-end
-
 fn FatUpdateDirent { fcb -- }
 	fnsection "PAGE$text"
 
@@ -1290,8 +1244,12 @@ fn FatUpdateDirent { fcb -- }
 	firstcluster@ 0xFFFF & fatdirent@ FatDirectoryEntry_FirstClusterLowI + si
 	firstcluster@ 16 >> fatdirent@ FatDirectoryEntry_FirstClusterHighI + si
 
-	fcb@ IOFileControlBlock_SizeInBytes + @
-	fatdirent@ FatDirectoryEntry_FileSizeBytes + !
+	if (fcbp@ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
+		fcb@ IOFileControlBlock_SizeInBytes + @
+		fatdirent@ FatDirectoryEntry_FileSizeBytes + !
+	end else
+		0 fatdirent@ FatDirectoryEntry_FileSizeBytes + !
+	end
 
 	// update timestamps
 
@@ -1336,31 +1294,77 @@ fn FatUpdateDirent { fcb -- }
 	bcb@ VcBufferDecrementMapCount drop
 end
 
-fn FatFreeDirents { fcb -- }
+fn FatFreeDirents { updatebitmap count startseek dirfcb -- ok }
 	fnsection "PAGE$text"
 
-	auto ok
+	0 ok!
+
+	if (updatebitmap@)
+		// if the directory has a dirent bitmap, we need to keep it up to date.
+
+		auto dirfcbdata
+		dirfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ dirfcbdata!
+
+		auto bmp
+		dirfcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData bmp!
+
+		if (bmp@)
+			dirfcbdata@ FatDCBData_DirentBitmapHeader + bmp!
+		end
+	end
+
+	auto bcb
+	0 bcb!
+
+	auto fatdirent
+
+	auto i
+	0 i!
+
+	while (i@ count@ <)
+		1 // dirty
+		0 // skipempty
+		startseek@ i@ + // seek
+		dirfcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+
+		if (ok@)
+			break
+		end
+
+		FAT_DIRENT_FREE fatdirent@ sb
+
+		1 i +=
+	end
+
+	if (bcb@)
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapCount drop
+	end
+
+	if (updatebitmap@)
+		if (ok@ ~~)
+			if (bmp@)
+				// free the entries in the bitmap
+
+				count@ // runlength
+				startseek@ // index
+				bmp@ // header
+				ComBitmapClearBits
+			end
+		end
+	end
+end
+
+fn FatFreeDirentsForFCB { fcb -- }
+	fnsection "PAGE$text"
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	auto dirfcb
 	fcbdata@ FatFCBData_ParentDirDCB + @ dirfcb!
-
-	auto mount
-	fcb@ FSFileControlBlockGetMount mount!
-
-	auto fatdata
-	mount@ IOMount_Extension + @ fatdata!
-
-	// if the directory has a dirent bitmap, we need to keep it up to date.
-
-	auto bmp
-	dirfcb@ FatDCBData_DirentBitmapHeader + ComBitmapGetData bmp!
-
-	if (bmp@)
-		dirfcb@ FatDCBData_DirentBitmapHeader + bmp!
-	end
 
 	auto bcb
 	0 bcb!
@@ -1370,74 +1374,24 @@ fn FatFreeDirents { fcb -- }
 	auto startseek
 	fcbdata@ FatFCBData_LongDirentSeek + @ startseek!
 
-	auto seek
-	startseek@ seek!
-
 	auto entries
 	1 entries!
 
-	// free the long entries
+	if (startseek@ -1 ==)
+		// no LFN
 
-	if (seek@ -1 ~=)
-		auto longcount
-		fcbdata@ FatFCBData_ShortDirentSeek + @ seek@ - longcount!
-
-		while (longcount@)
-			1 // dirty
-			0 // skipempty
-			seek@ // seek
-			dirfcb@ // fcb
-			bcb@ // lastbcb
-			FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
-
-			if (ok@)
-				if (bcb@)
-					bcb@ VcBufferDirty
-					bcb@ VcBufferDecrementMapCount drop
-				end
-
-				return
-			end
-
-			FAT_DIRENT_FREE fatdirent@ sb
-
-			1 entries +=
-			1 longcount -=
-			1 seek +=
-		end
-	end else
 		fcbdata@ FatFCBData_ShortDirentSeek + @ startseek!
+	end else
+		// free the LFN entries
+
+		fcbdata@ FatFCBData_ShortDirentSeek + @ startseek@ - entries +=
 	end
 
-	1 // dirty
-	0 // skipempty
-	fcbdata@ FatFCBData_ShortDirentSeek + @ // seek
-	dirfcb@ // fcb
-	bcb@ // lastbcb
-	FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
-
-	if (ok@)
-		if (bcb@)
-			bcb@ VcBufferDirty
-			bcb@ VcBufferDecrementMapCount drop
-		end
-
-		return
-	end
-
-	FAT_DIRENT_FREE fatdirent@ sb
-
-	bcb@ VcBufferDirty
-	bcb@ VcBufferDecrementMapCount drop
-
-	if (bmp@)
-		// free the entries in the bitmap
-
-		entries@ // runlength
-		startseek@ // index
-		bmp@ // header
-		ComBitmapClearBits
-	end
+	1 // updatebitmap
+	entries@ // count
+	startseek@ // startseek
+	dirfcb@ // dirfcb
+	FatFreeDirents drop
 end
 
 fn FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
@@ -1473,6 +1427,11 @@ fn FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
 	auto shortdirentseek
 	auto longdirentseek
 
+	auto dirent
+	OSDirectoryEntry_SIZEOF alloc dirent!
+
+	dirent@
+	1 // includelong
 	name@ // name
 	dirfcb@ // fcb
 	FatDirectoryFindEntry ok! bcb! shortdirent! shortdirentseek! longdirentseek!
@@ -1481,7 +1440,7 @@ fn FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
 		return
 	end
 
-	name@ // name
+	dirent@ OSDirectoryEntry_Name + // name
 	flags@ // flags
 	dirfcb@ // dirfcb
 	longdirentseek@ // longdirentseek
@@ -1497,41 +1456,522 @@ fn FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
 	end
 end
 
-fn FatVerifyName { name -- ok }
+fn FatDirectoryAllocateEntries { entries fcb -- seek ok }
+	fnsection "PAGE$text"
+
+	// assumes caller locked the directory FCB.
+
+	auto fcbdata
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto bmp
+	fcbdata@ FatDCBData_DirentBitmapHeader + bmp!
+
+	if (bmp@ ComBitmapGetData ~~)
+		fcb@ FatDirectoryFCBInitializeAllocation ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 ok!
+
+	auto direntries
+	fcb@ IOFileControlBlock_SizeInBytes + @ FatDirectoryEntry_SIZEOF / direntries!
+
+	// search the bitmap for space.
+
+	fcbdata@ FatDCBData_DirentHint + @ // hint
+	entries@ // runlength
+	bmp@ // header
+	ComBitmapFindRun ok! seek!
+
+	if (ok@ ~~)
+		if (seek@ entries@ + fcbdata@ FatDCBData_LastDirentIndex + @ >)
+			seek@ entries@ + fcbdata@ FatDCBData_LastDirentIndex + !
+		end
+
+		seek@ fcbdata@ FatDCBData_DirentHint + !
+
+		seek@ entries@ "bitmap, %d entries at %d\n" Printf
+
+		entries@ // runlength
+		seek@ // index
+		bmp@ // header
+		ComBitmapSetBits
+
+		return
+	end
+
+	// there is no space. we have to grow the directory.
+
+	entries@ // initialentries
+	fcb@ // dirfcb
+	FatDirectoryExtend ok! seek!
+end
+
+fn FatDirectoryExtend { initialentries dirfcb -- seek ok }
+	fnsection "PAGE$text"
+
+	auto mount
+	dirfcb@ FSFileControlBlockGetMount mount!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto extrasize
+	initialentries@ FatDirectoryEntry_SIZEOF * extrasize!
+
+	// round extrasize to next multiple of cluster size
+
+	extrasize@
+	fatdata@ FatData_ClusterSizeBytes + @ 1 - +
+	fatdata@ FatData_ClusterSizeBytes + @ 1 - ~ & extrasize!
+
+	auto fcbdata
+	dirfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	if (dirfcb@ mount@ IOMount_RootFCB + @ ==
+		fatdata@ FatData_FatType + @ 32 ~= &&)
+
+		// this is the root directory on a FAT12/16 volume. it can't be grown.
+
+		STATUS_END_OF_FILE ok!
+
+		return
+	end
+
+	auto oldsize
+	dirfcb@ IOFileControlBlock_SizeInBytes + @ oldsize!
+
+	auto newsize
+	oldsize@ extrasize@ + newsize!
+
+	auto newentries
+	newsize@ FatDirectoryEntry_SIZEOF / newentries!
+
+	oldsize@ FatDirectoryEntry_SIZEOF / seek!
+
+	newentries@
+	newsize@
+	oldsize@
+	seek@
+	initialentries@
+	"grow, %d entries at %d, oldsize=%d newsize=%d newentries=%d\n" Printf
+
+	// allocate an extended dirent bitmap.
+
+	auto bmp
+	newentries@ 7 + 3 >> // size
+	'FDEB' // tag
+	PAGED // flags
+	MmAllocWithTag ok! bmp!
+
+	if (ok@)
+		return
+	end
+
+	// add a cluster to the directory file.
+
+	newsize@ // newsize
+	1 // zero
+	0 // flags
+	dirfcb@ // fcb
+	FatTruncate ok!
+
+	if (ok@)
+		bmp@ MmFree
+
+		return
+	end
+
+	// copy the old bitmap into the new bitmap.
+
+	auto oldbmp
+	fcbdata@ FatDCBData_DirentBitmapHeader + ComBitmapGetData oldbmp!
+
+	bmp@ // dest
+	oldbmp@ // src
+	seek@ 7 + 3 >> // sz
+	memcpy
+
+	// free the old bitmap.
+
+	oldbmp@ MmFree
+
+	// reinitialize the bitmap header to point to our new extended bitmap.
+
+	newentries@ // sizeinbits
+	bmp@ // data
+	fcbdata@ FatDCBData_DirentBitmapHeader + // header
+	ComBitmapInitialize
+
+	// set the initial allocation.
+
+	initialentries@ // runlength
+	seek@ // index
+	fcbdata@ FatDCBData_DirentBitmapHeader + // header
+	ComBitmapSetBits
+
+	// clear the rest.
+
+	newentries@ seek@ initialentries@ + - // runlength
+	seek@ initialentries@ + // index
+	fcbdata@ FatDCBData_DirentBitmapHeader + // header
+	ComBitmapClearBits
+
+	// mark the entries that begin with a zero as freed (0xE5) so that our new
+	// space isn't ignored.
+
+	if (seek@ fcbdata@ FatDCBData_LastDirentIndex + @ -)
+		0 // updatebitmap
+		seek@ fcbdata@ FatDCBData_LastDirentIndex + @ - // count
+		fcbdata@ FatDCBData_LastDirentIndex + @ // startseek
+		dirfcb@ // dirfcb
+		FatFreeDirents drop
+	end
+
+	// update the lastdirentindex.
+
+	seek@ initialentries@ + fcbdata@ FatDCBData_LastDirentIndex + !
+end
+
+fn FatDirectoryBuildEntry { name dirfcb -- longdirentseek shortdirentseek entries seek bcb fatdirent ok }
+	fnsection "PAGE$text"
+
+	auto ntbyte
+	auto needslfn
+
+	name@ FatCalculateNameStuff ok! entries! needslfn! ntbyte!
+
+	if (ok@)
+		return
+	end
+
+	auto shortname
+	12 alloc shortname!
+
+	if (needslfn@)
+		// get a good shortname
+
+		auto context
+		FatShortNameContext_SIZEOF alloc context!
+
+		context@ FatInitializeGenerationContext
+
+		while (1)
+			shortname@ // shortname
+			name@ // longname
+			context@ // context
+			FatGenerateShortName ok!
+
+			if (ok@)
+				return
+			end
+
+			0 // dirent
+			0 // includelong
+			shortname@ // shortname
+			dirfcb@ // fcb
+			FatDirectoryFindEntry ok! bcb! drop drop drop
+
+			if (ok@ ~~)
+				// shortname exists already. loop again
+
+				bcb@ VcBufferDecrementMapCount drop
+			end elseif (ok@ STATUS_NOT_FOUND ==)
+				// shortname doesn't exist already, so we can use it
+
+				break
+			end else
+				// some other error occurred
+
+				return
+			end
+		end
+	end else
+		shortname@ // shortname
+		name@ // name
+		FatConvertToShortName
+	end
+
+	// allocate the dirents
+
+	entries@ // entries
+	dirfcb@ // fcb
+	FatDirectoryAllocateEntries ok! seek!
+
+	if (ok@)
+		return
+	end
+
+	if (needslfn@)
+		seek@ longdirentseek!
+		seek@ entries@ + 1 - shortdirentseek!
+
+		shortname@ // shortname
+		name@ // longname
+		entries@ 1 - // lfnentries
+		seek@ // seek
+		dirfcb@ // dirfcb
+		FatDirectoryBuildLFNEntries ok!
+
+		if (ok@)
+			1 // updatebitmap
+			entries@ // count
+			seek@ // startseek
+			dirfcb@ // dirfcb
+			FatFreeDirents drop
+
+			return
+		end
+	end else
+		seek@ shortdirentseek!
+		-1 longdirentseek!
+	end
+
+	ntbyte@ // ntbyte
+	shortname@ // shortname
+	seek@ entries@ + 1 - // seek
+	dirfcb@ // dirfcb
+	FatDirectoryBuildShortEntry ok! fatdirent! bcb!
+
+	if (ok@)
+		1 // updatebitmap
+		entries@ // count
+		seek@ // startseek
+		dirfcb@ // dirfcb
+		FatFreeDirents drop
+
+		return
+	end
+end
+
+fn FatDirectoryBuildLFNEntries { shortname longname lfnentries seek dirfcb -- ok }
 	fnsection "PAGE$text"
 
 	0 ok!
 
-	if (name@ "." strcmp)
-		STATUS_ALREADY_EXISTS ok!
+	auto checksum
+	shortname@ FatLFNChecksum checksum!
+
+	auto bcb
+	0 bcb!
+
+	auto ptr
+	longname@ lfnentries@ 13 * + ptr!
+
+	auto ordinal
+	lfnentries@ ordinal!
+
+	auto fatdirent
+
+	while (ordinal@)
+		13 ptr -=
+
+		auto thisent
+		ptr@ thisent!
+
+		1 // dirty
+		0 // skipempty
+		seek@ // seek
+		dirfcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+		
+		if (ok@)
+			break
+		end
+
+		// set the relevant fields
+
+		fatdirent@ // ptr
+		FatDirectoryEntry_SIZEOF // sz
+		0 // word
+		memset
+
+		if (ordinal@ lfnentries@ ==)
+			ordinal@ 0x40 |
+			fatdirent@ FatLFNEntry_OrdinalB + sb
+		end else
+			ordinal@ fatdirent@ FatLFNEntry_OrdinalB + sb
+		end
+
+		checksum@ fatdirent@ FatLFNEntry_ChecksumB + sb
+		0 fatdirent@ FatLFNEntry_TypeB + sb
+		0 fatdirent@ FatLFNEntry_FirstClusterLowI + si
+		FAT_ATTR_LFN fatdirent@ FatDirectoryEntry_AttributeB + sb
+
+		// fill in name
+
+		-1 ok!
+
+		auto dest
+		fatdirent@ FatLFNEntry_Name1 + dest!
+
+		auto i
+		0 i!
+
+		while (i@ 5 <)
+			// this completely obliterates the upper 8 bits of the character
+			// encoding, but we don't support UCS-2 anyway.
+
+			if (ok@)
+				thisent@ gb dest@ sb
+
+				if (thisent@ gb ~~)
+					0 ok!
+				end
+			end else
+				0xFF dest@ sb
+				0xFF dest@ 1 + sb
+			end
+
+			1 i +=
+			2 dest +=
+			1 thisent +=
+		end
+
+		fatdirent@ FatLFNEntry_Name2 + dest!
+		0 i!
+
+		while (i@ 6 <)
+			if (ok@)
+				thisent@ gb dest@ sb
+
+				if (thisent@ gb ~~)
+					0 ok!
+				end
+			end else
+				0xFF dest@ sb
+				0xFF dest@ 1 + sb
+			end
+
+			1 i +=
+			2 dest +=
+			1 thisent +=
+		end
+
+		fatdirent@ FatLFNEntry_Name3 + dest!
+		0 i!
+
+		while (i@ 2 <)
+			if (ok@)
+				thisent@ gb dest@ sb
+
+				if (thisent@ gb ~~)
+					0 ok!
+				end
+			end else
+				0xFF dest@ sb
+				0xFF dest@ 1 + sb
+			end
+
+			1 i +=
+			2 dest +=
+			1 thisent +=
+		end
+
+		1 ordinal -=
+		1 seek +=
+	end
+
+	0 ok!
+
+	if (bcb@)
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapCount drop
+	end
+end
+
+fn FatDirectoryBuildShortEntry { ntbyte shortname seek dirfcb -- bcb fatdirent ok }
+	fnsection "PAGE$text"
+
+	// assumes the short name provided is truly a valid 8.3 name.
+
+	0 // dirty
+	0 // skipempty
+	seek@ // seek
+	dirfcb@ // fcb
+	0 // lastbcb
+	FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+
+	if (ok@)
+		if (bcb@)
+			bcb@ VcBufferDecrementMapCount drop
+		end
+
 		return
 	end
 
-	if (name@ ".." strcmp)
-		STATUS_ALREADY_EXISTS ok!
+	fatdirent@ // ptr
+	FatDirectoryEntry_SIZEOF // sz
+	0 // word
+	memset
+
+	fatdirent@ // dest
+	shortname@ // src
+	11 // sz
+	memcpy
+
+	ntbyte@ fatdirent@ FatDirectoryEntry_NTReservedB + sb
+end
+
+fn FatDirectoryBuildDotEntries { fatdate fattime fcb dirfcb -- ok }
+	fnsection "PAGE$text"
+
+	// create the dot entries for the new directory.
+
+	auto bcb
+	0 bcb!
+
+	auto fatdirent
+	0 // dirty
+	0 // skipempty
+	0 // seek
+	fcb@ // fcb
+	0 // lastbcb
+	FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+
+	if (ok@)
+		if (bcb@)
+			bcb@ VcBufferDecrementMapCount drop
+		end
+
 		return
 	end
 
-	auto length
-	0 length!
+	".          " // name
+	fatdate@ // fatdate
+	fattime@ // fattime
+	fcb@ // fcb
+	fatdirent@ // fatdirent
+	FatBuildDotEntry
 
-	while (name@ gb)
-		if (length@ 255 >=)
-			STATUS_NAME_TOO_LONG ok!
-			return
+	1 // dirty
+	0 // skipempty
+	1 // seek
+	fcb@ // fcb
+	bcb@ // lastbcb
+	FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+
+	if (ok@)
+		if (bcb@)
+			bcb@ VcBufferDirty
+			bcb@ VcBufferDecrementMapCount drop
 		end
 
-		if (name@ gb 0x20 < name@ gb 0x7F >= ||)
-			STATUS_ILLEGAL_NAME ok!
-			return
-		end
-
-		if (name@ gb '/' ==)
-			STATUS_ILLEGAL_NAME ok!
-			return
-		end
-
-		1 length +=
-		1 name +=
+		return
 	end
+
+	"..         " // name
+	fatdate@ // fatdate
+	fattime@ // fattime
+	dirfcb@ // fcb
+	fatdirent@ // fatdirent
+	FatBuildDotEntry
+
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
 end

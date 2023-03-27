@@ -326,7 +326,92 @@ end
 fn FatCreateFile { fileobject name dirfcb -- fcb ok }
 	fnsection "PAGE$text"
 
+	auto mount
+	dirfcb@ FSFileControlBlockGetMount mount!
+
 	OSFILEFLAG_MUSTCREATE ~ fileobject@ IOFile_Flags + &=
 
-	STATUS_NOT_IMPLEMENTED ok!
+	auto seek
+	auto entries
+	auto bcb
+	auto fatdirent
+	auto shortdirentseek
+	auto longdirentseek
+
+	name@ // name
+	dirfcb@ // dirfcb
+	FatDirectoryBuildEntry ok! fatdirent! bcb! seek! entries! shortdirentseek! longdirentseek!
+
+	if (ok@)
+		return
+	end
+
+	// fill in the short entry appropriately
+
+	auto time
+	KeTime_SIZEOF alloc time!
+
+	time@ KeTimeQuery
+
+	time@ // desttime
+	time@ // srctime
+	KeRealTimeToLocalTime
+
+	auto fattime
+	time@ KeTime_SecPart + @ FatUnixToTime fattime!
+
+	auto fatdate
+	time@ KeTime_SecPart + @ FatUnixToDate fatdate!
+
+	fattime@ fatdirent@ FatDirectoryEntry_CreationTimeI + si
+	fatdate@ fatdirent@ FatDirectoryEntry_CreationDateI + si
+
+	fatdate@ fatdirent@ FatDirectoryEntry_AccessDateI + si
+
+	fattime@ fatdirent@ FatDirectoryEntry_ModificationTimeI + si
+	fatdate@ fatdirent@ FatDirectoryEntry_ModificationDateI + si
+
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATEDIR &)
+		FAT_ATTR_DIRECTORY fatdirent@ FatDirectoryEntry_AttributeB + sb
+	end
+
+	// create the FCB
+
+	name@ // name
+	fileobject@ IOFile_Flags + @ // flags
+	dirfcb@ // dirfcb
+	longdirentseek@ // longdirentseek
+	shortdirentseek@ // shortdirentseek
+	fatdirent@ // shortdirent
+	mount@ // mount
+	FatFCBCreateFromDirent ok! fcb!
+
+	bcb@ VcBufferDirty
+	bcb@ VcBufferDecrementMapCount drop
+
+	if (ok@)
+		1 // updatebitmap
+		entries@ // count
+		seek@ // startseek
+		dirfcb@ // dirfcb
+		FatFreeDirents drop
+
+		return
+	end
+
+	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATEDIR &)
+		// gotta create entries for . and .. for this to be a valid directory
+
+		fatdate@ // fatdate
+		fattime@ // fattime
+		fcb@ // fcb
+		dirfcb@ // dirfcb
+		FatDirectoryBuildDotEntries ok!
+
+		if (ok@)
+			fcb@ FatFileDelete
+
+			return
+		end
+	end
 end

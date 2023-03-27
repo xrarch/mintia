@@ -1,0 +1,997 @@
+//
+// Implements utility functions for the FAT driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "Fat.h"
+
+datasection "PAGE$text"
+
+table FatMonthDaysIntoYear
+	0 31 59 90 120 151 181 212 243 273 304 334
+endtable
+
+table FatMonthDays
+	31 28 31 30 31 30 31 31 30 31 30 31
+endtable
+
+table FatIllegalNameCharactersBitmap
+	0xffffffff
+	0xfc009c04
+	0x38000000
+	0x10000000
+endtable
+
+datasection "data"
+
+const SECSPERMIN      60
+const SECSPERHOUR     (SECSPERMIN 60 *)
+const SECSPERDAY      (SECSPERHOUR 24 *)
+const SECSPERYEAR     (SECSPERDAY 365 *)
+const SECSPERLEAPYEAR (SECSPERYEAR SECSPERDAY +)
+
+fn FatDateToUnix { date -- timestamp }
+	fnsection "PAGE$text"
+
+	// convert a 16 bit FAT datestamp to a corresponding unix timestamp.
+
+	auto day
+	date@ 31 & 1 - day!
+
+	auto month
+	date@ 5 >> 15 & 1 - month!
+
+	if (month@ 12 >=)
+		0 timestamp!
+		return
+	end
+
+	// add an offset of 10 years to normalize it against the unix epoch.
+
+	auto years
+	date@ 9 >> 127 & 10 + years!
+
+	[month@]FatMonthDaysIntoYear@ SECSPERDAY * timestamp!
+
+	day@ SECSPERDAY * timestamp +=
+
+	auto baseyear
+	1970 baseyear!
+
+	while (years@)
+		if (baseyear@ 3 & ~~)
+			SECSPERLEAPYEAR timestamp +=
+		end else
+			SECSPERYEAR timestamp +=
+		end
+
+		1 baseyear +=
+		1 years -=
+	end
+end
+
+fn FatTimeToUnix { time -- timeoffset }
+	fnsection "PAGE$text"
+
+	// convert 16-bit FAT timestamp to corresponding unix time offset
+
+	time@ 31 & 1 << timeoffset!
+
+	auto min
+	time@ 5 >> 63 & min!
+
+	auto hour
+	time@ 11 >> 15 & hour!
+
+	min@ 60 * timeoffset +=
+	hour@ 3600 * timeoffset +=
+end
+
+fn FatUnixToDate { timestamp -- date }
+	fnsection "PAGE$text"
+
+	// convert unix timestamp into corresponding FAT datestamp
+
+	auto year
+	1970 year!
+
+	while (timestamp@ SECSPERYEAR >=)
+		// very inefficient. O(n) where n is the number of years since 1970.
+		// i don't care.
+
+		if (year@ 3 & ~~)
+			if (timestamp@ SECSPERLEAPYEAR <)
+				break
+			end else
+				SECSPERLEAPYEAR timestamp -=
+			end
+		end else
+			SECSPERYEAR timestamp -=
+		end
+
+		1 year +=
+	end	
+
+	if (year@ 1980 <)
+		0 date!
+		return
+	end
+
+	1980 year -=
+
+	auto mday
+	timestamp@ SECSPERDAY / mday!
+
+	auto month
+	0 month!
+
+	while (1)
+		auto cmp
+		[month@]FatMonthDays@ cmp!
+
+		if (month@ 1 ==)
+			if (year@ 3 & ~~)
+				29 cmp!
+			end
+		end
+
+		if (mday@ cmp@ <)
+			break
+		end
+
+		cmp@ mday -=
+
+		1 month +=
+	end
+
+	1 mday +=
+
+	mday@ date!
+	month@ 1 + 5 << date |=
+	year@ 9 << date |=
+end
+
+fn FatUnixToTime { timestamp -- time }
+	fnsection "PAGE$text"
+
+	SECSPERDAY timestamp %=
+
+	auto sec
+	timestamp@ SECSPERMIN % sec!
+
+	auto hour
+	timestamp@ SECSPERHOUR / hour!
+
+	auto min
+	timestamp@ SECSPERHOUR % SECSPERMIN / min!
+
+	sec@ 1 >> time!
+	min@ 5 << time |=
+	hour@ 11 << time |=
+end
+
+fn FatVerifyName { name -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	if (name@ "." strcmp)
+		STATUS_ALREADY_EXISTS ok!
+		return
+	end
+
+	if (name@ ".." strcmp)
+		STATUS_ALREADY_EXISTS ok!
+		return
+	end
+
+	if (name@ gb ~~)
+		STATUS_ALREADY_EXISTS ok!
+		return
+	end
+
+	auto length
+	0 length!
+
+	while (name@ gb)
+		if (length@ 255 >=)
+			STATUS_NAME_TOO_LONG ok!
+			return
+		end
+
+		if (name@ gb 0x20 < name@ gb 0x7F >= ||)
+			STATUS_ILLEGAL_NAME ok!
+			return
+		end
+
+		if (name@ gb '/' ==)
+			STATUS_ILLEGAL_NAME ok!
+			return
+		end
+
+		1 length +=
+		1 name +=
+	end
+end
+
+fn FatNameCompare { name1 name2 -- cmp }
+	fnsection "PAGE$text"
+
+	auto n1len
+	name1@ strlen n1len!
+
+	auto n2len
+	name2@ strlen n2len!
+
+	auto minlen
+	n1len@ n2len@ min minlen!
+
+	while (minlen@)
+		auto c1
+		name1@ gb c1!
+
+		auto c2
+		name2@ gb c2!
+
+		if (c1@ 'a' >= c1@ 'z' <= &&)
+			32 c1 -=
+		end
+
+		if (c2@ 'a' >= c2@ 'z' <= &&)
+			32 c2 -=
+		end
+
+		if (c1@ c2@ >)
+			NAME_GREATER cmp!
+			return
+		end
+
+		if (c1@ c2@ <)
+			NAME_LESS cmp!
+			return
+		end
+
+		1 minlen -=
+		1 name1 +=
+		1 name2 +=
+	end
+
+	if (n1len@ n2len@ ==)
+		NAME_EQUAL cmp!
+		return
+	end
+
+	if (n1len@ n2len@ <)
+		NAME_LESS cmp!
+		return
+	end
+
+	NAME_GREATER cmp!
+end
+
+fn FatLFNChecksum { shortname -- checksum }
+	fnsection "PAGE$text"
+
+	shortname@ gb checksum!
+
+	auto i
+	1 i!
+
+	1 shortname +=
+
+	while (i@ 11 <)
+		if (checksum@ 1 &)
+			0x80
+			checksum@ 1 >> +
+			shortname@ gb +
+			checksum!
+		end else
+			0x00
+			checksum@ 1 >> +
+			shortname@ gb +
+			checksum!
+		end
+
+		0xFF checksum &=
+
+		1 i +=
+		1 shortname +=
+	end
+end
+
+fn FatShortEntryGenerationChecksum { shortname -- checksum }
+	fnsection "PAGE$text"
+
+	0 checksum!
+
+	while (shortname@ gb)
+		auto e
+		shortname@ gb e!
+
+		if (shortname@ 1 + gb)
+			shortname@ 1 + gb 8 << e |=
+			e@ 2 >> e@ ^ e!
+			2 shortname +=
+		end else
+			1 shortname +=
+		end
+
+		if (checksum@ 1 &)
+			0x80
+			checksum@ 1 >> +
+			e@ +
+			checksum!
+		end else
+			0x00
+			checksum@ 1 >> +
+			e@ +
+			checksum!
+		end
+	end
+end
+
+fn FatSetEntry { index value fattype vaddr -- }
+	fnsection "PAGE$text"
+
+	if (fattype@ 32 ==)
+		value@ vaddr@!
+	end elseif (fattype@ 16 ==)
+		value@ vaddr@ si
+	end else
+		// 12 bit funny business.
+		// make sure to do this in a way where there's no window of time where
+		// the neighboring entry is inconsistent.
+
+		0xFFF value &=
+
+		auto oldval
+		vaddr@ gb oldval!
+		vaddr@ 1 + gb 8 << oldval |=
+
+		if (index@ 1 &)
+			// replace upper 12 bits of oldval
+
+			oldval@ 0x000F & value@ 4 << | value!
+		end else
+			// replace lower 12 bits of oldval
+
+			oldval@ 0xF000 & value@ | value!
+		end
+
+		value@ vaddr@ sb
+		value@ 8 >> vaddr@ 1 + sb
+	end
+end
+
+fn FatInterpretEntry { entry fattype -- meaning }
+	if (fattype@ 32 ==)
+		0x0FFFFFFF entry &=
+	end elseif (fattype@ 12 ==)
+		if (DEBUGCHECKS)
+			if (entry@ 0xFFF >)
+				"FatInterpretEntry 12\n" KeCrash
+			end
+		end
+
+		if (entry@ 0xFF0 >=)
+			0x0FFFF000 entry |=
+		end
+	end else
+		if (DEBUGCHECKS)
+			if (entry@ 0xFFFF >)
+				"FatInterpretEntry 16\n" KeCrash
+			end
+		end
+
+		if (entry@ 0xFFF0 >=)
+			0x0FFF0000 entry |=
+		end
+	end
+
+	if (entry@ FAT_ENTRY_FREE ==)
+		entry@ meaning!
+		return
+	end
+
+	if (entry@ FAT_ENTRY_RESERVED <)
+		entry@ meaning!
+		return
+	end
+
+	if (entry@ FAT_ENTRY_BAD <)
+		FAT_ENTRY_RESERVED meaning!
+		return
+	end
+
+	if (entry@ FAT_ENTRY_BAD ==)
+		entry@ meaning!
+		return
+	end
+
+	FAT_ENTRY_EOC meaning!
+end
+
+fn FatStringCompareCaseInsensitive { str1 str2 -- eq }
+	fnsection "PAGE$text"
+
+	while (1)
+		auto c1
+		str1@ gb c1!
+
+		auto c2
+		str2@ gb c2!
+
+		if (c1@ 'a' >= c1@ 'z' <= &&)
+			32 c1 -=
+		end
+
+		if (c2@ 'a' >= c2@ 'z' <= &&)
+			32 c2 -=
+		end
+
+		if (c1@ c2@ ~=)
+			0 eq!
+			return
+		end
+
+		if (c1@ ~~)
+			1 eq!
+			return
+		end
+
+		1 str1 +=
+		1 str2 +=
+	end
+end
+
+fn FatCalculateNameStuff { name -- ntbyte needslfn entries ok }
+	fnsection "PAGE$text"
+
+	// validate the name and figure out whether we need LFN, how many entries
+	// are required if so, and what the value of the ntbyte (which determines
+	// capitalization in the short name) should be.
+	//
+	// if the name is in 8.3 format, and the casing is one of these:
+	// 1. NAME.EXT
+	// 2. NAME.ext
+	// 3. name.EXT
+	// 4. name.ext
+	// then a long filename is not required.
+	// if the name or extension length exceed 8 or 3 respectively, or the
+	// casing is inconsistent, then LFN entries are required. other cases
+	// that require LFN include an extension with no filename, or a filename
+	// ending in a period.
+
+	if (name@ "." strcmp)
+		STATUS_ALREADY_EXISTS ok!
+		return
+	end
+
+	if (name@ ".." strcmp)
+		STATUS_ALREADY_EXISTS ok!
+		return
+	end
+
+	0 ok!
+
+	0 needslfn!
+
+	auto namelen
+	0 namelen!
+
+	auto extlen
+	0 extlen!
+
+	auto totallen
+	0 totallen!
+
+	auto upcasecount
+	0 upcasecount!
+
+	auto downcasecount
+	0 downcasecount!
+
+	auto ext
+	0 ext!
+
+	auto c
+
+	0 ntbyte!
+
+	while (name@ gb)
+		1 totallen +=
+
+		name@ gb c!
+
+		if (c@ '.' ==)
+			1 ext!
+			1 name +=
+			break
+		end
+
+		if (c@ 0x20 < c@ 0x7F >= ||)
+			STATUS_ILLEGAL_NAME ok!
+			return
+		end
+
+		if (c@ '/' ==)
+			STATUS_ILLEGAL_NAME ok!
+			return
+		end
+
+		if (c@ ' ' ==)
+			1 needslfn!
+		end
+
+		if ([c@ 5 >>]FatIllegalNameCharactersBitmap@ 1 c@ 31 & << &)
+			1 needslfn!
+		end
+
+		if (c@ 'A' >= c@ 'Z' <= &&)
+			1 upcasecount +=
+		end elseif (c@ 'a' >= c@ 'z' <= &&)
+			1 downcasecount +=
+		end else
+			1 upcasecount +=
+			1 downcasecount +=
+		end
+
+		1 namelen +=
+		1 name +=
+	end
+
+	if (downcasecount@ namelen@ ==)
+		FAT_NTBYTE_NAMECASE ntbyte |=
+	end elseif (upcasecount@ namelen@ ~=)
+		// inconsistent case
+		1 needslfn!
+	end
+
+	if (ext@)
+		if (namelen@ ~~)
+			// name that begins with a period
+			1 needslfn!
+		end
+
+		if (name@ gb ~~)
+			// name that ends with a period
+			1 needslfn!
+		end
+
+		0 upcasecount!
+		0 downcasecount!
+
+		while (name@ gb)
+			1 totallen +=
+
+			name@ gb c!
+
+			if (name@ gb '.' ==)
+				1 needslfn!
+			end
+
+			if (c@ 0x20 < c@ 0x7F >= ||)
+				STATUS_ILLEGAL_NAME ok!
+				return
+			end
+
+			if (c@ '/' ==)
+				STATUS_ILLEGAL_NAME ok!
+				return
+			end
+
+			if (c@ ' ' ==)
+				1 needslfn!
+			end
+
+			if ([c@ 5 >>]FatIllegalNameCharactersBitmap@ 1 c@ 31 & << &)
+				1 needslfn!
+			end
+
+			if (c@ 'A' >= c@ 'Z' <= &&)
+				1 upcasecount +=
+			end elseif (c@ 'a' >= c@ 'z' <= &&)
+				1 downcasecount +=
+			end else
+				1 upcasecount +=
+				1 downcasecount +=
+			end
+
+			1 extlen +=
+			1 name +=
+		end
+
+		if (downcasecount@ extlen@ ==)
+			FAT_NTBYTE_EXTCASE ntbyte |=
+		end elseif (upcasecount@ extlen@ ~=)
+			// inconsistent case
+			1 needslfn!
+		end
+	end
+
+	if (namelen@ 8 >
+		extlen@ 3 > ||)
+		1 needslfn!
+	end
+
+	if (totallen@ ~~)
+		STATUS_ALREADY_EXISTS ok!
+		return
+	end
+
+	if (totallen@ 255 >)
+		STATUS_NAME_TOO_LONG ok!
+		return
+	end
+
+	if (needslfn@)
+		totallen@ 12 + 13 / entries!
+
+		1 entries +=
+	end else
+		1 entries!
+	end
+end
+
+fn FatInitializeGenerationContext { context -- }
+	fnsection "PAGE$text"
+
+	context@ // ptr
+	FatShortNameContext_SIZEOF // sz
+	0 // word
+	memset
+end
+
+fn FatGenerateShortName { shortname longname context -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	// generate a short name based on the long name and the context structure.
+
+	auto i
+	auto len
+	auto c
+
+	if (context@ FatShortNameContext_Index + @ ~~)
+		// this is the first go around. build the name buffer and extension
+		// buffer.
+
+		auto lastdot
+		-1 lastdot!
+
+		auto first
+		longname@ gb '.' == first!
+
+		auto ptr
+		longname@ ptr!
+
+		while (ptr@ gb)
+			if (ptr@ gb '.' ==)
+				if (first@)
+					1 ptr +=
+					continue
+				end
+
+				ptr@ lastdot!
+			end
+
+			0 first!
+			1 ptr +=
+		end
+
+		// build up a base short name that we will modify repeatedly until we
+		// get one that works.
+
+		auto dest
+
+		longname@ ptr!
+
+		context@ FatShortNameContext_ShortName + dest!
+
+		0 len!
+
+		while (ptr@ gb)
+			ptr@ gb c!
+
+			if (ptr@ lastdot@ >=)
+				break
+			end
+
+			if (len@ 8 >=)
+				break
+			end
+
+			// skip characters that aren't permissible in short names
+
+			if (c@ '.' ==)
+				1 ptr +=
+				continue
+			end
+
+			if (c@ ' ' <=)
+				1 ptr +=
+				continue
+			end
+
+			if (c@ 0x7F >)
+				1 ptr +=
+				continue
+			end
+
+			if ([c@ 5 >>]FatIllegalNameCharactersBitmap@ 1 c@ 31 & << &)
+				'_' c!
+			end
+
+			if (c@ 'a' >= c@ 'z' <= &&)
+				32 c -=
+			end
+
+			c@ dest@ sb
+
+			1 len +=
+			1 dest +=
+			1 ptr +=
+		end
+
+		if (len@ 3 <)
+			// length is less than 3 characters so add a checksum to the
+			// end to make the namespace less evil.
+
+			auto checksum
+			longname@ FatShortEntryGenerationChecksum checksum!
+
+			0 i!
+
+			while (i@ 3 <)
+				auto nib
+				checksum@ 0xF & nib!
+
+				if (nib@ 9 <=)
+					'0' nib@ + dest@ sb
+				end else
+					nib@ 10 - 'A' + dest@ sb
+				end
+
+				1 dest +=
+				1 len +=
+				1 i +=
+				4 checksum >>=
+			end
+		end
+
+		len@ context@ FatShortNameContext_ShortNameLength + !
+
+		while (len@ 8 <)
+			' ' dest@ sb
+
+			1 dest +=
+			1 len +=
+		end
+
+		context@ FatShortNameContext_Extension + dest!
+		0 len!
+
+		if (lastdot@ -1 ~=)
+			lastdot@ 1 + ptr!
+
+			while (ptr@ gb)
+				ptr@ gb c!
+
+				if (len@ 3 >=)
+					break
+				end
+
+				// skip characters that aren't permissible in short names
+
+				if (c@ '.' ==)
+					1 ptr +=
+					continue
+				end
+
+				if (c@ ' ' <=)
+					1 ptr +=
+					continue
+				end
+
+				if (c@ 0x7F >)
+					1 ptr +=
+					continue
+				end
+
+				if ([c@ 5 >>]FatIllegalNameCharactersBitmap@ 1 c@ 31 & << &)
+					'_' c!
+				end
+
+				if (c@ 'a' >= c@ 'z' <= &&)
+					32 c -=
+				end
+
+				c@ dest@ sb
+
+				1 len +=
+				1 dest +=
+				1 ptr +=
+			end
+
+			if (len@ 1 ==)
+				// there wasn't an extension after all
+
+				context@ FatShortNameContext_Extension + dest!
+				0 len!
+			end
+		end
+
+		while (len@ 3 <)
+			' ' dest@ sb
+
+			1 len +=
+			1 dest +=
+		end
+	end
+
+	if (context@ FatShortNameContext_Index + @ 999999 >)
+		// i don't see how this could ever happen, but just in case...
+
+		STATUS_NAME_TOO_LONG ok!
+
+		return
+	end
+
+	1 context@ FatShortNameContext_Index + +=
+
+	auto index
+	8 alloc index!
+
+	context@ FatShortNameContext_Index + @ // n
+	index@ // str
+	itoa
+
+	auto numlen
+	index@ strlen numlen!
+
+	auto namelen
+	context@ FatShortNameContext_ShortNameLength + @ namelen!
+
+	if (namelen@ numlen@ + 1 + 8 >)
+		// contract the name length
+
+		8 numlen@ 1 + - namelen!
+	end
+
+	// copy short name to buffer
+
+	shortname@ // dest
+	context@ FatShortNameContext_ShortName + // src
+	8 // sz
+	memcpy
+
+	// create the tail
+
+	'~' shortname@ namelen@ + sb
+
+	// append the number
+
+	shortname@ namelen@ + 1 + // dest
+	index@ // src
+	numlen@ // sz
+	memcpy
+
+	// copy extension to buffer
+
+	shortname@ 8 + // dest
+	context@ FatShortNameContext_Extension + // src
+	3 // sz
+	memcpy
+end
+
+fn FatConvertToShortName { shortname name -- }
+	fnsection "PAGE$text"
+
+	// assumes name is a valid 8.3 name
+
+	auto dest
+	shortname@ dest!
+
+	auto isext
+	0 isext!
+
+	auto len
+	0 len!
+
+	auto c
+
+	while (name@ gb)
+		if (name@ gb '.' ==)
+			1 isext!
+			1 name +=
+			break
+		end
+
+		name@ gb c!
+
+		if (c@ 'a' >= c@ 'z' <= &&)
+			32 c -=
+		end
+
+		c@ dest@ sb
+
+		1 len +=
+		1 dest +=
+		1 name +=
+	end
+
+	while (len@ 8 <)
+		' ' dest@ sb
+		1 dest +=
+		1 len +=
+	end
+
+	0 len!
+
+	while (name@ gb)
+		name@ gb c!
+
+		if (c@ 'a' >= c@ 'z' <= &&)
+			32 c -=
+		end
+
+		c@ dest@ sb
+
+		1 len +=
+		1 dest +=
+		1 name +=
+	end
+
+	while (len@ 3 <)
+		' ' dest@ sb
+		1 dest +=
+		1 len +=
+	end
+end
+
+fn FatBuildDotEntry { name fatdate fattime fcb fatdirent -- }
+	fnsection "PAGE$text"
+
+	fatdirent@ // ptr
+	FatDirectoryEntry_SIZEOF // sz
+	0 // word
+	memset
+
+	fattime@ fatdirent@ FatDirectoryEntry_CreationTimeI + si
+	fatdate@ fatdirent@ FatDirectoryEntry_CreationDateI + si
+
+	fatdate@ fatdirent@ FatDirectoryEntry_AccessDateI + si
+
+	fattime@ fatdirent@ FatDirectoryEntry_ModificationTimeI + si
+	fatdate@ fatdirent@ FatDirectoryEntry_ModificationDateI + si
+
+	FAT_ATTR_DIRECTORY fatdirent@ FatDirectoryEntry_AttributeB + sb
+
+	fatdirent@ // dest
+	name@ // src
+	11 // sz
+	memcpy
+
+	auto startingcluster
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @
+	FatFCBData_StartingCluster + @ startingcluster!
+
+	startingcluster@ 0xFFFF & fatdirent@ FatDirectoryEntry_FirstClusterLowI + si
+	startingcluster@ 16 >> fatdirent@ FatDirectoryEntry_FirstClusterHighI + si
+end

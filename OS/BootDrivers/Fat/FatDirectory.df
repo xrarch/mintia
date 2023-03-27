@@ -951,6 +951,104 @@ fn FatDirectoryFindEntry { dirent includelong name fcb -- longdirentseek shortdi
 	end
 end
 
+fn FatRootDirectorySetVolumeLabel { label mount -- ok }
+	fnsection "PAGE$text"
+
+	label@ "setting label to %s\n" Printf
+
+	if (label@ strlen 11 >)
+		STATUS_NAME_TOO_LONG ok!
+		return
+	end
+
+	0 ok!
+
+	auto fatdirent
+
+	auto fcb
+	mount@ IOMount_RootFCB + @ fcb!
+
+	auto bcb
+	0 bcb!
+
+	auto seek
+	0 seek!
+
+	while (1)
+		0 // dirty
+		1 // skipempty
+		seek@ // seek
+		fcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetRawEntry ok! seek! bcb! fatdirent!
+
+		if (ok@)
+			break
+		end
+
+		auto attr
+		fatdirent@ FatDirectoryEntry_AttributeB + gb attr!
+
+		if (attr@ FAT_ATTR_LFN_MASK & FAT_ATTR_LFN ~=
+			attr@ FAT_ATTR_VOLUME_ID & &&)
+
+			// found it. copy it
+
+			auto dest
+			mount@ IOMount_Extension + @ FatData_VolumeLabel + dest!
+
+			auto i
+			0 i!
+
+			while (i@ 11 <)
+				auto c
+				label@ gb c!
+
+				if (c@ ~~)
+					break
+				end
+
+				if (c@ ' ' ==)
+					break
+				end
+
+				if (c@ 'a' >= c@ 'z' <= &&)
+					32 c -=
+				end
+
+				c@ fatdirent@ sb
+				c@ dest@ sb
+
+				1 dest +=
+				1 label +=
+				1 fatdirent +=
+				1 i +=
+			end
+
+			0 dest@ sb
+
+			while (i@ 11 <)
+				' ' fatdirent@ sb
+
+				1 i +=
+				1 fatdirent +=
+			end
+
+			bcb@ VcBufferDirty
+
+			break
+		end
+	end
+
+	if (ok@ STATUS_END_OF_FILE ==)
+		STATUS_NOT_FOUND ok!
+	end
+
+	if (bcb@)
+		bcb@ VcBufferDecrementMapCount drop
+	end
+end
+
 fn FatRootDirectoryFindVolumeLabel { mount -- }
 	fnsection "PAGE$text"
 

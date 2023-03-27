@@ -67,7 +67,7 @@ fn IOFilesystemMount { flags handle fsname -- ok }
 	end
 
 	access@ // access
-	ACCESS_READ // permission
+	ACCESS_EXEC // permission
 	SeCheckAccess ok!
 
 	if (ok@)
@@ -280,7 +280,7 @@ fn IOFilesystemUnmount { handle -- ok }
 	end
 
 	access@ // access
-	ACCESS_READ // permission
+	ACCESS_EXEC // permission
 	SeCheckAccess ok!
 
 	if (ok@)
@@ -415,25 +415,13 @@ fn IOMountUpdateFlags { newflags handle -- ok }
 	end
 
 	access@ // access
-	ACCESS_READ // permission
+	ACCESS_EXEC // permission
 	SeCheckAccess ok!
 
 	if (ok@)
 		fileobject@ ObObjectDereferenceByPointer drop
 
 		return
-	end
-
-	if (newflags@ OSMOUNT_READONLY & ~~)
-		access@ // access
-		ACCESS_WRITE // permission
-		SeCheckAccess ok!
-
-		if (ok@)
-			fileobject@ ObObjectDereferenceByPointer drop
-
-			return
-		end
 	end
 
 	newflags@ // newflags
@@ -669,6 +657,105 @@ fn IOMountQueryAll { buffer maxquery -- count ok }
 	end
 
 	IOUnlockDeviceDatabase
+end
+
+fn IOMountSetObject { query fileobject -- ok }
+	fnsection "PAGE$text"
+
+	auto fcb
+	fileobject@ IOFile_FileControlBlock + @ fcb!
+
+	auto fcbp
+	fcb@ IOFileControlBlock_Paged + @ fcbp!
+
+	auto filetype
+	fcbp@ IOFileControlBlockPaged_FileType + @ filetype!
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		STATUS_IS_A_DIRECTORY ok!
+
+		return
+	end
+
+	if (filetype@ OSFILETYPE_BLOCKDEVICE ~=)
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	fcb@ IOFileControlBlockLock ok!
+
+	if (ok@)
+		return
+	end
+
+	auto fsdevobj
+	fcbp@ IOFileControlBlockPaged_DeviceObject + @ fsdevobj!
+
+	auto mount
+	fsdevobj@ IODevice_RelevantMount + @ mount!
+
+	if (mount@ ~~)
+		fcb@ IOFileControlBlockUnlock
+
+		STATUS_NOT_MOUNTED ok!
+
+		return
+	end
+
+	mount@ IOMount_FsDeviceObject + @ fsdevobj!
+
+	auto filesystem
+	mount@ IOMount_Filesystem + @ filesystem!
+
+	auto setfunc
+	filesystem@ IOFilesystem_VolumeSetFunction + @ setfunc!
+
+	if (setfunc@ ~~)
+		fcb@ IOFileControlBlockUnlock
+
+		STATUS_NOT_SUPPORTED ok!
+
+		return
+	end
+
+	query@ // query
+	fsdevobj@ // fsdeviceobject
+	setfunc@ IOFilesystemVolumeSetFunction ok!
+
+	fcb@ IOFileControlBlockUnlock
+end
+
+fn IOMountSet { query handle -- ok }
+	fnsection "PAGE$text"
+
+	auto fileobject
+
+	auto access
+
+	IOFileTypeObject@ // type
+	handle@ // handle
+	ObObjectReferenceByHandle ok! fileobject! access!
+
+	if (ok@)
+		return
+	end
+
+	access@ // access
+	ACCESS_WRITE // permission
+	SeCheckAccess ok!
+
+	if (ok@)
+		fileobject@ ObObjectDereferenceByPointer drop
+
+		return
+	end
+
+	query@ // query
+	fileobject@ // fileobject
+	IOMountSetObject ok!
+
+	fileobject@ ObObjectDereferenceByPointer drop
 end
 
 fn IOiFilesystemSyncAll { shutdown -- ok }

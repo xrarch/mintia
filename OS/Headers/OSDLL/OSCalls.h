@@ -98,6 +98,7 @@ extern OSMountQueryAll { buffer maxquery -- count ok }
 extern OSMountCountQuery { -- count ok }
 extern OSMountUpdateFlags { newflags handle -- ok }
 extern OSMountGetFilesystemName { buffer handle -- ok }
+extern OSMountSet { query handle -- ok }
 
 extern OSFlushModifiedPages { -- ok }
 

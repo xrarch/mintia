@@ -270,6 +270,8 @@ extern FatRootDirectoryCreate { mount -- ok }
 extern FatFCBCreate { name flags filetype mount -- fcb ok }
 extern FatFCBDelete { writeout fcb -- }
 
+extern FatRootDirectorySetVolumeLabel { label mount -- ok }
+
 extern FatDirectoryFCBInitializeAllocation { fcb -- ok }
 
 extern FatSetFile { info fileobject -- ok }

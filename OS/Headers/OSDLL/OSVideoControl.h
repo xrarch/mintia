@@ -1,5 +1,3 @@
-const OSVIDEOIOCONTROL_QUERY 1
-
 struct OSVideoQuery
 	4 Width
 	4 Height

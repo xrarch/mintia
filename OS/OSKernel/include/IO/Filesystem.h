@@ -4,6 +4,7 @@ fnptr IOFilesystemFlushFunction { shutdown fsdeviceobject -- ok }
 fnptr IOFilesystemUpdateFlagsFunction { newflags oldflags fsdeviceobject -- ok }
 fnptr IOFilesystemVolumeQueryFunction { query fsdeviceobject -- ok }
 fnptr IOFilesystemReclaimFunction { preferredcount fsdeviceobject -- actualcount }
+fnptr IOFilesystemVolumeSetFunction { query fsdeviceobject -- ok }
 
 struct IOFilesystem
 	4 Next
@@ -18,8 +19,8 @@ struct IOFilesystem
 	4 Flags
 	4 VolumeQueryFunction
 	4 ReclaimFunction
+	4 VolumeSetFunction
 
-	4 Reserved1
 	4 Reserved2
 	4 Reserved3
 	4 Reserved4
@@ -67,5 +68,7 @@ extern IOMountGetFilesystemName { buffer handle -- ok }
 extern IOMountGetFilesystemNameObject { buffer fileobject -- ok }
 
 extern IOMountQueryAll { buffer maxquery -- count ok }
+
+extern IOMountSet { query handle -- ok }
 
 externptr IOMountCount

@@ -84,17 +84,21 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
 
-	fatdata@ FatData_ClusterSizeShift + @ fileoffset >>=
+	auto clusteroffset
+	fileoffset@ fatdata@ FatData_ClusterSizeShift + @ >> clusteroffset!
 
 	auto firstlink
 	fcbdata@ FatFCBData_StartingCluster + @ firstlink!
 
-	if (fileoffset@ 0 ==)
+	if (clusteroffset@ 0 ==)
 		// bit of a fast path
 
 		firstlink@ 2 -
 		fatdata@ FatData_ClusterSizeShift + @ <<
 		fatdata@ FatData_DataStartByteOffset + @ + voloffset!
+
+		fileoffset@
+		fatdata@ FatData_ClusterSizeBytes + @ 1 - & voloffset +=
 
 		return
 	end
@@ -111,11 +115,11 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 	auto walkcount
 	auto walkstart
 
-	if (fileoffset@ lastlookup@ >)
-		fileoffset@ lastlookup@ - walkcount!
+	if (clusteroffset@ lastlookup@ >)
+		clusteroffset@ lastlookup@ - walkcount!
 		fcbnp@ FatFCBDataNonpaged_LastFATLinkValue + @ walkstart!
 	end else
-		fileoffset@ walkcount!
+		clusteroffset@ walkcount!
 		firstlink@ walkstart!
 	end
 
@@ -133,8 +137,8 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 
 	HALCPUInterruptDisable rs!
 
-	if (fileoffset@ lastlookup@ >= fileoffset@ 8 >= ||)
-		fileoffset@ fcbnp@ FatFCBDataNonpaged_LastFATLinkClusterOff + !
+	if (clusteroffset@ lastlookup@ >= clusteroffset@ 8 >= ||)
+		clusteroffset@ fcbnp@ FatFCBDataNonpaged_LastFATLinkClusterOff + !
 		voloffset@ fcbnp@ FatFCBDataNonpaged_LastFATLinkValue + !
 	end
 
@@ -143,6 +147,9 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 	voloffset@ 2 -
 	fatdata@ FatData_ClusterSizeShift + @ <<
 	fatdata@ FatData_DataStartByteOffset + @ + voloffset!
+
+	fileoffset@
+	fatdata@ FatData_ClusterSizeBytes + @ 1 - & voloffset +=
 end
 
 fn FatLookupEntryByIndex { dirty fattype index mount lastbcb -- bcb vaddr value ok }
@@ -509,7 +516,7 @@ fn FatUpdateHint { fcbnp link op -- }
 	rs@ HALCPUInterruptRestore
 end
 
-fn FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
+fn FatClusterTruncate { newsectors oldsectors newclusters oldclusters zero flags fcb -- ok }
 	fnsection "PAGE$text"
 
 	auto fcbdata
@@ -527,73 +534,111 @@ fn FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
 
-	auto walkcount
-	auto walkstart
-
-	0 ok!
-
-	if (newclusters@ oldclusters@ <)
-		// truncating, we need to seek to the new last block
-
-		if (newclusters@)
-			newclusters@ 1 - walkcount!
-		end else
-			0 walkcount!
-		end
-
-		firstlink@ walkstart!
-	end else
-		// growing, we need to seek to the last block
-
-		if (oldclusters@)
-			oldclusters@ 1 - walkcount!
-			firstlink@ walkstart!
-		end else
-			-1 walkcount!
-		end
-	end
-
-	auto clusterno
-
-	if (walkcount@)
-		if (walkcount@ -1 ~=)
-			walkcount@ // startcount
-			walkstart@ // startcluster
-			mount@ // mount
-			0 // kflags
-			FatWalkFAT ok! clusterno!
-
-			if (ok@)
-				return
-			end
-		end else
-			-1 clusterno!
-		end
-	end else
-		walkstart@ clusterno!
-	end
-
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
-	if (newclusters@ oldclusters@ <)
-		if (DEBUGCHECKS)
-			if (clusterno@ -1 ==)
-				"FatClusterTruncate: clusterno == -1\n" KeCrash
+	if (newclusters@ oldclusters@ ~=)
+		// have to allocate or release clusters from the file
+
+		auto walkcount
+		auto walkstart
+
+		0 ok!
+
+		if (newclusters@ oldclusters@ <)
+			// truncating, we need to seek to the new last block
+
+			if (newclusters@)
+				newclusters@ 1 - walkcount!
+			end else
+				0 walkcount!
+			end
+
+			firstlink@ walkstart!
+		end else
+			// growing, we need to seek to the last block
+
+			if (oldclusters@)
+				oldclusters@ 1 - walkcount!
+				firstlink@ walkstart!
+			end else
+				-1 walkcount!
 			end
 		end
 
-		if (fcbdata@ FatFCBData_Flags + @ FATFILEFLAG_VALIDATED & ~~)
-			if (newclusters@)
-				oldclusters@ newclusters@ - 1 + // length
-				clusterno@ // cluster
+		auto clusterno
+
+		if (walkcount@)
+			if (walkcount@ -1 ~=)
+				walkcount@ // startcount
+				walkstart@ // startcluster
 				mount@ // mount
-				FatClusterChainValidate ok! drop
+				0 // kflags
+				FatWalkFAT ok! clusterno!
+
+				if (ok@)
+					return
+				end
 			end else
-				oldclusters@ newclusters@ - // length
-				clusterno@ // cluster
-				mount@ // mount
-				FatClusterChainValidate ok! drop
+				-1 clusterno!
 			end
+		end else
+			walkstart@ clusterno!
+		end
+
+		if (newclusters@ oldclusters@ <)
+			if (DEBUGCHECKS)
+				if (clusterno@ -1 ==)
+					"FatClusterTruncate: clusterno == -1\n" KeCrash
+				end
+			end
+
+			if (fcbdata@ FatFCBData_Flags + @ FATFILEFLAG_VALIDATED & ~~)
+				if (newclusters@)
+					oldclusters@ newclusters@ - 1 + // length
+					clusterno@ // cluster
+					mount@ // mount
+					FatClusterChainValidate ok! drop
+				end else
+					oldclusters@ newclusters@ - // length
+					clusterno@ // cluster
+					mount@ // mount
+					FatClusterChainValidate ok! drop
+				end
+
+				if (ok@)
+					KeThreadCurrent@ KeThreadAcceptKill drop
+
+					return
+				end
+
+				FATFILEFLAG_VALIDATED fcbdata@ FatFCBData_Flags + |=
+			end
+
+			if (newclusters@)
+				1 // first
+				clusterno@ // clusterno
+				fcb@ FSFileControlBlockGetMount // mount
+				FatDeallocateChain
+			end else
+				0 // first
+				clusterno@ // clusterno
+				fcb@ FSFileControlBlockGetMount // mount
+				FatDeallocateChain
+
+				0x00000000 fcbdata@ FatFCBData_StartingCluster + !
+			end
+
+			fcbnp@ // fcbnp
+			firstlink@ // link
+			0 // op
+			FatUpdateHint
+		end else
+			auto startcluster
+			newclusters@ oldclusters@ - // blocks
+			clusterno@ // lastblock
+			zero@ // zero
+			fcb@ FSFileControlBlockGetMount // mount
+			FatAllocateChain ok! startcluster!
 
 			if (ok@)
 				KeThreadCurrent@ KeThreadAcceptKill drop
@@ -601,70 +646,38 @@ fn FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
 				return
 			end
 
-			FATFILEFLAG_VALIDATED fcbdata@ FatFCBData_Flags + |=
-		end
+			if (fcbdata@ FatFCBData_StartingCluster + @ ~~)
+				if (startcluster@ ~~)
+					"FatClusterTruncate: startcluster == -1\n" KeCrash
+				end
 
-		if (newclusters@)
-			1 // first
-			clusterno@ // clusterno
-			fcb@ FSFileControlBlockGetMount // mount
-			FatDeallocateChain
-		end else
-			0 // first
-			clusterno@ // clusterno
-			fcb@ FSFileControlBlockGetMount // mount
-			FatDeallocateChain
+				startcluster@ fcbdata@ FatFCBData_StartingCluster + !
 
-			0x00000000 fcbdata@ FatFCBData_StartingCluster + !
-		end
-
-		fcbnp@ // fcbnp
-		firstlink@ // link
-		0 // op
-		FatUpdateHint
-	end else
-		auto startcluster
-		newclusters@ oldclusters@ - // blocks
-		clusterno@ // lastblock
-		zero@ // zero
-		fcb@ FSFileControlBlockGetMount // mount
-		FatAllocateChain ok! startcluster!
-
-		if (ok@)
-			KeThreadCurrent@ KeThreadAcceptKill drop
-
-			return
-		end
-
-		if (fcbdata@ FatFCBData_StartingCluster + @ ~~)
-			if (startcluster@ ~~)
-				"FatClusterTruncate: startcluster == -1\n" KeCrash
+				fcbnp@ // fcbnp
+				startcluster@ // link
+				1 // op
+				FatUpdateHint
 			end
-
-			startcluster@ fcbdata@ FatFCBData_StartingCluster + !
-
-			fcbnp@ // fcbnp
-			startcluster@ // link
-			1 // op
-			FatUpdateHint
 		end
+	end
 
+	if (newsectors@ oldsectors@ >)
 		if (zero@)
 			// zero out the chain now that we know it was allocated.
 
 			KeThreadCurrent@ KeThreadAcceptKill drop
 
 			if (zero@ 1 ==)
-				newclusters@ oldclusters@ - fatdata@ FatData_ClusterSizeShift + @ << // size
-				oldclusters@ fatdata@ FatData_ClusterSizeShift + @ << // offset
+				newsectors@ oldsectors@ - fatdata@ FatData_SectorSizeShift + @ << // size
+				oldsectors@ fatdata@ FatData_SectorSizeShift + @ << // offset
 				flags@ // flags
 				fcb@ // fcb
 				IOCacheZeroData ok!
 			end else
 				// only zero the last block
 
-				fatdata@ FatData_ClusterSizeBytes + @ // size
-				newclusters@ 1 - fatdata@ FatData_ClusterSizeShift + @ << // offset
+				fatdata@ FatData_SectorSizeBytes + @ // size
+				newsectors@ 1 - fatdata@ FatData_SectorSizeShift + @ << // offset
 				flags@ // flags
 				fcb@ // fcb
 				IOCacheZeroData ok!
@@ -673,18 +686,22 @@ fn FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
 			KeThreadCurrent@ KeThreadIgnoreKill drop
 
 			if (ok@)
-				if (oldclusters@)
-					1 // first
-					startcluster@ // clusterno
-					fcb@ FSFileControlBlockGetMount // mount
-					FatDeallocateChain
-				end else
-					0 // first
-					startcluster@ // clusterno
-					fcb@ FSFileControlBlockGetMount // mount
-					FatDeallocateChain
+				if (oldclusters@ newclusters@ ~=)
+					// deallocate the clusters that were allocated previously.
 
-					0x00000000 fcbdata@ FatFCBData_StartingCluster + !
+					if (oldclusters@)
+						1 // first
+						startcluster@ // clusterno
+						fcb@ FSFileControlBlockGetMount // mount
+						FatDeallocateChain
+					end else
+						0 // first
+						startcluster@ // clusterno
+						fcb@ FSFileControlBlockGetMount // mount
+						FatDeallocateChain
+
+						0x00000000 fcbdata@ FatFCBData_StartingCluster + !
+					end
 				end
 			end
 		end

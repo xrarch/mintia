@@ -262,7 +262,7 @@ extern FatClusterBitmapUninitialize { mount -- }
 
 extern FatDeallocateChain { first clusterno mount -- }
 
-extern FatClusterTruncate { newclusters oldclusters zero flags fcb -- ok }
+extern FatClusterTruncate { newsectors oldsectors newclusters oldclusters zero flags fcb -- ok }
 
 extern FatTruncateToZero { fcb -- ok }
 

@@ -154,13 +154,237 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 		end
 	end
 
-	fcb@ FatFileDelete
+	fcb@ FatFileDelete ok!
+end
+
+fn FatRenameLock { mount -- ok }
+	fnsection "PAGE$text"
+
+	KERNELMODE // waitmode
+	1 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	mount@ IOMount_Extension + @ FatData_RenameMutex + // object
+	KeThreadWaitForObject ok!
+end
+
+fn FatRenameUnlock { mount -- }
+	fnsection "PAGE$text"
+
+	0 // abandon
+	mount@ IOMount_Extension + @ FatData_RenameMutex + // mutex
+	KeMutexRelease drop
 end
 
 fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok }
 	fnsection "PAGE$text"
 
-	STATUS_NOT_IMPLEMENTED ok!
+	auto mount
+	srcfcb@ FSFileControlBlockGetMount mount!
+
+	if (destfcb@ FSFileControlBlockGetMount mount@ ~=)
+		STATUS_CROSS_VOLUME ok!
+		return
+	end
+
+	srcname@ FatVerifyName ok!
+
+	if (ok@)
+		if (ok@ STATUS_ALREADY_EXISTS ==)
+			STATUS_FORBIDDEN_OPERATION ok!
+		end
+
+		return
+	end
+
+	destname@ FatVerifyName ok!
+
+	if (ok@)
+		return
+	end
+
+	if (destfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
+			destfcb@ mount@ IOMount_RootFCB + @ ~= ||)
+
+			destfcb@ IOFileControlBlockCacheCheck ok! drop
+
+			if (ok@)
+				return
+			end
+		end
+	end
+
+	if (srcfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
+			srcfcb@ mount@ IOMount_RootFCB + @ ~= ||)
+
+			srcfcb@ IOFileControlBlockCacheCheck ok! drop
+
+			if (ok@)
+				return
+			end
+		end
+	end
+
+	auto filefcb
+	0 // flags
+	srcname@ // name
+	srcfcb@ // dirfcb
+	mount@ // mount
+	FatDirectoryGetChildByName ok! filefcb!
+
+	if (ok@)
+		return
+	end
+
+	auto fcbdata
+	filefcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	auto checkexists
+	1 checkexists!
+
+	if (destfcb@ srcfcb@ ==)
+		if (fcbdata@ FatFCBData_Name + @ destname@ strcmp)
+			filefcb@ FatFCBDereference
+
+			return
+		end elseif (fcbdata@ FatFCBData_Name + @ destname@ FatStringCompareCaseInsensitive)
+			// they're the same, but only when not considering case.
+			// that means case changed. we should allow this.
+
+			0 checkexists!
+		end
+	end
+
+	if (checkexists@)
+		// make sure that the name doesn't already exist in the directory.
+
+		auto bcb
+		0 // dirent
+		1 // includelong
+		destname@ // destname
+		destfcb@ // fcb
+		FatDirectoryFindEntry ok! bcb! drop drop drop
+
+		if (ok@ STATUS_NOT_FOUND ~=)
+			filefcb@ FatFCBDereference
+
+			if (ok@ ~~)
+				bcb@ VcBufferDecrementMapCount drop
+
+				STATUS_ALREADY_EXISTS ok!
+			end
+
+			return
+		end
+
+		0 ok!
+	end
+
+	auto renamelocked
+	0 renamelocked!
+
+	if (srcfcb@ destfcb@ ~=)
+		auto filetype
+		filefcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ filetype!
+
+		if (filetype@ OSFILETYPE_DIRECTORY ==)
+			// make sure it won't create a cycle by walking from the
+			// destination directory up to the root directory, and seeing if
+			// the source appears along the way. if it does, this operation
+			// would create a cycle.
+
+			mount@ FatRenameLock ok!
+
+			if (ok@)
+				filefcb@ FatFCBDereference
+
+				return
+			end
+
+			filefcb@ // testfcb
+			destfcb@ // searchfcb
+			FatDirectoryCheckForCycle ok!
+
+			if (ok@)
+				mount@ FatRenameUnlock
+
+				filefcb@ FatFCBDereference
+
+				return
+			end
+
+			1 renamelocked!
+		end
+	end
+
+	auto seek
+	auto entries
+	auto fatdirent
+	auto shortdirentseek
+	auto longdirentseek
+
+	destname@ // name
+	destfcb@ // dirfcb
+	FatDirectoryBuildEntry ok! fatdirent! bcb! seek! entries! shortdirentseek! longdirentseek!
+
+	if (ok@)
+		if (renamelocked@)
+			mount@ FatRenameUnlock
+		end
+
+		filefcb@ FatFCBDereference
+
+		return
+	end
+	
+	bcb@ VcBufferDecrementMapCount drop
+
+	// free FCB dirents
+
+	filefcb@ FatFreeDirentsForFCB
+
+	// update FCB
+
+	shortdirentseek@ fcbdata@ FatFCBData_ShortDirentSeek + !
+	longdirentseek@ fcbdata@ FatFCBData_LongDirentSeek + !
+
+	filefcb@ // childfcb
+	mount@ // mount
+	FatDirectoryRemoveCachedChild
+
+	filefcb@ // childfcb
+	destfcb@ // dirfcb
+	mount@ // mount
+	FatDirectoryInsertCachedChild
+
+	filefcb@ FatUpdateDirent
+
+	if (renamelocked@)
+		mount@ FatRenameUnlock
+	end
+
+	filefcb@ FatFCBDereference
+end
+
+fn FatDirectoryCheckForCycle { testfcb searchfcb -- ok }
+	fnsection "PAGE$text"
+
+	auto fcbdata
+	searchfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+
+	while (searchfcb@ testfcb@ ~=)
+		if (fcbdata@ FatFCBData_ParentDirDCB + @ ~~)
+			// found root. no cycles.
+
+			return
+		end
+
+		fcbdata@ FatFCBData_ParentDirDCB + @ searchfcb!
+		searchfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	end
+
+	STATUS_FORBIDDEN_OPERATION ok!
 end
 
 fn FatDirectoryCheckEmpty { dirfcb -- ok }

@@ -311,7 +311,7 @@ extern FatRename { srcname srcfcb destname destfcb -- ok }
 extern FatPoke { poketype object -- }
 extern FatSetSecurity { uid gid permissions object -- ok }
 
-extern FatFileDelete { fcb -- }
+extern FatFileDelete { fcb -- ok }
 
 extern FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 

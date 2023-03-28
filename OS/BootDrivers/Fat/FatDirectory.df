@@ -31,23 +31,10 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nexts
 	fnsection "PAGE$text"
 
 	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		auto mount
-		fcb@ FSFileControlBlockGetMount mount!
+		fcb@ IOFileControlBlockCacheCheck ok! drop
 
-		// only initialize caching if this is FAT32 or the FCB is not root.
-		// the reason for this is that on FAT12/16, we access the root
-		// directory through the volume file, and its FCB is just a dummy.
-		// in that case, we don't want to initialize caching on it, since no
-		// I/O will ever go through it anyway.
-
-		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
-			fcb@ mount@ IOMount_RootFCB + @ ~= ||)
-
-			fcb@ IOFileControlBlockCacheCheck ok! drop
-
-			if (ok@)
-				return
-			end
+		if (ok@)
+			return
 		end
 	end
 
@@ -93,14 +80,10 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 	dirfcb@ FSFileControlBlockGetMount mount!
 
 	if (dirfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
-			dirfcb@ mount@ IOMount_RootFCB + @ ~= ||)
+		dirfcb@ IOFileControlBlockCacheCheck ok! drop
 
-			dirfcb@ IOFileControlBlockCacheCheck ok! drop
-
-			if (ok@)
-				return
-			end
+		if (ok@)
+			return
 		end
 	end
 
@@ -207,26 +190,18 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	end
 
 	if (destfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
-			destfcb@ mount@ IOMount_RootFCB + @ ~= ||)
+		destfcb@ IOFileControlBlockCacheCheck ok! drop
 
-			destfcb@ IOFileControlBlockCacheCheck ok! drop
-
-			if (ok@)
-				return
-			end
+		if (ok@)
+			return
 		end
 	end
 
 	if (srcfcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
-			srcfcb@ mount@ IOMount_RootFCB + @ ~= ||)
+		srcfcb@ IOFileControlBlockCacheCheck ok! drop
 
-			srcfcb@ IOFileControlBlockCacheCheck ok! drop
-
-			if (ok@)
-				return
-			end
+		if (ok@)
+			return
 		end
 	end
 
@@ -495,29 +470,12 @@ fn FatDirectoryGetRawEntry { dirty skipempty seek fcb lastbcb -- fatdirent bcb n
 	auto byteoff
 	seek@ FatDirectoryEntry_SIZEOF * byteoff!
 
-	auto mapfcb
+	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
+		fcb@ IOFileControlBlockCacheCheck ok! drop
 
-	if (fatdata@ FatData_FatType + @ 32 ~=
-		mount@ IOMount_RootFCB + @ fcb@ == &&)
-		// FAT12/16 access the root directory thru the volume file
-
-		fatdata@ FatData_RootFirstCluster + @ // actually the first sector
-		fatdata@ FatData_SectorSizeShift + @ << byteoff +=
-
-		fatdata@ FatData_RootFirstCluster + @
-		fatdata@ FatData_SectorSizeShift + @ << bytesize +=
-
-		mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ mapfcb!
-	end else
-		if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
-			fcb@ IOFileControlBlockCacheCheck ok! drop
-
-			if (ok@)
-				return
-			end
+		if (ok@)
+			return
 		end
-
-		fcb@ mapfcb!
 	end
 
 	auto pageno
@@ -542,7 +500,7 @@ fn FatDirectoryGetRawEntry { dirty skipempty seek fcb lastbcb -- fatdirent bcb n
 			end
 
 			byteoff@ // offset
-			mapfcb@ // fcb
+			fcb@ // fcb
 			VcFileControlBlockMap ok! bcb! data!
 
 			if (ok@)

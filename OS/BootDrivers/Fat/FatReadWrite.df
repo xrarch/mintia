@@ -50,6 +50,14 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 	auto bytes
 	iopl@ IOPacketLocation_Length + @ bytes!
 
+	auto sectorsize
+	fatdata@ FatData_SectorSizeBytes + @ sectorsize!
+
+	auto rundownlisthead
+	4 alloc rundownlisthead!
+
+	0 rundownlisthead@!
+
 	if (offset@ bytesize@ >=)
 		1 done!
 
@@ -67,36 +75,11 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 		return
 	end
 
-	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_BLOCKDEVICE ==)
-		// this is actually the volume device, just redirect the request to
-		// the underlying device.
-
-		mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @ iopl@ IOPacketLocation_FileControlBlock + !
-
-		if (iopl@ IOPacketLocation_Offset + @ iopl@ IOPacketLocation_Length + @ + bytesize@ >)
-
-			// truncate the transfer to the size of the volume file.
-			// this should be paging I/O from the viewcache, so lets trust
-			// length + offset not to overflow.
-
-			bytesize@ iopl@ IOPacketLocation_Offset + @ - iopl@ IOPacketLocation_Length + !
-			bytesize@ iopl@ IOPacketLocation_Offset + @ - iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
-		end
-
-		IODONE_SAMELOCATION done!
-
-		return
-	end
+	// truncate length to file size.
 
 	bytesize@ offset@ -
 	bytes@
 	min bytes!
-
-	// round bytes up to next sector
-
-	bytes@
-	fatdata@ FatData_SectorSizeBytes + @ 1 - +
-	fatdata@ FatData_SectorSizeBytes + @ 1 - ~ & bytes!
 
 	if (bytes@ ~~)
 		1 done!
@@ -111,14 +94,85 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 		return
 	end
 
+	// round bytes up to next sector
+
+	bytes@
+	sectorsize@ 1 - +
+	sectorsize@ 1 - ~ & bytes!
+
+	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_BLOCKDEVICE ==)
+		// this is actually the volume device.
+		// Make sector zero and the primary FAT directly mapped on reads.
+		// Make the secondary FATs completely ignored on reads and writes.
+		// If this is a write to the primary FAT, truncate the request to the
+		// final sector in the primary FAT and then mirror it to the other
+		// FATs in sequence.
+
+		IODONE_SAMELOCATION done!
+
+		mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @ iopl@ IOPacketLocation_FileControlBlock + !
+
+		if (offset@ bytes@ + fatdata@ FatData_PrimaryFatEndByteOffset + @ >)
+			fatdata@ FatData_PrimaryFatEndByteOffset + @ offset@ - bytes!
+		end
+
+		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
+			bytes@ iopl@ IOPacketLocation_Length + !
+
+			return
+		end
+
+		rundownlisthead@ // rundownlisthead
+		offset@ // offset
+		bytes@ // bytes
+		mount@ // mount
+		iopl@ // iopl
+		iop@ // iop
+		FatMirrorWrite ok!
+
+		if (ok@)
+			rundownlisthead@ FatCleanupAssociatedIOPs
+
+			1 done!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+		end
+
+		return
+	end
+
+	if (fcb@ mount@ IOMount_RootFCB + @ ==
+		fatdata@ FatData_FatType + @ 32 ~= &&)
+
+		// root directory I/O
+
+		offset@ // offset
+		bytes@ // bytes
+		mount@ // mount
+		iopl@ // iopl
+		iop@ // iop
+		FatReadWriteRootDirectory ok!
+
+		if (ok@)
+			1 done!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+		end else
+			IODONE_SAMELOCATION done!
+		end
+
+		return
+	end
+
 	bytes@ iopl@ IOPacketLocation_Context + !
 
 	pointerof FatReadWriteCallback iopl@ IOPacketLocation_CallbackRoutine + !
-
-	auto rundownlisthead
-	4 alloc rundownlisthead!
-
-	0 rundownlisthead@!
 
 	rundownlisthead@ // rundownlisthead
 	fcb@ // fcb
@@ -130,20 +184,7 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 	FatReadWrite ok!
 
 	if (ok@)
-		// clean up any associated IOP that AFSReadWrite allocated before the
-		// error condition occurred.
-
-		auto associop
-		rundownlisthead@@ associop!
-
-		while (associop@)
-			auto niop
-			associop@ IOPacketHeader_DeviceQueueNext + @ niop!
-
-			associop@ IOPacketFree
-
-			niop@ associop!
-		end
+		rundownlisthead@ FatCleanupAssociatedIOPs
 
 		1 done!
 
@@ -153,6 +194,23 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 		IOPacketCompleteLow
 
 		return
+	end
+end
+
+fn FatCleanupAssociatedIOPs { rundownlisthead -- }
+	// clean up any associated IOPs that were allocated before the error
+	// condition occurred.
+
+	auto associop
+	rundownlisthead@@ associop!
+
+	while (associop@)
+		auto niop
+		associop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+		associop@ IOPacketFree
+
+		niop@ associop!
 	end
 end
 
@@ -307,4 +365,108 @@ fn (IOPacketCompletionDPCRoutine) FatReadWriteCallback { iopl -- ok }
 	end
 
 	0 ok!
+end
+
+fn FatReadWriteRootDirectory { offset bytes mount iopl iop -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	// access the FAT12/16 root directory.
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @ iopl@ IOPacketLocation_FileControlBlock + !
+
+	fatdata@ FatData_RootFirstCluster + @ // actually the first sector
+	fatdata@ FatData_SectorSizeShift + @ <<
+	iopl@ IOPacketLocation_Offset + +=
+end
+
+fn FatMirrorWrite { rundownlisthead offset bytes mount iopl iop -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	auto fatdata
+	mount@ IOMount_Extension + @ fatdata!
+
+	auto fatsizebytes
+	fatdata@ FatData_FatSize + @ fatdata@ FatData_SectorSizeShift + @ << fatsizebytes!
+
+	if (offset@ ~~)
+		// skip over the boot sector
+
+		fatdata@ FatData_SectorSizeBytes + @ offset +=
+		fatdata@ FatData_SectorSizeBytes + @ bytes -=
+		fatdata@ FatData_SectorSizeBytes + @ iopl@ IOPacketLocation_OffsetInMDL + +=
+	end
+
+	offset@ iopl@ IOPacketLocation_Offset + !
+	bytes@ iopl@ IOPacketLocation_Length + !
+
+	auto rundownlisttail
+	0 rundownlisttail!
+
+	auto fragiop
+	auto fragiopl
+
+	// mirror the write
+
+	auto fats
+	fatdata@ FatData_FatCount + @ 1 - fats!
+
+	while (fats@)
+		fatsizebytes@ offset +=
+
+		iop@ IOPacketHeader_KFlags + @ // kflags
+		IOPFLAG_FREEIOP IOPFLAG_QUOTA | // iopflags
+		iopl@ // iopl
+		IOPacketAllocateAssocStack ok! fragiop! fragiopl!
+
+		if (ok@)
+			return
+		end
+
+		mount@ IOMount_UnderlyingDeviceObject + @ IODevice_FileControlBlock + @
+		fragiopl@ IOPacketLocation_FileControlBlock + !
+
+		offset@ fragiopl@ IOPacketLocation_Offset + !
+
+		IODISPATCH_WRITE fragiopl@ IOPacketLocation_FunctionCodeB + sb
+
+		iopl@ IOPacketLocation_Flags + @
+		fragiopl@ IOPacketLocation_Flags + !
+
+		iop@ IOPacketHeader_MDL + @
+		fragiop@ IOPacketHeader_MDL + !
+
+		iopl@ IOPacketLocation_OffsetInMDL + @ fragiopl@ IOPacketLocation_OffsetInMDL + !
+
+		bytes@ fragiopl@ IOPacketLocation_Length + !
+
+		if (rundownlisttail@ ~~)
+			fragiop@ rundownlisthead@!
+		end else
+			fragiop@ rundownlisttail@ IOPacketHeader_DeviceQueueNext + !
+		end
+
+		fragiop@ rundownlisttail!
+
+		1 fats -=
+	end
+
+	rundownlisthead@@ fragiop!
+
+	while (fragiop@)
+		auto niop
+		fragiop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+		fragiop@ // associop
+		iop@ // iop
+		IOPacketAssociate
+
+		niop@ fragiop!
+	end
 end

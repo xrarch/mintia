@@ -6,7 +6,7 @@ const IOKFLAG_SWAPOUT 1  // this read is involved in a swapout operation which
 
 const IOKFLAG_URGENT   2
 const IOKFLAG_ZEROES   4  // force IOCachePageGet to allocate zero pages
-const IOKFLAG_SWAPIN   8  // try forever to allocate pages
+const IOKFLAG_SYSSPC   8  // IO op is system space paging
 const IOKFLAG_PAGEIN   16 // flush icache for page
 const IOKFLAG_CLUSTR   64 // return error if IO in progress
 // NOTE: upper 4 bits of IOKFLAG are reserved for driver use

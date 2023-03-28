@@ -71,42 +71,22 @@ public IOPageFileExtendEvent
 
 table IOPageFiles[IOPAGEFILEMAX]
 
-var IOiPageFileExtensionIndex 0
+table IOPageFilePriorityListHeads[IOPAGEFILEMAXPRI]
+table IOPageFilePriorityListTails[IOPAGEFILEMAXPRI]
+table IOPageFilePriorityExtensionSpace[IOPAGEFILEMAXPRI]
+table IOPageFilePriorityCount[IOPAGEFILEMAXPRI]
 
 var IOPageFileCount 0
 public IOPageFileCount
 
-fn IOiPageFileInsert { pri fcb pagefile -- }
-	auto fcbp
-	fcb@ IOFileControlBlock_Paged + @ fcbp!
-
-	// set system file flag
+fn IOiIncrementCommitLimit { min max -- }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	IOFCBFLAG_SYSTEMFILE fcbp@ IOFileControlBlockPaged_Flags + |=
-
-	pagefile@ [IOPageFileCount@]IOPageFiles!
-	pagefile@ IOiPageFile_MinimumSize + @ IOSwapPagesCount +=
-
-	2 MmAnonTransfersAvailable +=
+	min@ MmCommitLimit +=
+	max@ MmTheoreticalCommitLimit +=
 
 	rs@ HALCPUInterruptRestore
-
-	if (IOPageFileCount@ 0 ==)
-		// this is the first pagefile created.
-		// set the commit limit to its size and signal the creation event.
-
-		pagefile@ IOiPageFile_MinimumSize + @ MmCommitLimit!
-		pagefile@ IOiPageFile_MaximumSize + @ MmTheoreticalCommitLimit!
-	end else
-		HALCPUInterruptDisable rs!
-		pagefile@ IOiPageFile_MinimumSize + @ MmCommitLimit +=
-		pagefile@ IOiPageFile_MaximumSize + @ MmTheoreticalCommitLimit +=
-		rs@ HALCPUInterruptRestore
-	end
-
-	1 IOPageFileCount +=
 end
 
 fn IOPageFileGetPriority { pagefile -- pri }
@@ -348,24 +328,28 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	transfer2@ transfersize@ + bitmap!
 
 	// initialize the bitmap
+
 	maxpages@ // sizeinbits
 	bitmap@ // data
 	pagefile@ IOiPageFile_BitmapHeader + // header
 	ComBitmapInitialize
 
 	// clear the minimum size
+
 	minpages@ // runlength
 	0 // index
 	pagefile@ IOiPageFile_BitmapHeader + // header
 	ComBitmapClearBits
 
 	// set beyond the minimum size
+
 	maxpages@ minpages@ - // runlength
 	minpages@ // index
 	pagefile@ IOiPageFile_BitmapHeader + // header
 	ComBitmapSetBits
 
 	// initialize pagefile structures
+
 	minpages@ pagefile@ IOiPageFile_MinimumSize + !
 	maxpages@ pagefile@ IOiPageFile_MaximumSize + !
 	fileobject@ pagefile@ IOiPageFile_FileObject + !
@@ -376,15 +360,54 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 	pri@ pagefile@ IOiPageFile_Priority + !
 	IOPageFileCount@ pagefile@ IOiPageFile_Number + !
 
-	pri@ // pri
-	fcb@ // fcb
-	pagefile@ // pagefile
-	IOiPageFileInsert
+	// set the systemfile flag
+
+	IOFCBFLAG_SYSTEMFILE fcbp@ IOFileControlBlockPaged_Flags + |=
+
+	// insert into pagefile table
+
+	pagefile@ [IOPageFileCount@]IOPageFiles!
+
+	// increment count of total pagefile pages
+
+	minpages@ IOSwapPagesCount +=
+
+	// increment the commit limit
+
+	if (IOPageFileCount@ 0 ==)
+		// this is the first pagefile created.
+		// set the commit limit to its size and signal the creation event.
+
+		minpages@ MmCommitLimit!
+		maxpages@ MmTheoreticalCommitLimit!
+	end else
+		minpages@ // min
+		maxpages@ // max
+		IOiIncrementCommitLimit
+	end
+
+	1 IOPageFileCount +=
+
+	// insert the pagefile into the extension priority structures
+
+	[pri@]IOPageFilePriorityListHeads@ pagefile@ IOiPageFile_Next + !
+
+	pagefile@ [pri@]IOPageFilePriorityListHeads!
+
+	if ([pri@]IOPageFilePriorityListTails@ ~~)
+		pagefile@ [pri@]IOPageFilePriorityListTails!
+	end
+
+	1 [pri@]IOPageFilePriorityCount +=
+
+	maxpages@ minpages@ - [pri@]IOPageFilePriorityExtensionSpace +=
+
+	IOiPageFileCreateUnlock
+
+	// complete the transfers and allow the pagefile to be used
 
 	transfer1@ IOTransferComplete
 	transfer2@ IOTransferComplete
-
-	IOiPageFileCreateUnlock
 
 	// leave fileobject refcount biased
 
@@ -788,70 +811,117 @@ fn IOiPageFileSatisfyExtension { extension -- }
 
 	ipl@ KeIPLLower
 
-	requiredextension@ IOiPageFileTryExtendAll extension@ IOPageFileExtension_Success + !
+	auto ok
+	requiredextension@ IOiPageFileTryExtendAll ok!
+	
+	ok@ extension@ IOPageFileExtension_Success + !
 
 	0 // priboost
 	extension@ IOPageFileExtension_Event + // event
 	KeEventSignal
 end
 
+const IOPAGEFILEMINIMUMEXTENSION 128
+
 fn IOiPageFileTryExtendAll { extension -- ok }
 	fnsection "PAGE$text"
 
-	if (IOiPageFileExtensionIndex@ IOPageFileCount@ >=)
-		0 IOiPageFileExtensionIndex!
-	end
+	STATUS_COMMIT_EXCEEDED ok!
 
-	0 ok!
+	IOiPageFileCreateLock
 
-	auto i
-	0 i!
+	auto pri
+	0 pri!
 
-	while (i@ 2 <)
-		auto max
-		auto j
+	while (pri@ IOPAGEFILEMAXPRI <)
+		auto tries
+		0 tries!
 
-		if (i@ 0 ==)
-			IOPageFileCount@ max!
-			IOiPageFileExtensionIndex@ j!
-		end else
-			IOiPageFileExtensionIndex@ max!
-			0 j!
-		end
+		while ([pri@]IOPageFilePriorityExtensionSpace@ IOPAGEFILEMINIMUMEXTENSION >=)
+			auto onesuccess
+			0 onesuccess!
 
-		while (j@ max@ <)
-			auto realextension
-			extension@ // extension
-			[j@]IOPageFiles@ // pagefile
-			IOiPageFileTryExtend realextension!
+			auto pagefile
+			[pri@]IOPageFilePriorityListHeads@ pagefile!
 
-			if (realextension@ extension@ >)
-				0 extension!
+			auto count
+			[pri@]IOPageFilePriorityCount@ count!
+
+			// try to evenly distribute the extension thru-out the priority
+			// level.
+
+			auto extensionpart
+
+			if (tries@ 1 >=)
+				// try to evenly distribute.
+
+				extension@ count@ 1 - + count@ / extensionpart!
 			end else
-				realextension@ extension -=
+				// we tried too many times, try all now.
+
+				extension@ extensionpart!
+			end
+
+			while (count@)
+				auto realextension
+				extensionpart@ // extension
+				pagefile@ // pagefile
+				IOiPageFileTryExtend realextension!
+
+				if (realextension@)
+					1 onesuccess!
+				end
+
+				// move pagefile to tail of priority list
+
+				pagefile@ IOiPageFile_Next + @ [pri@]IOPageFilePriorityListHeads!
+				pagefile@ [pri@]IOPageFilePriorityListTails!
+
+				if ([pri@]IOPageFilePriorityListHeads@ ~~)
+					pagefile@ [pri@]IOPageFilePriorityListHeads!
+				end
+
+				[pri@]IOPageFilePriorityListHeads@ pagefile!
+
+				// figure out if that extension was good enough
+
+				if (realextension@ extension@ >)
+					0 extension!
+				end else
+					realextension@ extension -=
+				end
+
+				if (extension@ ~~)
+					0 ok!
+
+					break
+				end
+
+				1 count -=
 			end
 
 			if (extension@ ~~)
 				break
 			end
 
-			1 j +=
+			if (onesuccess@ ~~)
+				// not even one success on this priority level, move on.
+
+				break
+			end
+
+			1 tries +=
 		end
 
 		if (extension@ ~~)
-			j@ 1 + IOiPageFileExtensionIndex!
 			break
 		end
 
-		1 i +=
+		1 pri +=
 	end
 
-	if (extension@)
-		STATUS_COMMIT_EXCEEDED ok!
-	end
+	IOiPageFileCreateUnlock
 end
-
-const IOPAGEFILEMINIMUMEXTENSION 128
 
 fn IOiPageFileTryExtend { extension pagefile -- realextension }
 	auto maxextend
@@ -907,6 +977,8 @@ fn IOiPageFileTryExtend { extension pagefile -- realextension }
 	tryextension@ realextension!
 
 	// growing the pagefile succeeded. update the structures.
+
+	realextension@ [pagefile@ IOiPageFile_Priority + @]IOPageFilePriorityExtensionSpace -=
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -985,48 +1057,99 @@ end
 fn IOiPageFileTryContractAll { contraction -- }
 	fnsection "PAGE$text"
 
-	if (IOiPageFileExtensionIndex@ IOPageFileCount@ >=)
-		0 IOiPageFileExtensionIndex!
-	end
+	// try to contract from the lowest priority level to the highest.
 
-	auto i
-	0 i!
+	IOiPageFileCreateLock
 
-	while (i@ 2 <)
-		auto max
-		auto j
+	auto pri
+	IOPAGEFILEMAXPRI pri!
 
-		if (i@ 0 ==)
-			IOPageFileCount@ max!
-			IOiPageFileExtensionIndex@ j!
-		end else
-			IOiPageFileExtensionIndex@ max!
-			0 j!
-		end
+	while (pri@)
+		1 pri -=
 
-		while (j@ max@ <)
-			auto contractedby
-			contraction@ // contraction
-			[j@]IOPageFiles@ // pagefile
-			IOiPageFileTryContract contractedby!
+		auto tries
+		0 tries!
 
-			if (contractedby@ contraction@ >=)
-				0 contraction!
+		while (1)
+			auto onesuccess
+			0 onesuccess!
+
+			auto pagefile
+			[pri@]IOPageFilePriorityListHeads@ pagefile!
+
+			auto count
+			[pri@]IOPageFilePriorityCount@ count!
+
+			// try to evenly distribute the contraction thru-out the priority
+			// level.
+
+			auto contractionpart
+
+			if (tries@ 1 >=)
+				// try to evenly distribute.
+
+				contraction@ count@ 1 - + count@ / contractionpart!
+			end else
+				// we tried too many times, try all now.
+
+				contraction@ contractionpart!
+			end
+
+			while (count@)
+				auto realcontraction
+				contractionpart@ // contraction
+				pagefile@ // pagefile
+				IOiPageFileTryContract realcontraction!
+
+				if (realcontraction@)
+					1 onesuccess!
+				end
+
+				// move pagefile to tail of priority list
+
+				pagefile@ IOiPageFile_Next + @ [pri@]IOPageFilePriorityListHeads!
+				pagefile@ [pri@]IOPageFilePriorityListTails!
+
+				if ([pri@]IOPageFilePriorityListHeads@ ~~)
+					pagefile@ [pri@]IOPageFilePriorityListHeads!
+				end
+
+				[pri@]IOPageFilePriorityListHeads@ pagefile!
+
+				// figure out if that contraction was good enough
+
+				if (realcontraction@ contraction@ >)
+					0 contraction!
+				end else
+					realcontraction@ contraction -=
+				end
+
+				if (contraction@ ~~)
+					break
+				end
+
+				1 count -=
+			end
+
+			if (contraction@ ~~)
 				break
 			end
 
-			contractedby@ contraction -=
+			if (onesuccess@ ~~)
+				// not even one success on this priority level, move on.
 
-			1 j +=
+				break
+			end
+
+			1 tries +=
 		end
 
 		if (contraction@ ~~)
-			j@ 1 + IOiPageFileExtensionIndex!
 			break
 		end
-
-		1 i +=
 	end
+
+	IOiPageFileCreateUnlock
 end
 
 fn IOiPageFileTryContract { contraction pagefile -- contractedby }
@@ -1090,6 +1213,10 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 				OSFILEFLAG_NOCACHE // flags
 				pagefile@ IOiPageFile_CapturedFCB + @ // fcb
 				IOFileControlBlockTruncate drop drop
+
+				contraction@ contractedby!
+
+				contraction@ [pagefile@ IOiPageFile_Priority + @]IOPageFilePriorityExtensionSpace +=
 
 				return
 			end

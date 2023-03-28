@@ -7,7 +7,7 @@ struct IOTransfer
 	4 Prev // only used in the low space list; stores pagefile offset when active
 endstruct
 
-const IOTRANSFER_ACTIVE   0
-const IOTRANSFER_INACTIVE 1
+const IOTRANSFER_ACTIVE      0
+const IOTRANSFER_INACTIVE    1
 
 extern IOTransferComplete { transfer -- }

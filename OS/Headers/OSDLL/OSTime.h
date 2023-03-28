@@ -17,6 +17,7 @@ endstruct
 extern OSTimeUTCGet { ostime ms sec -- }
 extern OSTimeLocalGet { ostime ms sec -- }
 extern OSTimePrint { ostime showyear -- }
+extern OSDatePrint { ostime -- }
 
 extern OSTimeToTimestamp { ostime -- sec ms }
 extern OSLocalTimeToTimestamp { ostime -- sec ms }

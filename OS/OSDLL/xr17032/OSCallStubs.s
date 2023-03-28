@@ -104,11 +104,23 @@ OSTimeZoneSet:
 
 	ret
 
+OSTimeSet:
+.global OSTimeSet
+	mov  t1, a0
+	mov  t2, a1
+
+	li   t0, 10
+	sys  0
+
+	mov  a0, t1
+
+	ret
+
 OSShutdownSystem:
 .global OSShutdownSystem
 	mov  t1, a0
 
-	li   t0, 10
+	li   t0, 11
 	sys  0
 
 	mov  a0, t1
@@ -119,7 +131,7 @@ OSVersion:
 .global OSVersion
 	mov  t1, a0
 
-	li   t0, 11
+	li   t0, 12
 	sys  0
 
 	mov  a0, t1
@@ -133,7 +145,7 @@ OSEventCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 12
+	li   t0, 13
 	sys  0
 
 	mov  a1, t2
@@ -145,7 +157,7 @@ OSEventReset:
 .global OSEventReset
 	mov  t1, a0
 
-	li   t0, 13
+	li   t0, 14
 	sys  0
 
 	mov  a1, t2
@@ -157,7 +169,7 @@ OSEventSignal:
 .global OSEventSignal
 	mov  t1, a0
 
-	li   t0, 14
+	li   t0, 15
 	sys  0
 
 	mov  a0, t1
@@ -168,7 +180,7 @@ OSEventPulse:
 .global OSEventPulse
 	mov  t1, a0
 
-	li   t0, 15
+	li   t0, 16
 	sys  0
 
 	mov  a0, t1
@@ -179,7 +191,7 @@ OSEventReadState:
 .global OSEventReadState
 	mov  t1, a0
 
-	li   t0, 16
+	li   t0, 17
 	sys  0
 
 	mov  a1, t2
@@ -193,7 +205,7 @@ OSSemaphoreCreate:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 17
+	li   t0, 18
 	sys  0
 
 	mov  a1, t2
@@ -206,7 +218,7 @@ OSSemaphoreRelease:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 18
+	li   t0, 19
 	sys  0
 
 	mov  a0, t1
@@ -217,7 +229,7 @@ OSSemaphoreReadState:
 .global OSSemaphoreReadState
 	mov  t1, a0
 
-	li   t0, 19
+	li   t0, 20
 	sys  0
 
 	mov  a1, t2
@@ -230,7 +242,7 @@ OSMutexCreate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 20
+	li   t0, 21
 	sys  0
 
 	mov  a1, t2
@@ -242,7 +254,7 @@ OSMutexRelease:
 .global OSMutexRelease
 	mov  t1, a0
 
-	li   t0, 21
+	li   t0, 22
 	sys  0
 
 	mov  a0, t1
@@ -253,7 +265,7 @@ OSMutexReadState:
 .global OSMutexReadState
 	mov  t1, a0
 
-	li   t0, 22
+	li   t0, 23
 	sys  0
 
 	mov  a1, t2
@@ -266,7 +278,7 @@ OSTimerCreate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 23
+	li   t0, 24
 	sys  0
 
 	mov  a1, t2
@@ -278,7 +290,7 @@ OSTimerReset:
 .global OSTimerReset
 	mov  t1, a0
 
-	li   t0, 24
+	li   t0, 25
 	sys  0
 
 	mov  a1, t2
@@ -291,7 +303,7 @@ OSTimerEnqueue:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 25
+	li   t0, 26
 	sys  0
 
 	mov  a0, t1
@@ -302,7 +314,7 @@ OSTimerDequeue:
 .global OSTimerDequeue
 	mov  t1, a0
 
-	li   t0, 26
+	li   t0, 27
 	sys  0
 
 	mov  a0, t1
@@ -313,7 +325,7 @@ OSTimerReadState:
 .global OSTimerReadState
 	mov  t1, a0
 
-	li   t0, 27
+	li   t0, 28
 	sys  0
 
 	mov  a1, t2
@@ -325,7 +337,7 @@ OSGetStatistics:
 .global OSGetStatistics
 	mov  t1, a0
 
-	li   t0, 28
+	li   t0, 29
 	sys  0
 
 	mov  a0, t1
@@ -335,7 +347,7 @@ OSGetStatistics:
 OSIsComputerOn:
 .global OSIsComputerOn
 
-	li   t0, 29
+	li   t0, 30
 	sys  0
 
 	mov  a1, t2
@@ -346,7 +358,7 @@ OSIsComputerOn:
 OSIsComputerOnFire:
 .global OSIsComputerOnFire
 
-	li   t0, 30
+	li   t0, 31
 	sys  0
 
 	mov  a1, t2
@@ -361,7 +373,7 @@ OSObjectOpen:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 31
+	li   t0, 32
 	sys  0
 
 	mov  a1, t2
@@ -374,7 +386,7 @@ OSQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 32
+	li   t0, 33
 	sys  0
 
 	mov  a0, t1
@@ -385,7 +397,7 @@ OSClose:
 .global OSClose
 	mov  t1, a0
 
-	li   t0, 33
+	li   t0, 34
 	sys  0
 
 	mov  a0, t1
@@ -400,7 +412,7 @@ OSWaitForMultipleObjects:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 34
+	li   t0, 35
 	sys  0
 
 	mov  a0, t1
@@ -413,7 +425,7 @@ OSWaitForObject:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 35
+	li   t0, 36
 	sys  0
 
 	mov  a0, t1
@@ -427,7 +439,7 @@ OSHandleDuplicate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 36
+	li   t0, 37
 	sys  0
 
 	mov  a1, t2
@@ -439,7 +451,7 @@ OSObjectDirectoryCountQuery:
 .global OSObjectDirectoryCountQuery
 	mov  t1, a0
 
-	li   t0, 37
+	li   t0, 38
 	sys  0
 
 	mov  a1, t2
@@ -453,7 +465,7 @@ OSObjectDirectoryQueryAll:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 38
+	li   t0, 39
 	sys  0
 
 	mov  a1, t2
@@ -466,7 +478,7 @@ OSObjectDirectoryCreate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 39
+	li   t0, 40
 	sys  0
 
 	mov  a1, t2
@@ -479,7 +491,7 @@ OSObjectDirectoryInsert:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 40
+	li   t0, 41
 	sys  0
 
 	mov  a0, t1
@@ -490,7 +502,7 @@ OSObjectDirectoryRemove:
 .global OSObjectDirectoryRemove
 	mov  t1, a0
 
-	li   t0, 41
+	li   t0, 42
 	sys  0
 
 	mov  a0, t1
@@ -504,7 +516,7 @@ OSSetSecurity:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 42
+	li   t0, 43
 	sys  0
 
 	mov  a0, t1
@@ -516,7 +528,7 @@ OSFileQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 43
+	li   t0, 44
 	sys  0
 
 	mov  a0, t1
@@ -529,7 +541,7 @@ OSFileTruncate:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 44
+	li   t0, 45
 	sys  0
 
 	mov  a1, t2
@@ -543,7 +555,7 @@ OSFileSeek:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 45
+	li   t0, 46
 	sys  0
 
 	mov  a1, t2
@@ -559,7 +571,7 @@ OSFileRead:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 46
+	li   t0, 47
 	sys  0
 
 	mov  a1, t2
@@ -574,7 +586,7 @@ OSFileWrite:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 47
+	li   t0, 48
 	sys  0
 
 	mov  a1, t2
@@ -587,7 +599,7 @@ OSFileFlush:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 48
+	li   t0, 49
 	sys  0
 
 	mov  a0, t1
@@ -599,7 +611,7 @@ OSFileSetInformation:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 49
+	li   t0, 50
 	sys  0
 
 	mov  a0, t1
@@ -615,7 +627,7 @@ OSFileReadAsync:
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
 
-	li   t0, 50
+	li   t0, 51
 	sys  0
 
 	mov  a0, t1
@@ -631,7 +643,7 @@ OSFileWriteAsync:
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
 
-	li   t0, 51
+	li   t0, 52
 	sys  0
 
 	mov  a0, t1
@@ -643,7 +655,7 @@ OSFileCancelIO:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 52
+	li   t0, 53
 	sys  0
 
 	mov  a0, t1
@@ -657,7 +669,7 @@ OSDirectoryRename:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 53
+	li   t0, 54
 	sys  0
 
 	mov  a0, t1
@@ -669,7 +681,7 @@ OSDirectoryUnlink:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 54
+	li   t0, 55
 	sys  0
 
 	mov  a0, t1
@@ -681,7 +693,7 @@ OSDirectoryRead:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 55
+	li   t0, 56
 	sys  0
 
 	mov  a0, t1
@@ -695,7 +707,7 @@ OSPageFileCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 56
+	li   t0, 57
 	sys  0
 
 	mov  a0, t1
@@ -707,7 +719,7 @@ OSPageFileQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 57
+	li   t0, 58
 	sys  0
 
 	mov  a0, t1
@@ -720,7 +732,7 @@ OSIOControl:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 58
+	li   t0, 59
 	sys  0
 
 	mov  a1, t2
@@ -732,7 +744,7 @@ OSGetBootDevicePath:
 .global OSGetBootDevicePath
 	mov  t1, a0
 
-	li   t0, 59
+	li   t0, 60
 	sys  0
 
 	mov  a0, t1
@@ -745,7 +757,7 @@ OSFilesystemMount:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 60
+	li   t0, 61
 	sys  0
 
 	mov  a0, t1
@@ -756,7 +768,7 @@ OSFilesystemUnmount:
 .global OSFilesystemUnmount
 	mov  t1, a0
 
-	li   t0, 61
+	li   t0, 62
 	sys  0
 
 	mov  a0, t1
@@ -768,7 +780,7 @@ OSMountQueryAll:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 62
+	li   t0, 63
 	sys  0
 
 	mov  a1, t2
@@ -779,7 +791,7 @@ OSMountQueryAll:
 OSMountCountQuery:
 .global OSMountCountQuery
 
-	li   t0, 63
+	li   t0, 64
 	sys  0
 
 	mov  a1, t2
@@ -792,7 +804,7 @@ OSMountUpdateFlags:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 64
+	li   t0, 65
 	sys  0
 
 	mov  a0, t1
@@ -804,7 +816,7 @@ OSMountGetFilesystemName:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 65
+	li   t0, 66
 	sys  0
 
 	mov  a0, t1
@@ -816,7 +828,7 @@ OSMountSet:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 66
+	li   t0, 67
 	sys  0
 
 	mov  a0, t1
@@ -826,7 +838,7 @@ OSMountSet:
 OSFlushModifiedPages:
 .global OSFlushModifiedPages
 
-	li   t0, 67
+	li   t0, 68
 	sys  0
 
 	mov  a0, t1
@@ -840,7 +852,7 @@ OSSectionCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 68
+	li   t0, 69
 	sys  0
 
 	mov  a1, t2
@@ -858,7 +870,7 @@ OSMapView:
 	mov  a0, long [sp + 8]
 	mov  a1, long [sp + 12]
 
-	li   t0, 69
+	li   t0, 70
 	sys  0
 
 	mov  a1, t2
@@ -872,7 +884,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 70
+	li   t0, 71
 	sys  0
 
 	mov  a0, t1
@@ -886,7 +898,7 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 71
+	li   t0, 72
 	sys  0
 
 	mov  a0, t1
@@ -899,7 +911,7 @@ OSFlushView:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 72
+	li   t0, 73
 	sys  0
 
 	mov  a0, t1
@@ -914,7 +926,7 @@ OSAllocate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 73
+	li   t0, 74
 	sys  0
 
 	mov  a1, t2
@@ -926,7 +938,7 @@ OSMemoryQuery:
 .global OSMemoryQuery
 	mov  t1, a0
 
-	li   t0, 74
+	li   t0, 75
 	sys  0
 
 	mov  a0, t1
@@ -936,7 +948,7 @@ OSMemoryQuery:
 OSWorkingSetPurge:
 .global OSWorkingSetPurge
 
-	li   t0, 75
+	li   t0, 76
 	sys  0
 
 	mov  a0, t1
@@ -946,7 +958,7 @@ OSWorkingSetPurge:
 OSSynchronizeIcache:
 .global OSSynchronizeIcache
 
-	li   t0, 76
+	li   t0, 77
 	sys  0
 
 
@@ -960,7 +972,7 @@ OSProcessCreate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 77
+	li   t0, 78
 	sys  0
 
 	mov  a1, t2
@@ -973,7 +985,7 @@ OSProcessSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 78
+	li   t0, 79
 	sys  0
 
 	mov  a0, t1
@@ -985,7 +997,7 @@ OSProcessOpenByPID:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 79
+	li   t0, 80
 	sys  0
 
 	mov  a1, t2
@@ -998,7 +1010,7 @@ OSProcessQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 80
+	li   t0, 81
 	sys  0
 
 	mov  a0, t1
@@ -1010,7 +1022,7 @@ OSProcessQueryByPID:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 81
+	li   t0, 82
 	sys  0
 
 	mov  a0, t1
@@ -1021,7 +1033,7 @@ OSProcessReadStatus:
 .global OSProcessReadStatus
 	mov  t1, a0
 
-	li   t0, 82
+	li   t0, 83
 	sys  0
 
 	mov  a1, t2
@@ -1034,7 +1046,7 @@ OSProcessSetConsoleGroup:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 83
+	li   t0, 84
 	sys  0
 
 	mov  a0, t1
@@ -1046,7 +1058,7 @@ OSProcessBasePrioritySet:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 84
+	li   t0, 85
 	sys  0
 
 	mov  a0, t1
@@ -1057,7 +1069,7 @@ OSProcessSignalActivation:
 .global OSProcessSignalActivation
 	mov  t1, a0
 
-	li   t0, 85
+	li   t0, 86
 	sys  0
 
 	mov  a0, t1
@@ -1069,7 +1081,7 @@ OSProcessWaitForActivation:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 86
+	li   t0, 87
 	sys  0
 
 	mov  a1, t2
@@ -1081,7 +1093,7 @@ OSProcessExit:
 .global OSProcessExit
 	mov  t1, a0
 
-	li   t0, 87
+	li   t0, 88
 	sys  0
 
 
@@ -1090,7 +1102,7 @@ OSProcessExit:
 OSProcessCountQuery:
 .global OSProcessCountQuery
 
-	li   t0, 88
+	li   t0, 89
 	sys  0
 
 	mov  a1, t2
@@ -1103,7 +1115,7 @@ OSProcessQueryAll:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 89
+	li   t0, 90
 	sys  0
 
 	mov  a1, t2
@@ -1116,7 +1128,7 @@ OSSetQuota:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 90
+	li   t0, 91
 	sys  0
 
 	mov  a0, t1
@@ -1128,7 +1140,7 @@ OSQuotaQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 91
+	li   t0, 92
 	sys  0
 
 	mov  a0, t1
@@ -1139,7 +1151,7 @@ OSThreadSetFilePermissions:
 .global OSThreadSetFilePermissions
 	mov  t1, a0
 
-	li   t0, 92
+	li   t0, 93
 	sys  0
 
 	mov  a0, t1
@@ -1149,7 +1161,7 @@ OSThreadSetFilePermissions:
 OSThreadGetFilePermissions:
 .global OSThreadGetFilePermissions
 
-	li   t0, 93
+	li   t0, 94
 	sys  0
 
 	mov  a1, t2
@@ -1161,7 +1173,7 @@ OSThreadSleep:
 .global OSThreadSleep
 	mov  t1, a0
 
-	li   t0, 94
+	li   t0, 95
 	sys  0
 
 	mov  a0, t1
@@ -1177,7 +1189,7 @@ OSThreadCreate:
 	mov  t5, long [sp + 4]
 	mov  a0, long [sp + 8]
 
-	li   t0, 95
+	li   t0, 96
 	sys  0
 
 	mov  a1, t2
@@ -1190,7 +1202,7 @@ OSThreadTerminate:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 96
+	li   t0, 97
 	sys  0
 
 	mov  a0, t1
@@ -1201,7 +1213,7 @@ OSThreadSuspend:
 .global OSThreadSuspend
 	mov  t1, a0
 
-	li   t0, 97
+	li   t0, 98
 	sys  0
 
 	mov  a0, t1
@@ -1212,7 +1224,7 @@ OSThreadResume:
 .global OSThreadResume
 	mov  t1, a0
 
-	li   t0, 98
+	li   t0, 99
 	sys  0
 
 	mov  a0, t1
@@ -1223,7 +1235,7 @@ OSThreadReadStatus:
 .global OSThreadReadStatus
 	mov  t1, a0
 
-	li   t0, 99
+	li   t0, 100
 	sys  0
 
 	mov  a1, t2
@@ -1236,7 +1248,7 @@ OSThreadQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 100
+	li   t0, 101
 	sys  0
 
 	mov  a0, t1
@@ -1248,7 +1260,7 @@ OSThreadSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 101
+	li   t0, 102
 	sys  0
 
 	mov  a0, t1
@@ -1260,7 +1272,7 @@ OSThreadMaskSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 102
+	li   t0, 103
 	sys  0
 
 	mov  a0, t1
@@ -1272,7 +1284,7 @@ OSThreadDeliverOnWaitSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 103
+	li   t0, 104
 	sys  0
 
 	mov  a0, t1
@@ -1287,7 +1299,7 @@ OSJobCreate:
 	mov  t4, a3
 	mov  t5, long [sp + 4]
 
-	li   t0, 104
+	li   t0, 105
 	sys  0
 
 	mov  a1, t2
@@ -1300,7 +1312,7 @@ OSJobAddProcess:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 105
+	li   t0, 106
 	sys  0
 
 	mov  a0, t1
@@ -1311,7 +1323,7 @@ OSJobRemoveProcess:
 .global OSJobRemoveProcess
 	mov  t1, a0
 
-	li   t0, 106
+	li   t0, 107
 	sys  0
 
 	mov  a0, t1
@@ -1324,7 +1336,7 @@ OSJobSignal:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 107
+	li   t0, 108
 	sys  0
 
 	mov  a0, t1
@@ -1335,7 +1347,7 @@ OSSetSystemConsole:
 .global OSSetSystemConsole
 	mov  t1, a0
 
-	li   t0, 108
+	li   t0, 109
 	sys  0
 
 	mov  a0, t1
@@ -1347,7 +1359,7 @@ OSConsoleSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 109
+	li   t0, 110
 	sys  0
 
 	mov  a0, t1
@@ -1358,7 +1370,7 @@ OSIsAConsole:
 .global OSIsAConsole
 	mov  t1, a0
 
-	li   t0, 110
+	li   t0, 111
 	sys  0
 
 	mov  a0, t1
@@ -1371,7 +1383,7 @@ OSDuplexCreate:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 111
+	li   t0, 112
 	sys  0
 
 	mov  a2, t3
@@ -1385,7 +1397,7 @@ OSCheckPermission:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 112
+	li   t0, 113
 	sys  0
 
 	mov  a0, t1
@@ -1397,7 +1409,7 @@ OSGrantPermission:
 	mov  t1, a0
 	mov  t2, a1
 
-	li   t0, 113
+	li   t0, 114
 	sys  0
 
 	mov  a0, t1
@@ -1411,7 +1423,7 @@ OSPortCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 114
+	li   t0, 115
 	sys  0
 
 	mov  a1, t2
@@ -1426,7 +1438,7 @@ OSPortConnect:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 115
+	li   t0, 116
 	sys  0
 
 	mov  a1, t2
@@ -1441,7 +1453,7 @@ OSPortAccept:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 116
+	li   t0, 117
 	sys  0
 
 	mov  a0, t1
@@ -1455,7 +1467,7 @@ OSPortSendAndWaitReceive:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 117
+	li   t0, 118
 	sys  0
 
 	mov  a0, t1
@@ -1469,7 +1481,7 @@ OSPortSendAndWaitReply:
 	mov  t3, a2
 	mov  t4, a3
 
-	li   t0, 118
+	li   t0, 119
 	sys  0
 
 	mov  a0, t1
@@ -1482,7 +1494,7 @@ OSPortOpenProcessByClientID:
 	mov  t2, a1
 	mov  t3, a2
 
-	li   t0, 119
+	li   t0, 120
 	sys  0
 
 	mov  a1, t2

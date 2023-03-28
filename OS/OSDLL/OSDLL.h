@@ -1,5 +1,7 @@
 #define OSDLL
 
+extern DLLStringCompareCaseInsensitive { str1 str2 -- eq }
+
 // init stuff
 
 externptr DLLComponentsInitialized

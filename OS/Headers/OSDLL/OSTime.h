@@ -18,6 +18,11 @@ extern OSTimeUTCGet { ostime ms sec -- }
 extern OSTimeLocalGet { ostime ms sec -- }
 extern OSTimePrint { ostime showyear -- }
 
+extern OSTimeToTimestamp { ostime -- sec ms }
+extern OSLocalTimeToTimestamp { ostime -- sec ms }
+
+extern OSMonthNameToIndex { month -- index }
+
 extern OSTimeZoneNameToOffset { name -- offset ok }
 
 extern OSTimeZoneOffsetToName { offset namebuf -- }

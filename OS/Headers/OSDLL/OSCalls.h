@@ -18,6 +18,8 @@ extern OSQueryUptime { -- sec ms }
 extern OSTimeZoneGet { -- offset ok }
 extern OSTimeZoneSet { offset -- oldoffset ok }
 
+extern OSTimeSet { sec ms -- ok }
+
 extern OSShutdownSystem { mode -- ok }
 
 extern OSVersion { query -- ok }

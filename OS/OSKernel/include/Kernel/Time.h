@@ -10,4 +10,6 @@ extern KeLocalTimeToRealTime { desttime srctime -- }
 extern KeTimeZoneSet { offset -- oldoffset }
 extern KeTimeZoneGet { -- offset }
 
+extern KeTimeSet { time -- ok }
+
 extern KeTimeQuery { time -- }

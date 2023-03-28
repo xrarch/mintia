@@ -344,6 +344,52 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	
 	bcb@ VcBufferDecrementMapCount drop
 
+	if (renamelocked@)
+		// set cluster number in .. entry for directory to new one
+
+		0 // dirty
+		0 // skipempty
+		1 // seek
+		filefcb@ // fcb
+		0 // lastbcb
+		FatDirectoryGetRawEntry ok! drop bcb! fatdirent!
+
+		if (ok@)
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
+			end
+
+			mount@ FatRenameUnlock
+
+			filefcb@ FatFCBDereference
+
+			1 // updatebitmap
+			entries@ // count
+			seek@ // seek
+			destfcb@ // dirfcb
+			FatFreeDirents drop
+
+			return
+		end
+
+		auto startingcluster
+
+		if (mount@ IOMount_Extension + @ FatData_FatType + @ 32 ==
+			destfcb@ mount@ IOMount_RootFCB + @ ~= ||)
+
+			destfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @
+			FatFCBData_StartingCluster + @ startingcluster!
+		end else
+			0 startingcluster!
+		end
+
+		startingcluster@ 0xFFFF & fatdirent@ FatDirectoryEntry_FirstClusterLowI + si
+		startingcluster@ 16 >> fatdirent@ FatDirectoryEntry_FirstClusterHighI + si
+
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapCount drop
+	end
+
 	// free FCB dirents
 
 	filefcb@ FatFreeDirentsForFCB
@@ -2296,12 +2342,26 @@ fn FatDirectoryBuildDotEntries { fatdate fattime fcb dirfcb -- ok }
 		return
 	end
 
-	"..         " // name
-	fatdate@ // fatdate
-	fattime@ // fattime
-	dirfcb@ // fcb
-	fatdirent@ // fatdirent
-	FatBuildDotEntry
+	auto mount
+	fcb@ FSFileControlBlockGetMount mount!
+
+	if (dirfcb@ mount@ IOMount_RootFCB + @ ~=
+		mount@ IOMount_Extension + @ FatData_FatType + @ 32 == ||)
+
+		"..         " // name
+		fatdate@ // fatdate
+		fattime@ // fattime
+		dirfcb@ // fcb
+		fatdirent@ // fatdirent
+		FatBuildDotEntry
+	end else
+		"..         " // name
+		fatdate@ // fatdate
+		fattime@ // fattime
+		0 // fcb
+		fatdirent@ // fatdirent
+		FatBuildDotEntry
+	end
 
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop

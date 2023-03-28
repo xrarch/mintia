@@ -339,6 +339,7 @@ extern FatInitializeGenerationContext { context -- }
 extern FatGenerateShortName { shortname longname context -- ok }
 extern FatConvertToShortName { shortname name -- }
 extern FatBuildDotEntry { name fatdate fattime fcb fatdirent -- }
+extern FatCopyVolumeLabel { fatdirent dest src -- }
 
 struct FatShortNameContext
 	4 Index

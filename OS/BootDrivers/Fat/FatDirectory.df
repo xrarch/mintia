@@ -1000,45 +1000,10 @@ fn FatRootDirectorySetVolumeLabel { label mount -- ok }
 
 			// found it. copy it
 
-			auto dest
-			mount@ IOMount_Extension + @ FatData_VolumeLabel + dest!
-
-			auto i
-			0 i!
-
-			while (i@ 11 <)
-				auto c
-				label@ gb c!
-
-				if (c@ ~~)
-					break
-				end
-
-				if (c@ ' ' ==)
-					break
-				end
-
-				if (c@ 'a' >= c@ 'z' <= &&)
-					32 c -=
-				end
-
-				c@ fatdirent@ sb
-				c@ dest@ sb
-
-				1 dest +=
-				1 label +=
-				1 fatdirent +=
-				1 i +=
-			end
-
-			0 dest@ sb
-
-			while (i@ 11 <)
-				' ' fatdirent@ sb
-
-				1 i +=
-				1 fatdirent +=
-			end
+			fatdirent@ // fatdirent
+			mount@ IOMount_Extension + @ FatData_VolumeLabel + // dest
+			label@ // src
+			FatCopyVolumeLabel
 
 			bcb@ VcBufferDirty
 
@@ -1046,12 +1011,71 @@ fn FatRootDirectorySetVolumeLabel { label mount -- ok }
 		end
 	end
 
-	if (ok@ STATUS_END_OF_FILE ==)
-		STATUS_NOT_FOUND ok!
-	end
-
 	if (bcb@)
 		bcb@ VcBufferDecrementMapCount drop
+	end
+
+	if (ok@ STATUS_END_OF_FILE ==)
+		// we found no volume label dirent in the root directory.
+		// lets try to allocate one.
+
+		fcb@ IOFileControlBlockLock ok!
+
+		if (ok@)
+			return
+		end
+
+		1 // entries
+		fcb@ // fcb
+		FatDirectoryAllocateEntries ok! seek!
+
+		if (ok@)
+			fcb@ IOFileControlBlockUnlock
+
+			return
+		end
+
+		0 // dirty
+		0 // skipempty
+		seek@ // seek
+		fcb@ // fcb
+		0 // lastbcb
+		FatDirectoryGetRawEntry ok! seek! bcb! fatdirent!
+
+		if (ok@)
+			1 // updatebitmap
+			1 // count
+			seek@ // startseek
+			fcb@ // dirfcb
+			FatFreeDirents drop
+
+			fcb@ IOFileControlBlockUnlock
+
+			if (bcb@)
+				bcb@ VcBufferDecrementMapCount drop
+			end
+
+			return
+		end
+
+		// create the volume dirent
+
+		fatdirent@ // ptr
+		FatDirectoryEntry_SIZEOF // sz
+		0 // word
+		memset
+
+		FAT_ATTR_VOLUME_ID fatdirent@ FatDirectoryEntry_AttributeB + sb
+
+		fatdirent@ // fatdirent
+		mount@ IOMount_Extension + @ FatData_VolumeLabel + // dest
+		label@ // src
+		FatCopyVolumeLabel
+
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapCount drop
+
+		fcb@ IOFileControlBlockUnlock
 	end
 end
 

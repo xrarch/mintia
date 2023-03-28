@@ -275,6 +275,8 @@ extern FatRootDirectorySetVolumeLabel { label mount -- ok }
 
 extern FatDirectoryFCBInitializeAllocation { fcb -- ok }
 
+extern FatUpdateModifyTimestamp { fcb fileobject -- }
+
 extern FatSetFile { info fileobject -- ok }
 
 extern FatFCBReference { fcb -- }

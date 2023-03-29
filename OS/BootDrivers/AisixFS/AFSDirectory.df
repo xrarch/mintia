@@ -326,24 +326,6 @@ fn AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }
 	STATUS_NOT_FOUND ok!
 end
 
-fn AFSRenameLock { mount -- ok }
-	fnsection "PAGE$text"
-
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMount_Extension + @ AFSData_RenameMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn AFSRenameUnlock { mount -- }
-	fnsection "PAGE$text"
-
-	0 // abandon
-	mount@ IOMount_Extension + @ AFSData_RenameMutex + // mutex
-	KeMutexRelease drop
-end
-
 fn AFSDirectoryCheckForCycle { testfcb searchfcb mount -- ok }
 	fnsection "PAGE$text"
 
@@ -410,6 +392,15 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		return
 	end
 
+	auto mount
+	dirfcb@ FSFileControlBlockGetMount mount!
+
+	1 mount@ AFSTreeLock ok!
+
+	if (ok@)
+		return
+	end
+
 	auto bcb
 	auto dirent
 
@@ -418,11 +409,10 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	AFSDirectoryFindEntry ok! bcb! dirent!
 
 	if (ok@)
+		mount@ AFSTreeUnlock
+
 		return
 	end
-
-	auto mount
-	dirfcb@ FSFileControlBlockGetMount mount!
 
 	auto fcb
 	0 // flags
@@ -431,6 +421,8 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	AFSFCBRead ok! fcb!
 
 	if (ok@)
+		mount@ AFSTreeUnlock
+
 		bcb@ VcBufferDecrementMapCount drop
 
 		return
@@ -440,8 +432,11 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
 	if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Flags + @ IOFCBFLAG_SYSTEMFILE &)
-		bcb@ VcBufferDecrementMapCount drop
 		fcb@ AFSFCBDereference
+
+		mount@ AFSTreeUnlock
+
+		bcb@ VcBufferDecrementMapCount drop
 
 		STATUS_FORBIDDEN_OPERATION ok!
 
@@ -453,10 +448,13 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 			// unlinking directories is forbidden if anyone could possibly
 			// add new entries to it afterwards.
 
-			bcb@ VcBufferDecrementMapCount drop
 			fcb@ AFSFCBDereference
 
-			STATUS_TRY_AGAIN_LATER ok!
+			mount@ AFSTreeUnlock
+
+			bcb@ VcBufferDecrementMapCount drop
+
+			STATUS_FILE_BUSY ok!
 
 			return
 		end
@@ -468,8 +466,11 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		AFSDirectoryFindEntry ok! drop drop
 
 		if (ok@ STATUS_NOT_FOUND ~=)
-			bcb@ VcBufferDecrementMapCount drop
 			fcb@ AFSFCBDereference
+
+			mount@ AFSTreeUnlock
+
+			bcb@ VcBufferDecrementMapCount drop
 
 			if (ok@ ~~)
 				STATUS_IS_A_DIRECTORY ok!
@@ -479,8 +480,12 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 		end
 	end
 
+	dirfcb@ IOFileControlBlockLockUnalertable
+
 	// free the directory entry
 	0 dirent@ AFSDirEnt_INum + !
+
+	dirfcb@ IOFileControlBlockUnlock
 
 	bcb@ VcBufferDirty
 	bcb@ VcBufferDecrementMapCount drop
@@ -488,6 +493,8 @@ fn (IODispatchUnlinkFunction) AFSUnlink { name dirfcb -- ok }
 	AFSFILEFLAG_DELETE fcbdata@ AFSFCBData_Flags + |=
 
 	fcb@ AFSFCBDereference
+
+	mount@ AFSTreeUnlock
 
 	0 ok!
 end
@@ -535,6 +542,18 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		return
 	end
 
+	// we avoid having to lock either FCB (which would result in awful lock
+	// ordering issues) by holding the tree lock to block out other renames,
+	// deletions, and creations, and carefully updating the dirents in such a
+	// way that the people who lock the FCB shared never see a half-formed
+	// dirent.
+
+	1 mount@ AFSTreeLock ok!
+
+	if (ok@)
+		return
+	end
+
 	auto srcbcb
 	auto srcdirent
 
@@ -543,11 +562,15 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 	AFSDirectoryFindEntry ok! srcbcb! srcdirent!
 
 	if (ok@)
+		mount@ AFSTreeUnlock
+
 		return
 	end
 
 	if (srcfcb@ destfcb@ ==)
 		if (srcname@ destname@ strcmp)
+			mount@ AFSTreeUnlock
+
 			srcbcb@ VcBufferDecrementMapCount drop
 
 			0 ok!
@@ -570,6 +593,8 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		srcbcb@ VcBufferDecrementMapCount drop
 
 		if (ok@ ~~)
+			mount@ AFSTreeUnlock
+
 			destbcb@ VcBufferDecrementMapCount drop
 
 			STATUS_ALREADY_EXISTS ok!
@@ -578,20 +603,25 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		return
 	end
 
+	auto inum
+	srcdirent@ AFSDirEnt_INum + @ inum!
+
 	auto filefcb
 	0 // flags
-	srcdirent@ AFSDirEnt_INum + @  // inum
+	inum@ // inum
 	mount@ // mount
 	AFSFCBRead ok! filefcb!
 
 	if (ok@)
+		mount@ AFSTreeUnlock
+
 		srcbcb@ VcBufferDecrementMapCount drop
 
 		return
 	end
 
-	auto renamelocked
-	0 renamelocked!
+	auto changeddir
+	0 changeddir!
 
 	if (srcfcb@ destfcb@ ~=)
 		auto filetype
@@ -603,41 +633,32 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 			// the source appears along the way. if it does, this operation
 			// would create a cycle.
 
-			mount@ AFSRenameLock ok!
-
-			if (ok@)
-				srcbcb@ VcBufferDecrementMapCount drop
-				filefcb@ AFSFCBDereference
-
-				return
-			end
-
 			filefcb@ // testfcb
 			destfcb@ // searchfcb
 			mount@ // mount
 			AFSDirectoryCheckForCycle ok!
 
 			if (ok@)
-				mount@ AFSRenameUnlock
+				filefcb@ AFSFCBDereference
+
+				mount@ AFSTreeUnlock
 
 				srcbcb@ VcBufferDecrementMapCount drop
-				filefcb@ AFSFCBDereference
 
 				return
 			end
 
-			1 renamelocked!
+			1 changeddir!
 		end
 
 		destfcb@ AFSDirectoryAllocateEntry ok! destbcb! destdirent!
 
 		if (ok@)
-			if (renamelocked@)
-				mount@ AFSRenameUnlock
-			end
+			filefcb@ AFSFCBDereference
+
+			mount@ AFSTreeUnlock
 
 			srcbcb@ VcBufferDecrementMapCount drop
-			filefcb@ AFSFCBDereference
 
 			return
 		end
@@ -645,15 +666,24 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		// move the directory entry over by invalidating the old one and updating
 		// the new one.
 
-		srcdirent@ AFSDirEnt_INum + @ destdirent@ AFSDirEnt_INum + !
+		srcfcb@ IOFileControlBlockLockUnalertable
+
 		0 srcdirent@ AFSDirEnt_INum + !
+
+		srcfcb@ IOFileControlBlockUnlock
 	end else
 		srcdirent@ destdirent!
 	end
 
+	destfcb@ IOFileControlBlockLockUnalertable
+
 	destdirent@ AFSDirEnt_name + // dest
 	destname@ // src
 	strcpy
+
+	inum@ destdirent@ AFSDirEnt_INum + !
+
+	destfcb@ IOFileControlBlockUnlock
 
 	srcbcb@ VcBufferDirty
 
@@ -662,17 +692,19 @@ fn (IODispatchRenameFunction) AFSRename { srcname srcfcb destname destfcb -- ok 
 		destbcb@ VcBufferDecrementMapCount drop
 	end
 
-	if (renamelocked@)
+	if (changeddir@)
 		auto fcbdata
 		filefcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
-		destfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_INum + @ fcbdata@ AFSFCBData_IParent + !
+		destfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ AFSFCBData_INum + @
+		fcbdata@ AFSFCBData_IParent + !
 
 		filefcb@ AFSINodeUpdate
-
-		mount@ AFSRenameUnlock
 	end
 
-	srcbcb@ VcBufferDecrementMapCount drop
 	filefcb@ AFSFCBDereference
+
+	mount@ AFSTreeUnlock
+
+	srcbcb@ VcBufferDecrementMapCount drop
 end

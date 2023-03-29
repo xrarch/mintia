@@ -47,12 +47,18 @@ fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparse
 		return
 	end
 
-	initialfcb@ FatFCBReference
-
 	auto mount
 	initialfcb@ FSFileControlBlockGetMount mount!
 
-	initialfcb@ IOFileControlBlockLock ok!
+	1 // alertable
+	mount@ // mount
+	FatTreeLock ok!
+
+	if (ok@)
+		return
+	end
+
+	initialfcb@ FatFCBReference
 
 	while (path@ gb)
 		fileobject@ // fileobject
@@ -66,6 +72,8 @@ fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparse
 			if (initialfcb@ ~~)
 				// FatCrunchPathComponent already cleaned up.
 
+				mount@ FatTreeUnlock
+
 				return
 			end
 
@@ -73,18 +81,20 @@ fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparse
 		end
 	end
 
-	initialfcb@ IOFileControlBlockUnlock
-
 	// at this point the FCB should be refed but unlocked
 
 	if (ok@)
 		initialfcb@ FatFCBDereference
+
+		mount@ FatTreeUnlock
 
 		return
 	end
 
 	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_MUSTCREATE &)
 		initialfcb@ FatFCBDereference
+
+		mount@ FatTreeUnlock
 
 		STATUS_ALREADY_EXISTS ok!
 
@@ -95,11 +105,15 @@ fn (IODispatchParseFunction) FatParse { fileobject initialfcb process -- reparse
 		if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			initialfcb@ FatFCBDereference
 
+			mount@ FatTreeUnlock
+
 			STATUS_ALREADY_EXISTS ok!
 
 			return
 		end
 	end
+
+	mount@ FatTreeUnlock
 
 	fileobject@ // fileobject
 	initialfcb@ // fcb
@@ -129,7 +143,13 @@ fn (IODispatchDeleteObjectFunction) FatDeleteObject { object -- ok }
 	// the FCB may or may not stop existing after we deref it here, so don't
 	// touch it again.
 
+	0 // alertable
+	mount@ // mount
+	FatTreeLock drop
+
 	fcb@ FatFCBDereference
+
+	mount@ FatTreeUnlock
 
 	mount@ FatMountDereference
 
@@ -240,18 +260,8 @@ fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfc
 
 		fcbdata@ FatFCBData_ParentDirDCB + @ nextfcb!
 
-		nextfcb@ FatFCBReferenceLockHeld
-
-		fcb@ IOFileControlBlockUnlock
+		nextfcb@ FatFCBReference
 		fcb@ FatFCBDereference
-
-		nextfcb@ IOFileControlBlockLock ok!
-
-		if (ok@)
-			nextfcb@ FatFCBDereference
-
-			0 nextfcb!
-		end
 
 		return
 	end
@@ -293,34 +303,16 @@ fn FatCrunchPathComponent { fileobject path fcb mount process -- nextpath nextfc
 		fcb@ // dirfcb
 		FatCreateFile ok! nextfcb!
 
-		fcb@ IOFileControlBlockUnlock
 		fcb@ FatFCBDereference
 
 		if (ok@)
 			0 nextfcb!
-		end else
-			nextfcb@ IOFileControlBlockLock ok!
-
-			if (ok@)
-				nextfcb@ FatFCBDereference
-
-				0 nextfcb!
-			end
 		end
 
 		return
 	end
 
-	fcb@ IOFileControlBlockUnlock
 	fcb@ FatFCBDereference
-
-	nextfcb@ IOFileControlBlockLock ok!
-
-	if (ok@)
-		nextfcb@ FatFCBDereference
-
-		0 nextfcb!
-	end
 end
 
 fn FatCreateFile { fileobject name dirfcb -- fcb ok }
@@ -338,11 +330,15 @@ fn FatCreateFile { fileobject name dirfcb -- fcb ok }
 	auto shortdirentseek
 	auto longdirentseek
 
+	dirfcb@ IOFileControlBlockLockUnalertable
+
 	name@ // name
 	dirfcb@ // dirfcb
 	FatDirectoryBuildEntry ok! fatdirent! bcb! seek! entries! shortdirentseek! longdirentseek!
 
 	if (ok@)
+		dirfcb@ IOFileControlBlockUnlock
+
 		return
 	end
 
@@ -396,6 +392,8 @@ fn FatCreateFile { fileobject name dirfcb -- fcb ok }
 		dirfcb@ // dirfcb
 		FatFreeDirents drop
 
+		dirfcb@ IOFileControlBlockUnlock
+
 		return
 	end
 
@@ -409,11 +407,15 @@ fn FatCreateFile { fileobject name dirfcb -- fcb ok }
 		FatDirectoryBuildDotEntries ok!
 
 		if (ok@)
+			dirfcb@ IOFileControlBlockUnlock
+
 			fcb@ FatFileDelete drop
 
 			return
 		end
 	end
+
+	dirfcb@ IOFileControlBlockUnlock
 
 	dirfcb@ // fcb
 	0 // fileobject

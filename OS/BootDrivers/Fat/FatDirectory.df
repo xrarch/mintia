@@ -87,6 +87,14 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 		end
 	end
 
+	1 // alertable
+	mount@ // mount
+	FatTreeLock ok!
+
+	if (ok@)
+		return
+	end
+
 	auto fcb
 	0 // flags
 	name@ // name
@@ -95,6 +103,8 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 	FatDirectoryGetChildByName ok! fcb!
 
 	if (ok@)
+		mount@ FatTreeUnlock
+
 		return
 	end
 
@@ -111,6 +121,8 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 		if (fcbdata@ FatDCBData_SplayTreeRoot + @)
 			fcb@ FatFCBDereference
 
+			mount@ FatTreeUnlock
+
 			STATUS_IS_A_DIRECTORY ok!
 
 			return
@@ -119,6 +131,8 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 
 	if (fcbdata@ FatFCBData_References + @ 1 ~=)
 		fcb@ FatFCBDereference
+
+		mount@ FatTreeUnlock
 
 		STATUS_FILE_BUSY ok!
 
@@ -133,6 +147,8 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 		if (ok@)
 			fcb@ FatFCBDereference
 
+			mount@ FatTreeUnlock
+
 			return
 		end
 	end
@@ -142,24 +158,8 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 	if (ok@)
 		fcb@ FatFCBDereference
 	end
-end
 
-fn FatRenameLock { mount -- ok }
-	fnsection "PAGE$text"
-
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMount_Extension + @ FatData_RenameMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn FatRenameUnlock { mount -- }
-	fnsection "PAGE$text"
-
-	0 // abandon
-	mount@ IOMount_Extension + @ FatData_RenameMutex + // mutex
-	KeMutexRelease drop
+	mount@ FatTreeUnlock
 end
 
 fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok }
@@ -205,6 +205,14 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 		end
 	end
 
+	1 // alertable
+	mount@ // mount
+	FatTreeLock ok!
+
+	if (ok@)
+		return
+	end
+
 	auto filefcb
 	0 // flags
 	srcname@ // name
@@ -213,6 +221,8 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	FatDirectoryGetChildByName ok! filefcb!
 
 	if (ok@)
+		mount@ FatTreeUnlock
+
 		return
 	end
 
@@ -225,6 +235,8 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	if (destfcb@ srcfcb@ ==)
 		if (fcbdata@ FatFCBData_Name + @ destname@ strcmp)
 			filefcb@ FatFCBDereference
+
+			mount@ FatTreeUnlock
 
 			return
 		end elseif (fcbdata@ FatFCBData_Name + @ destname@ FatStringCompareCaseInsensitive)
@@ -248,6 +260,8 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 		if (ok@ STATUS_NOT_FOUND ~=)
 			filefcb@ FatFCBDereference
 
+			mount@ FatTreeUnlock
+
 			if (ok@ ~~)
 				bcb@ VcBufferDecrementMapCount drop
 
@@ -260,8 +274,8 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 		0 ok!
 	end
 
-	auto renamelocked
-	0 renamelocked!
+	auto switcheddir
+	0 switcheddir!
 
 	if (srcfcb@ destfcb@ ~=)
 		auto filetype
@@ -273,27 +287,19 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 			// the source appears along the way. if it does, this operation
 			// would create a cycle.
 
-			mount@ FatRenameLock ok!
-
-			if (ok@)
-				filefcb@ FatFCBDereference
-
-				return
-			end
-
 			filefcb@ // testfcb
 			destfcb@ // searchfcb
 			FatDirectoryCheckForCycle ok!
 
 			if (ok@)
-				mount@ FatRenameUnlock
-
 				filefcb@ FatFCBDereference
+
+				mount@ FatTreeUnlock
 
 				return
 			end
 
-			1 renamelocked!
+			1 switcheddir!
 		end
 	end
 
@@ -303,23 +309,25 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 	auto shortdirentseek
 	auto longdirentseek
 
+	destfcb@ IOFileControlBlockLockUnalertable
+
 	destname@ // name
 	destfcb@ // dirfcb
 	FatDirectoryBuildEntry ok! fatdirent! bcb! seek! entries! shortdirentseek! longdirentseek!
 
-	if (ok@)
-		if (renamelocked@)
-			mount@ FatRenameUnlock
-		end
+	destfcb@ IOFileControlBlockUnlock
 
+	if (ok@)
 		filefcb@ FatFCBDereference
+
+		mount@ FatTreeUnlock
 
 		return
 	end
 	
 	bcb@ VcBufferDecrementMapCount drop
 
-	if (renamelocked@)
+	if (switcheddir@)
 		// set cluster number in .. entry for directory to new one
 
 		0 // dirty
@@ -334,15 +342,19 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 				bcb@ VcBufferDecrementMapCount drop
 			end
 
-			mount@ FatRenameUnlock
-
 			filefcb@ FatFCBDereference
+
+			destfcb@ IOFileControlBlockLockUnalertable
 
 			1 // updatebitmap
 			entries@ // count
 			seek@ // seek
 			destfcb@ // dirfcb
 			FatFreeDirents drop
+
+			destfcb@ IOFileControlBlockUnlock
+
+			mount@ FatTreeUnlock
 
 			return
 		end
@@ -385,11 +397,9 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 
 	filefcb@ FatUpdateDirent
 
-	if (renamelocked@)
-		mount@ FatRenameUnlock
-	end
-
 	filefcb@ FatFCBDereference
+
+	mount@ FatTreeUnlock
 end
 
 fn FatDirectoryCheckForCycle { testfcb searchfcb -- ok }
@@ -1369,16 +1379,10 @@ fn FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
 
-	1 // alertable
-	mount@ // mount
-	FatFCBCacheLock ok!
-
-	if (ok@)
-		return
-	end
-
 	// copypasted from ExSplayTreeFindNodeByValue and adapted for string
 	// comparisons
+
+	0 ok!
 
 	auto childfcbdata
 	fcbdata@ FatDCBData_SplayTreeRoot + @ childfcbdata!
@@ -1405,17 +1409,13 @@ fn FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 	end
 
 	if (childfcbdata@ ~~)
-		mount@ FatFCBCacheUnlock
-
 		0 childfcb!
 
 		return
 	end
 
 	childfcbdata@ FatFCBData_FCB + @ childfcb!
-	childfcb@ FatFCBReferenceLockHeld
-
-	mount@ FatFCBCacheUnlock
+	childfcb@ FatFCBReference
 end
 
 fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
@@ -1436,10 +1436,6 @@ fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
 
-	0 // alertable
-	mount@ // mount
-	FatFCBCacheLock drop
-
 	// add the childfcbdata to the mount's list of active fcbdatas.
 
 	auto h
@@ -1457,7 +1453,7 @@ fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 	// make the childfcbdata point to the directory FCB.
 
 	fcb@ childfcbdata@ FatFCBData_ParentDirDCB + !
-	fcb@ FatFCBReferenceLockHeld
+	fcb@ FatFCBReference
 
 	// insert the childfcbdata in the directory's splay tree.
 
@@ -1467,8 +1463,6 @@ fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 	if (parent@ ~~)
 		childfcbdata@ rootptr@!
 		0 childfcbdata@ ExSplayTreeNode_Parent + !
-
-		mount@ FatFCBCacheUnlock
 
 		return
 	end
@@ -1505,8 +1499,6 @@ fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 			end
 		end
 	end
-
-	mount@ FatFCBCacheUnlock
 end
 
 fn FatDirectoryRemoveCachedChild { childfcb mount -- }
@@ -1523,10 +1515,6 @@ fn FatDirectoryRemoveCachedChild { childfcb mount -- }
 
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
-
-	0 // alertable
-	mount@ // mount
-	FatFCBCacheLock drop
 
 	// remove the childfcbdata from the mount's list of active fcbdatas
 
@@ -1551,8 +1539,6 @@ fn FatDirectoryRemoveCachedChild { childfcb mount -- }
 	childfcbdata@ // node
 	rootptr@ // rootptr
 	ExSplayTreeRemove
-
-	mount@ FatFCBCacheUnlock
 
 	fcb@ FatFCBDereference
 end
@@ -1726,6 +1712,8 @@ fn FatFreeDirentsForFCB { fcb -- }
 	auto dirfcb
 	fcbdata@ FatFCBData_ParentDirDCB + @ dirfcb!
 
+	dirfcb@ IOFileControlBlockLockUnalertable
+
 	auto bcb
 	0 bcb!
 
@@ -1752,6 +1740,8 @@ fn FatFreeDirentsForFCB { fcb -- }
 	startseek@ // startseek
 	dirfcb@ // dirfcb
 	FatFreeDirents drop
+
+	dirfcb@ IOFileControlBlockUnlock
 end
 
 fn FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }

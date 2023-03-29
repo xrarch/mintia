@@ -109,6 +109,7 @@ const IOAVERAGEFCBCONTEXTPAGED 96
 
 extern IOFileControlBlockCreate { devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }
+extern IOFileControlBlockLockUnalertable { fcb -- }
 extern IOFileControlBlockLock { fcb -- ok }
 extern IOFileControlBlockLockShared { fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }

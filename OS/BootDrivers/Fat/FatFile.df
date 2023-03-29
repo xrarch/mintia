@@ -27,21 +27,21 @@
 
 #include "Fat.h"
 
-fn FatFCBCacheLock { alertable mount -- ok }
+fn FatTreeLock { alertable mount -- ok }
 	fnsection "PAGE$text"
 
 	KERNELMODE // waitmode
 	alertable@ // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMount_Extension + @ FatData_FCBCacheMutex + // object
+	mount@ IOMount_Extension + @ FatData_TreeMutex + // object
 	KeThreadWaitForObject ok!
 end
 
-fn FatFCBCacheUnlock { mount -- }
+fn FatTreeUnlock { mount -- }
 	fnsection "PAGE$text"
 
 	0 // abandon
-	mount@ IOMount_Extension + @ FatData_FCBCacheMutex + // mutex
+	mount@ IOMount_Extension + @ FatData_TreeMutex + // mutex
 	KeMutexRelease drop
 end
 
@@ -183,7 +183,7 @@ fn FatFCBCacheDestroy { mount -- ok }
 
 	0 // alertable
 	mount@ // mount
-	FatFCBCacheLock drop
+	FatTreeLock drop
 
 	while (1)
 		auto fcbdata
@@ -196,14 +196,14 @@ fn FatFCBCacheDestroy { mount -- ok }
 		auto fcb
 		fcbdata@ FatFCBData_FCB + @ fcb!
 
-		fcb@ FatFCBReferenceLockHeld
+		fcb@ FatFCBReference
 
 		1 // writeout
 		fcb@ // fcb
 		FatFCBDelete
 	end
 
-	mount@ FatFCBCacheUnlock
+	mount@ FatTreeUnlock
 
 	if (DEBUGCHECKS)
 		if (fatdata@ FatData_FCBDataListHead + @)
@@ -228,7 +228,7 @@ fn FatFCBCacheFlush { mount -- ok }
 
 	0 // alertable
 	mount@ // mount
-	FatFCBCacheLock drop
+	FatTreeLock drop
 
 	auto fcbdata
 	fatdata@ FatData_FCBDataListHead + @ fcbdata!
@@ -242,7 +242,7 @@ fn FatFCBCacheFlush { mount -- ok }
 		fcbdata@ FatFCBData_NextFCBData + @ fcbdata!
 	end
 
-	mount@ FatFCBCacheUnlock
+	mount@ FatTreeUnlock
 
 	mount@ IOMount_RootFCB + @ IOFileControlBlockFlush drop
 end
@@ -260,7 +260,7 @@ fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -
 
 	0 // alertable
 	mount@ // mount
-	FatFCBCacheLock drop
+	FatTreeLock drop
 
 	while (actualcount@ preferredcount@ <)
 		auto fcbdata
@@ -273,7 +273,7 @@ fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -
 		auto fcb
 		fcbdata@ FatFCBData_FCB + @ fcb!
 
-		fcb@ FatFCBReferenceLockHeld
+		fcb@ FatFCBReference
 
 		1 // writeout
 		fcb@ // fcb
@@ -282,7 +282,7 @@ fn (IOFilesystemReclaimFunction) FatFCBReclaim { preferredcount fsdeviceobject -
 		1 actualcount +=
 	end
 
-	mount@ FatFCBCacheUnlock
+	mount@ FatTreeUnlock
 end
 
 fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek shortdirent mount -- fcb ok }
@@ -614,20 +614,7 @@ end
 fn FatFCBReference { fcb -- }
 	fnsection "PAGE$text"
 
-	auto mount
-	fcb@ FSFileControlBlockGetMount mount!
-
-	0 mount@ FatFCBCacheLock drop
-
-	fcb@ FatFCBReferenceLockHeld
-
-	mount@ FatFCBCacheUnlock
-end
-
-fn FatFCBReferenceLockHeld { fcb -- }
-	fnsection "PAGE$text"
-
-	// assumes the FCB cache lock is held
+	// assumes tree lock is held
 
 	auto mount
 	fcb@ FSFileControlBlockGetMount mount!
@@ -671,13 +658,13 @@ end
 fn FatFCBDereference { fcb -- }
 	fnsection "PAGE$text"
 
+	// assumes tree lock is held
+
 	auto mount
 	fcb@ FSFileControlBlockGetMount mount!
 
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
-
-	0 mount@ FatFCBCacheLock drop
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
@@ -715,8 +702,6 @@ fn FatFCBDereference { fcb -- }
 
 		IOFileControlBlockIncrementReclaimable
 	end
-
-	mount@ FatFCBCacheUnlock
 end
 
 fn FatUpdateModifyTimestamp { fcb fileobject -- }

@@ -53,8 +53,16 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 	auto mount
 	initialfcb@ FSFileControlBlockGetMount mount!
 
+	1 mount@ AFSTreeLock ok!
+
+	if (ok@)
+		return
+	end
+
 	if (path@ gb)
 		if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
+			mount@ AFSTreeUnlock
+
 			STATUS_NOT_A_DIRECTORY ok!
 
 			return
@@ -70,17 +78,6 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 
 		initialfcb@ AFSFCBReference
 
-		if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
-			initialfcb@ IOFileControlBlockLock ok!
-		end else
-			initialfcb@ IOFileControlBlockLockShared ok!
-		end
-
-		if (ok@)
-			initialfcb@ AFSFCBDereference
-			return
-		end
-
 		while (1)
 			while (path@ gb '/' ==)
 				1 path +=
@@ -88,8 +85,6 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 
 			if (path@ gb ~~)
 				// no more path, done
-
-				initialfcb@ IOFileControlBlockUnlock
 
 				break
 			end
@@ -113,8 +108,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 				if (ok@)
 					// no rights
 
-					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ AFSFCBDereference
+					mount@ AFSTreeUnlock
 
 					return
 				end
@@ -133,8 +127,7 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 				end
 
 				if (len@ 59 >=)
-					initialfcb@ IOFileControlBlockUnlock
-					initialfcb@ AFSFCBDereference
+					mount@ AFSTreeUnlock
 
 					STATUS_NAME_TOO_LONG ok!
 
@@ -168,10 +161,11 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 				initialfcb@ FSFileControlBlockGetMount // mount
 				AFSFCBRead ok! nextfcb!
 
-				initialfcb@ IOFileControlBlockUnlock
 				initialfcb@ AFSFCBDereference
 
 				if (ok@)
+					mount@ AFSTreeUnlock
+
 					return
 				end
 
@@ -181,20 +175,10 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 					if (ok@)
 						nextfcb@ AFSFCBDereference
 
+						mount@ AFSTreeUnlock
+
 						return
 					end
-				end
-
-				if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
-					nextfcb@ IOFileControlBlockLock ok!
-				end else
-					nextfcb@ IOFileControlBlockLockShared ok!
-				end
-
-				if (ok@)
-					nextfcb@ AFSFCBDereference
-
-					return
 				end
 
 				nextfcb@ initialfcb!
@@ -231,8 +215,9 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 					end
 				end
 
-				initialfcb@ IOFileControlBlockUnlock
 				initialfcb@ AFSFCBDereference
+
+				mount@ AFSTreeUnlock
 
 				return
 			end
@@ -253,16 +238,19 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 
 			bcb@ VcBufferDecrementMapCount drop
 
-			initialfcb@ IOFileControlBlockUnlock
 			initialfcb@ AFSFCBDereference
 
 			if (ok@)
+				mount@ AFSTreeUnlock
+
 				return
 			end
 
 			if (path@ gb)
 				if (nextfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 					nextfcb@ AFSFCBDereference
+
+					mount@ AFSTreeUnlock
 
 					STATUS_NOT_A_DIRECTORY ok!
 
@@ -276,19 +264,11 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 
 					if (ok@)
 						nextfcb@ AFSFCBDereference
+
+						mount@ AFSTreeUnlock
+
 						return
 					end
-				end
-
-				if (fileobject@ IOFile_Flags + @ OSFILEFLAG_CREATE &)
-					nextfcb@ IOFileControlBlockLock ok!
-				end else
-					nextfcb@ IOFileControlBlockLockShared ok!
-				end
-
-				if (ok@)
-					nextfcb@ AFSFCBDereference
-					return
 				end
 			end
 
@@ -307,6 +287,8 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 	if (fileobject@ IOFile_Flags + @ OSFILEFLAG_MUSTCREATE &)
 		initialfcb@ AFSFCBDereference
 
+		mount@ AFSTreeUnlock
+
 		STATUS_ALREADY_EXISTS ok!
 
 		return
@@ -316,11 +298,15 @@ fn (IODispatchParseFunction) AFSParse { fileobject initialfcb process -- reparse
 		if (initialfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
 			initialfcb@ AFSFCBDereference
 
+			mount@ AFSTreeUnlock
+
 			STATUS_ALREADY_EXISTS ok!
 
 			return
 		end
 	end
+
+	mount@ AFSTreeUnlock
 
 	fileobject@ // fileobject
 	process@ // process
@@ -450,6 +436,8 @@ fn AFSCreateFile { fileobject process name dirfcb -- ok }
 
 	// fill in fields
 
+	dirfcb@ IOFileControlBlockLockUnalertable
+
 	inum@ dirent@ AFSDirEnt_INum + !
 
 	dirent@ AFSDirEnt_name + // dest
@@ -471,6 +459,8 @@ fn AFSCreateFile { fileobject process name dirfcb -- ok }
 		0 inode@ AFSINode_type + !
 		0 dirent@ AFSDirEnt_INum + !
 
+		dirfcb@ IOFileControlBlockUnlock
+
 		ibcb@ VcBufferDirty
 		ibcb@ VcBufferDecrementMapCount drop
 
@@ -478,6 +468,8 @@ fn AFSCreateFile { fileobject process name dirfcb -- ok }
 
 		return
 	end
+
+	dirfcb@ IOFileControlBlockUnlock
 
 	// create object with FCB
 
@@ -518,7 +510,11 @@ fn (IODispatchDeleteObjectFunction) AFSDeleteObject { object -- ok }
 	// the FCB may or may not stop existing after we deref it here, so don't
 	// touch it again.
 
+	0 mount@ AFSTreeLock drop
+
 	fcb@ AFSFCBDereference
+
+	mount@ AFSTreeUnlock
 
 	mount@ // mount
 	AFSMountDereference drop

@@ -48,24 +48,6 @@ fn AFSINodeRead { inum mount urgent -- ptr bcb ok }
 	VcFileControlBlockMap ok! bcb! ptr!
 end
 
-fn AFSINodeAllocationLock { mount -- ok }
-	fnsection "PAGE$text"
-
-	KERNELMODE // waitmode
-	1 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMount_Extension + @ AFSData_INodeAllocationMutex + // object
-	KeThreadWaitForObject ok!
-end
-
-fn AFSINodeAllocationUnlock { mount -- }
-	fnsection "PAGE$text"
-
-	0 // abandon
-	mount@ IOMount_Extension + @ AFSData_INodeAllocationMutex + // mutex
-	KeMutexRelease drop
-end
-
 fn AFSINodeFree { inum mount -- }
 	fnsection "PAGE$text"
 
@@ -105,19 +87,11 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 	auto inoblk
 	afsdata@ AFSData_IStart + @ inoblk!
 
-	mount@ AFSINodeAllocationLock ok!
-
-	if (ok@)
-		return
-	end
-
 	inoblk@ AFSBLOCKSHIFT << // offset
 	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
 	VcFileControlBlockMap ok! bcb! inode!
 
 	if (ok@)
-		mount@ AFSINodeAllocationUnlock
-
 		return
 	end
 
@@ -136,8 +110,6 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 			VcFileControlBlockMap ok! bcb! inode!
 
 			if (ok@)
-				mount@ AFSINodeAllocationUnlock
-
 				return
 			end
 		end
@@ -146,8 +118,6 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 			// found a free inode! reserve it and return
 			
 			-1 inode@ AFSINode_type + !
-
-			mount@ AFSINodeAllocationUnlock
 
 			return
 		end
@@ -159,8 +129,6 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 	STATUS_END_OF_DISK ok!
 
 	bcb@ VcBufferDecrementMapCount drop
-
-	mount@ AFSINodeAllocationUnlock
 end
 
 fn (IODispatchSetFileFunction) AFSSetFile { info fileobject -- ok }
@@ -329,7 +297,7 @@ fn AFSINodeUpdate { fcb -- }
 		ok@ "AFSINodeUpdate: couldn't read inode (%i)\n" KeCrash
 	end
 
-	fcb@ IOFileControlBlockLock drop
+	fcb@ IOFileControlBlockLockUnalertable
 
 	fcb@ IOFileControlBlock_SizeInBytes + @ inode@ AFSINode_bytesize + !
 	fcbdata@ AFSFCBData_FirstFATLink + @ inode@ AFSINode_startblock + !
@@ -347,21 +315,21 @@ fn AFSINodeUpdate { fcb -- }
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
-fn AFSFCBCacheLock { alertable mount -- ok }
+fn AFSTreeLock { alertable mount -- ok }
 	fnsection "PAGE$text"
 
 	KERNELMODE // waitmode
 	alertable@ // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
-	mount@ IOMount_Extension + @ AFSData_FCBCacheMutex + // object
+	mount@ IOMount_Extension + @ AFSData_TreeMutex + // object
 	KeThreadWaitForObject ok!
 end
 
-fn AFSFCBCacheUnlock { mount -- }
+fn AFSTreeUnlock { mount -- }
 	fnsection "PAGE$text"
 
 	0 // abandon
-	mount@ IOMount_Extension + @ AFSData_FCBCacheMutex + // mutex
+	mount@ IOMount_Extension + @ AFSData_TreeMutex + // mutex
 	KeMutexRelease drop
 end
 
@@ -369,7 +337,7 @@ fn AFSFCBRemove { fcb buckethead -- }
 	fnsection "PAGE$text"
 
 	// remove from hash list.
-	// assumes fcb cache bucket is locked.
+	// assumes tree is locked.
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
@@ -396,7 +364,7 @@ fn AFSFCBInsert { fcb buckethead -- }
 	fnsection "PAGE$text"
 
 	// insert into hash list on the recently-used end.
-	// assumes fcb cache bucket is locked.
+	// assumes tree is locked.
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
@@ -466,7 +434,7 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
-	0 mount@ AFSFCBCacheLock drop
+	0 mount@ AFSTreeLock drop
 
 	auto i
 	0 i!
@@ -494,7 +462,7 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 					end
 				end
 
-				fcb@ AFSFCBReferenceLockHeld
+				fcb@ AFSFCBReference
 
 				1 // writeout
 				fcb@ // fcb
@@ -520,7 +488,7 @@ fn AFSFCBCacheFlush { destroy mount -- ok }
 		1 i +=
 	end
 
-	mount@ AFSFCBCacheUnlock
+	mount@ AFSTreeUnlock
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
@@ -533,6 +501,8 @@ fn AFSDelete { fcb -- }
 
 	// must clean up any internal structures relating to the FCB and free any
 	// on-disk resources associated with it as well.
+
+	// assumes tree lock is held.
 
 	0 // writeout
 	fcb@ // fcb
@@ -613,7 +583,7 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount fsdeviceobject
 
 	0 actualcount!
 
-	0 mount@ AFSFCBCacheLock drop
+	0 mount@ AFSTreeLock drop
 
 	while (actualcount@ preferredcount@ <)
 		auto fcb
@@ -640,7 +610,7 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount fsdeviceobject
 
 		// first, remove it from the reclaimable list.
 
-		fcb@ AFSFCBReferenceLockHeld
+		fcb@ AFSFCBReference
 
 		// next, remove it from the cache bucket.
 
@@ -662,63 +632,13 @@ fn (IOFilesystemReclaimFunction) AFSINodeReclaim { preferredcount fsdeviceobject
 		1 actualcount +=
 	end
 
-	mount@ AFSFCBCacheUnlock
-end
-
-fn AFSFCBDelete { fcb -- }
-	fnsection "PAGE$text"
-
-	// we already guaranteed that the refcount on this FCB can never be
-	// incremented again by removing its name from the directory tree.
-
-	auto mount
-	fcb@ FSFileControlBlockGetMount mount!
-
-	auto afsdata
-	mount@ IOMount_Extension + @ afsdata!
-
-	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
-
-	auto bucket
-	fcbdata@ AFSFCBData_INum + @ AFSFCBMASK & bucket!
-
-	auto buckethead
-	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
-
-	KeThreadCurrent@ KeThreadIgnoreKill drop
-
-	0 mount@ AFSFCBCacheLock drop
-
-	fcb@ // fcb
-	buckethead@ // buckethead
-	AFSFCBRemove
-
-	mount@ AFSFCBCacheUnlock
-
-	KeThreadCurrent@ KeThreadAcceptKill drop
-
-	fcbdata@ AFSFCBData_Nonpaged + @ MmFree
-	fcbdata@ MmFree
+	mount@ AFSTreeUnlock
 end
 
 fn AFSFCBReference { fcb -- }
 	fnsection "PAGE$text"
 
-	auto mount
-	fcb@ FSFileControlBlockGetMount mount!
-
-	0 mount@ AFSFCBCacheLock drop
-
-	fcb@ AFSFCBReferenceLockHeld
-
-	mount@ AFSFCBCacheUnlock
-end
-
-fn AFSFCBReferenceLockHeld { fcb -- }
-	fnsection "PAGE$text"
-
-	// assumes the FCB cache lock is held
+	// assumes the tree lock is held
 
 	auto mount
 	fcb@ FSFileControlBlockGetMount mount!
@@ -762,13 +682,13 @@ end
 fn AFSFCBDereference { fcb -- }
 	fnsection "PAGE$text"
 
+	// assumes tree lock is held
+
 	auto mount
 	fcb@ FSFileControlBlockGetMount mount!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
-
-	0 mount@ AFSFCBCacheLock drop
 
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
@@ -806,13 +726,7 @@ fn AFSFCBDereference { fcb -- }
 			end
 
 			IOFileControlBlockIncrementReclaimable
-		end
-	end
-
-	mount@ AFSFCBCacheUnlock
-
-	if (oldcount@ 1 ==)
-		if (fcbdata@ AFSFCBData_Flags + @ AFSFILEFLAG_DELETE &)
+		end else
 			// delete the FCB
 
 			fcb@ AFSDelete
@@ -822,6 +736,10 @@ end
 
 fn AFSFCBRead { flags inum mount -- fcb ok }
 	fnsection "PAGE$text"
+
+	// assumes tree lock is held
+
+	0 ok!
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
@@ -841,17 +759,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 
 	auto bucket
 	inum@ AFSFCBMASK & bucket!
-
-	// throttle before we take any locks instead of after so that we don't
-	// deadlock the cache trimmer.
-
-	IOFileControlBlockThrottle
-
-	1 mount@ AFSFCBCacheLock ok!
-
-	if (ok@)
-		return
-	end
 
 	auto buckethead
 	afsdata@ AFSData_FCBBucketListHeads + bucket@ 3 << + buckethead!
@@ -883,8 +790,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 		AFSINodeRead ok! bcb! ptr!
 
 		if (ok@)
-			mount@ AFSFCBCacheUnlock
-
 			return
 		end
 
@@ -913,8 +818,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 		end
 
 		if (ok@)
-			mount@ AFSFCBCacheUnlock
-
 			bcb@ VcBufferDecrementMapCount drop
 
 			return
@@ -939,8 +842,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 			fcb@ // fcb
 			IOFileControlBlockDelete drop
 
-			mount@ AFSFCBCacheUnlock
-
 			bcb@ VcBufferDecrementMapCount drop
 
 			return
@@ -958,8 +859,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 			-1 // writeout
 			fcb@ // fcb
 			IOFileControlBlockDelete drop
-
-			mount@ AFSFCBCacheUnlock
 
 			bcb@ VcBufferDecrementMapCount drop
 
@@ -1027,8 +926,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 			if (fcbdata@ AFSFCBData_InitialFlags + @ OSFILEFLAG_PAGEFILE & ~~)
 				// fcbdata is in paged pool, so it won't work for the pagefile.
 
-				mount@ AFSFCBCacheUnlock
-
 				STATUS_FORBIDDEN_OPERATION ok!
 
 				return
@@ -1047,8 +944,6 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 			AFSFCBInsert
 		end
 
-		fcb@ AFSFCBReferenceLockHeld
+		fcb@ AFSFCBReference
 	end
-
-	mount@ AFSFCBCacheUnlock
 end

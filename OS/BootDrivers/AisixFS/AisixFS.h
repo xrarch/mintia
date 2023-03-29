@@ -39,9 +39,7 @@ struct AFSData
 	4 FreeBlockHint
 
 	KeMutex_SIZEOF FreeBlockBitmapMutex
-	KeMutex_SIZEOF INodeAllocationMutex
-	KeMutex_SIZEOF RenameMutex
-	KeMutex_SIZEOF FCBCacheMutex
+	KeMutex_SIZEOF TreeMutex
 
 	4 WritableFiles
 
@@ -123,10 +121,8 @@ extern AFSINodeFree { inum mount -- }
 extern AFSFCBReference { fcb -- }
 extern AFSFCBDereference { fcb -- }
 
-extern AFSFCBDelete { fcb -- }
-
-extern AFSFCBCacheLock { alertable mount -- ok }
-extern AFSFCBCacheUnlock { mount -- }
+extern AFSTreeLock { alertable mount -- ok }
+extern AFSTreeUnlock { mount -- }
 
 extern AFSFCBCacheFlush { destroy mount -- ok }
 extern AFSFCBRead { flags inum mount -- fcb ok }

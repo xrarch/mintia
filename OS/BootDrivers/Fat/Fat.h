@@ -161,8 +161,7 @@ struct FatData
 
 	12 VolumeLabel
 
-	KeMutex_SIZEOF FCBCacheMutex
-	KeMutex_SIZEOF RenameMutex
+	KeMutex_SIZEOF TreeMutex
 
 	KeMutex_SIZEOF FreeClusterBitmapMutex
 	ComBitmapHeader_SIZEOF FreeClusterBitmap
@@ -253,8 +252,8 @@ extern FatDirectoryRemoveCachedChild { childfcb mount -- }
 extern FatClusterChainValidate { mustlen cluster mount -- length ok }
 extern FatFCBMeasureSize { fcb -- ok }
 
-extern FatFCBCacheLock { alertable mount -- ok }
-extern FatFCBCacheUnlock { mount -- }
+extern FatTreeLock { alertable mount -- ok }
+extern FatTreeUnlock { mount -- }
 
 extern FatRootDirectoryFindVolumeLabel { mount -- }
 
@@ -280,7 +279,6 @@ extern FatUpdateModifyTimestamp { fcb fileobject -- }
 extern FatSetFile { info fileobject -- ok }
 
 extern FatFCBReference { fcb -- }
-extern FatFCBReferenceLockHeld { fcb -- }
 extern FatFCBDereference { fcb -- }
 
 extern FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }

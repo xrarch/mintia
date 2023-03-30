@@ -166,6 +166,37 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 		return
 	end
 
+	// we are now pretty sure this is a normal file/directory, so lock the
+	// paging rwlock if applicable.
+
+	iop@ fcb@ IOFileControlBlockLockSharedForPaging
+
+	// get the file size again since it may have changed due to truncation.
+
+	fcb@ IOFileControlBlock_SizeInBytes + @ bytesize!
+	iopl@ IOPacketLocation_Length + @ bytes!
+
+	// truncate length to file size.
+
+	bytesize@ offset@ -
+	bytes@
+	min bytes!
+
+	if (bytes@ ~~)
+		iop@ fcb@ IOFileControlBlockUnlockForPaging
+
+		1 done!
+
+		0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+		0 // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
 	bytes@ iopl@ IOPacketLocation_Context + !
 
 	pointerof FatReadWriteCallback iopl@ IOPacketLocation_CallbackRoutine + !
@@ -178,6 +209,8 @@ fn (IODispatchEnqueueIOPFunction) FatReadWriteFile { iopl -- done ok }
 	iopl@ // iopl
 	iop@ // iop
 	FatReadWrite ok!
+
+	iop@ fcb@ IOFileControlBlockUnlockForPaging
 
 	if (ok@)
 		rundownlisthead@ FatCleanupAssociatedIOPs

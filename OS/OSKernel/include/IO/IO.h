@@ -2,14 +2,21 @@ const IOVERSION_MAJOR 1
 const IOVERSION_MINOR 0
 
 const IOKFLAG_SWAPOUT 1  // this read is involved in a swapout operation which
-                         // means different page allocation behavior is needed
+                         // means different page allocation behavior is needed.
+                         // different between this and IOKFLAG_PAGEOUT is that
+                         // this is set by the modified page writer, whereas
+                         // IOKFLAG_PAGEOUT is set by the lazy writer.
 
 const IOKFLAG_URGENT   2
 const IOKFLAG_ZEROES   4  // force IOCachePageGet to allocate zero pages
 const IOKFLAG_SYSSPC   8  // IO op is system space paging
 const IOKFLAG_PAGEIN   16 // flush icache for page
 const IOKFLAG_CLUSTR   64 // return error if IO in progress
+const IOKFLAG_PAGEFILE 128 // pagefile I/O
+const IOKFLAG_PAGEOUT  256 // lazy writer I/O
 // NOTE: upper 4 bits of IOKFLAG are reserved for driver use
+
+const IOKFLAG_PAGING   (IOKFLAG_SWAPOUT IOKFLAG_PAGEIN | IOKFLAG_PAGEOUT |)
 
 extern IOInitPhase1 { -- }
 
@@ -110,9 +117,9 @@ const IOAVERAGEFCBCONTEXTPAGED 96
 extern IOFileControlBlockCreate { devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }
 
-extern IOFileControlBlockLockForPaging { fcb -- }
-extern IOFileControlBlockLockSharedForPaging { fcb -- }
-extern IOFileControlBlockUnlockForPaging { fcb -- }
+extern IOFileControlBlockLockForPaging { iop fcb -- }
+extern IOFileControlBlockLockSharedForPaging { iop fcb -- }
+extern IOFileControlBlockUnlockForPaging { iop fcb -- }
 
 extern IOFileControlBlockLockUnalertable { fcb -- }
 extern IOFileControlBlockLock { fcb -- ok }

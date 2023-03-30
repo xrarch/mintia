@@ -145,7 +145,7 @@ const MMPROCESSPINGUARANTEE 8
 const MMSYSTEMPROMISE         32
 const MMPHYSICALCOMMITMINIMUM 64
 
-extern MiPoolSpaceReserve { pagesneeded -- offset ok }
+extern MiPoolSpaceReserve { pri pagesneeded -- offset ok }
 extern MiPoolSpaceRelease { pages offset -- }
 
 extern MiMapQuickPage { phyaddr -- vaddr }

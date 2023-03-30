@@ -93,7 +93,9 @@ fn ExRwLockRelease { rwlock -- }
 
 	if (owner@ ExRwLockOwner_Locked + @)
 		// was held recursively
+
 		ipl@ KeIPLLower
+
 		return
 	end
 
@@ -174,28 +176,15 @@ fn ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 
 	0 ok!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	while (1)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-	if (rwlock@ ExRwLock_HeldCount + @ ~~)
-		1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
-		current@ rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
-		1 rwlock@ ExRwLock_HeldCount + !
+		if (rwlock@ ExRwLock_HeldCount + @ ~~)
+			1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
+			current@ rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
+			1 rwlock@ ExRwLock_HeldCount + !
 
-		ipl@ KeIPLLower
-
-		if (nowait@)
-			1 ok!
-		end
-
-		return
-	end
-
-	if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @)
-		if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ current@ ==)
-			// yoink
-
-			1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + +=
 			ipl@ KeIPLLower
 
 			if (nowait@)
@@ -204,66 +193,103 @@ fn ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 
 			return
 		end
-	end elseif (nowait@)
+
+		if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @)
+			if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ current@ ==)
+				// yoink
+
+				1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + +=
+
+				ipl@ KeIPLLower
+
+				if (nowait@)
+					1 ok!
+				end
+
+				return
+			end
+		end elseif (nowait@)
+			ipl@ KeIPLLower
+
+			0 ok!
+
+			return
+		end
+
+		if (alertable@)
+			// we need to wait, so check if we got killed.
+
+			KERNELMODE // mode
+			1 // alertable
+			1 // waiting
+			current@ // thread
+			KeThreadIsKilled ok!
+
+			if (ok@)
+				// thread was killed or received a signal that cannot be ignored
+
+				ipl@ KeIPLLower
+
+				return
+			end
+		end
+
+		auto exwev
+		rwlock@ ExRwLock_ExclusiveSyncEvent + @ exwev!
+
+		if (exwev@ ~~)
+			// theres no event! drop IPL and try to allocate one, then retry
+			// this entire thing.
+
+			ipl@ KeIPLLower
+
+			KeEvent_SIZEOF // bytes
+			'ReEE' // tag
+			MUSTSUCCEEDL2 CANBLOCK | // flags
+			MmAllocWithTag ok! exwev!
+
+			if (ok@)
+				if (alertable@ ~~)
+					// caller not expecting failure.
+
+					ok@ "rwlock ex (%i)\n" KeCrash
+				end
+
+				return
+			end
+
+			0 // signaled
+			OSEVENT_SYNCH // type
+			"ExRwLockExclusiveSyncEvent" // name
+			exwev@ // event
+			KeEventInitialize
+
+			IPLDPC KeIPLRaise ipl!
+
+			if (rwlock@ ExRwLock_ExclusiveSyncEvent + @)
+				// noo!! someone else allocated an event while we were trying
+				// to. we have to free ours and retry
+
+				ipl@ KeIPLLower
+
+				exwev@ MmFree
+
+				continue
+			end
+
+			exwev@ rwlock@ ExRwLock_ExclusiveSyncEvent + !
+
+			ipl@ KeIPLLower
+
+			continue
+		end
+
+		1 rwlock@ ExRwLock_ExclusiveWaitersCount + +=
+
 		ipl@ KeIPLLower
 
-		0 ok!
-
-		return
+		break
 	end
-
-	if (alertable@)
-		// we need to wait, so check if we got killed.
-
-		KERNELMODE // mode
-		1 // alertable
-		1 // waiting
-		current@ // thread
-		KeThreadIsKilled ok!
-
-		if (ok@)
-			// thread was killed or received a signal that cannot be ignored
-
-			ipl@ KeIPLLower
-
-			return
-		end
-	end
-
-	auto exwev
-	rwlock@ ExRwLock_ExclusiveSyncEvent + @ exwev!
-
-	if (exwev@ ~~)
-		if (KeThreadCurrent@ KeThread_IgnoreKill + @)
-			KeEvent_SIZEOF // bytes
-			'ReEE' // tag
-			MUSTSUCCEED // flags
-			MmAllocWithTag ok! exwev!
-		end else
-			KeEvent_SIZEOF // bytes
-			'ReEE' // tag
-			MUSTSUCCEEDL2 // flags
-			MmAllocWithTag ok! exwev!
-		end
-
-		if (ok@)
-			ipl@ KeIPLLower
-
-			return
-		end
-
-		0 // signaled
-		OSEVENT_SYNCH // type
-		"ExRwLockExclusiveSyncEvent" // name
-		exwev@ // event
-		KeEventInitialize
-
-		exwev@ rwlock@ ExRwLock_ExclusiveSyncEvent + !
-	end
-
-	1 rwlock@ ExRwLock_ExclusiveWaitersCount + +=
-
-	ipl@ KeIPLLower
 
 	exwev@ // event
 	rwlock@ // rwlock
@@ -295,155 +321,202 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 	auto current
 	KeThreadCurrent@ current!
 
-	0 ok!
+	while (1)
+		0 ok!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-	if (rwlock@ ExRwLock_HeldCount + @ ~~)
-		1 rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_Locked + !
-		current@ rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_OwningThread + !
-		1 rwlock@ ExRwLock_HeldCount + !
+		if (rwlock@ ExRwLock_HeldCount + @ ~~)
+			1 rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_Locked + !
+			current@ rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_OwningThread + !
+			1 rwlock@ ExRwLock_HeldCount + !
+
+			ipl@ KeIPLLower
+
+			if (nowait@)
+				1 ok!
+			end
+
+			return
+		end
+
+		auto exown
+
+		if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @)
+			if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ current@ ==)
+				// yoink
+
+				1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + +=
+				ipl@ KeIPLLower
+
+				if (nowait@)
+					1 ok!
+				end
+
+				return
+			end
+
+			if (nowait@)
+				ipl@ KeIPLLower
+
+				0 ok!
+
+				return
+			end
+
+			ipl@ // ipl
+			0 // thread
+			rwlock@ // rwlock
+			ExRwLockFindOwner ok! exown!
+
+			if (ok@)
+				ipl@ KeIPLLower
+
+				if (alertable@ ~~)
+					ok@ "rwlock o1 (%i)\n" KeCrash
+				end
+
+				return
+			end
+
+			if (exown@ ~~)
+				ipl@ KeIPLLower
+
+				continue
+			end
+		end else
+			ipl@ // ipl
+			current@ // thread
+			rwlock@ // rwlock
+			ExRwLockFindOwner ok! exown!
+
+			if (ok@)
+				ipl@ KeIPLLower
+
+				if (alertable@ ~~)
+					ok@ "rwlock o2 (%i)\n" KeCrash
+				end
+
+				return
+			end
+
+			if (exown@ ~~)
+				ipl@ KeIPLLower
+
+				continue
+			end
+
+			if (exown@ ExRwLockOwner_OwningThread + @ current@ ==)
+				// yoink recursively
+
+				1 exown@ ExRwLockOwner_Locked + +=
+
+				ipl@ KeIPLLower
+
+				if (nowait@)
+					1 ok!
+				end
+
+				return
+			end
+
+			if (canstarve@ rwlock@ ExRwLock_ExclusiveWaitersCount + @ ~~ ||)
+				current@ exown@ ExRwLockOwner_OwningThread + !
+				1 exown@ ExRwLockOwner_Locked + !
+				1 rwlock@ ExRwLock_HeldCount + +=
+
+				ipl@ KeIPLLower
+
+				if (nowait@)
+					1 ok!
+				end
+
+				return
+			end elseif (nowait@)
+				ipl@ KeIPLLower
+
+				0 ok!
+
+				return
+			end
+		end
+
+		if (alertable@)
+			// we need to wait, so check if we got killed.
+
+			KERNELMODE // mode
+			1 // alertable
+			1 // waiting
+			current@ // thread
+			KeThreadIsKilled ok!
+
+			if (ok@)
+				// thread was killed or received a signal that cannot be ignored
+
+				ipl@ KeIPLLower
+
+				return
+			end
+		end
+
+		auto shwev
+		rwlock@ ExRwLock_SharedSemaphore + @ shwev!
+
+		if (shwev@ ~~)
+			// theres no semaphore! drop IPL and try to allocate one, then
+			// retry this entire thing.
+
+			ipl@ KeIPLLower
+
+			KeSemaphore_SIZEOF // bytes
+			'ReSS' // tag
+			MUSTSUCCEEDL2 CANBLOCK | // flags
+			MmAllocWithTag ok! shwev!
+
+			if (ok@)
+				if (alertable@ ~~)
+					// caller not expecting failure.
+
+					ok@ "rwlock sh (%i)\n" KeCrash
+				end
+
+				return
+			end
+
+			0 // count
+			"ExRwLockSharedSemaphore" // name
+			shwev@ // semaphore
+			KeSemaphoreInitialize
+
+			IPLDPC KeIPLRaise ipl!
+
+			if (rwlock@ ExRwLock_SharedSemaphore + @)
+				// noo!! someone else allocated an event while we were trying
+				// to. we have to free ours and retry
+
+				ipl@ KeIPLLower
+
+				shwev@ MmFree
+
+				continue
+			end
+
+			shwev@ rwlock@ ExRwLock_SharedSemaphore + !
+
+			ipl@ KeIPLLower
+
+			continue
+		end
+
+		current@ exown@ ExRwLockOwner_OwningThread + !
+		1 exown@ ExRwLockOwner_Locked + !
+		1 rwlock@ ExRwLock_SharedWaitersCount + +=
 
 		ipl@ KeIPLLower
 
-		if (nowait@)
-			1 ok!
-		end
-
-		return
+		break
 	end
-
-	auto exown
-
-	if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @)
-		if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ current@ ==)
-			// yoink
-
-			1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + +=
-			ipl@ KeIPLLower
-
-			if (nowait@)
-				1 ok!
-			end
-
-			return
-		end
-
-		if (nowait@)
-			ipl@ KeIPLLower
-
-			0 ok!
-
-			return
-		end
-
-		0 // thread
-		rwlock@ // rwlock
-		ExRwLockFindOwner ok! exown!
-
-		if (ok@)
-			ipl@ KeIPLLower
-
-			return
-		end
-	end else
-		current@ // thread
-		rwlock@ // rwlock
-		ExRwLockFindOwner ok! exown!
-
-		if (ok@)
-			ipl@ KeIPLLower
-
-			return
-		end
-
-		if (exown@ ExRwLockOwner_OwningThread + @ current@ ==)
-			// yoink
-			1 exown@ ExRwLockOwner_Locked + +=
-			ipl@ KeIPLLower
-
-			if (nowait@)
-				1 ok!
-			end
-
-			return
-		end
-
-		if (canstarve@ rwlock@ ExRwLock_ExclusiveWaitersCount + @ ~~ ||)
-			current@ exown@ ExRwLockOwner_OwningThread + !
-			1 exown@ ExRwLockOwner_Locked + !
-			1 rwlock@ ExRwLock_HeldCount + +=
-
-			ipl@ KeIPLLower
-
-			if (nowait@)
-				1 ok!
-			end
-
-			return
-		end elseif (nowait@)
-			ipl@ KeIPLLower
-
-			0 ok!
-
-			return
-		end
-	end
-
-	if (alertable@)
-		// we need to wait, so check if we got killed.
-
-		KERNELMODE // mode
-		1 // alertable
-		1 // waiting
-		current@ // thread
-		KeThreadIsKilled ok!
-
-		if (ok@)
-			// thread was killed or received a signal that cannot be ignored
-
-			ipl@ KeIPLLower
-
-			return
-		end
-	end
-
-	auto shwev
-	rwlock@ ExRwLock_SharedSemaphore + @ shwev!
-
-	if (shwev@ ~~)
-		if (KeThreadCurrent@ KeThread_IgnoreKill + @)
-			KeSemaphore_SIZEOF // bytes
-			'ReSS' // tag
-			MUSTSUCCEED // flags
-			MmAllocWithTag ok! shwev!
-		end else
-			KeSemaphore_SIZEOF // bytes
-			'ReSS' // tag
-			MUSTSUCCEEDL2 // flags
-			MmAllocWithTag ok! shwev!
-		end
-
-		if (ok@)
-			ipl@ KeIPLLower
-
-			return
-		end
-
-		0 // count
-		"ExRwLockSharedSemaphore" // name
-		shwev@ // semaphore
-		KeSemaphoreInitialize
-
-		shwev@ rwlock@ ExRwLock_SharedSemaphore + !
-	end
-
-	current@ exown@ ExRwLockOwner_OwningThread + !
-	1 exown@ ExRwLockOwner_Locked + !
-	1 rwlock@ ExRwLock_SharedWaitersCount + +=
-
-	ipl@ KeIPLLower
 
 	shwev@ // event
 	rwlock@ // rwlock
@@ -470,53 +543,65 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 end
 
 fn ExRwLockDemoteToShared { rwlock -- ok }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (DEBUGCHECKS)
-		if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ KeThreadCurrent@ ~=)
-			"ExRwLockDemoteToShared: didn't own exclusively\n" KeCrash
-		end
-	end
-
-	// find a slot to put us in
-
-	auto owner
-	0 // thread
-	rwlock@ // rwlock
-	ExRwLockFindOwner ok! owner!
-
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
-
-	0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
-
-	KeThreadCurrent@ owner@ ExRwLockOwner_OwningThread + !
-	rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @ owner@ ExRwLockOwner_Locked + !
-
-	0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
-
-	auto waiters
-	rwlock@ ExRwLock_SharedWaitersCount + @ waiters!
-
-	if (waiters@)
-		waiters@ 1 + rwlock@ ExRwLock_HeldCount + !
-		0 rwlock@ ExRwLock_SharedWaitersCount + !
-
-		waiters@ // adjustment
-		rwlock@ ExRwLock_SharedSemaphore + @ // semaphore
-		KeSemaphoreRelease waiters!
+	while (1)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
 		if (DEBUGCHECKS)
-			if (waiters@)
-				waiters@ "ExRwLockDemoteToShared: couldn't release semaphore (%i)\n" KeCrash
+			if (rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + @ KeThreadCurrent@ ~=)
+				"ExRwLockDemoteToShared: didn't own exclusively\n" KeCrash
 			end
 		end
-	end
 
-	ipl@ KeIPLLower
+		// find a slot to put us in
+
+		auto owner
+		ipl@ // ipl
+		0 // thread
+		rwlock@ // rwlock
+		ExRwLockFindOwner ok! owner!
+
+		if (ok@)
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		if (owner@ ~~)
+			ipl@ KeIPLLower
+
+			continue
+		end
+
+		0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
+
+		KeThreadCurrent@ owner@ ExRwLockOwner_OwningThread + !
+		rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + @ owner@ ExRwLockOwner_Locked + !
+
+		0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
+
+		auto waiters
+		rwlock@ ExRwLock_SharedWaitersCount + @ waiters!
+
+		if (waiters@)
+			waiters@ 1 + rwlock@ ExRwLock_HeldCount + !
+			0 rwlock@ ExRwLock_SharedWaitersCount + !
+
+			waiters@ // adjustment
+			rwlock@ ExRwLock_SharedSemaphore + @ // semaphore
+			KeSemaphoreRelease waiters!
+
+			if (DEBUGCHECKS)
+				if (waiters@)
+					waiters@ "ExRwLockDemoteToShared: couldn't release semaphore (%i)\n" KeCrash
+				end
+			end
+		end
+
+		ipl@ KeIPLLower
+
+		break
+	end
 end
 
 fn ExRwLockWait { event rwlock -- ok }
@@ -570,7 +655,7 @@ fn ExRwLockWait { event rwlock -- ok }
 	end
 end
 
-fn ExRwLockFindOwner { thread rwlock -- owner ok }
+fn ExRwLockFindOwner { ipl thread rwlock -- owner ok }
 	0 ok!
 
 	if (thread@)
@@ -617,6 +702,10 @@ fn ExRwLockFindOwner { thread rwlock -- owner ok }
 
 	rwlock@ ExRwLock_TableSize + @ oldsize!
 
+	ipl@ KeIPLLower
+
+	// return zero in owner to signify to caller to retry the acquire.
+
 	auto newsize
 	if (oldsize@ ~~)
 		3 newsize!
@@ -624,19 +713,24 @@ fn ExRwLockFindOwner { thread rwlock -- owner ok }
 		oldsize@ 4 + newsize!
 	end
 
-	if (KeThreadCurrent@ KeThread_IgnoreKill + @)
-		newsize@ ExRwLockOwner_SIZEOF * // bytes
-		'ReTa' // tag
-		MUSTSUCCEED // flags
-		MmAllocWithTag ok! owner!
-	end else
-		newsize@ ExRwLockOwner_SIZEOF * // bytes
-		'ReTa' // tag
-		MUSTSUCCEEDL2 // flags
-		MmAllocWithTag ok! owner!
-	end
+	newsize@ ExRwLockOwner_SIZEOF * // bytes
+	'SOTa' // tag
+	MUSTSUCCEEDL2 CANBLOCK | // flags
+	MmAllocWithTag ok! owner!
+
+	IPLDPC KeIPLRaise ipl!
 
 	if (ok@)
+		return
+	end
+
+	if (rwlock@ ExRwLock_TableSize + @ oldsize@ ~=)
+		// someone already grew it... free what we did and return to retry.
+
+		owner@ MmFree
+
+		0 owner!
+
 		return
 	end
 
@@ -657,5 +751,5 @@ fn ExRwLockFindOwner { thread rwlock -- owner ok }
 	owner@ rwlock@ ExRwLock_OwnerTable + !
 	newsize@ rwlock@ ExRwLock_TableSize + !
 
-	oldsize@ ExRwLockOwner_SIZEOF * owner +=
+	0 owner!
 end

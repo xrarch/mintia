@@ -283,50 +283,76 @@ var MiPoolPageHint 0
 var MiPoolSpaceUsed 0
 public MiPoolSpaceUsed
 
-fn MiPoolSpaceReserve { pagesneeded -- offset ok }
+fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
 	auto bmpheader
 	MiPoolSpaceBitmapHeader bmpheader!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	while (1)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-	MiPoolPageHint@ // hint
-	pagesneeded@ // runlength
-	bmpheader@ // header
-	ComBitmapFindRun ok! offset!
+		MiPoolPageHint@ // hint
+		pagesneeded@ // runlength
+		bmpheader@ // header
+		ComBitmapFindRun ok! offset!
 
-	if (ok@)
-		if (DEBUGCHECKS)
-			bmpheader@ ComBitmapDump
-			ok@ pagesneeded@ "\n\n%d (%i)\n" Printf
+		if (ok@)
+			if (pri@ PAGED CANBLOCK | & ~~
+				DEBUGCHECKS ||)
 
-			POOLPAGES
-			MiPoolSpaceUsed@
-			"used: %d / %d\n" Printf
+				ipl@ KeIPLLower
 
-			MmPagedPoolBytesUsed@ PAGESHIFT >>
-			"pagedpool: %d\n" Printf
+				// just crash right away if can't block or checked build
 
-			"out of poolspace\n" KeCrash
+				bmpheader@ ComBitmapDump
+				ok@ pagesneeded@ "\n\n%d (%i)\n" Printf
+
+				POOLPAGES
+				MiPoolSpaceUsed@
+				"used: %d / %d\n" Printf
+
+				MmPagedPoolBytesUsed@ PAGESHIFT >>
+				"pagedpool: %d\n" Printf
+
+				"out of poolspace\n" KeCrash
+
+				return
+			end
+
+			// wait aimlessly for 100 milliseconds and repeat the request.
+			// this is a last resort for stability purposes on release builds.
+			// we should never ever get to this point; POOLSPACE is not
+			// designed to be a scarce resource like physical and virtual
+			// memory are, since the chicken and egg problem has to have a
+			// first chicken somewhere. this is not a problem during normal
+			// operation since pool quota prevents user processes from
+			// consuming this much POOLSPACE, and its honestly difficult to
+			// run out of POOLSPACE without running out of other resources
+			// first (which can be coped with) anyway.
+
+			ipl@ KeIPLLower
+
+			100 // ms
+			KERNELMODE // waitmode
+			0 // alertable
+			KeThreadSleep drop
+
+			continue
 		end
+
+		offset@ MiPoolPageHint!
+
+		pagesneeded@ // runlength
+		offset@ // index
+		bmpheader@ // header
+		ComBitmapSetBits
+
+		pagesneeded@ MiPoolSpaceUsed +=
 
 		ipl@ KeIPLLower
 
-		STATUS_NO_MEMORY ok!
-
-		return
+		break
 	end
-
-	offset@ MiPoolPageHint!
-
-	pagesneeded@ // runlength
-	offset@ // index
-	bmpheader@ // header
-	ComBitmapSetBits
-
-	pagesneeded@ MiPoolSpaceUsed +=
-
-	ipl@ KeIPLLower
 end
 
 fn MiPoolSpaceRelease { pages offset -- }
@@ -360,7 +386,9 @@ fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 	end
 
 	auto startva
-	pages@ MiPoolSpaceReserve ok! startva!
+	CANBLOCK // pri
+	pages@ // pages
+	MiPoolSpaceReserve ok! startva!
 
 	if (ok@)
 		pages@ PAGESHIFT << // charge
@@ -519,6 +547,7 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 
 	auto offset
 
+	flags@ // pri
 	pagesneeded@ // pagesneeded
 	MiPoolSpaceReserve ok! offset!
 

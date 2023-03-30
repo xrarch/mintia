@@ -1,6 +1,6 @@
 externptr HALPlatformKernelPageDirectory
 
-const POOLSIZE  (8 1024 * 1024 *)
+const POOLSIZE  (12 1024 * 1024 *)
 const POOLPAGES (POOLSIZE PAGESHIFT >>)
 
 const VIEWSIZE  (8 1024 * 1024 *)

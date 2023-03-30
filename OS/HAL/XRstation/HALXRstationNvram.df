@@ -1,0 +1,182 @@
+//
+// Implements NVRAM control for XR/station.
+//
+
+#include "<df>/dragonfruit.h"
+#include "../../OSLoader/OSLoaderGlobal.h"
+
+#include "<inc>/HALLog.h"
+
+#include "<inc>/HALIPL.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALCrash.h"
+#include "<inc>/HALNvram.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+// synchronization for these functions is provided by the caller.
+
+const NVRAMSIZE     65536
+const NVRAMVARCOUNT 255
+
+struct NVRAMHeader
+	4 Magic
+endstruct
+
+struct NVRAMVariable
+	32 Name
+	224 Contents
+endstruct
+
+externptr HALLoaderInfo
+
+fn HALNvramQuery { query -- ok }
+	// query a specific variable by name.
+
+	// caller made sure query is valid and null terminated properly.
+
+	STATUS_NO_VARIABLE ok!
+
+	auto i
+	0 i!
+
+	auto sp
+	HALLoaderInfo@ LdrInfo_NVRAMBase + @ sp!
+
+	NVRAMHeader_SIZEOF sp +=
+
+	while (i@ NVRAMVARCOUNT <)
+		if (sp@ NVRAMVariable_Name +
+			query@ OSNvramQuery_Name +
+			31
+			strncmp)
+
+			0 ok!
+
+			query@ OSNvramQuery_Contents + // dest
+			sp@ NVRAMVariable_Contents + // src
+			223 // max
+			strncpy
+
+			return
+		end
+
+		sp@ NVRAMVariable_SIZEOF + sp!
+		1 i +=
+	end
+end
+
+fn HALNvramSet { delete query -- ok }
+	// set a specific variable.
+
+	// caller made sure query is valid and null terminated properly.
+
+	STATUS_NO_VARIABLE ok!
+
+	auto i
+	0 i!
+
+	auto lastfree
+	-1 lastfree!
+
+	auto sp
+	HALLoaderInfo@ LdrInfo_NVRAMBase + @ sp!
+
+	NVRAMHeader_SIZEOF sp +=
+
+	while (i@ NVRAMVARCOUNT <)
+		if (sp@ NVRAMVariable_Name +
+			query@ OSNvramQuery_Name +
+			31
+			strncmp)
+
+			0 ok!
+
+			if (delete@)
+				0 sp@ NVRAMVariable_Name + sb
+			end else
+				sp@ NVRAMVariable_Contents + // dest
+				query@ OSNvramQuery_Contents + // src
+				223 // max
+				strncpy
+			end
+
+			return
+		end elseif (sp@ NVRAMVariable_Name + gb ~~)
+			sp@ lastfree!
+		end
+
+		sp@ NVRAMVariable_SIZEOF + sp!
+		1 i +=
+	end
+
+	if (delete@)
+		0 ok!
+
+		return
+	end
+
+	if (lastfree@ -1 ==)
+		STATUS_END_OF_DISK ok!
+
+		return
+	end
+
+	0 ok!
+
+	// new variable
+
+	lastfree@ NVRAMVariable_Name + // dest
+	query@ OSNvramQuery_Name + // src
+	31 // max
+	strncpy
+
+	lastfree@ NVRAMVariable_Contents + // dest
+	query@ OSNvramQuery_Contents + // src
+	223 // max
+	strncpy
+end
+
+fn HALNvramRead { query index -- nextindex ok }
+	// query a variable by opaque index and return the next index value.
+	// if -1 is provided, then the first variable will be read.
+
+	// caller made sure query is valid and null terminated properly.
+
+	if (index@ -1 ==)
+		0 index!
+	end
+
+	STATUS_NO_VARIABLE ok!
+
+	auto sp
+	HALLoaderInfo@ LdrInfo_NVRAMBase + @ sp!
+
+	NVRAMHeader_SIZEOF sp +=
+
+	index@ NVRAMVariable_SIZEOF * sp +=
+
+	while (index@ NVRAMVARCOUNT <)
+		if (sp@ NVRAMVariable_Name + gb)
+			0 ok!
+
+			query@ OSNvramQuery_Name + // dest
+			sp@ NVRAMVariable_Name + // src
+			31 // max
+			strncpy
+
+			query@ OSNvramQuery_Contents + // dest
+			sp@ NVRAMVariable_Contents + // src
+			223 // max
+			strncpy
+
+			index@ 1 + nextindex!
+
+			return
+		end
+
+		sp@ NVRAMVariable_SIZEOF + sp!
+		1 index +=
+	end
+end

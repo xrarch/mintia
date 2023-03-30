@@ -46,6 +46,10 @@ extern OSTimerReadState { timerhandle -- signaled ok }
 
 extern OSGetStatistics { statistics -- ok }
 
+extern OSNvramVariableQuery { query -- ok }
+extern OSNvramVariableSet { delete query -- ok }
+extern OSNvramVariableRead { query index -- nextindex ok }
+
 extern OSIsComputerOn { -- ison ok }
 extern OSIsComputerOnFire { -- isonfire ok }
 

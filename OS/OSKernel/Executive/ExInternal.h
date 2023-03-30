@@ -33,3 +33,10 @@ const EXBOOSTEXCLUSIVEWAITER 2
 const EXBOOSTSHAREDWAITER    1
 
 const EXBOOSTTIMEOUT 300
+
+
+// nvram stuff
+
+
+extern ExiNvramLock { -- }
+extern ExiNvramUnlock { -- }

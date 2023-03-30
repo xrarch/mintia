@@ -22,5 +22,6 @@
 #include "<ll>/OSDLL/OSStream.h"
 #include "<ll>/OSDLL/OSPort.h"
 #include "<ll>/OSDLL/OSIOControl.h"
+#include "<ll>/OSDLL/OSNvramControl.h"
 
 #include "<ll>/OSDLL/OSContext.h"

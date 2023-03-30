@@ -43,6 +43,7 @@ struct LdrInfo
 #ifdef XRSTATION
 	4 CitronBase
 	4 LSICBase
+	4 NVRAMBase
 #endif
 endstruct
 

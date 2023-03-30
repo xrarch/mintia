@@ -100,5 +100,6 @@ const STATUS_JOB_DEPTH                -98
 const STATUS_FILE_CORRUPT             -99
 const STATUS_FAULT_WRITE              -100
 const STATUS_FILE_BUSY                -101
+const STATUS_NO_VARIABLE              -102
 
 extern OSStatusGetName { status -- name }

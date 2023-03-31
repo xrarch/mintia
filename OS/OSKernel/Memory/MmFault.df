@@ -135,35 +135,39 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		end
 
 		while (signal@ STATUS_REFAULT ==)
-			if (refaults@ 10 >=)
-				// If this thread has refaulted more than 10 times, then
-				// the process is probably stuck in a situation where its
-				// working set has become a revolving door of death. If we
-				// don't sleep and allow the working set trimmer to do some
-				// work, it may be stuck in this situation forever. NOTE that
-				// this is a very rare occurrence and only happens with
-				// realtime priority threads (whose priority is greater than
-				// that of the working set trimmer) in situations of prolonged
-				// extreme memory pressure.
+			if (process@ PsSystemProcess@ ==
+				KeThreadCurrent@ KeThread_PriorityB + gb PRIORITY_LOWREALTIME >= ||)
 
-				if (kernelmapping@ ~~)
-					process@ MmVADListUnlock
+				if (process@ PsProcess_PageFaultCount + @ refaults@ + 0xFFF & 0x300 ==)
+					// If this thread has refaulted more than 10 times, then
+					// the process is probably stuck in a situation where its
+					// working set has become a revolving door of death. If we
+					// don't sleep and allow the working set trimmer to do some
+					// work, it may be stuck in this situation forever. NOTE that
+					// this is a very rare occurrence and only happens with
+					// realtime priority threads (whose priority is greater than
+					// that of the working set trimmer) in situations of prolonged
+					// extreme memory pressure.
+
+					if (kernelmapping@ ~~)
+						process@ MmVADListUnlock
+					end
+
+					ipl@ KeIPLLower
+
+					50 // ms
+					KERNELMODE // waitmode
+					0 // alertable
+					KeThreadSleep drop
+
+					IPLAPC KeIPLRaise ipl!
+
+					if (kernelmapping@ ~~)
+						process@ MmVADListLock drop
+					end
+
+					0 refaults!
 				end
-
-				ipl@ KeIPLLower
-
-				50 // ms
-				KERNELMODE // waitmode
-				0 // alertable
-				KeThreadSleep drop
-
-				IPLAPC KeIPLRaise ipl!
-
-				if (kernelmapping@ ~~)
-					process@ MmVADListLock drop
-				end
-
-				0 refaults!
 			end
 
 			1 refaults +=

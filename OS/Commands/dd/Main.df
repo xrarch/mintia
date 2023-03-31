@@ -1,0 +1,356 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+fn Usage { -- }
+	"usage: dd [option=value] ...\n" OSGetStdErr FPrintf
+end
+
+var PartialInputRecords 0
+var PartialOutputRecords 0
+
+var FullInputRecords 0
+var FullOutputRecords 0
+
+var BlockSize 512
+var IBlockSize 512
+var OBlockSize 512
+var BlockCount -1
+var ISeek 0
+var OSeek 0
+var Trunc 1
+var Buffer 0
+
+fn Main { ... -- ret }
+	auto inhandle
+	OSGetStdIn inhandle!
+
+	auto outhandle
+	OSGetStdOut outhandle!
+
+	// process options
+
+	auto option
+	256 alloc option!
+
+	auto value
+	256 alloc value!
+
+	auto convopt
+	256 alloc convopt!
+
+	auto i
+	1 i!
+
+	while (i@ argc@ <)
+		auto arg
+		[i@]argv@ arg!
+
+		auto dest
+		option@ dest!
+
+		while (arg@ gb)
+			if (arg@ gb '=' ==)
+				1 arg +=
+				break
+			end
+
+			arg@ gb dest@ sb
+
+			1 arg +=
+			1 dest +=
+		end
+
+		0 dest@ sb
+
+		value@ dest!
+
+		while (arg@ gb)
+			arg@ gb dest@ sb
+
+			1 arg +=
+			1 dest +=
+		end
+
+		0 dest@ sb
+
+		if (value@ gb ~~)
+			// no value
+			Usage
+			-1 OSExit
+		end
+
+		if (option@ "bs" strcmp)
+			value@ atoi BlockSize!
+
+			if (BlockSize@ ~~)
+				Usage
+				-1 OSExit
+			end
+
+			BlockSize@ IBlockSize!
+			BlockSize@ OBlockSize!
+		end elseif (option@ "obs" strcmp)
+			value@ atoi OBlockSize!
+
+			if (OBlockSize@ ~~)
+				Usage
+				-1 OSExit
+			end
+		end elseif (option@ "ibs" strcmp)
+			value@ atoi IBlockSize!
+
+			if (IBlockSize@ ~~)
+				Usage
+				-1 OSExit
+			end
+		end elseif (option@ "count" strcmp)
+			value@ atoi BlockCount!
+		end elseif (option@ "if" strcmp)
+			if (inhandle@ OSGetStdIn ~=)
+				inhandle@ OSClose drop
+			end
+
+			0 // flags
+			ACCESS_READ // access
+			value@ // path
+			0 // ftype
+			OSFileOpen ret! inhandle!
+
+			if (ret@)
+				ret@ OSStatusGetName
+				value@
+				"dd: couldn't open %s: %s\n" OSError
+			end
+
+			// drop page cache for input file
+
+			1 // purge
+			inhandle@ // filehandle
+			OSFileFlush drop
+		end elseif (option@ "of" strcmp)
+			if (outhandle@ OSGetStdOut ~=)
+				outhandle@ OSClose drop
+			end
+
+			OSDEFAULTFILEPERMISSIONS // permissions
+			0 // flags
+			ACCESS_WRITE // access
+			value@ // path
+			OSFileCreate ret! outhandle!
+
+			if (ret@)
+				ret@ OSStatusGetName
+				value@
+				"dd: couldn't open %s: %s\n" OSError
+			end
+		end elseif (option@ "iseek" strcmp)
+			value@ atoi ISeek!
+		end elseif (option@ "oseek" strcmp)
+			value@ atoi OSeek!
+		end elseif (option@ "conv" strcmp)
+			auto src
+			value@ src!
+
+			while (src@ gb)
+				convopt@ dest!
+
+				while (src@ gb)
+					if (src@ gb ',' ==)
+						1 src +=
+						break
+					end
+
+					src@ gb dest@ sb
+
+					1 src +=
+					1 dest +=
+				end
+
+				0 dest@ sb
+
+				if (convopt@ "notrunc" strcmp)
+					0 Trunc!
+				end else
+					Usage
+					-1 OSExit
+				end
+			end
+		end else
+			Usage
+			-1 OSExit
+		end
+
+		1 i +=
+	end
+
+	auto bufsize
+
+	if (IBlockSize@ OBlockSize@ >=)
+		IBlockSize@ bufsize!
+	end else
+		// we wanna be able to hold OBlockSize rounded to the next multiple of
+		// IBlockSize.
+
+		OBlockSize@ IBlockSize@ 1 - + IBlockSize@ / IBlockSize@ * bufsize!
+
+		bufsize@ "%d\n" Printf
+	end
+
+	bufsize@ OSHeapAllocate ret! Buffer!
+
+	if (ret@)
+		ret@ OSStatusGetName "dd: couldn't allocate buffer: %s\n" OSError
+	end
+
+	if (ISeek@)
+		ISeek@ IBlockSize@ * // offset
+		inhandle@ // handle
+		OSSEEK_SET // mode
+		OSFileSeek drop drop
+	end
+
+	if (OSeek@)
+		OSeek@ OBlockSize@ * // offset
+		outhandle@ // handle
+		OSSEEK_SET // mode
+		OSFileSeek drop drop
+	end
+
+	if (outhandle@ OSGetStdOut ~=)
+		if (Trunc@)
+			OSeek@ BlockSize@ * // newsize
+			0 // growing
+			outhandle@ // handle
+			OSFileTruncate ret! drop
+
+			if (ret@)
+				ret@ OSStatusGetName
+				value@
+				"dd: couldn't truncate %s: %s\n" OSError
+			end
+		end
+	end
+
+	if (OSSIGNAL_INT OSSignalGetAction OSSIGNALACTION_IGNORE ~=)
+		pointerof SignalInterrupt // action
+		OSSIGNAL_INT // signum
+		OSSignalSetAction drop
+	end
+
+	inhandle@ // inhandle
+	outhandle@ // outhandle
+	Dd
+end
+
+fn Dd { inhandle outhandle -- }
+	auto ok
+
+	auto buf
+	Buffer@ buf!
+
+	auto bytestowrite
+	0 bytestowrite!
+
+	while (BlockCount@)
+		auto bytesread
+		OSWAIT_TIMEOUTINFINITE // timeout
+		0 // flags
+		IBlockSize@ // length
+		buf@ // buffer
+		inhandle@ // filehandle
+		OSFileRead ok! bytesread!
+
+		if (ok@)
+			ok@ OSStatusGetName "dd: read error: %s\n" OSGetStdErr FPrintf
+
+			-1 Done
+		end
+
+		if (bytesread@ ~~)
+			if (bytestowrite@ ~~)
+				break
+			end else
+				// there's no more to read, but we have some stuff to write
+				// pending. set blockcount to 1 to trigger a final write.
+
+				1 BlockCount!
+			end
+		end else
+			bytesread@ bytestowrite +=
+
+			if (bytesread@ IBlockSize@ ==)
+				1 FullInputRecords +=
+			end else
+				1 PartialInputRecords +=
+			end
+		end
+
+		if (bytestowrite@ OBlockSize@ >= BlockCount@ 1 == ||)
+			// write regardless of whether we have enough to satisfy an output
+			// block, or this is the final input block, since we won't get
+			// another opportunity.
+
+			Buffer@ buf!
+
+			while (1)
+				if (BlockCount@ 1 >)
+					if (bytestowrite@ OBlockSize@ <)
+						break
+					end
+				end elseif (bytestowrite@ ~~)
+					break
+				end
+
+				auto byteswritten
+				0 // flags
+				OBlockSize@ bytestowrite@ min // length
+				buf@ // buffer
+				outhandle@ // filehandle
+				OSFileWrite ok! byteswritten!
+
+				if (ok@)
+					ok@ OSStatusGetName "dd: write error: %s\n" OSGetStdErr FPrintf
+
+					-1 Done
+				end
+
+				if (byteswritten@ OBlockSize@ ==)
+					1 FullOutputRecords +=
+				end else
+					1 PartialOutputRecords +=
+				end
+
+				byteswritten@ bytestowrite -=
+				byteswritten@ buf +=
+			end
+
+			Buffer@ buf!
+		end else
+			IBlockSize@ buf +=
+		end
+
+		1 BlockCount -=
+	end
+
+	0 Done
+end
+
+fn (OSSignalHandler) SignalInterrupt { context signum -- }
+	signum@ 128 + Done
+end
+
+fn Statistics { -- }
+	PartialInputRecords@
+	FullInputRecords@
+	"%d+%d records in\n" OSGetStdErr FPrintf
+
+	PartialOutputRecords@
+	FullOutputRecords@
+	"%d+%d records out\n" OSGetStdErr FPrintf
+end
+
+fn Done { status -- }
+	Statistics
+	status@ OSExit
+end

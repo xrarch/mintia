@@ -40,6 +40,7 @@ const OSSIGNALCOUNT 32
 
 extern OSSignalSetDefaults { -- }
 extern OSSignalSetAction { action signum -- oldaction }
+extern OSSignalGetAction { signum -- action }
 
 extern OSSignalGetName { signum -- signame ok }
 extern OSSignalGetNumber { signame -- signum ok }

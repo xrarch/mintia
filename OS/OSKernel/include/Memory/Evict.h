@@ -11,6 +11,7 @@ const MMEVICTFLAG_IOINPROGRESS 128
 const MMEVICTTYPE_FILE       0
 const MMEVICTTYPE_ANON       1
 
+extern MmEvictablePageInitialize { flags evictabletype pfdbe -- }
 extern MmEvictablePageGet { flags evictabletype priority -- pfdbe pfn ok }
 extern MmEvictablePageDelete { pfdbe -- }
 extern MmEvictablePageDereference { pfdbe -- oldcount }

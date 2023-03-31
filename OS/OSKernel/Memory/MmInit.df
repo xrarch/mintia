@@ -759,6 +759,19 @@ fn MmInitPhysicalCommit { -- }
 	MmIncrementCommitLimit
 end
 
+fn MiSysPTEDereferenceAndSet { pfdbe pte pteaddr -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	pfdbe@ MmEvictablePageDereference drop
+
+	pte@ // pte
+	pteaddr@ // pteaddr
+	MiPTESet
+
+	ipl@ KeIPLLower
+end
+
 fn MiUnwireKernel { -- }
 	fnsection "PAGE$text"
 
@@ -817,15 +830,11 @@ fn MiUnwireKernel { -- }
 
 				auto pfdbe
 				phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-				0 pfdbe@ MiPageFrameEntryAnonymous_Next + !
-				0 pfdbe@ MiPageFrameEntryAnonymous_Prev + !
-
-				MMEVICTFLAG_PRIVATE MMEVICTFLAG_MODIFIED | pfdbe@ MiPageFrameEntryAnonymous_EvictionFlagsB + sb
-
-				MMEVICTTYPE_ANON pfdbe@ MiPageFrameEntryAnonymous_EvictionTypeB + sb
-
-				1 pfdbe@ MiPageFrameEntryAnonymous_ReferencesI + si
+				
+				MMEVICTFLAG_PRIVATE MMEVICTFLAG_MODIFIED | MMEVICTFLAG_WORKINGSET | // flags
+				MMEVICTTYPE_ANON // evictabletype
+				pfdbe@ // pfdbe
+				MmEvictablePageInitialize
 
 				PTE_TLBHACK pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
@@ -834,14 +843,10 @@ fn MiUnwireKernel { -- }
 				PsSystemProcess@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
 				vaddr@ pfdbe@ MiPageFrameEntryAnonymous_VirtualAddress + !
 
-				pfdbe@ MmEvictablePageDereference drop
-
-				MMEVICTFLAG_WORKINGSET pfdbe@ MiPageFrameEntryAnonymous_EvictionFlagsB + gb |
-				pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
-
+				pfdbe@ // pfdbe
 				phyaddr@ PTE_TRANSITION | PTE_TLBHACK | // pte
 				pteaddr@ // pteaddr
-				MiPTESet
+				MiSysPTEDereferenceAndSet
 
 				1 MmPageTotal KeInterlockedIncrement drop
 				1 MmAnonymousPageCount KeInterlockedIncrement drop

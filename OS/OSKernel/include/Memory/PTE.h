@@ -16,7 +16,7 @@ const PTE_D  2  // dirty
 const PTE_K  4  // kernel
 const PTE_NC 8  // non-cacheable
 const PTE_G  16 // global
-const PTE_WC 32 // writecombine
+const PTE_WC 0  // writecombine
 
 // software PTE fields
 

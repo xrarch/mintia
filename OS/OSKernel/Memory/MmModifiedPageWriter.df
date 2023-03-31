@@ -753,3 +753,68 @@ fn (KeAPCFunctionSpecial) MmAnonPageWriterAPCRoutine { normalfunc context1 conte
 
 	mdl@ IOTransferComplete
 end
+
+fn MmGatewayFileDirtying { bytes -- throttled }
+	// forms a gateway for threads that wish to dirty a file so that memory
+	// doesn't become full of dirty file pages.
+
+	0 throttled!
+
+	if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+		return
+	end
+
+	auto pages
+	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	if (pages@ ~~)
+		return
+	end
+
+	auto throttle
+	auto wakelazywriter
+
+	auto throttlemax
+	10 throttlemax!
+
+	while (throttlemax@)
+		0 throttle!
+		0 wakelazywriter!
+
+		auto modanon
+		MmModifiedPageCount@ MmModifiedFilePageCount@ - modanon!
+
+		if (IOModifiedFilePageCountTotal@ pages@ + IODIRTYFILEPAGEMAX >=)
+			1 throttle!
+			1 wakelazywriter!
+		end elseif (MmEvictablePageCount@ MmPageFreeCount@ + pages@ MmPageFreeCountLow@ + <)
+			1 throttle!
+		end elseif (MmEvictablePageCount@ MmPageFreeCount@ + pages@ MMNORMALTHRESH + 1 + <)
+			1 throttle!
+			10 throttlemax!
+		end elseif (MmModifiedFilePageCount@ pages@ + 100 >)
+			1 throttle!
+		end
+
+		if (throttle@ ~~)
+			return
+		end
+
+		if (wakelazywriter@)
+			IOTriggerWritebehind
+		end
+
+		1 throttled!
+
+		100 // ms
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
+
+		if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+			return
+		end
+
+		1 throttlemax -=
+	end
+end

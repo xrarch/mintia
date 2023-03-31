@@ -41,6 +41,7 @@ extern MmInitPhysicalCommit { -- }
 extern MmIncrementCommitLimit { min max -- }
 
 extern MmThrottle { -- }
+extern MmGatewayFileDirtying { bytes -- throttled }
 
 extern MmPageFrameZero { offset phyaddr -- }
 

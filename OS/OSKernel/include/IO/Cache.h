@@ -21,3 +21,6 @@ extern IOCachePageFlush { pfdbe -- ok }
 extern IOCacheZeroData { size offset flags fcb -- ok }
 
 externptr IOCachePagesUsed
+externptr IOModifiedFilePageCountTotal
+
+const IODIRTYFILEPAGEMAX 100

@@ -1,0 +1,377 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+// ported from AISIX
+
+struct Superblock
+	4 Version
+	4 Magic
+	4 Dirty
+	4 ReservedBlocks
+	4 FATStart
+	4 FATSize
+	4 IStart
+	4 ICount
+	4 DataStart
+	4 DataSize
+	4 VolSize
+endstruct
+
+struct DirEnt
+	4 INum
+	60 name
+endstruct
+
+struct INode
+	4 type
+	4 permissions
+	4 uid
+	4 iparent
+	4 timestamp
+	4 startblock
+	4 reserved2
+	4 bytesize
+endstruct
+
+const BLOCKSZ 512
+const RESERVEDBLOCKS 63
+const AFSMAGIC 0xAFBBAFBB
+const AFSVER 0x6
+
+const ROOTINO 1
+
+var FSBlocks 0
+var FATSize 0
+var FATStart 0
+var IStart 0
+var ICount 0
+var ISize 0
+var DataStart 0
+
+buffer ZeroBlock (BLOCKSZ 2 *)
+
+buffer BlockBuf (BLOCKSZ 2 *)
+
+buffer Prompt 256
+
+var VFlag 0
+var YFlag 0
+var SFlag 0
+
+fn private Usage { -- }
+	"usage: mkfs_aisixfs -svy dev\n" OSGetStdErr FPrintf
+end
+
+fn Main { ... -- ret }
+	auto i
+	1 i!
+
+	auto chk
+	2 chk!
+
+	auto flags
+	0 flags!
+
+	if (argc@ 2 >=)
+		auto sw
+		[1]argv@ sw!
+
+		if (sw@ gb '-' ==)
+			2 i!
+			3 chk!
+
+			1 sw +=
+
+			while (sw@ gb 0 ~=)
+				if (sw@ gb 'v' ==)
+					1 VFlag!
+				end elseif (sw@ gb 'y' ==)
+					1 YFlag!
+				end elseif (sw@ gb 's' ==)
+					1 SFlag!
+				end else
+					Usage
+					-1 OSExit
+				end
+
+				1 sw +=
+			end
+		end
+	end
+
+	if (argc@ chk@ ~=)
+		Usage
+		-1 OSExit
+	end
+
+	auto canon
+	256 alloc canon!
+
+	[i@]argv@ // path
+	canon@ // canon
+	255 // bufsize
+	OSRealPath ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "mkfs: %s\n" OSError
+	end
+
+	auto fd
+	canon@ GetParams fd!
+
+	if (YFlag@ ~~)
+		"mkfs: write [y]? " Printf
+		Prompt 255 Gets
+
+		if (Prompt gb 'n' ==)
+			0 OSExit
+		end
+	end
+
+	fd@ WriteSuper
+	fd@ InitializeFAT
+	fd@ InitializeIList
+	fd@ InitializeRootINode
+
+	if (SFlag@ ~~)
+		"mkfs: enjoy your new filesystem :)\n" Printf
+	end
+
+	0 ret!
+end
+
+buffer StatB OSFileInformation_SIZEOF
+
+fn GetParams { path -- fd }
+	auto ok
+	OSFILEFLAG_NOCACHE // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	path@ // path
+	0 // ftype
+	OSFileOpen ok! fd!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "mkfs: %s: %s\n" OSError
+	end
+
+	fd@ // filehandle
+	StatB // query
+	OSFileQuery ok!
+
+	if (ok@)
+		ok@ OSStatusGetName path@ "mkfs: couldn't stat %s: %s\n" OSError
+	end
+
+	auto sz
+	StatB OSFileInformation_Size + @ sz!
+
+	if (sz@ BLOCKSZ %)
+		BLOCKSZ path@ "mkfs: %s: size is not multiple of block size (%d)\n" OSError
+	end
+
+	sz@ BLOCKSZ / FSBlocks!
+
+	FSBlocks@ 4 * BLOCKSZ / FATSize!
+
+	if (FSBlocks@ 4 * BLOCKSZ %)
+		1 FATSize +=
+	end
+
+	RESERVEDBLOCKS 1 + FATStart!
+
+	FATStart@ FATSize@ + IStart!
+	FSBlocks@ 32 / ICount!
+	ICount@ INode_SIZEOF * BLOCKSZ / ISize!
+
+	if (ICount@ INode_SIZEOF * BLOCKSZ %)
+		1 ISize +=
+	end
+
+	IStart@ ISize@ + DataStart!
+
+	if (VFlag@ SFlag@ ~~ ||)
+		path@ "mkfs: params for %s:\n" Printf
+		BLOCKSZ    "  blocksz    %d bytes\n" Printf
+		FSBlocks@  "  blocks     %d blocks\n" Printf
+		FATSize@   "  fatsize    %d blocks\n" Printf
+		ICount@    "  icount     %d inodes\n" Printf
+		ISize@     "  isize      %d blocks\n" Printf
+		FATStart@  "  fatstart   block %d\n" Printf
+		IStart@    "  istart     block %d\n" Printf
+		DataStart@ "  datastart  block %d\n" Printf
+	end
+end
+
+buffer SuperblockB (BLOCKSZ 2 *)
+
+fn WriteSuper { fd -- }
+	if (VFlag@)
+		"mkfs: writing superblock\n" Printf
+	end
+
+	auto buf
+	SuperblockB BLOCKSZ 1 - + BLOCKSZ 1 - ~ & buf!
+
+	AFSMAGIC buf@ Superblock_Magic + !
+	AFSVER buf@ Superblock_Version + !
+	RESERVEDBLOCKS buf@ Superblock_ReservedBlocks + !
+	FATStart@ buf@ Superblock_FATStart + !
+	FATSize@ buf@ Superblock_FATSize + !
+	IStart@ buf@ Superblock_IStart + !
+	ICount@ buf@ Superblock_ICount + !
+	DataStart@ buf@ Superblock_DataStart + !
+	FSBlocks@ buf@ Superblock_DataSize + !
+	FSBlocks@ buf@ Superblock_VolSize + !
+
+	0 buf@ fd@ bwrite
+end
+
+fn InitializeFAT { fd -- }
+	if (VFlag@)
+		"mkfs: initializing FAT\n" Printf
+	end
+
+	auto cantalloc
+	1 RESERVEDBLOCKS + FATSize@ + ISize@ + cantalloc!
+
+	auto blocks
+	cantalloc@ 128 / blocks!
+
+	if (cantalloc@ 512 %)
+		1 blocks +=
+	end
+
+	auto block
+	FATStart@ block!
+
+	auto i
+	0 i!
+
+	while (i@ blocks@ <)
+		auto buf
+		BlockBuf BLOCKSZ 1 - + BLOCKSZ 1 - ~ & buf!
+
+		buf@ BLOCKSZ 0 memset
+
+		auto m
+		cantalloc@ 128 min m!
+
+		m@ cantalloc -=
+
+		auto j
+		0 j!
+
+		while (j@ m@ <)
+			0xFFFFFFFF buf@ j@ 4 * + !
+
+			1 j +=
+		end
+
+		block@ buf@ fd@ bwrite
+		1 block +=
+
+		1 i +=
+	end
+
+	auto max
+	block@ FATSize@ + max!
+
+	ZeroBlock BLOCKSZ 1 - + BLOCKSZ 1 - ~ & buf!
+
+	while (block@ max@ <)
+		block@ buf@ fd@ bwrite
+
+		1 block +=
+	end
+end
+
+fn InitializeIList { fd -- }
+	if (VFlag@)
+		"mkfs: initializing ilist\n" Printf
+	end
+
+	auto buf
+	ZeroBlock BLOCKSZ 1 - + BLOCKSZ 1 - ~ & buf!
+
+	auto i
+	IStart@ i!
+
+	auto max
+	i@ ISize@ + max!
+
+	while (i@ max@ <)
+		i@ buf@ fd@ bwrite
+
+		1 i +=
+	end
+end
+
+fn InitializeRootINode { fd -- }
+	if (VFlag@)
+		"mkfs: initializing root inode\n" Printf
+	end
+
+	auto buf
+	BlockBuf BLOCKSZ 1 - + BLOCKSZ 1 - ~ & buf!
+
+	buf@ BLOCKSZ 0 memset
+
+	auto root
+	buf@ ROOTINO INode_SIZEOF * + root!
+
+	0 root@ INode_uid + !
+	493 root@ INode_permissions + !
+	ROOTINO root@ INode_iparent + !
+	2 root@ INode_type + !
+	0 root@ INode_bytesize + !
+	0xFFFFFFFF root@ INode_startblock + !
+	0 root@ INode_timestamp + !
+
+	IStart@ buf@ fd@ bwrite
+end
+
+fn bread { blockno buf fd -- }
+	auto ok
+	blockno@ BLOCKSZ * // offset
+	fd@ // handle
+	OSSEEK_SET // mode
+	OSFileSeek ok! drop
+
+	if (ok@)
+		ok@ OSStatusGetName blockno@ "mkfs: couldn't seek to block %d: %s\n" OSError
+	end
+
+	OSWAIT_TIMEOUTINFINITE // timeout
+	0 // flags
+	BLOCKSZ // length
+	buf@ // buffer
+	fd@ // filehandle
+	OSFileRead ok! drop
+
+	if (ok@)
+		ok@ OSStatusGetName blockno@ "mkfs: couldn't read block %d: %s\n" OSError
+	end
+end
+
+fn bwrite { blockno buf fd -- }
+	auto ok
+	blockno@ BLOCKSZ * // offset
+	fd@ // handle
+	OSSEEK_SET // mode
+	OSFileSeek ok! drop
+
+	if (ok@)
+		ok@ OSStatusGetName blockno@ "mkfs: couldn't seek to block %d: %s\n" OSError
+	end
+
+	0 // flags
+	BLOCKSZ // length
+	buf@ // buffer
+	fd@ // filehandle
+	OSFileWrite ok! drop
+
+	if (ok@)
+		ok@ OSStatusGetName blockno@ "mkfs: couldn't write block %d: %s\n" OSError
+	end
+end

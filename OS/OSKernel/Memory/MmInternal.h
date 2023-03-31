@@ -223,7 +223,7 @@ struct MiProcessHeader // contains things that only need to be accessed while pr
 	4 ModifiedPageCount
 endstruct
 
-const MMMODIFIEDPAGETHROTTLE 20
+const MMMODIFIEDPAGETHROTTLE 16
 
 extern MiProcessHeaderCreate { process -- ok }
 extern MiProcessHeaderDestroy { process -- }

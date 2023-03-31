@@ -35,9 +35,7 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 	fnsection "PAGE$text"
 
 	// read the entire FAT page-by-page to construct an in-memory bitmap of
-	// free blocks. assumes disks will be a reasonable size (100-500MB) or
-	// else this bitmap will be too large to fit in kernel pool and mounting
-	// the volume will fail. could probably be made more flexible.
+	// free blocks.
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
@@ -73,6 +71,10 @@ fn AFSBlockBitmapReadFAT { mount -- ok }
 	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ volfcb!
 
 	auto fatdata
+
+	// this is the only place where we map and pin the FAT rather than just
+	// mapping it. we avoid it later by assuming that since we already checked
+	// the entire FAT here, its unlikely that errors will appear later.
 
 	while (blkno@ blocks@ <)
 		afsdata@ AFSData_FATStart + @ AFSBLOCKSHIFT << blkno@ 2 << + diskoff!
@@ -286,12 +288,12 @@ fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 			// must read in a new FAT block
 
 			if (fatbcb@)
-				fatbcb@ VcBufferDecrementMapAndPinCount
+				fatbcb@ VcBufferDecrementMapCount drop
 			end
 
 			diskoff@ FILEVIEWNUMBERMASK & // offset
 			volfcb@ // fileobject
-			VcFileControlBlockMapAndPin ok! fatbcb! fatdata!
+			VcFileControlBlockMap ok! fatbcb! fatdata!
 
 			if (ok@)
 				return
@@ -306,7 +308,7 @@ fn AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
 	end
 
 	if (fatbcb@)
-		fatbcb@ VcBufferDecrementMapAndPinCount
+		fatbcb@ VcBufferDecrementMapCount drop
 	end
 end
 

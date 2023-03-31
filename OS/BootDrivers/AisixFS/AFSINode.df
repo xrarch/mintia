@@ -45,7 +45,7 @@ fn AFSINodeRead { inum mount urgent -- ptr bcb ok }
 
 	block@ // offset
 	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-	VcFileControlBlockMap ok! bcb! ptr!
+	VcFileControlBlockMapAndPin ok! bcb! ptr!
 end
 
 fn AFSINodeFree { inum mount -- }
@@ -70,7 +70,7 @@ fn AFSINodeFree { inum mount -- }
 	0 inode@ AFSINode_type + !
 
 	bcb@ VcBufferDirty
-	bcb@ VcBufferDecrementMapCount drop
+	bcb@ VcBufferDecrementMapAndPinCount
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
@@ -89,7 +89,7 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 
 	inoblk@ AFSBLOCKSHIFT << // offset
 	mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-	VcFileControlBlockMap ok! bcb! inode!
+	VcFileControlBlockMapAndPin ok! bcb! inode!
 
 	if (ok@)
 		return
@@ -101,13 +101,13 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 
 	while (inum@ inodes@ <)
 		if (inum@ AFSINode_SIZEOF * AFSBLOCKOFFMASK & ~~)
-			bcb@ VcBufferDecrementMapCount drop
+			bcb@ VcBufferDecrementMapAndPinCount
 
 			1 inoblk +=
 
 			inoblk@ AFSBLOCKSHIFT << // offset
 			mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-			VcFileControlBlockMap ok! bcb! inode!
+			VcFileControlBlockMapAndPin ok! bcb! inode!
 
 			if (ok@)
 				return
@@ -128,7 +128,7 @@ fn AFSINodeAllocate { mount -- inum inode bcb ok }
 
 	STATUS_END_OF_DISK ok!
 
-	bcb@ VcBufferDecrementMapCount drop
+	bcb@ VcBufferDecrementMapAndPinCount
 end
 
 fn (IODispatchSetFileFunction) AFSSetFile { info fileobject -- ok }
@@ -310,7 +310,7 @@ fn AFSINodeUpdate { fcb -- }
 	fcb@ IOFileControlBlockUnlock
 
 	bcb@ VcBufferDirty
-	bcb@ VcBufferDecrementMapCount drop
+	bcb@ VcBufferDecrementMapAndPinCount
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
 end
@@ -531,10 +531,8 @@ fn AFSDelete { fcb -- }
 	fcb@ // fcb
 	AFSTruncate ok!
 
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ "AFSDelete: couldn't truncate FCB (%i)\n" KeCrash
-		end
+	if (ok@)
+		ok@ "AFSDelete: couldn't truncate FCB (%i)\n" Printf
 	end
 
 	fcb@ // fcb
@@ -551,15 +549,15 @@ fn AFSDelete { fcb -- }
 	AFSINodeRead ok! bcb! inode!
 
 	if (ok@)
-		ok@ "AFSDelete: couldn't read inode (%i)\n" KeCrash
+		ok@ "AFSDelete: couldn't read inode (%i)\n" Printf
+	end else
+		// mark inode freed
+
+		0 inode@ AFSINode_type + !
+
+		bcb@ VcBufferDirty
+		bcb@ VcBufferDecrementMapAndPinCount
 	end
-
-	// mark inode freed
-
-	0 inode@ AFSINode_type + !
-
-	bcb@ VcBufferDirty
-	bcb@ VcBufferDecrementMapCount drop
 
 	fcbdata@ AFSFCBData_Nonpaged + @ MmFree
 	fcbdata@ MmFree
@@ -818,7 +816,7 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 		end
 
 		if (ok@)
-			bcb@ VcBufferDecrementMapCount drop
+			bcb@ VcBufferDecrementMapAndPinCount
 
 			return
 		end
@@ -842,7 +840,7 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 			fcb@ // fcb
 			IOFileControlBlockDelete drop
 
-			bcb@ VcBufferDecrementMapCount drop
+			bcb@ VcBufferDecrementMapAndPinCount
 
 			return
 		end
@@ -860,7 +858,7 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 			fcb@ // fcb
 			IOFileControlBlockDelete drop
 
-			bcb@ VcBufferDecrementMapCount drop
+			bcb@ VcBufferDecrementMapAndPinCount
 
 			return
 		end
@@ -910,7 +908,7 @@ fn AFSFCBRead { flags inum mount -- fcb ok }
 		KeTime_SIZEOF // sz
 		memcpy
 
-		bcb@ VcBufferDecrementMapCount drop
+		bcb@ VcBufferDecrementMapAndPinCount
 
 		fcb@ // fcb
 		buckethead@ // buckethead

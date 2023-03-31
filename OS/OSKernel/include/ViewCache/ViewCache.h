@@ -25,7 +25,7 @@ struct VcBuffer
 
 // opaque
 
-	4 ReclaimNext
+	4 ReclaimNext // or pinned length if pinned
 	4 ReclaimPrev
 
 	4 Type
@@ -42,6 +42,11 @@ extern VcCacheInfoBlockTruncate { newsize cacheblock -- }
 extern VcBufferIncrementMapCount { bcb -- oldcount }
 extern VcBufferDecrementMapCount { bcb -- oldcount }
 
+extern VcBufferIncrementPinCount { bcb -- oldcount ok }
+extern VcBufferDecrementPinCount { bcb -- oldcount }
+
+extern VcBufferDecrementMapAndPinCount { bcb -- }
+
 extern VcBufferDirty { bcb -- }
 
 extern VcBufferLargeMap { offset length fileobject -- vaddr bcb ok }
@@ -50,6 +55,7 @@ extern VcBufferGet { offset fcb -- bcb ok }
 
 extern VcFileMap { offset length fileobject -- vaddr bcb ok }
 extern VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
+extern VcFileControlBlockMapAndPin { offset fcb -- vaddr bcb ok }
 
 extern VcFileWrite { fileflags flags length offset buf fcb -- byteswritten ok }
 extern VcFileRead { flags length offset buf fcb -- bytesread ok }

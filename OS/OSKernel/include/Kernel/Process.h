@@ -95,6 +95,7 @@ struct KeThread
 	KeTimer_SIZEOF Timer
 
 	4 SafeAccessAbort
+	4 SafeSystemAccessAbort
 	4 SafeAccessSP
 
 	4 Signals
@@ -142,6 +143,7 @@ extern KeSafeMemset { ptr size word -- ok }
 extern KeSafeStoreByte { byte dest -- ok }
 extern KeSafeProbeWrite { dest -- ok }
 extern KeSafeGetByte { src -- byte ok }
+extern KeSafeProbeSystemByte { src -- byte ok }
 
 extern KeInterlockedIncrement { inc ptr -- oldcount }
 

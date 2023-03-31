@@ -319,6 +319,12 @@ fn VcBufferDecrementMapCount { bcb -- oldcount }
 	oldcount@ 1 - bcb@ VcBuffer_MapCountI + si
 
 	if (oldcount@ 1 ==)
+		if (DEBUGCHECKS)
+			if (bcb@ VcBuffer_PinCountI + gi)
+				"VcBufferDecrementMapCount: mapcount dropped to zero while pinned\n" KeCrash
+			end
+		end
+
 		if (bcb@ VcBuffer_Type + @ VCBCBTYPE_LARGE ~=)
 			// insert into reclaimable list
 
@@ -395,6 +401,107 @@ end
 
 fn VcBufferDirty { bcb -- }
 	bcb@ MmBufferDirty
+end
+
+fn VcBufferIncrementPinCount { bcb -- oldcount ok }
+	// this should be used before directly accessing a viewcache buffer
+	// (w/o a KeSafeCopy* function) since it will catch all page-in I/O errors
+	// rather than letting the system crash if they occur later. this will
+	// only pin the pages that currently lie within the bounds of the file.
+	// the FCB MUST be held at least shared for the duration of the pin,
+	// otherwise truncation may occur which will cause horrible effects.
+
+	if (DEBUGCHECKS)
+		if (bcb@ VcBuffer_MapCountI + gi ~~)
+			"VcBufferIncrementPinCount: tried to pin unmapped buffer\n" KeCrash
+		end
+	end
+
+	auto event
+	bcb@ VcBuffer_FileControlBlock + @
+	IOFileControlBlock_CacheInfoBlock + @
+	IOiCacheInfoBlock_BCBTreeEvent + event!
+
+	// lock the BCB tree for the file.
+	// this is a little bit coarse grained, but the alternative is putting an
+	// event in the BCB structure, which would bloat it considerably.
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject drop
+
+	bcb@ VcBuffer_PinCountI + gi oldcount!
+
+	oldcount@ 1 + bcb@ VcBuffer_PinCountI + si
+
+	if (oldcount@)
+		// already pinned. unlock and return.
+
+		0 // priboost
+		event@ // event
+		KeEventSignal
+
+		0 ok!
+
+		return
+	end
+
+	bcb@ MmBufferPin ok!
+
+	if (ok@)
+		// failed! don't pin after all, restore oldcount.
+
+		oldcount@ bcb@ VcBuffer_PinCountI + si
+	end
+
+	0 // priboost
+	event@ // event
+	KeEventSignal
+end
+
+fn VcBufferDecrementPinCount { bcb -- oldcount }
+	auto event
+	bcb@ VcBuffer_FileControlBlock + @
+	IOFileControlBlock_CacheInfoBlock + @
+	IOiCacheInfoBlock_BCBTreeEvent + event!
+
+	// lock the BCB tree for the file.
+	// this is a little bit coarse grained, but the alternative is putting an
+	// event in the BCB structure, which would bloat it considerably.
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	event@ // object
+	KeThreadWaitForObject drop
+
+	bcb@ VcBuffer_PinCountI + gi oldcount!
+
+	if (DEBUGCHECKS)
+		if (oldcount@ ~~)
+			"VcBufferDecrementPinCount: underflow\n" KeCrash
+		end
+	end
+
+	oldcount@ 1 - bcb@ VcBuffer_PinCountI + si
+
+	if (oldcount@ 1 ~=)
+		// still pinned, unlock and return
+
+		0 // priboost
+		event@ // event
+		KeEventSignal
+
+		return
+	end
+
+	bcb@ MmBufferUnpin
+
+	0 // priboost
+	event@ // event
+	KeEventSignal
 end
 
 fn VcCacheInfoBlockTruncate { newsize cacheblock -- }
@@ -530,6 +637,27 @@ fn VcFileControlBlockMap { offset fcb -- vaddr bcb ok }
 
 	bcb@ VcBuffer_WindowAddress + @ vaddr!
 	offset@ FILEVIEWOFFSETMASK & vaddr +=
+end
+
+fn VcFileControlBlockMapAndPin { offset fcb -- vaddr bcb ok }
+	offset@ fcb@ VcFileControlBlockMap ok! bcb! vaddr!
+
+	if (ok@)
+		return
+	end
+
+	bcb@ VcBufferIncrementPinCount ok! drop
+
+	if (ok@)
+		bcb@ VcBufferDecrementMapCount drop
+
+		return
+	end
+end
+
+fn VcBufferDecrementMapAndPinCount { bcb -- }
+	bcb@ VcBufferDecrementPinCount drop
+	bcb@ VcBufferDecrementMapCount drop
 end
 
 fn VcFileWrite { fileflags flags length offset buf fcb -- byteswritten ok }

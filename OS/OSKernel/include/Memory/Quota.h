@@ -15,11 +15,13 @@ extern MmQuotaBlockUncharge { charge quotablock -- }
 extern MmQuotaBlockChargeWS { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeWS { charge quotablock -- }
 extern MmQuotaBlockChargeVM { charge quotablock -- ok }
-extern MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
 extern MmQuotaBlockUnchargeVM { charge quotablock -- }
 extern MmQuotaBlockChargePaged { charge quotablock -- ok }
 extern MmQuotaBlockUnchargePaged { charge quotablock -- }
 extern MmQuotaBlockPrint { quotablock -- }
+
+extern MmChargeCommit { pri pages -- ok }
+extern MmUnchargeCommit { pages -- }
 
 extern MmSetQuota { quota quotablock -- }
 extern MmQuotaQuery { query quotablock -- }

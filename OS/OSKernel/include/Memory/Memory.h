@@ -38,6 +38,8 @@ extern MmPageFault { writing badaddr trapframe -- handled }
 extern MmResourceJettison { -- }
 extern MmInitPhysicalCommit { -- }
 
+extern MmIncrementCommitLimit { min max -- }
+
 extern MmThrottle { -- }
 
 extern MmPageFrameZero { offset phyaddr -- }
@@ -67,9 +69,6 @@ externptr MmPageInCount        // pageins in general
 externptr MmTheoreticalCommitLimit // virtual memory available if all pagefiles extend to maximum
 externptr MmCommitLimit            // virtual memory available right now
 externptr MmCommitUsage            // virtual memory promised
-
-externptr MmPhysicalCommitLimit // physical memory available, sans a minimum margin for paging activity
-externptr MmPhysicalCommitUsage // physical memory promised to nonpaged pool and working set minimums
 
 externptr MmSystemSize
 

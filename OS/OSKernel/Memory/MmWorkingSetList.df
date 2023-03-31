@@ -558,24 +558,38 @@ fn MiWorkingSetEntryReserve { process -- wsli wsleptr ok }
 	auto wssize
 	phdr@ MiProcessHeader_WorkingSetSize + @ wssize!
 
+	auto minpages
+
 	if (wssize@ phdr@ MiProcessHeader_WorkingSetMinimum + @ <)
 		// below minimum, there's always room
-		1 room!
+
+		0 minpages!
 	end elseif (wssize@ phdr@ MiProcessHeader_WorkingSetMaximum + @ <)
 		// between minimum and maximum
-		if (MiEventLowMemory KeDispatchIsSignaled ~~)
-			1 room!
+
+		if (process@ PsProcess_PageFaultCount + @ phdr@ MiProcessHeader_WorkingSetTrimFaultCount + @ - 100 >)
+			MmPageFreeCountLow@ minpages!
+		end else
+			MmPageFreeCountSufficient@ minpages!
 		end
 	end elseif (wssize@ phdr@ MiProcessHeader_WorkingSetQuota + @ >=)
-		// above quota
-		0 room!
+		// above quota, there's never room
+
+		-1 minpages!
 	end else
 		// above maximum
-		if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
-			if (process@ PsProcess_PageFaultCount + @ phdr@ MiProcessHeader_WorkingSetTrimFaultCount + @ - 100 >)
-				1 room!
-			end
+
+		if (process@ PsProcess_PageFaultCount + @ phdr@ MiProcessHeader_WorkingSetTrimFaultCount + @ - 200 >)
+			MmPageFreeCountSufficient@ minpages!
+		end else
+			MmPageFreeCountSufficient@ 20 + minpages!
 		end
+	end
+
+	if (MmEvictablePageCount@ MmPageFreeCount@ + minpages@ <)
+		0 room!
+	end else
+		1 room!
 	end
 
 	1 process@ PsProcess_PageFaultCount + +=
@@ -1064,10 +1078,6 @@ fn MiManageWorkingSets { -- success }
 
 		MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - pagecount!
 		MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
-
-		if (MmPhysicalCommitUsage@ MmPhysicalCommitLimit@ >)
-			1 dire!
-		end
 
 		ipl@ KeIPLLower
 

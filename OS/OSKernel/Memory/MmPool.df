@@ -559,10 +559,17 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 		return
 	end
 
-	auto rs
-	HALCPUInterruptDisable rs!
-	pagesneeded@ MmPhysicalCommitUsage +=
-	rs@ HALCPUInterruptRestore
+	flags@ MUSTSUCCEED | // pri
+	pagesneeded@ // pages
+	MmChargeCommit ok!
+
+	if (ok@)
+		pagesneeded@ // pages
+		offset@ // offset
+		MiPoolSpaceRelease
+
+		return
+	end
 
 	if (flags@ 0xFF & ZEROMUST ~=)
 		FREEFIRST flags |=
@@ -604,9 +611,7 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 				phyaddr@ PAGESHIFT >> MiPageFree
 			end
 
-			HALCPUInterruptDisable rs!
-			pagesneeded@ MmPhysicalCommitUsage -=
-			rs@ HALCPUInterruptRestore
+			pagesneeded@ MmUnchargeCommit
 
 			pagesneeded@ // pages
 			offset@ // offset
@@ -635,6 +640,7 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 	end
 
 	if (flags@ POOLEXP & ~~)
+		auto rs
 		HALCPUInterruptDisable rs!
 
 		pagesneeded@ PAGESHIFT << MmNonpagedPoolBytesUsed +=
@@ -648,7 +654,11 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
+
+	pagesneeded@ MiPhysicalUsage +=
+
 	firstpfdbe@ MiPoolPageInsert
+
 	ipl@ KeIPLLower
 end
 
@@ -709,9 +719,11 @@ fn MiNonpagedPoolFreePages { noaccount ptr -- }
 		pages@ PAGESHIFT << MmNonpagedPoolBytesUsed -=
 	end
 
-	pages@ MmPhysicalCommitUsage -=
+	pages@ MiPhysicalUsage -=
 
 	rs@ HALCPUInterruptRestore
+
+	pages@ MmUnchargeCommit
 
 	pages@ // pages
 	offset@ // offset

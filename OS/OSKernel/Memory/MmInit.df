@@ -135,11 +135,9 @@ public MmCommitLimit
 var MmCommitUsage 0
 public MmCommitUsage
 
-var MmPhysicalCommitLimit 0
-public MmPhysicalCommitLimit
-
-var MmPhysicalCommitUsage 0
-public MmPhysicalCommitUsage
+var MmPhysicalLimit 0
+var MiPhysicalUsage 0
+public MiPhysicalUsage
 
 buffer MiEventPageAvailable KeEvent_SIZEOF
 public MiEventPageAvailable
@@ -254,7 +252,12 @@ rosection "INIT$text"
 
 	MiPoolInit
 
-	-1 MmPhysicalCommitLimit!
+	// initialize the commit limit to the free page count plus 100 pages.
+	// will get set to the size of the pagefile later.
+
+	MmPageFreeCount@ 100 + MmCommitLimit!
+	MmCommitLimit@ MmTheoreticalCommitLimit!
+	MmCommitLimit@ MmPhysicalLimit!
 
 	MmReclaimMemory
 
@@ -287,12 +290,6 @@ rosection "INIT$text"
 	end
 
 	pfdbe@ MmConstantZeroPage!
-
-	// initialize the commit limit to the free page count plus 100 pages.
-	// will get set to the size of the pagefile later.
-
-	MmPageFreeCount@ 100 + MmCommitLimit!
-	MmCommitLimit@ MmTheoreticalCommitLimit!
 end
 
 var MmSystemSize 0
@@ -306,8 +303,9 @@ fn MmInitPhase1 { -- }
 
 	auto phdr
 	PsSystemProcess@ PsProcess_MmHeader + @ phdr!
-//
-//	MMSYSTEMWORKINGSETDEFAULTMINIMUM phdr@ MiProcessHeader_WorkingSetMinimum + !
+
+	auto oldmin
+	phdr@ MiProcessHeader_WorkingSetMinimum + @ oldmin!
 	256 phdr@ MiProcessHeader_WorkingSetMaximum + !
 	-1 phdr@ MiProcessHeader_WorkingSetQuota + !
 
@@ -345,12 +343,15 @@ fn MmInitPhase1 { -- }
 
 	100 MmModifiedPageMaximum!
 
+	auto sysmin
+
 	if (membytes@ 3 1024 * 1024 * <=)
 		// tiny system, 0-3MB
 
 		MMTINYSYSTEM MmSystemSize!
 
 		6 MiWorkingSetDefaultMinimum!
+		10 sysmin!
 
 		50 MmModifiedPageMaximum!
 		40 MmPinnedPagesLimit!
@@ -360,6 +361,7 @@ fn MmInitPhase1 { -- }
 		MMSMALLSYSTEM MmSystemSize!
 
 		12 MiWorkingSetDefaultMinimum!
+		20 sysmin!
 
 		80 MmPinnedPagesLimit!
 	end elseif (membytes@ 9 1024 * 1024 * <=)
@@ -368,6 +370,7 @@ fn MmInitPhase1 { -- }
 		MMMEDIUMSYSTEM MmSystemSize!
 
 		16 MiWorkingSetDefaultMinimum!
+		24 sysmin!
 
 		120 MmPinnedPagesLimit!
 	end elseif (membytes@ 33 1024 * 1024 * <)
@@ -376,6 +379,7 @@ fn MmInitPhase1 { -- }
 		MMLARGESYSTEM MmSystemSize!
 
 		20 MiWorkingSetDefaultMinimum!
+		28 sysmin!
 
 		300 MmPinnedPagesLimit!
 	end else
@@ -384,8 +388,15 @@ fn MmInitPhase1 { -- }
 		MMHUGESYSTEM MmSystemSize!
 
 		32 MiWorkingSetDefaultMinimum!
+		40 sysmin!
 
 		500 MmPinnedPagesLimit!
+	end
+
+	if (sysmin@ oldmin@ >)
+		MUSTSUCCEED // pri
+		sysmin@ oldmin@ - // charge
+		MmChargeCommit drop
 	end
 
 	MmPageFreeCountSufficient@
@@ -704,13 +715,23 @@ fn MmResourceJettison { -- }
 	"%dK freed, %dK paged, %dK wired (%dK debug)\n" "MmResourceJettison" HALLog
 end
 
+fn MmIncrementCommitLimit { min max -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	min@ MmCommitLimit +=
+	max@ MmTheoreticalCommitLimit +=
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn MmInitPhysicalCommit { -- }
 	fnsection "PAGE$text"
 
 	auto limit
 	MmPageTotal@ limit!
 
-	// subtract an arbitrary 32 pages for system usage
+	// subtract an arbitrary 12 pages for system usage
 
 	if (MMSYSTEMPROMISE limit@ <)
 		MMSYSTEMPROMISE limit -=
@@ -728,7 +749,14 @@ fn MmInitPhysicalCommit { -- }
 		MmPageTotal@ limit!
 	end
 
-	limit@ MmPhysicalCommitLimit!
+	auto change
+	limit@ MmPhysicalLimit@ - change!
+
+	limit@ MmPhysicalLimit!
+
+	change@ // min
+	change@ // max
+	MmIncrementCommitLimit
 end
 
 fn MiUnwireKernel { -- }
@@ -748,13 +776,9 @@ fn MiUnwireKernel { -- }
 		unwr@ MmUnwireRecord_Pages + @ pages!
 
 		if (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_PAGE ==)
-			pages@ PAGESHIFT << // charge
-			MmQuotaSystem // quotablock
-			MmQuotaBlockChargeVMNoExtend ok!
-
-			if (ok@)
-				ok@ "%i\n" KeCrash
-			end
+			MUSTSUCCEED // pri
+			pages@ // pages
+			MmChargeCommit drop
 		end
 
 		while (pages@)
@@ -897,8 +921,8 @@ fn MmQuery { query -- ok }
 	MmCommitLimit@ query@ OSMemoryInformation_CommitLimit + !
 	MmCommitUsage@ query@ OSMemoryInformation_CommitUsage + !
 
-	MmPhysicalCommitLimit@ query@ OSMemoryInformation_PhysicalCommitLimit + !
-	MmPhysicalCommitUsage@ query@ OSMemoryInformation_PhysicalCommitUsage + !
+	MmPhysicalLimit@ query@ OSMemoryInformation_PhysicalCommitLimit + !
+	MiPhysicalUsage@ query@ OSMemoryInformation_PhysicalCommitUsage + !
 
 	MmModifiedFilePageCount@ query@ OSMemoryInformation_ModifiedFilePageCount + !
 

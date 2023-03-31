@@ -277,22 +277,8 @@ fn MmQuotaBlockChargeWS { charge quotablock -- ok }
 
 	0 ok!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	auto commitlimit
-	MmPhysicalCommitLimit@ commitlimit!
-
-	auto commitused
-	MmPhysicalCommitUsage@ commitused!
-
-	if (commitused@ charge@ + commitlimit@ >)
-		ipl@ KeIPLLower
-
-		STATUS_PHYSICAL_COMMIT_EXCEEDED ok!
-
-		return
-	end
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	auto wsmax
 	quotablock@ MiQuotaBlock_WorkingSetMax + @ wsmax!
@@ -301,7 +287,7 @@ fn MmQuotaBlockChargeWS { charge quotablock -- ok }
 	quotablock@ MiQuotaBlock_WorkingSetUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ + wsmax@ >)
-		ipl@ KeIPLLower
+		rs@ HALCPUInterruptRestore
 
 		STATUS_WS_QUOTA_EXCEEDED ok!
 
@@ -309,9 +295,28 @@ fn MmQuotaBlockChargeWS { charge quotablock -- ok }
 	end
 
 	oldcharge@ charge@ + quotablock@ MiQuotaBlock_WorkingSetUsed + !
-	commitused@ charge@ + MmPhysicalCommitUsage!
 
-	ipl@ KeIPLLower
+	charge@ MiPhysicalUsage +=
+
+	rs@ HALCPUInterruptRestore
+
+	CANBLOCK // pri
+	charge@ // pages
+	MmChargeCommit ok!
+
+	if (ok@)
+		// uncharge quota
+
+		HALCPUInterruptDisable rs!
+
+		charge@ quotablock@ MiQuotaBlock_WorkingSetUsed + -=
+
+		charge@ MiPhysicalUsage -=
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
 end
 
 fn MmQuotaBlockUnchargeWS { charge quotablock -- }
@@ -321,85 +326,21 @@ fn MmQuotaBlockUnchargeWS { charge quotablock -- }
 	auto oldcharge
 	quotablock@ MiQuotaBlock_WorkingSetUsed + @ oldcharge!
 
-	auto commitused
-	MmPhysicalCommitUsage@ commitused!
-
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
 			charge@
 			oldcharge@
 			"MmQuotaBlockUnchargeWS: attempt to uncharge more than was charged (oldcharge=%d charge=%d)\n" KeCrash
 		end
-
-		if (charge@ commitused@ >)
-			commitused@
-			charge@
-			"MmQuotaBlockUnchargeWS: attempt to uncharge more commit than was charged %d > %d\n" KeCrash
-		end
 	end
 
 	oldcharge@ charge@ - quotablock@ MiQuotaBlock_WorkingSetUsed + !
-	commitused@ charge@ - MmPhysicalCommitUsage!
+
+	charge@ MiPhysicalUsage -=
 
 	rs@ HALCPUInterruptRestore
-end
 
-fn MmQuotaBlockChargeVMNoExtend { charge quotablock -- ok }
-	if (DEBUGCHECKS)
-		if (charge@ PAGEOFFSETMASK &)
-			"MmQuotaBlockChargeVM: charge isn't aligned to page size\n" KeCrash
-		end
-	end
-
-	if (charge@ z<)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
-
-	PAGESHIFT charge >>=
-
-	0 ok!
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	auto vmmax
-	quotablock@ MiQuotaBlock_VMMax + @ vmmax!
-
-	auto oldcharge
-	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
-
-	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
-		ipl@ KeIPLLower
-
-		STATUS_VM_QUOTA_EXCEEDED ok!
-
-		return
-	end
-
-	oldcharge@ charge@ PAGESHIFT << + quotablock@ MiQuotaBlock_VMUsed + !
-
-	auto commitlimit
-	MmCommitLimit@ commitlimit!
-
-	auto commitused
-	MmCommitUsage@ commitused!
-
-	if (commitused@ charge@ + commitlimit@ >)
-		// uncharge quota
-		charge@ PAGESHIFT << quotablock@ MiQuotaBlock_VMUsed + -=
-
-		ipl@ KeIPLLower
-
-		STATUS_VM_QUOTA_EXCEEDED ok!
-
-		return
-	end
-
-	commitused@ charge@ + MmCommitUsage!
-
-	ipl@ KeIPLLower
+	charge@ MmUnchargeCommit
 end
 
 fn MmQuotaBlockChargeVM { charge quotablock -- ok }
@@ -419,8 +360,8 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 
 	0 ok!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	auto vmmax
 	quotablock@ MiQuotaBlock_VMMax + @ vmmax!
@@ -429,7 +370,7 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
 
 	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
-		ipl@ KeIPLLower
+		rs@ HALCPUInterruptRestore
 
 		STATUS_VM_QUOTA_EXCEEDED ok!
 
@@ -438,31 +379,23 @@ fn MmQuotaBlockChargeVM { charge quotablock -- ok }
 
 	oldcharge@ charge@ PAGESHIFT << + quotablock@ MiQuotaBlock_VMUsed + !
 
-	auto commitlimit
-	MmCommitLimit@ commitlimit!
+	rs@ HALCPUInterruptRestore
 
-	auto commitused
-	MmCommitUsage@ commitused!
+	CANBLOCK // pri
+	charge@ // pages
+	MmChargeCommit ok!
 
-	while (commitused@ charge@ + commitlimit@ >)
-		charge@ IOPageFileRequestExpansion ok!
+	if (ok@)
+		// uncharge quota
 
-		if (ok@)
-			// uncharge quota
-			charge@ PAGESHIFT << quotablock@ MiQuotaBlock_VMUsed + -=
+		HALCPUInterruptDisable rs!
 
-			ipl@ KeIPLLower
+		charge@ PAGESHIFT << quotablock@ MiQuotaBlock_VMUsed + -=
 
-			return
-		end
+		rs@ HALCPUInterruptRestore
 
-		MmCommitLimit@ commitlimit!
-		MmCommitUsage@ commitused!
+		return
 	end
-
-	commitused@ charge@ + MmCommitUsage!
-
-	ipl@ KeIPLLower
 end
 
 fn MmQuotaBlockUnchargeVM { charge quotablock -- }
@@ -478,25 +411,17 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 	auto oldcharge
 	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
 
-	auto commitused
-	MmCommitUsage@ commitused!
-
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
 			"MmQuotaBlockUnchargeVM: attempt to uncharge more than was charged\n" KeCrash
 		end
-
-		if (charge@ PAGESHIFT >> commitused@ >)
-			commitused@
-			charge@ PAGESHIFT >>
-			"MmQuotaBlockUnchargeVM: attempt to uncharge more commit than was charged %d > %d\n" KeCrash
-		end
 	end
 
 	oldcharge@ charge@ - quotablock@ MiQuotaBlock_VMUsed + !
-	commitused@ charge@ PAGESHIFT >> - MmCommitUsage!
 
 	rs@ HALCPUInterruptRestore
+
+	charge@ PAGESHIFT >> MmUnchargeCommit
 end
 
 fn MmQuotaBlockChargePaged { charge quotablock -- ok }
@@ -578,6 +503,59 @@ fn MmQuotaQuery { query quotablock -- }
 
 	quotablock@ MiQuotaBlock_WorkingSetUsed + @ query@ OSQuotaInformation_WorkingSetUsed + !
 	quotablock@ MiQuotaBlock_WorkingSetMax + @ query@ OSQuotaInformation_WorkingSetMaximum + !
+end
+
+fn MmChargeCommit { pri pages -- ok }
+	0 ok!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto commitlimit
+	MmCommitLimit@ commitlimit!
+
+	auto commitused
+	MmCommitUsage@ commitused!
+
+	while (commitused@ pages@ + commitlimit@ >)
+		ipl@ // ipl
+		pri@ // pri
+		pages@ // pages
+		IOPageFileRequestExpansion ok!
+
+		if (ok@)
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		MmCommitLimit@ commitlimit!
+		MmCommitUsage@ commitused!
+	end
+
+	commitused@ pages@ + MmCommitUsage!
+
+	ipl@ KeIPLLower
+end
+
+fn MmUnchargeCommit { pages -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	auto commitused
+	MmCommitUsage@ commitused!
+
+	if (DEBUGCHECKS)
+		if (pages@ commitused@ >)
+			commitused@
+			pages@
+			"MmUnchargeCommit: attempt to uncharge more commit than was charged %d > %d\n" KeCrash
+		end
+	end
+
+	commitused@ pages@ - MmCommitUsage!
+
+	rs@ HALCPUInterruptRestore
 end
 
 #ifdef DEBUGCHECKS

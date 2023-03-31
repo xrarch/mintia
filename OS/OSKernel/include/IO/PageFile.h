@@ -9,7 +9,7 @@ extern IOPageFileWriteMDL { pagecount offset mdl -- ok }
 
 extern IOPageFileAwaitCreation { -- }
 
-extern IOPageFileRequestExpansion { pages -- ok }
+extern IOPageFileRequestExpansion { ipl pri pages -- ok }
 
 extern IOPageFileGetPriority { pagefile -- pri }
 extern IOPageFileGetFree { pagefile -- free }

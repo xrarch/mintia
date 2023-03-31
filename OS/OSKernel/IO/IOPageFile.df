@@ -79,16 +79,6 @@ table IOPageFilePriorityCount[IOPAGEFILEMAXPRI]
 var IOPageFileCount 0
 public IOPageFileCount
 
-fn IOiIncrementCommitLimit { min max -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	min@ MmCommitLimit +=
-	max@ MmTheoreticalCommitLimit +=
-
-	rs@ HALCPUInterruptRestore
-end
-
 fn IOPageFileGetPriority { pagefile -- pri }
 	pagefile@ IOiPageFile_Priority + @ pri!
 end
@@ -374,17 +364,9 @@ fn IOPageFileCreate { minpages maxpages pri path -- ok }
 
 	// increment the commit limit
 
-	if (IOPageFileCount@ 0 ==)
-		// this is the first pagefile created.
-		// set the commit limit to its size and signal the creation event.
-
-		minpages@ MmCommitLimit!
-		maxpages@ MmTheoreticalCommitLimit!
-	end else
-		minpages@ // min
-		maxpages@ // max
-		IOiIncrementCommitLimit
-	end
+	minpages@ // min
+	maxpages@ // max
+	MmIncrementCommitLimit
 
 	1 IOPageFileCount +=
 
@@ -655,41 +637,66 @@ struct IOPageFileExtension
 	4 Success
 endstruct
 
-fn IOPageFileRequestExpansion { pages -- ok }
+buffer IOPageFileCantWaitExtension IOPageFileExtension_SIZEOF
+
+fn IOPageFileRequestExpansion { ipl pri pages -- ok }
 	// entered and left at IPLDPC.
 
-	// quick check to make sure this can feasibly work before we go to the
-	// trouble of queuing a request and waking the worker thread.
+	0 ok!
 
-	auto i
-	0 i!
+	if (pri@ MUSTSUCCEED MUSTSUCCEEDL2 | & ~~)
+		// quick check to make sure this can feasibly work before we go to the
+		// trouble of queuing a request and waking the worker thread.
 
-	auto avail
-	0 avail!
+		auto i
+		0 i!
 
-	while (i@ IOPageFileCount@ <)
-		auto pagefile
-		[i@]IOPageFiles@ pagefile!
+		auto avail
+		0 avail!
 
-		pagefile@ IOiPageFile_MaximumSize + @ pagefile@ IOiPageFile_CurrentSize + @ - avail +=
+		while (i@ IOPageFileCount@ <)
+			auto pagefile
+			[i@]IOPageFiles@ pagefile!
 
-		if (avail@ pages@ >=)
-			break
+			pagefile@ IOiPageFile_MaximumSize + @ pagefile@ IOiPageFile_CurrentSize + @ - avail +=
+
+			if (avail@ pages@ >=)
+				break
+			end
+
+			1 i +=
 		end
 
-		1 i +=
-	end
+		if (avail@ pages@ MmCommitUsage@ + MmCommitLimit@ - <)
+			// not enough potential expansion left to satisfy this
 
-	if (avail@ pages@ MmCommitUsage@ + MmCommitLimit@ - <)
-		// not enough potential expansion left to satisfy this.
-		STATUS_COMMIT_EXCEEDED ok!
-		return
-	end
+			STATUS_COMMIT_EXCEEDED ok!
 
-	IPLLOW KeIPLLower
+			return
+		end
+	end
 
 	auto extension
-	IOPageFileExtension_SIZEOF alloc extension!
+
+	if (pri@ CANBLOCK & ~~)
+		IOPageFileCantWaitExtension extension!
+
+		if (extension@ IOPageFileExtension_Pages + @)
+			// the can't wait extension is already in progress
+
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		-1 extension@ IOPageFileExtension_Pages + !
+
+		ipl@ KeIPLLower
+	end else
+		ipl@ KeIPLLower
+
+		IOPageFileExtension_SIZEOF alloc extension!
+	end
 
 	0 extension@ IOPageFileExtension_Next + !
 	pages@ extension@ IOPageFileExtension_Pages + !
@@ -721,15 +728,17 @@ fn IOPageFileRequestExpansion { pages -- ok }
 	IOPageFileExtendEvent // event
 	KeEventSignal
 
-	KERNELMODE // waitmode
-	0 // alertable
-	OSWAIT_TIMEOUTINFINITE // timeout
-	extension@ IOPageFileExtension_Event + // object
-	KeThreadWaitForObject drop
+	if (pri@ CANBLOCK &)
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		extension@ IOPageFileExtension_Event + // object
+		KeThreadWaitForObject drop
 
-	extension@ IOPageFileExtension_Success + @ ok!
+		extension@ IOPageFileExtension_Success + @ ok!
+	end
 
-	IPLDPC KeIPLRaise drop
+	IPLDPC KeIPLRaise ipl!
 end
 
 fn IOiPageFileExtend { -- }
@@ -815,6 +824,8 @@ fn IOiPageFileSatisfyExtension { extension -- }
 	requiredextension@ IOiPageFileTryExtendAll ok!
 	
 	ok@ extension@ IOPageFileExtension_Success + !
+
+	0 extension@ IOPageFileExtension_Pages + !
 
 	0 // priboost
 	extension@ IOPageFileExtension_Event + // event

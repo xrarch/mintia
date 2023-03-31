@@ -112,9 +112,6 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		auto ipl
 		IPLAPC KeIPLRaise ipl!
 
-		auto refaults
-		0 refaults!
-
 		STATUS_REFAULT signal!
 
 		// We only need to lock the VAD list mutex right now if this is a user
@@ -138,7 +135,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 			if (process@ PsSystemProcess@ ==
 				KeThreadCurrent@ KeThread_PriorityB + gb PRIORITY_LOWREALTIME >= ||)
 
-				if (process@ PsProcess_PageFaultCount + @ refaults@ + 0xFFF & 0x300 ==)
+				if (process@ PsProcess_ReFaultCount + @ 0xFFF & 0x300 ==)
 					// If this thread has refaulted more than 10 times, then
 					// the process is probably stuck in a situation where its
 					// working set has become a revolving door of death. If we
@@ -155,7 +152,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 
 					ipl@ KeIPLLower
 
-					50 // ms
+					100 // ms
 					KERNELMODE // waitmode
 					0 // alertable
 					KeThreadSleep drop
@@ -165,12 +162,10 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 					if (kernelmapping@ ~~)
 						process@ MmVADListLock drop
 					end
-
-					0 refaults!
 				end
 			end
 
-			1 refaults +=
+			1 process@ PsProcess_ReFaultCount + +=
 
 			// Call MiSatisfyFault to handle the fault. It may return a status
 			// of STATUS_REFAULT instead of a signal value, which indicates we
@@ -329,7 +324,7 @@ fn MmThrottle { -- }
 	end
 
 	auto times
-	100 times!
+	2 times!
 
 	auto process
 	KeProcessCurrent process!
@@ -1181,10 +1176,6 @@ fn MiWriteFault { pteaddr vaddr process -- signal }
 		// now, so REFAULT.
 
 		ipl@ KeIPLLower
-
-		if (process@ PsSystemProcess@ ~=)
-			process@ MmVADListUnlock
-		end
 
 		STATUS_REFAULT signal!
 

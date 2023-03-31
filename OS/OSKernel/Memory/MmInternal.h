@@ -122,6 +122,8 @@ externptr MiModifiedPageListTail
 externptr MiEvictablePageListHead
 externptr MiEvictablePageListTail
 
+externptr MiPhysicalUsage
+
 extern MiModifiedPageWriter { context1 context2 -- }
 
 // free page count threshold that counts as "dire", meaning the working set
@@ -142,7 +144,7 @@ const MMPROCESSPINGUARANTEE 8
 
 // default physical commit heuristics
 
-const MMSYSTEMPROMISE         32
+const MMSYSTEMPROMISE         8
 const MMPHYSICALCOMMITMINIMUM 64
 
 extern MiPoolSpaceReserve { pri pagesneeded -- offset ok }

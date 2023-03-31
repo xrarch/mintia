@@ -1,0 +1,378 @@
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+struct VDBs
+	15 BootCode
+	1 FFIfVariant
+	128 PartitionTable
+	4 Magic
+	16 Label
+endstruct
+
+struct PTE
+	8 Label
+	4 Blocks
+	4 Status
+endstruct
+
+extern PromptYN { ... fmt -- r }
+extern IWriteBlock { block buf -- }
+extern IReadBlock { block buf -- }
+
+externptr DiskInfo
+
+var VDB 0
+
+var Fixed 0
+
+const MaxParts 8
+
+buffer WriteBuffer 1024
+buffer RealVDB 1024
+
+externptr DiskNode
+
+struct BootRecord
+	4 Magic
+	16 OSLabel
+	4 BootBlockStart
+	4 BootBlockCount
+endstruct
+
+fn LoadVDBSafe { -- ok }
+	1 ok!
+
+	0 Fixed!
+
+	LoadVDB
+
+	if (VDBValid ~~)
+		VDBFix dup Fixed! ok!
+
+		if (Fixed@ ~~)
+			return
+		end
+	end
+end
+
+fn LoadVDB { -- }
+	RealVDB 511 + 511 ~ & VDB!
+
+	0 VDB@ IReadBlock
+end
+
+fn FreeVDB { -- }
+	// nothing
+end
+
+fn VDBValid { -- valid }
+	VDB@ VDBs_Magic + @ 0x4E4D494D == valid!
+
+	if (valid@)
+		if (VDB@ VDBs_FFIfVariant + gb 0xFF ~=)
+			"VDB has old variant. internally converting.\n" Printf
+
+			// move label to correct spot
+
+			VDB@ VDBs_Label + // dest
+			VDB@ // src
+			strcpy
+
+			0xFF VDB@ VDBs_FFIfVariant + sb
+		end
+	end
+end
+
+fn VDBLabel { -- label }
+	VDB@ VDBs_Label + label!
+end
+
+fn VDBWrite { new -- }
+	RealVDB 511 + 511 ~ & VDB!
+
+	auto buf
+
+	if (new@ 2 ~=)
+		WriteBuffer 511 + 511 ~ & buf!
+
+		buf@ // ptr
+		512 // sz
+		0 // word
+		memset
+	end else
+		if (LoadVDBSafe ~~)
+			"disklabel invalid. cannot continue.\n" Printf
+			return
+		end
+
+		VDB@ buf!
+	end
+
+	auto nbuf
+	256 alloc nbuf!
+
+	while (1)
+		"disk label (15 characters): " Printf
+
+		nbuf@ 255 Gets
+
+		if (nbuf@ strlen 15 >)
+			"label too long!\n" Printf
+			continue
+		end
+
+		break
+	end
+
+	0x4E4D494D buf@ VDBs_Magic + !
+
+	0xFF buf@ VDBs_FFIfVariant + sb
+
+	buf@ VDBs_Label + nbuf@ strcpy
+
+	"writing new disklabel...\n" Printf
+
+	0 buf@ IWriteBlock
+
+	FreeVDB
+	LoadVDB
+
+	"wrote disklabel successfully.\n" Printf
+
+	Reboot
+end
+
+fn VDBFix { -- ok }
+	if (VDBValid) 1 ok! return end
+
+	auto ynr
+
+	"this disk's volume descriptor block is corrupt or empty.\nwrite new one" PromptYN ynr!
+
+	if (ynr@ ~~) 0 ok! return end
+
+	0 VDBWrite
+
+	'\n' Putc
+
+	VDBValid drop
+
+	1 ok! return
+end
+
+fn PTEGet { ent -- label blocks status }
+	VDB@ VDBs_PartitionTable + ent@ PTE_SIZEOF * + ent!
+
+	ent@ PTE_Label + label!
+	ent@ PTE_Blocks + @ blocks!
+	ent@ PTE_Status + @ status!
+end
+
+fn PTESet { label blocks status ent -- }
+	auto ptb
+	VDB@ VDBs_PartitionTable + ptb!
+	ptb@ ent@ PTE_SIZEOF * + ptb!
+
+	ptb@ PTE_Label + label@ strcpy
+	blocks@ ptb@ PTE_Blocks + !
+	status@ ptb@ PTE_Status + !
+end
+
+table PTStatus
+	"unused"
+	"boot"
+	"used"
+	"??? corrupt entry ???"
+endtable
+
+fn PTInfo { -- }
+	auto i
+	0 i!
+
+	while (i@ 8 <)
+		auto status
+		auto blocks
+		auto label
+
+		i@ PTEGet status! blocks! label!
+
+		if (status@ 3 >)
+			3 status!
+		end
+
+		if (status@ 0 ~=)
+			label@ i@ "part%d: %s\n" Printf
+			[status@]PTStatus@ "\tstatus: %s\n" Printf
+			blocks@ dup 512 * "\tsize: %d bytes (%d blocks)\n" Printf
+		end
+
+		1 i +=
+	end
+end
+
+fn PartitionDisk { update -- }
+	if (LoadVDBSafe ~~)
+		"disklabel invalid. cannot continue.\n" Printf
+		return
+	end
+
+	if (Fixed@ ~~)
+		if ("view current partition info" PromptYN)
+			"\ncurrent partition info:\n" Printf
+			PTInfo
+			'\n' Putc
+		end
+	end
+
+	auto blocksleft
+	DiskInfo OSFileInformation_Size + @ 512 / blocksleft!
+
+	auto ptr
+	VDB@ VDBs_PartitionTable + ptr!
+
+	ptr@ 128 0 memset
+
+	auto buf
+	256 alloc buf!
+
+	"number of partitions: " Printf
+
+	buf@ 255 Gets
+
+	auto partnum
+	buf@ atoi 8 min partnum!
+
+	auto i
+	0 i!
+
+	while (i@ partnum@ <)
+		if (blocksleft@ 0 ==)
+			"no more space on disk\n" Printf
+			break
+		end
+
+		partnum@ 1 - i@ "partition %d of %d\n" Printf
+
+		blocksleft@ 512 * "  [%d bytes left] size: " Printf
+		buf@ 255 Gets
+
+		auto sz
+		buf@ atoi sz!
+
+		sz@ 511 + 512 / sz!
+
+		if (sz@ blocksleft@ >)
+			"not enough space!\n" Printf
+			continue
+		end
+
+		"  label (7 characters): " Printf
+		buf@ 255 Gets
+
+		if (buf@ strlen 7 >)
+			"label too long!\n" Printf
+			continue
+		end
+
+		sz@ blocksleft -=
+
+		sz@ ptr@ PTE_Blocks + !
+
+		ptr@ PTE_Label + buf@ strcpy
+
+		2 ptr@ PTE_Status + !
+
+		PTE_SIZEOF ptr +=
+
+		1 i +=
+	end
+
+	0 VDB@ IWriteBlock
+
+	FreeVDB
+
+	'\n' Putc
+
+	"partitioned successfully!\n" Printf
+
+	Reboot
+end
+
+fn Reboot { -- }
+	"\nthe system software will not correctly identify the changes until next reboot.\n" Printf
+
+	if ("would you like to reboot now" PromptYN)
+		auto ok
+		OSSHUTDOWN_REBOOT OSShutdownSystem ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "aptdisk: failed to reboot: %s\n" OSError
+		end
+
+		"didn't reset!\n" Printf
+
+		while (1) end
+	end
+end
+
+fn ChangeLabel { -- }
+	if (LoadVDBSafe ~~)
+		"disklabel invalid. cannot continue.\n" Printf
+		return
+	end
+
+	"\ncurrent partition info:\n" Printf
+	PTInfo
+	'\n' Putc
+
+	auto buf
+	256 alloc buf!
+
+	while (1)
+		"partition index (0-7): " Printf
+
+		buf@ 255 Gets
+
+		auto index
+		buf@ atoi index!
+
+		if (index@ 7 >)
+			"index too great!\n" Printf
+			continue
+		end
+
+		auto label
+		auto blocks
+		auto status
+		index@ PTEGet status! blocks! label!
+
+		if (status@ ~~)
+			"partition is empty\n" Printf
+			continue
+		end
+
+		label@
+		index@
+		"part%d: %s\n" Printf
+
+		"new label (7 characters): " Printf
+
+		buf@ 255 Gets
+
+		if (buf@ strlen 7 >)
+			"label too long!\n" Printf
+			continue
+		end
+
+		label@ buf@ strcpy
+
+		0 VDB@ IWriteBlock
+
+		break
+	end
+
+	"partition label updated successfully.\n" Printf
+
+	Reboot
+end

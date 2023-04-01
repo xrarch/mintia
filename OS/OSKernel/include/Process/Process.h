@@ -101,8 +101,6 @@ struct PsThread
 
 	4 IPCBlock
 
-	4 PoolAddress
-
 	KeEvent_SIZEOF TerminationEvent
 
 	4 FileCreationPermissions // also stashes the thread's last paging error

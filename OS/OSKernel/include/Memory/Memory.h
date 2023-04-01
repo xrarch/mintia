@@ -23,7 +23,7 @@ extern MmFree { ptr -- }
 extern MmChargeBytesGet { bytes -- charge }
 extern MmBlockChargeGet { block -- charge }
 
-extern MmKernelStackAlloc { -- pooladdr kstack ok }
+extern MmKernelStackAlloc { -- kstack ok }
 extern MmKernelStackFree { kstack -- }
 
 extern MmModifiedPageWriter { context1 context2 -- }

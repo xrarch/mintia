@@ -122,6 +122,9 @@ externptr MiModifiedPageListTail
 externptr MiEvictablePageListHead
 externptr MiEvictablePageListTail
 
+externptr MiQuickPage
+externptr MiZeroingPage
+
 externptr MiPhysicalUsage
 
 extern MiModifiedPageWriter { context1 context2 -- }
@@ -205,8 +208,6 @@ extern MiProcessSwapIn { process -- }
 
 extern MiProcessChargePageTables { startva endva process -- ok }
 extern MiProcessUnchargePageTables { process -- }
-
-extern MiThreadGetPoolAddress { -- pooladdr }
 
 struct MiProcessHeader // contains things that only need to be accessed while process is swapped in
 	4 WorkingSetSize

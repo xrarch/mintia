@@ -116,7 +116,13 @@ end
 fn (IOFilesystemMountFunction) DriverAFSMount { flags deviceobject -- fsdeviceobject ok }
 	fnsection "PAGE$text"
 
-	deviceobject@ IODevice_FileControlBlock + @ IOFileControlBlockCacheCheck ok! drop
+	auto mount
+	flags@ // mountflags
+	AFSData_SIZEOF // extensionsize
+	PAGENUMBERMASK // sizeinbytes
+	DriverAFSFilesystem // filesystem
+	deviceobject@ // deviceobject
+	IOVolumeDeviceCreate ok! fsdeviceobject! mount!
 
 	if (ok@)
 		return
@@ -126,15 +132,19 @@ fn (IOFilesystemMountFunction) DriverAFSMount { flags deviceobject -- fsdeviceob
 	auto bcb
 
 	0 // offset
-	deviceobject@ IODevice_FileControlBlock + @ // fcb
+	fsdeviceobject@ IODevice_FileControlBlock + @ // fcb
 	VcFileControlBlockMapAndPin ok! bcb! pageframe!
 
 	if (ok@)
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
 		return
 	end
 
 	if (pageframe@ AFSSuperblock_Magic + @ AFSSUPERBLOCKMAGIC ~=)
 		bcb@ VcBufferDecrementMapAndPinCount
+
+		fsdeviceobject@ IOVolumeDeviceUninitialize
 
 		STATUS_BAD_FILESYSTEM ok!
 
@@ -144,24 +154,15 @@ fn (IOFilesystemMountFunction) DriverAFSMount { flags deviceobject -- fsdeviceob
 	if (pageframe@ AFSSuperblock_Version + @ AFSSUPERBLOCKVERSION ~=)
 		bcb@ VcBufferDecrementMapAndPinCount
 
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
 		STATUS_BAD_FILESYSTEM ok!
 
 		return
 	end
 
-	auto mount
-	flags@ // mountflags
-	AFSData_SIZEOF // extensionsize
-	pageframe@ AFSSuperblock_DataStart + @ AFSBLOCKSHIFT << // sizeinbytes
-	DriverAFSFilesystem // filesystem
-	deviceobject@ // deviceobject
-	IOVolumeDeviceCreate ok! fsdeviceobject! mount!
-
-	if (ok@)
-		bcb@ VcBufferDecrementMapAndPinCount
-
-		return
-	end
+	pageframe@ AFSSuperblock_DataStart + @ AFSBLOCKSHIFT <<
+	fsdeviceobject@ IODevice_FileControlBlock + @ IOFileControlBlock_SizeInBytes + !
 
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!

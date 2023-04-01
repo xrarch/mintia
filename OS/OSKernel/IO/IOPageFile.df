@@ -780,9 +780,12 @@ fn IOiPageFileSatisfyExtension { extension -- }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (extension@ IOPageFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ <=)
+	if (extension@ IOPageFileExtension_Pages + @ IOSwapPagesUsed@ + IOSwapPagesCount@ <=)
 		// immediately succeed
+
 		ipl@ KeIPLLower
+
+		0 extension@ IOPageFileExtension_Pages + !
 
 		0 extension@ IOPageFileExtension_Success + !
 
@@ -807,13 +810,16 @@ fn IOiPageFileSatisfyExtension { extension -- }
 	end
 
 	auto requiredextension
-	extension@ IOPageFileExtension_Pages + @ MmCommitUsage@ + MmCommitLimit@ - requiredextension!
+	extension@ IOPageFileExtension_Pages + @ IOSwapPagesUsed@ + IOSwapPagesCount@ - requiredextension!
 
 	if (avail@ requiredextension@ <)
 		// immediately fail
+
 		ipl@ KeIPLLower
 
 		STATUS_COMMIT_EXCEEDED extension@ IOPageFileExtension_Success + !
+
+		0 extension@ IOPageFileExtension_Pages + !
 
 		0 // priboost
 		extension@ IOPageFileExtension_Event + // event
@@ -1254,5 +1260,57 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 		ipl@ KeIPLLower
 
 		1 contraction >>=
+	end
+end
+
+fn IOPageFileFullOrFragmented { -- }
+	// called at IPLDPC when the modified page writer discovers that a
+	// pagefile is full. this is a problem since it makes us unable to clean
+	// any more modified anonymous pages. first check to see whether there's
+	// really an issue (i.e. the pagefiles are really super full), and then
+	// issue an expansion request if needed.
+
+	auto i
+	0 i!
+
+	auto modanon
+	MmModifiedPageCount@ MmModifiedFilePageCount@ - modanon!
+
+	auto pagefile
+
+	auto total
+	0 total!
+
+	auto used
+	0 used!
+
+	// no synchronization is required since IOPageFileCount isn't incremented
+	// until a pagefile has been completely initialized.
+
+	while (i@ IOPageFileCount@ <)
+		[i@]IOPageFiles@ pagefile!
+
+		pagefile@ IOiPageFile_CurrentSize + @ total +=
+		pagefile@ IOiPageFile_UsedCount + @ used +=
+
+		1 i +=
+	end
+
+	auto oughttohave
+	used@ modanon@ + 10 + oughttohave!
+
+	if (oughttohave@ total@ >)
+		// yes, there is a problem, we ought to extend the pagefiles.
+
+		total@ oughttohave -=
+
+		if (oughttohave@ 30 <)
+			30 oughttohave!
+		end
+
+		IPLDPC // ipl
+		MUSTSUCCEED // pri
+		oughttohave@ // pages
+		IOPageFileRequestExpansion drop
 	end
 end

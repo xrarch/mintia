@@ -51,10 +51,7 @@ extern ObObjectCloseProcess { handle process -- ok }
 extern ObObjectOpen { nocheck access object -- handle ok }
 extern ObObjectOpenProcess { nocheck access object process -- handle ok }
 
-extern ObObjectReferenceByPointerCapturedHeader { npheader -- oldcount }
 extern ObObjectReferenceByPointer { object -- oldcount }
-
-extern ObObjectDereferenceByPointerCapturedHeader { object npheader -- oldcount }
 extern ObObjectDereferenceByPointer { object -- oldcount }
 
 extern ObObjectInheritPermissions { destobject srcobject -- }

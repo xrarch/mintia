@@ -365,6 +365,7 @@ extern MiVADListCheckRange { startva endva process -- ok }
 externptr MiVADListHead
 externptr MiVADListTail
 
+extern MiVADListLockUnalertable { processobject -- }
 
 // working set stuff
 
@@ -389,7 +390,7 @@ extern MiWorkingSetEntryFindByIndex { wsli process -- wsleptr ok }
 extern MiWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok }
 extern MiWorkingSetEntryFree { wsli wsleptr process -- }
 
-extern MiWorkingSetEntryForceOut { vaddr pfdbe process -- }
+extern MiWorkingSetEntryForceOut { vaddr pfdbe -- }
 
 extern MiManageWorkingSets { -- success }
 

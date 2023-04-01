@@ -132,7 +132,7 @@ extern MiModifiedPageWriter { context1 context2 -- }
 // free page count threshold that counts as "dire", meaning the working set
 // trimmer will ignore working set lower limits and go woo wild.
 
-const MMDIREPAGES           (MMNORMALTHRESH 1 -)
+const MMDIREPAGES           (MMNORMALTHRESH 2 +)
 
 // default working set heuristics
 

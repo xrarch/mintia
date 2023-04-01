@@ -635,6 +635,7 @@ struct IOPageFileExtension
 	4 Pages
 	KeEvent_SIZEOF Event
 	4 Success
+	4 InProgress
 endstruct
 
 buffer IOPageFileCantWaitExtension IOPageFileExtension_SIZEOF
@@ -642,7 +643,17 @@ buffer IOPageFileCantWaitExtension IOPageFileExtension_SIZEOF
 fn IOPageFileRequestExpansion { ipl pri pages -- ok }
 	// entered and left at IPLDPC.
 
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IOPageFileRequestExpansion: ipl != IPLDPC\n" KeCrash
+		end
+	end
+
 	0 ok!
+
+	if (pages@ ~~)
+		return
+	end
 
 	if (pri@ MUSTSUCCEED MUSTSUCCEEDL2 | & ~~)
 		// quick check to make sure this can feasibly work before we go to the
@@ -681,32 +692,32 @@ fn IOPageFileRequestExpansion { ipl pri pages -- ok }
 	if (pri@ CANBLOCK & ~~)
 		IOPageFileCantWaitExtension extension!
 
-		if (extension@ IOPageFileExtension_Pages + @)
-			// the can't wait extension is already in progress
+		if (extension@ IOPageFileExtension_InProgress + @)
+			// the cant-wait extension is already in progress
 
 			ipl@ KeIPLLower
 
 			return
 		end
 
-		-1 extension@ IOPageFileExtension_Pages + !
+		1 extension@ IOPageFileExtension_InProgress + !
 
 		ipl@ KeIPLLower
 	end else
 		ipl@ KeIPLLower
 
 		IOPageFileExtension_SIZEOF alloc extension!
+
+		0 // signaled
+		OSEVENT_SYNCH // type
+		"IOPageFileRequestExpansionEvent" // name
+		extension@ IOPageFileExtension_Event + // event
+		KeEventInitialize
 	end
 
 	0 extension@ IOPageFileExtension_Next + !
 	pages@ extension@ IOPageFileExtension_Pages + !
 	-1 extension@ IOPageFileExtension_Success + !
-
-	0 // signaled
-	OSEVENT_SYNCH // type
-	"IOPageFileRequestExpansionEvent" // name
-	extension@ IOPageFileExtension_Event + // event
-	KeEventInitialize
 
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -770,6 +781,18 @@ fn IOiPageFileExtend { -- }
 	1 KeThreadCurrent@ PsThread_MemoryPrivilegedCount + -=
 end
 
+fn IOiPageFileWakeExtension { ok extension -- }
+	0 extension@ IOPageFileExtension_InProgress + !
+
+	if (extension@ IOPageFileCantWaitExtension ~=)
+		ok@ extension@ IOPageFileExtension_Success + !
+
+		0 // priboost
+		extension@ IOPageFileExtension_Event + // event
+		KeEventSignal
+	end
+end
+
 fn IOiPageFileSatisfyExtension { extension -- }
 	auto i
 	0 i!
@@ -777,69 +800,73 @@ fn IOiPageFileSatisfyExtension { extension -- }
 	auto avail
 	0 avail!
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto pages
+	extension@ IOPageFileExtension_Pages + @ pages!
 
-	if (extension@ IOPageFileExtension_Pages + @ IOSwapPagesUsed@ + IOSwapPagesCount@ <=)
-		// immediately succeed
+	if (pages@ z<)
+		// absolute pagefile extension request from system; the pagefiles are
+		// low on space but there are a lot of modified anonymous pages, so it
+		// wants to grow the pagefiles in an absolute fashion rather than
+		// relative to the current commit usage. if we did the latter, this
+		// routine would go "oh, there's plenty of commit" and immediately
+		// succeed the request without extending any pagefiles.
 
-		ipl@ KeIPLLower
+		pages@ abs requiredextension!
+	end else
+		// commit extension request.
 
-		0 extension@ IOPageFileExtension_Pages + !
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-		0 extension@ IOPageFileExtension_Success + !
+		if (pages@ MmCommitUsage@ + MmCommitLimit@ <=)
+			// immediately succeed
 
-		0 // priboost
-		extension@ IOPageFileExtension_Event + // event
-		KeEventSignal
+			ipl@ KeIPLLower
 
-		return
-	end
+			0 // ok
+			extension@ // extension
+			IOiPageFileWakeExtension
 
-	while (i@ IOPageFileCount@ <)
-		auto pagefile
-		[i@]IOPageFiles@ pagefile!
-
-		pagefile@ IOiPageFile_MaximumSize + @ pagefile@ IOiPageFile_CurrentSize + @ - avail +=
-
-		if (avail@ extension@ IOPageFileExtension_Pages + @ >=)
-			break
+			return
 		end
 
-		1 i +=
-	end
+		while (i@ IOPageFileCount@ <)
+			auto pagefile
+			[i@]IOPageFiles@ pagefile!
 
-	auto requiredextension
-	extension@ IOPageFileExtension_Pages + @ IOSwapPagesUsed@ + IOSwapPagesCount@ - requiredextension!
+			pagefile@ IOiPageFile_MaximumSize + @ pagefile@ IOiPageFile_CurrentSize + @ - avail +=
 
-	if (avail@ requiredextension@ <)
-		// immediately fail
+			if (avail@ pages@ >=)
+				break
+			end
+
+			1 i +=
+		end
+
+		auto requiredextension
+		pages@ MmCommitUsage@ + MmCommitLimit@ - requiredextension!
+
+		if (avail@ requiredextension@ <)
+			// immediately fail
+
+			ipl@ KeIPLLower
+
+			STATUS_COMMIT_EXCEEDED // ok
+			extension@ // extension
+			IOiPageFileWakeExtension
+
+			return
+		end
 
 		ipl@ KeIPLLower
-
-		STATUS_COMMIT_EXCEEDED extension@ IOPageFileExtension_Success + !
-
-		0 extension@ IOPageFileExtension_Pages + !
-
-		0 // priboost
-		extension@ IOPageFileExtension_Event + // event
-		KeEventSignal
-
-		return
 	end
-
-	ipl@ KeIPLLower
 
 	auto ok
 	requiredextension@ IOiPageFileTryExtendAll ok!
 	
-	ok@ extension@ IOPageFileExtension_Success + !
-
-	0 extension@ IOPageFileExtension_Pages + !
-
-	0 // priboost
-	extension@ IOPageFileExtension_Event + // event
-	KeEventSignal
+	ok@ // ok
+	extension@ // extension
+	IOiPageFileWakeExtension
 end
 
 const IOPAGEFILEMINIMUMEXTENSION 128
@@ -1312,9 +1339,17 @@ fn IOPageFileFullOrFragmented { -- }
 			30 oughttohave!
 		end
 
+		if (oughttohave@ IOPAGEFILEMINIMUMEXTENSION >)
+			IOPAGEFILEMINIMUMEXTENSION oughttohave!
+		end
+
+		// negative pages indicates an absolute extension request.
+		// positive means relative to current commit usage, which we don't
+		// want here.
+
 		IPLDPC // ipl
 		MUSTSUCCEED // pri
-		oughttohave@ // pages
+		0 oughttohave@ - // pages
 		IOPageFileRequestExpansion drop
 	end
 end

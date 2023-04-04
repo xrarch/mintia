@@ -55,7 +55,6 @@ struct IOiCacheInfoBlock
 	4 BCBTreeRoot
 
 	KeEvent_SIZEOF BCBTreeEvent
-	KeEvent_SIZEOF BCBPinEvent
 endstruct
 
 const IOCACHEBLOCKFLAG_TRUNCATING 1

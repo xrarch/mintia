@@ -31,7 +31,7 @@ struct VcBuffer
 	4 Type
 
 	2 MapCountI // when nonzero, this BCB cannot be reclaimed
-	2 PinCountI // when nonzero, the pages described by this BCB have a biased refcount
+	2 ReservedI
 endstruct
 
 extern VcWindowAllocate { -- bcb vaddr }
@@ -42,10 +42,7 @@ extern VcCacheInfoBlockTruncate { newsize cacheblock -- }
 extern VcBufferIncrementMapCount { bcb -- oldcount }
 extern VcBufferDecrementMapCount { bcb -- oldcount }
 
-extern VcBufferIncrementPinCount { bcb -- oldcount ok }
-extern VcBufferDecrementPinCount { bcb -- oldcount }
-
-extern VcBufferDecrementMapAndPinCount { bcb -- }
+extern VcBufferDecrementMapAndUnpin { bcb -- }
 
 extern VcBufferDirty { bcb -- }
 

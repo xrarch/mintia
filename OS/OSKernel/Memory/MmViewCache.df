@@ -124,16 +124,14 @@ end
 fn MmBufferPin { bcb -- ok }
 	0 ok!
 
-	// indicate pinned length in ReclaimNext, since that field is currently
-	// unused.
-
-	0 bcb@ VcBuffer_ReclaimNext + !
-
 	// pin the buffer one page at a time. we just fault the pages in with
 	// KeSafeGetByte and capture the pfdbe to increment the refcount, much
 	// like how we pin MDLs. when the working set manager sees a shared page
 	// with a biased refcount in the system working set, it knows its a pinned
 	// viewcache page and doesn't touch it.
+
+	// the FCB MUST be held at least shared for the duration of the pin,
+	// otherwise truncation may occur which will cause horrible effects.
 
 	// read an entire fileview or up to the end of the file, whatever comes
 	// first.
@@ -154,9 +152,13 @@ fn MmBufferPin { bcb -- ok }
 	auto pteaddr
 	vaddr@ MmVirtualtoPTEAddress pteaddr!
 
+	auto pagesdone
+	0 pagesdone!
+
 	while (pages@)
 		while (1)
 			// poke the buffer page to make sure it is resident.
+
 			vaddr@ KeSafeProbeSystemByte ok! drop
 
 			if (ok@)
@@ -172,6 +174,7 @@ fn MmBufferPin { bcb -- ok }
 
 			if (ok@)
 				// not resident, loop, re-poke, and try again.
+
 				ipl@ KeIPLLower
 
 				continue
@@ -199,21 +202,20 @@ fn MmBufferPin { bcb -- ok }
 			break
 		end
 
-		1 bcb@ VcBuffer_ReclaimNext + +=
 		PAGESIZE vaddr +=
 		PTESIZE pteaddr +=
 		1 pages -=
+		1 pagesdone +=
 	end
 
 	if (ok@)
-		bcb@ MmBufferUnpin
+		pagesdone@ // pages
+		bcb@ // bcb
+		MiBufferUnpin
 	end
 end
 
-fn MmBufferUnpin { bcb -- }
-	auto pages
-	bcb@ VcBuffer_ReclaimNext + @ pages!
-
+fn MiBufferUnpin { pages bcb -- }
 	auto pteaddr
 	bcb@ VcBuffer_WindowAddress + @ MmVirtualtoPTEAddress pteaddr!
 
@@ -221,8 +223,7 @@ fn MmBufferUnpin { bcb -- }
 		auto pfdbe
 		auto ok
 
-		pteaddr@ // pteaddr
-		MiPTEInterpret ok! drop pfdbe!
+		pteaddr@ MiPTEInterpret ok! drop pfdbe!
 
 		if (DEBUGCHECKS)
 			if (ok@)
@@ -246,6 +247,74 @@ fn MmBufferUnpin { bcb -- }
 		PTESIZE pteaddr +=
 		1 pages -=
 	end
+end
 
-	0 bcb@ VcBuffer_ReclaimNext + !
+fn MmBufferUnpin { bcb -- }
+	auto pages
+	bcb@ VcBuffer_FileControlBlock + @ IOFileControlBlock_SizeInBytes + @
+	bcb@ VcBuffer_FileOffset + @ - pages!
+
+	if (pages@ FILEVIEWGRANULARITY >)
+		FILEVIEWGRANULARITY pages!
+	end
+
+	pages@ PAGEOFFSETMASK + PAGESHIFT >> pages!
+
+	pages@ // pages
+	bcb@ // bcb
+	MiBufferUnpin
+end
+
+fn MmViewPagePin { vaddr -- pfdbe ok }
+	// pin a single viewcache page into the system working set and return its
+	// PFDBE. useful when pinning an entire BCB (up to 32K) would be too heavy
+	// handed, but a guarantee of page validity, and/or the catching of
+	// potential page-in I/O errors, is still required.
+
+	auto pteaddr
+	vaddr@ MmVirtualtoPTEAddress pteaddr!
+
+	while (1)
+		// poke the buffer page to make sure it is resident.
+
+		vaddr@ KeSafeProbeSystemByte ok! drop
+
+		if (ok@)
+			return
+		end
+
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
+		pteaddr@ MiPTEInterpret ok! drop pfdbe!
+
+		if (ok@)
+			// not resident, loop, re-poke, and try again.
+
+			ipl@ KeIPLLower
+
+			continue
+		end
+
+		pfdbe@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
+
+		// we got a pfdbe, time to pin it.
+
+		auto oldcount
+		pfdbe@ MmEvictablePageReference oldcount!
+
+		if (DEBUGCHECKS)
+			if (oldcount@ 1 <)
+				"MmViewCachePagePin: count too low\n" KeCrash
+			end
+		end
+
+		ipl@ KeIPLLower
+
+		return
+	end
+end
+
+fn MmViewPageUnpin { pfdbe -- }
+	pfdbe@ MmEvictablePageDereference drop
 end

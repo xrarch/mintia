@@ -43,7 +43,6 @@ fn FatWalkFAT { startcount startcluster mount kflags -- cluster ok }
 	0 ok!
 
 	while (startcount@)
-		0 // pin
 		0 // dirty
 		fattype@ // fattype
 		cluster@ // index
@@ -59,7 +58,7 @@ fn FatWalkFAT { startcount startcluster mount kflags -- cluster ok }
 	end
 
 	if (fatbcb@)
-		fatbcb@ VcBufferDecrementMapCount drop
+		fatbcb@ VcBufferDecrementMapAndUnpin
 	end
 end
 
@@ -153,7 +152,7 @@ fn FatBlockMap { fileoffset fcb kflags -- voloffset ok }
 	fatdata@ FatData_ClusterSizeBytes + @ 1 - & voloffset +=
 end
 
-fn FatLookupEntryByIndex { pin dirty fattype index mount lastbcb -- bcb vaddr value ok }
+fn FatLookupEntryByIndex { dirty fattype index mount lastbcb -- bcb vaddr value ok }
 	0 ok!
 
 	// make sure not to overwrite the caller's lastbcb in case of an error
@@ -207,37 +206,21 @@ fn FatLookupEntryByIndex { pin dirty fattype index mount lastbcb -- bcb vaddr va
 				lastbcb@ VcBufferDirty
 			end
 
-			if (pin@)
-				volfileoffset@ // offset
-				mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-				VcFileControlBlockMapAndPin ok! bcb! vaddr!
-			end else
-				volfileoffset@ // offset
-				mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-				VcFileControlBlockMap ok! bcb! vaddr!
-			end
+			volfileoffset@ // offset
+			mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+			VcFileControlBlockMapAndPin ok! bcb! vaddr!
 
 			if (ok@)
 				lastbcb@ bcb!
 				return
 			end
 
-			if (pin@)
-				lastbcb@ VcBufferDecrementMapAndPinCount
-			end else
-				lastbcb@ VcBufferDecrementMapCount drop
-			end
+			lastbcb@ VcBufferDecrementMapAndUnpin
 		end
 	end else
-		if (pin@)
-			volfileoffset@ // offset
-			mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-			VcFileControlBlockMapAndPin ok! bcb! vaddr!
-		end else
-			volfileoffset@ // offset
-			mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
-			VcFileControlBlockMap ok! bcb! vaddr!
-		end
+		volfileoffset@ // offset
+		mount@ IOMount_FsDeviceObject + @ IODevice_FileControlBlock + @ // fcb
+		VcFileControlBlockMapAndPin ok! bcb! vaddr!
 
 		if (ok@)
 			lastbcb@ bcb!
@@ -293,7 +276,6 @@ fn FatClusterChainValidate { mustlen cluster mount -- length ok }
 			end
 		end
 
-		1 // pin
 		0 // dirty
 		fattype@ // fattype
 		cluster@ // index
@@ -322,7 +304,7 @@ fn FatClusterChainValidate { mustlen cluster mount -- length ok }
 	end
 
 	if (lastbcb@)
-		lastbcb@ VcBufferDecrementMapAndPinCount
+		lastbcb@ VcBufferDecrementMapAndUnpin
 	end
 
 	if (mustlen@ -1 ~=)
@@ -337,10 +319,6 @@ fn FatClusterBitmapReadFAT { mount -- ok }
 
 	// read the entire FAT page-by-page to construct an in-memory bitmap of
 	// free clusters.
-
-	// this is the only place where we map and pin the FAT rather than just
-	// mapping it. we avoid it later by assuming that since we already checked
-	// the entire FAT here, its unlikely that errors will appear later.
 
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
@@ -375,7 +353,6 @@ fn FatClusterBitmapReadFAT { mount -- ok }
 	while (clusterno@ clusters@ <)
 		auto value
 
-		1 // pin
 		0 // dirty
 		fattype@ // fattype
 		clusterno@ 2 + // index
@@ -385,7 +362,7 @@ fn FatClusterBitmapReadFAT { mount -- ok }
 
 		if (ok@)
 			if (lastbcb@)
-				lastbcb@ VcBufferDecrementMapAndPinCount
+				lastbcb@ VcBufferDecrementMapAndUnpin
 			end
 
 			return
@@ -439,7 +416,7 @@ fn FatClusterBitmapReadFAT { mount -- ok }
 	end
 
 	if (lastbcb@)
-		lastbcb@ VcBufferDecrementMapAndPinCount
+		lastbcb@ VcBufferDecrementMapAndUnpin
 	end
 
 	usedclusters@ fatdata@ FatData_ClusterSizeShift + @ <<
@@ -797,7 +774,6 @@ fn FatAllocateChain { clusters lastcluster zero mount -- startcluster ok }
 		0 first!
 		-1 startcluster!
 	end else
-		1 // pin
 		1 // dirty
 		fattype@ // fattype
 		lastcluster@ // clusterno
@@ -839,7 +815,7 @@ fn FatAllocateChain { clusters lastcluster zero mount -- startcluster ok }
 
 				if (fatbcb@)
 					fatbcb@ VcBufferDirty
-					fatbcb@ VcBufferDecrementMapAndPinCount
+					fatbcb@ VcBufferDecrementMapAndUnpin
 				end
 
 				if (killstart@ -1 ~=)
@@ -880,7 +856,6 @@ fn FatAllocateChain { clusters lastcluster zero mount -- startcluster ok }
 			clusterno@ startcluster!
 		end
 
-		1 // pin
 		1 // dirty
 		fattype@ // fattype
 		clusterno@ // clusterno
@@ -891,7 +866,7 @@ fn FatAllocateChain { clusters lastcluster zero mount -- startcluster ok }
 		if (ok@)
 			if (fatbcb@)
 				fatbcb@ VcBufferDirty
-				fatbcb@ VcBufferDecrementMapAndPinCount
+				fatbcb@ VcBufferDecrementMapAndUnpin
 			end
 
 			if (killstart@ -1 ~=)
@@ -925,7 +900,7 @@ fn FatAllocateChain { clusters lastcluster zero mount -- startcluster ok }
 
 	if (fatbcb@)
 		fatbcb@ VcBufferDirty
-		fatbcb@ VcBufferDecrementMapAndPinCount
+		fatbcb@ VcBufferDecrementMapAndUnpin
 	end
 
 	mount@ FatClusterBitmapUnlock
@@ -989,8 +964,6 @@ fn FatDeallocateChain { first clusterno mount -- }
 		clusterno@ index!
 
 		auto vaddr
-
-		1 // pin
 		1 // dirty
 		fattype@ // fattype
 		clusterno@ // clusterno
@@ -1022,7 +995,7 @@ fn FatDeallocateChain { first clusterno mount -- }
 
 	if (fatbcb@)
 		fatbcb@ VcBufferDirty
-		fatbcb@ VcBufferDecrementMapAndPinCount
+		fatbcb@ VcBufferDecrementMapAndUnpin
 	end
 
 	clusters@ fatdata@ FatData_ClusterSizeShift + @ <<

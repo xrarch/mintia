@@ -3,6 +3,7 @@ export BUILDROOT  := $(REPO)/Root
 export SYSROOT    := mintia
 export BINROOT    := mintia/bin
 export DRIVERROOT := mintia/BootDrivers
+export WINROOT    := mintia/win
 
 ifndef SDK
 	SDK := $(REPO)/../sdk
@@ -50,6 +51,8 @@ ULIBRARIES := AMS/Client \
 
 LIBRARIES := OSDLL $(ULIBRARIES)
 
+WINLIBRARIES := Win/BitmapEngine
+
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \
 				BootDrivers/Fat \
@@ -71,6 +74,8 @@ export DFLIBBIN := $(BUILDROOT)/$(SYSROOT)/Dragonfruit.dll.$(ARCHITECTURE).$(CHK
 export OSDLLBIN := $(BUILDROOT)/$(SYSROOT)/OSDLL.dll.$(ARCHITECTURE).$(CHKFRE)
 export AMSBIN   := $(BUILDROOT)/$(SYSROOT)/ams.dll.$(ARCHITECTURE).$(CHKFRE)
 export MCLBIN   := $(BUILDROOT)/$(SYSROOT)/mcl.dll.$(ARCHITECTURE).$(CHKFRE)
+
+export BMEBIN   := $(BUILDROOT)/$(WINROOT)/bme.dll.$(ARCHITECTURE).$(CHKFRE)
 
 ifndef SMALLDIST
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE).img
@@ -94,7 +99,7 @@ DFC += $(BUILDCONFIG)
 ASM += target=$(ARCHITECTURE)
 
 ifndef PROJECT
-	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(LIBRARIES) $(COMMANDS)
+	PROJECT := $(BOOTCODE) $(PROJECTS) $(KERNELMODULES) $(LIBRARIES) $(COMMANDS) $(WINLIBRARIES) $(WINDRIVERS)
 endif
 
 all: $(PROJECT) | $(DISTIMAGE)
@@ -145,11 +150,20 @@ $(KERNELMODULES): HAL/$(PLATFORM) OSKernel | $(DISTIMAGE) $(BUILDROOT)/$(DRIVERR
 $(COMMANDS): $(LIBRARIES) | $(DISTIMAGE) $(BUILDROOT)/$(BINROOT)
 	make -C $@
 
+$(BUILDROOT)/$(WINROOT):
+	mkdir -p $(BUILDROOT)/$(WINROOT)
+
 $(BUILDROOT)/$(DRIVERROOT):
 	mkdir -p $(BUILDROOT)/$(DRIVERROOT)
 
 $(BUILDROOT)/$(BINROOT):
 	mkdir -p $(BUILDROOT)/$(BINROOT)
+
+$(WINLIBRARIES): $(LIBRARIES) | $(DISTIMAGE) $(BUILDROOT)/$(WINROOT)
+	make -C OS/$@
+
+$(WINDRIVERS): $(WINLIBRARIES) $(LIBRARIES) | $(DISTIMAGE) $(BUILDROOT)/$(WINROOT)
+	make -C OS/$@
 
 $(REPO)/build:
 	mkdir -p $(REPO)/build

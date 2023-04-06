@@ -133,8 +133,7 @@ extern AFSBlockBitmapUninitialize { mount -- }
 extern AFSBlockBitmapLockUnalertable { mount -- }
 extern AFSBlockBitmapUnlock { mount -- }
 
-extern AFSWalkFAT { startcount startblkno mount kflags -- blkno ok }
-extern AFSBlockMap { blkoff fcb kflags -- blkno ok }
+extern AFSBlockMap { blkoff fcb -- blkno ok }
 extern AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 
 extern AFSPinChain { lookuptable blkno mount -- }

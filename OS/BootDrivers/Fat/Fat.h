@@ -316,7 +316,7 @@ extern FatSetSecurity { uid gid permissions object -- ok }
 
 extern FatFileDelete { fcb -- ok }
 
-extern FatBlockMap { fileoffset fcb kflags -- voloffset ok }
+extern FatBlockMap { fileoffset fcb -- voloffset ok }
 
 extern FatDateToUnix { date -- timestamp }
 extern FatTimeToUnix { time -- timeoffset }

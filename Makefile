@@ -51,7 +51,7 @@ ULIBRARIES := AMS/Client \
 
 LIBRARIES := OSDLL $(ULIBRARIES)
 
-WINLIBRARIES := Win/BitmapEngine
+WINLIBRARIES := Window/BitmapEngine
 
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \

@@ -5,4 +5,4 @@ KERNELMODULES += BootDrivers/XRstation/EBus \
 		BootDrivers/XRstation/KinnowFB \
 		BootDrivers/XRstation/Mouse
 
-WINDRIVERS += Win/Drivers/KinnowFB
+WINDRIVERS += Window/Drivers/KinnowFB

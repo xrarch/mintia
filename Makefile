@@ -51,7 +51,7 @@ ULIBRARIES := AMS/Client \
 
 LIBRARIES := OSDLL $(ULIBRARIES)
 
-WINLIBRARIES := Window/BitmapEngine
+WINLIBRARIES := Window/BME
 
 KERNELMODULES := BootDrivers/AisixFS \
 				BootDrivers/AnalogClockTest \
@@ -189,6 +189,14 @@ cleanup:
 	done
 
 	for dir in $(LIBRARIES); do \
+		make -C OS/$$dir cleanup; \
+	done
+
+	for dir in $(WINLIBRARIES); do \
+		make -C OS/$$dir cleanup; \
+	done
+
+	for dir in $(WINDRIVERS); do \
 		make -C OS/$$dir cleanup; \
 	done
 

@@ -2,7 +2,7 @@ COMPONENTS := .
 
 OUTPUTFILE := $(WINROOT)/kinnowfb.drv
 
-DYLIBS += OSDLL.dll:$(OSDLLBIN)
+DYLIBS += OSDLL.dll:$(OSDLLBIN) bme.dll:$(BMEBIN)
 
 MOVEEXPR := mintiadll text=0x71000000,data=text+text_size+align,bss=data+data_size+align
 

@@ -57,7 +57,8 @@ struct IOFileControlBlockPaged
 	4 Flags
 	4 FileType
 	4 DeviceObject
-	4 FSContext
+	
+	4 Extension // can be used as a free context field if no extension
 
 	KeTime_SIZEOF AccessTime
 	KeTime_SIZEOF ModifyTime
@@ -76,6 +77,8 @@ struct IOFileControlBlock
 	4 DispatchTable
 	4 SizeInBytes
 	4 StackDepth
+
+	4 Extension // can be used as a free context field if no extension
 
 	4 Paged
 
@@ -114,7 +117,7 @@ const IOCACHEZEROMAX (512 1024 *)
 const IOAVERAGEFCBCONTEXTNP    16
 const IOAVERAGEFCBCONTEXTPAGED 96
 
-extern IOFileControlBlockCreate { devobj filetype flags -- fcb ok }
+extern IOFileControlBlockCreate { extensionsize pagedextensionsize devobj filetype flags -- fcb ok }
 extern IOFileControlBlockDelete { writeout fcb -- ok }
 
 extern IOFileControlBlockLockForPaging { iop fcb -- }

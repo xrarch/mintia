@@ -97,7 +97,7 @@ fn (IODispatchSetSecurityFunction) FatSetSecurity { uid gid permissions object -
 		return
 	end
 
-	permissions@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ FatFCBData_SavedPermissions + !
+	permissions@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ FatFCBData_SavedPermissions + !
 end
 
 fn (IODispatchSetFileFunction) FatSetFile { info fileobject -- ok }
@@ -320,7 +320,7 @@ fn FatFCBCreateFromDirent { name flags dirfcb longdirentseek shortdirentseek sho
 	fcb@ IOFileControlBlock_Paged + @ fcbp!
 
 	auto fcbdata
-	fcbp@ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcbp@ IOFileControlBlockPaged_Extension + @ fcbdata!
 
 	firstcluster@ fcbdata@ FatFCBData_StartingCluster + !
 
@@ -412,65 +412,44 @@ fn FatFCBCreate { name flags filetype mount -- fcb ok }
 		name@ strlen 1 + namelen!
 	end
 
+	auto fcbflags
+
 	if (flags@ OSFILEFLAG_PAGEFILE &)
-		mount@ IOMount_FsDeviceObject + @ // devobj
-		filetype@ // filetype
-		0 // flags
-		IOFileControlBlockCreate ok! fcb!
+		if (filetype@ OSFILETYPE_DIRECTORY ==)
+			STATUS_IS_A_DIRECTORY ok!
+
+			return
+		end
+
+		0 fcbflags!
 	end else
-		mount@ IOMount_FsDeviceObject + @ // devobj
-		filetype@ // filetype
-		IOFCBFLAG_PAGED // flags
-		IOFileControlBlockCreate ok! fcb!
+		IOFCBFLAG_PAGED fcbflags!
 	end
+
+	auto pextensionsize
+
+	if (filetype@ OSFILETYPE_DIRECTORY ==)
+		FatDCBData_SIZEOF namelen@ + pextensionsize!
+	end else
+		FatFCBData_SIZEOF namelen@ + pextensionsize!
+	end
+
+	FatFCBDataNonpaged_SIZEOF // extensionsize
+	pextensionsize@ // pagedextensionsize
+	mount@ IOMount_FsDeviceObject + @ // devobj
+	filetype@ // filetype
+	fcbflags@ // flags
+	IOFileControlBlockCreate ok! fcb!
 
 	if (ok@)
 		return
 	end
 
 	auto fcbdata
-	if (flags@ OSFILEFLAG_PAGEFILE & ~~)
-		if (filetype@ OSFILETYPE_DIRECTORY ==)
-			FatDCBData_SIZEOF namelen@ + // bytes
-			'FDCp' // tag
-			PAGED // flags
-			MmAllocWithTag ok! fcbdata!
-		end else
-			FatFCBData_SIZEOF namelen@ + // bytes
-			'FFCp' // tag
-			PAGED // flags
-			MmAllocWithTag ok! fcbdata!
-		end
-	end else
-		FatFCBData_SIZEOF namelen@ + // bytes
-		'FFCX' // tag
-		0 // flags
-		MmAllocWithTag ok! fcbdata!
-	end
-
-	if (ok@)
-		-1 // writeout
-		fcb@ // fcb
-		IOFileControlBlockDelete drop
-
-		return
-	end
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ fcbdata!
 
 	auto fcbnp
-	FatFCBDataNonpaged_SIZEOF // bytes
-	'FFCn' // tag
-	0 // flags
-	MmAllocWithTag ok! fcbnp!
-
-	if (ok@)
-		fcbdata@ MmFree
-
-		-1 // writeout
-		fcb@ // fcb
-		IOFileControlBlockDelete drop
-
-		return
-	end
+	fcb@ IOFileControlBlock_Extension + @ fcbnp!
 
 	if (filetype@ OSFILETYPE_DIRECTORY ==)
 		OSDEFAULTDIRPERMISSIONS fcbdata@ FatFCBData_SavedPermissions + !
@@ -479,7 +458,6 @@ fn FatFCBCreate { name flags filetype mount -- fcb ok }
 	end
 
 	fcbnp@ fcbdata@ FatFCBData_Nonpaged + !
-	fcbdata@ fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + !
 
 	0 fcbdata@ FatFCBData_ParentFCBData + !
 	0 fcbdata@ FatFCBData_LeftChild + !
@@ -546,7 +524,7 @@ fn FatFCBDelete { writeout fcb -- }
 	fnsection "PAGE$text"
 
 	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ fcbdata!
 
 	if (DEBUGCHECKS)
 		if (fcbdata@ FatFCBData_References + @ 1 ~=)
@@ -580,16 +558,13 @@ fn FatFCBDelete { writeout fcb -- }
 	writeout@ // writeout
 	fcb@ // fcb
 	IOFileControlBlockDelete drop
-
-	fcbdata@ FatFCBData_Nonpaged + @ MmFree
-	fcbdata@ MmFree
 end
 
 fn FatFCBMeasureSize { fcb -- ok }
 	fnsection "PAGE$text"
 
 	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ fcbdata!
 
 	auto mount
 	fcb@ FSFileControlBlockGetMount mount!
@@ -623,7 +598,7 @@ fn FatFCBReference { fcb -- }
 	mount@ IOMount_Extension + @ fatdata!
 
 	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ fcbdata!
 
 	auto oldcount
 	fcbdata@ FatFCBData_References + @ oldcount!
@@ -667,7 +642,7 @@ fn FatFCBDereference { fcb -- }
 	mount@ IOMount_Extension + @ fatdata!
 
 	auto fcbdata
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FSContext + @ fcbdata!
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ fcbdata!
 
 	auto oldcount
 	fcbdata@ FatFCBData_References + @ oldcount!

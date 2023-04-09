@@ -65,7 +65,7 @@ fn ExRwLockRelease { rwlock -- }
 		0 exclusive!
 
 		auto tabsize
-		rwlock@ ExRwLock_TableSize + @ tabsize!
+		rwlock@ ExRwLock_TableSizeI + gi tabsize!
 
 		rwlock@ ExRwLock_OwnerTable + @ owner!
 
@@ -103,32 +103,35 @@ fn ExRwLockRelease { rwlock -- }
 	0 owner@ ExRwLockOwner_OwningThread + !
 
 	if (DEBUGCHECKS)
-		if (rwlock@ ExRwLock_HeldCount + @ 0 ==)
+		if (rwlock@ ExRwLock_HeldCountI + gi 0 ==)
 			"ExRwLockReleaseForThread: heldcount==0\n" KeCrash
 		end
 	end
 
-	1 rwlock@ ExRwLock_HeldCount + -=
+	rwlock@ ExRwLock_HeldCountI + gi 1 -
+	rwlock@ ExRwLock_HeldCountI + si
 
-	if (rwlock@ ExRwLock_HeldCount + @ ~~)
+	if (rwlock@ ExRwLock_HeldCountI + gi ~~)
 		auto access
 		0 access!
 
 		if (exclusive@ ~~)
 			// we were holding it shared, try to grant exclusive access
 			1 access!
-		end elseif (rwlock@ ExRwLock_SharedWaitersCount + @ ~~)
+		end elseif (rwlock@ ExRwLock_SharedWaitersCountI + gi ~~)
 			// we were holding it exclusive and there are no shared waiters,
 			// try to grant exclusive access
 			1 access!
 		end
 
 		if (access@)
-			if (rwlock@ ExRwLock_ExclusiveWaitersCount + @)
+			if (rwlock@ ExRwLock_ExclusiveWaitersCountI + gi)
 				// there's a waiter,, try to give him the thing
 
-				1 rwlock@ ExRwLock_HeldCount + !
-				1 rwlock@ ExRwLock_ExclusiveWaitersCount + -=
+				1 rwlock@ ExRwLock_HeldCountI + si
+
+				rwlock@ ExRwLock_ExclusiveWaitersCountI + gi 1 -
+				rwlock@ ExRwLock_ExclusiveWaitersCountI + si
 
 				EXBOOSTEXCLUSIVEWAITER // priboost
 				rwlock@ ExRwLock_ExclusiveSyncEvent + @ // event
@@ -145,11 +148,11 @@ fn ExRwLockRelease { rwlock -- }
 
 		// couldn't (or don't want to) wake an exclusive waiter, wake shared
 
-		rwlock@ ExRwLock_SharedWaitersCount + @ access!
+		rwlock@ ExRwLock_SharedWaitersCountI + gi access!
 
 		if (access@)
-			access@ rwlock@ ExRwLock_HeldCount + !
-			0 rwlock@ ExRwLock_SharedWaitersCount + !
+			access@ rwlock@ ExRwLock_HeldCountI + si
+			0 rwlock@ ExRwLock_SharedWaitersCountI + si
 
 			access@ // adjustment
 			rwlock@ ExRwLock_SharedSemaphore + @ // semaphore
@@ -180,10 +183,10 @@ fn ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		if (rwlock@ ExRwLock_HeldCount + @ ~~)
+		if (rwlock@ ExRwLock_HeldCountI + gi ~~)
 			1 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
 			current@ rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_OwningThread + !
-			1 rwlock@ ExRwLock_HeldCount + !
+			1 rwlock@ ExRwLock_HeldCountI + si
 
 			ipl@ KeIPLLower
 
@@ -284,7 +287,8 @@ fn ExRwLockAcquireExclusive { alertable nowait rwlock -- ok }
 			continue
 		end
 
-		1 rwlock@ ExRwLock_ExclusiveWaitersCount + +=
+		rwlock@ ExRwLock_ExclusiveWaitersCountI + gi 1 +
+		rwlock@ ExRwLock_ExclusiveWaitersCountI + si
 
 		ipl@ KeIPLLower
 
@@ -327,10 +331,10 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		if (rwlock@ ExRwLock_HeldCount + @ ~~)
+		if (rwlock@ ExRwLock_HeldCountI + gi ~~)
 			1 rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_Locked + !
 			current@ rwlock@ ExRwLock_SharedOwner + ExRwLockOwner_OwningThread + !
-			1 rwlock@ ExRwLock_HeldCount + !
+			1 rwlock@ ExRwLock_HeldCountI + si
 
 			ipl@ KeIPLLower
 
@@ -421,10 +425,12 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 				return
 			end
 
-			if (canstarve@ rwlock@ ExRwLock_ExclusiveWaitersCount + @ ~~ ||)
+			if (canstarve@ rwlock@ ExRwLock_ExclusiveWaitersCountI + gi ~~ ||)
 				current@ exown@ ExRwLockOwner_OwningThread + !
 				1 exown@ ExRwLockOwner_Locked + !
-				1 rwlock@ ExRwLock_HeldCount + +=
+
+				rwlock@ ExRwLock_HeldCountI + gi 1 +
+				rwlock@ ExRwLock_HeldCountI + si
 
 				ipl@ KeIPLLower
 
@@ -511,7 +517,9 @@ fn ExRwLockAcquireShared { alertable nowait canstarve rwlock -- ok }
 
 		current@ exown@ ExRwLockOwner_OwningThread + !
 		1 exown@ ExRwLockOwner_Locked + !
-		1 rwlock@ ExRwLock_SharedWaitersCount + +=
+
+		rwlock@ ExRwLock_SharedWaitersCountI + gi 1 +
+		rwlock@ ExRwLock_SharedWaitersCountI + si
 
 		ipl@ KeIPLLower
 
@@ -581,11 +589,11 @@ fn ExRwLockDemoteToShared { rwlock -- ok }
 		0 rwlock@ ExRwLock_ExclusiveOwner + ExRwLockOwner_Locked + !
 
 		auto waiters
-		rwlock@ ExRwLock_SharedWaitersCount + @ waiters!
+		rwlock@ ExRwLock_SharedWaitersCountI + gi waiters!
 
 		if (waiters@)
-			waiters@ 1 + rwlock@ ExRwLock_HeldCount + !
-			0 rwlock@ ExRwLock_SharedWaitersCount + !
+			waiters@ 1 + rwlock@ ExRwLock_HeldCountI + si
+			0 rwlock@ ExRwLock_SharedWaitersCountI + si
 
 			waiters@ // adjustment
 			rwlock@ ExRwLock_SharedSemaphore + @ // semaphore
@@ -636,7 +644,7 @@ fn ExRwLockWait { event rwlock -- ok }
 			auto tabsize
 			auto owner
 
-			rwlock@ ExRwLock_TableSize + @ tabsize!
+			rwlock@ ExRwLock_TableSizeI + gi tabsize!
 			rwlock@ ExRwLock_OwnerTable + @ owner!
 
 			while (tabsize@)
@@ -671,7 +679,7 @@ fn ExRwLockFindOwner { ipl thread rwlock -- owner ok }
 	end
 
 	auto oldsize
-	rwlock@ ExRwLock_TableSize + @ oldsize!
+	rwlock@ ExRwLock_TableSizeI + gi oldsize!
 
 	auto tab
 	rwlock@ ExRwLock_OwnerTable + @ tab!
@@ -700,7 +708,7 @@ fn ExRwLockFindOwner { ipl thread rwlock -- owner ok }
 		return
 	end
 
-	rwlock@ ExRwLock_TableSize + @ oldsize!
+	rwlock@ ExRwLock_TableSizeI + gi oldsize!
 
 	ipl@ KeIPLLower
 
@@ -724,7 +732,7 @@ fn ExRwLockFindOwner { ipl thread rwlock -- owner ok }
 		return
 	end
 
-	if (rwlock@ ExRwLock_TableSize + @ oldsize@ ~=)
+	if (rwlock@ ExRwLock_TableSizeI + gi oldsize@ ~=)
 		// someone already grew it... free what we did and return to retry.
 
 		owner@ MmFree
@@ -749,7 +757,7 @@ fn ExRwLockFindOwner { ipl thread rwlock -- owner ok }
 	memset
 
 	owner@ rwlock@ ExRwLock_OwnerTable + !
-	newsize@ rwlock@ ExRwLock_TableSize + !
+	newsize@ rwlock@ ExRwLock_TableSizeI + si
 
 	0 owner!
 end

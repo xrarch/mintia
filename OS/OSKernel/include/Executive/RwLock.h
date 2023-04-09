@@ -7,12 +7,13 @@ struct ExRwLock
 	ExRwLockOwner_SIZEOF ExclusiveOwner
 	ExRwLockOwner_SIZEOF SharedOwner
 	4 OwnerTable
-	4 TableSize
-	4 HeldCount
-	4 SharedWaitersCount
 	4 SharedSemaphore
-	4 ExclusiveWaitersCount
 	4 ExclusiveSyncEvent
+
+	2 TableSizeI
+	2 SharedWaitersCountI
+	2 ExclusiveWaitersCountI
+	2 HeldCountI
 endstruct
 
 extern ExRwLockInitialize { name rwlock -- }

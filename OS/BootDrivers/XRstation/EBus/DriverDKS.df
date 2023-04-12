@@ -28,12 +28,15 @@ const DKSBLOCKOFFMASK (DKSBLOCKSIZE 1 -)
 
 const DKS_REALDISK  1
 const DKS_PARTITION 2
+const DKS_REMOVED   3
 
 const DKSBUFFERPHYS 0xF8020000
 
 var DKSBuffer 0
 
 var DKSCompletedBitmap 0
+var DKSScan 0
+var DKSScanned 0
 
 struct Disk
 	4 Type
@@ -65,6 +68,8 @@ const DKSCMDINTROFF 0x7
 const DKSINTERRUPT  0x3
 
 const DKSBLOCKTRANSFER 0x0
+const DKSINSERTED      0x1
+const DKSREMOVED       0x2
 
 datasection "text"
 
@@ -114,6 +119,87 @@ endtable
 datasection "data"
 
 buffer DKSDPC KeDPC_SIZEOF
+
+fn DriverDKSRescan { -- }
+	if (DKSScanned@ ~~)
+		// not scanned the first time
+
+		return
+	end
+
+	auto diskid
+	0 diskid!
+
+	while (diskid@ DKSMAXDISKID <=)
+		auto realdisk
+		[diskid@]DKSRealDisks@ realdisk!
+
+		if (realdisk@ ~~)
+			1 diskid +=
+
+			continue
+		end
+
+		auto present
+		auto blocks
+
+		auto rs
+		HALCPUInterruptDisable rs!
+
+		diskid@ DKSPORTA HALXRstationCitronOutl
+
+		DKSCMDPOLL DKSPORTCMD HALXRstationCitronCommand
+
+		DKSPORTA HALXRstationCitronInl present!
+		DKSPORTB HALXRstationCitronInl blocks!
+
+		rs@ HALCPUInterruptRestore
+
+		if (present@ 1 & ~~)
+			if (realdisk@ Disk_Type + @ DKS_REALDISK ==)
+				// disk was removed, cancel any pending requests.
+
+				DKS_REMOVED realdisk@ Disk_Type + !
+
+				auto iop
+				realdisk@ Disk_CurrentRequest + @ iop!
+
+				if (iop@)
+					STATUS_MEDIA_REMOVED // status
+					IOBOOSTDISK // priboost
+					iop@ // iop
+					IOPacketComplete
+				end
+
+				0 realdisk@ Disk_CurrentRequest + !
+
+				realdisk@ Disk_RequestListHead + @ iop!
+
+				while (iop@)
+					auto niop
+					iop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+					STATUS_MEDIA_REMOVED // status
+					IOBOOSTDISK // priboost
+					iop@ // iop
+					IOPacketComplete
+
+					niop@ iop!
+				end
+
+				0 realdisk@ Disk_RequestListHead + !
+			end
+
+			1 diskid +=
+
+			continue
+		end
+
+		DKS_REALDISK realdisk@ Disk_Type + !
+
+		1 diskid +=
+	end
+end
 
 fn private CreateDisk { name blocks type id offset -- dev }
 	auto sizeinbytes
@@ -193,12 +279,17 @@ fn (FDriverInit) DriverInitDKS { stage -- ok }
 			auto present
 			auto blocks
 
+			auto rs
+			HALCPUInterruptDisable rs!
+
 			diskid@ DKSPORTA HALXRstationCitronOutl
 
 			DKSCMDPOLL DKSPORTCMD HALXRstationCitronCommand
 
 			DKSPORTA HALXRstationCitronInl present!
 			DKSPORTB HALXRstationCitronInl blocks!
+
+			rs@ HALCPUInterruptRestore
 
 			if (present@ 1 & ~~)
 				1 diskid +=
@@ -280,6 +371,8 @@ fn (FDriverInit) DriverInitDKS { stage -- ok }
 
 			1 diskid +=
 		end
+
+		1 DKSScanned!
 	end
 
 	0 ok!
@@ -293,6 +386,10 @@ fn DKSComplete { id -- }
 		if (disk@ ~~)
 			"DriverDKSDPCFunction: no disk\n" KeCrash
 		end
+	end
+
+	if (disk@ Disk_Type + @ DKS_REMOVED ==)
+		return
 	end
 
 	auto iop
@@ -395,6 +492,7 @@ fn (KeDPCFunction) DriverDKSDPCFunction { context1 context2 dpc -- }
 	// fulfill pending requests
 
 	auto completed
+	auto doscan
 
 	auto rs
 	HALCPUInterruptDisable rs!
@@ -402,7 +500,14 @@ fn (KeDPCFunction) DriverDKSDPCFunction { context1 context2 dpc -- }
 	DKSCompletedBitmap@ completed!
 	0 DKSCompletedBitmap!
 
+	DKSScan@ doscan!
+	0 DKSScan!
+
 	rs@ HALCPUInterruptRestore
+
+	if (doscan@)
+		DriverDKSRescan
+	end
 
 	auto id
 	0 id!
@@ -424,14 +529,24 @@ fn (HALInterruptHandler) DriverDKSInterrupt { trapframe int -- }
 	DKSPORTA HALXRstationCitronInl event!
 	DKSPORTB HALXRstationCitronInl details!
 
-	if (event@ DKSBLOCKTRANSFER ==)
-		auto dpc
-		DKSDPC dpc!
+	auto dpc
+	DKSDPC dpc!
 
+	if (event@ DKSBLOCKTRANSFER ==)
 		details@ DKSCompletedBitmap |=
 
 		// defer doing fun work til later,
 		// otherwise we will BSOD since we're at IPLDISK
+
+		0 // context1
+		0 // context2
+		DPCHIGHIMPORTANCE // importance
+		dpc@ // dpc
+		KeDPCEnqueue drop
+	end elseif (event@ DKSREMOVED ==
+				event@ DKSINSERTED == ||)
+
+		1 DKSScan!
 
 		0 // context1
 		0 // context2
@@ -453,8 +568,6 @@ fn DKSBlockTransferCommand { disk iopl -- ok }
 	auto realdisk
 	[id@]DKSRealDisks@ realdisk!
 
-	iop@ IOPacketWasEnqueued
-
 	// stash the completed length in context
 
 	0 iopl@ IOPacketLocation_Context + !
@@ -467,20 +580,26 @@ fn DKSBlockTransferCommand { disk iopl -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
+	if (realdisk@ Disk_Type + @ DKS_REMOVED ==)
+		ipl@ KeIPLLower
+
+		STATUS_MEDIA_REMOVED ok!
+
+		return
+	end
+
+	iop@ IOPacketWasEnqueued
+
 	if (realdisk@ Disk_CurrentRequest + @ ~~)
 		// no pending requests, start the disk.
 
 		iop@ realdisk@ Disk_CurrentRequest + !
 
 		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_WRITE ==)
-			ipl@ KeIPLLower
-
 			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
 			iopl@ IOPacketLocationMappedBuffer // src
 			DKSBLOCKSIZE // len
 			memcpy
-
-			IPLDPC KeIPLRaise ipl!
 		end
 
 		id@ DKSPORTA HALXRstationCitronOutl

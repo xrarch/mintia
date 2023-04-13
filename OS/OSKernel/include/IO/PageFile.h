@@ -18,7 +18,7 @@ extern IOPageFileGetNumber { pagefile -- number }
 extern IOPageFileReserve { pagesneeded pagefile -- offset ok }
 extern IOPageFileRelease { pages offset pagefile -- }
 
-extern IOPageFileFullOrFragmented { -- }
+extern IOPageFileFullOrFragmented { fragmented -- }
 
 const IOPAGEFILEMAX 16
 

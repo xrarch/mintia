@@ -1294,43 +1294,57 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 	end
 end
 
-fn IOPageFileFullOrFragmented { -- }
+fn IOPageFileFullOrFragmented { fragmented -- }
 	// called at IPLDPC when the modified page writer discovers that a
 	// pagefile is full. this is a problem since it makes us unable to clean
 	// any more modified anonymous pages. first check to see whether there's
 	// really an issue (i.e. the pagefiles are really super full), and then
 	// issue an expansion request if needed.
 
-	auto i
-	0 i!
-
-	auto modanon
-	MmModifiedPageCount@ MmModifiedFilePageCount@ - modanon!
-
-	auto pagefile
-
-	auto total
-	0 total!
-
-	auto used
-	0 used!
-
-	// no synchronization is required since IOPageFileCount isn't incremented
-	// until a pagefile has been completely initialized.
-
-	while (i@ IOPageFileCount@ <)
-		[i@]IOPageFiles@ pagefile!
-
-		pagefile@ IOiPageFile_CurrentSize + @ total +=
-		pagefile@ IOiPageFile_UsedCount + @ used +=
-
-		1 i +=
-	end
-
 	auto oughttohave
-	used@ modanon@ + 10 + oughttohave!
 
-	if (oughttohave@ total@ >)
+	if (fragmented@)
+		// too fragmented, always extend by one minimum extension unit.
+		// if we were to check the pagefiles, we would likely decide they
+		// have enough space already and return, which we don't want.
+
+		IOPAGEFILEMINIMUMEXTENSION oughttohave!
+	end else
+		// not enough space to clean the modified page list.
+		// figure out what the situation is and how we can resolve it.
+
+		auto i
+		0 i!
+
+		auto modanon
+		MmModifiedPageCount@ MmModifiedFilePageCount@ - modanon!
+
+		auto pagefile
+
+		auto total
+		0 total!
+
+		auto used
+		0 used!
+
+		// no synchronization is required since IOPageFileCount isn't
+		// incremented until a pagefile has been completely initialized.
+
+		while (i@ IOPageFileCount@ <)
+			[i@]IOPageFiles@ pagefile!
+
+			pagefile@ IOiPageFile_CurrentSize + @ total +=
+			pagefile@ IOiPageFile_UsedCount + @ used +=
+
+			1 i +=
+		end
+
+		used@ modanon@ + 10 + oughttohave!
+
+		if (oughttohave@ total@ <=)
+			return
+		end
+
 		// yes, there is a problem, we ought to extend the pagefiles.
 
 		total@ oughttohave -=
@@ -1342,14 +1356,14 @@ fn IOPageFileFullOrFragmented { -- }
 		if (oughttohave@ IOPAGEFILEMINIMUMEXTENSION >)
 			IOPAGEFILEMINIMUMEXTENSION oughttohave!
 		end
-
-		// negative pages indicates an absolute extension request.
-		// positive means relative to current commit usage, which we don't
-		// want here.
-
-		IPLDPC // ipl
-		MUSTSUCCEED // pri
-		0 oughttohave@ - // pages
-		IOPageFileRequestExpansion drop
 	end
+
+	// negative pages indicates an absolute extension request.
+	// positive means relative to current commit usage, which we don't
+	// want here.
+
+	IPLDPC // ipl
+	MUSTSUCCEED // pri
+	0 oughttohave@ - // pages
+	IOPageFileRequestExpansion drop
 end

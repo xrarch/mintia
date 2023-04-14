@@ -60,35 +60,48 @@ fn OSSetStdIn { fd -- }
 end
 
 fn OSSetStdOut { fd -- }
-	if (OSPEB OSPEBs_StdOut + @ fd@ ~=)
-		DLLStdIoFastMutex OSFastMutexAcquire
+	if (OSPEB OSPEBs_StdOut + @ fd@ ==)
+		// same handle. nothing to do
 
-		if (DLLStdOutStream@ DLLNOSTREAM ~=)
-			DLLStdOutStream@ OSStreamClose drop
-		end
-		
-		fd@ OSPEB OSPEBs_StdOut + !
-
-		if (fd@ OSNONE ~=)
-			auto ok
-
-			0 // flags
-			ACCESS_WRITE // access
-			fd@ // filehandle
-			OSStreamObjectCreate ok! DLLStdOutStream!
-
-			if (ok@)
-				DLLNOSTREAM DLLStdOutStream!
-				DLLNOSTREAM OSPEB OSPEBs_StdOut + !
-
-				ok@ OSStatusGetName "OSSetStdOut: %s\n" OSAbort
-			end
-		end else
-			DLLNOSTREAM DLLStdOutStream!
-		end
-
-		DLLStdIoFastMutex OSFastMutexRelease
+		return
 	end
+
+	// acquire the stdio mutex
+
+	DLLStdIoFastMutex OSFastMutexAcquire
+
+	// if there's an existing stream, close it.
+
+	if (DLLStdOutStream@ DLLNOSTREAM ~=)
+		DLLStdOutStream@ OSStreamClose drop
+	end
+
+	// set the new stdout handle in the PEB.
+	
+	fd@ OSPEB OSPEBs_StdOut + !
+
+	if (fd@ OSNONE ~=)
+		// there's really a stdout handle (i.e. its not being cleared).
+		// create a stream object to manage the buffering for the stdout
+		// object.
+
+		auto ok
+		0 // flags
+		ACCESS_WRITE // access
+		fd@ // filehandle
+		OSStreamObjectCreate ok! DLLStdOutStream!
+
+		if (ok@)
+			DLLNOSTREAM DLLStdOutStream!
+			DLLNOSTREAM OSPEB OSPEBs_StdOut + !
+
+			ok@ OSStatusGetName "OSSetStdOut: %s\n" OSAbort
+		end
+	end else
+		DLLNOSTREAM DLLStdOutStream!
+	end
+
+	DLLStdIoFastMutex OSFastMutexRelease
 end
 
 fn OSSetStdErr { fd -- }

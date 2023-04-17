@@ -156,6 +156,9 @@ externptr PsProcessDeletionCount
 extern PsProcessListLock { alertable -- ok }
 extern PsProcessListUnlock { -- }
 
+extern PsProcessListLockForTrim { -- }
+extern PsProcessListUnlockForTrim { -- }
+
 extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
 
@@ -215,10 +218,13 @@ extern PsThreadDeliverOnWaitSignal { signal threadhandle -- ok }
 extern PsProcessGetUID { process -- uid }
 extern PsProcessGetGID { process -- gid }
 
-extern PsProcessRemove { locked trim process -- }
-extern PsProcessInsert { locked trim process -- }
+extern PsProcessRemoveForTrim { locked process -- }
+extern PsProcessInsertForTrim { locked process -- }
 
-extern PsSignalAllProcesses { signal -- }
+extern PsProcessRemove { locked process -- }
+extern PsProcessInsert { locked process -- }
+
+extern PsSignalAllProcesses { onlysystem signal -- }
 
 extern PsJobCreate { parentjobhandle signalonclose flags permissions name -- jobhandle ok }
 extern PsJobAddProcess { processhandle jobhandle -- ok }

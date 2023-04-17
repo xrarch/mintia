@@ -317,9 +317,12 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 	// put it on the global process list
 
 	0 // locked
-	0 // trim
 	processobject@ // process
 	PsProcessInsert
+
+	0 // locked
+	processobject@ // process
+	PsProcessInsertForTrim
 
 	if (creationflags@ OSPROCESS_DETACHCONSOLE & ~~)
 		// inherit the console group
@@ -651,32 +654,13 @@ fn PsProcessGetGID { process -- gid }
 	process@ PsProcess_PagedArea + @ PsProcessPaged_GID + @ gid!
 end
 
-fn PsProcessRemove { locked trim process -- }
+fn PsProcessRemoveForTrim { locked process -- }
 	if (locked@ ~~)
-		0 PsProcessListLock drop
+		PsProcessListLockForTrim
 	end
 
 	auto ls
 	auto ns
-
-	if (trim@ ~~)
-		1 PsActiveProcessCount -=
-
-		process@ PsProcess_GlobalListPrev + @ ls!
-		process@ PsProcess_GlobalListNext + @ ns!
-
-		if (ls@)
-			ns@ ls@ PsProcess_GlobalListNext + !
-		end else
-			ns@ PsProcessListHead!
-		end
-
-		if (ns@)
-			ls@ ns@ PsProcess_GlobalListPrev + !
-		end else
-			ls@ PsProcessListTail!
-		end
-	end
 
 	process@ PsProcess_TrimListPrev + @ ls!
 	process@ PsProcess_TrimListNext + @ ns!
@@ -694,37 +678,16 @@ fn PsProcessRemove { locked trim process -- }
 	end
 
 	if (locked@ ~~)
-		PsProcessListUnlock
+		PsProcessListUnlockForTrim
 	end
 end
 
-fn PsProcessInsert { locked trim process -- }
+fn PsProcessInsertForTrim { locked process -- }
 	if (locked@ ~~)
-		0 PsProcessListLock drop
+		PsProcessListLockForTrim
 	end
 
 	auto t
-
-	if (trim@ ~~)
-		1 PsActiveProcessCount +=
-
-		PsProcessListTail@ t!
-
-		if (t@ ~~)
-			0 process@ PsProcess_GlobalListNext + !
-			0 process@ PsProcess_GlobalListPrev + !
-
-			process@ PsProcessListHead!
-			process@ PsProcessListTail!
-		end else
-			0 process@ PsProcess_GlobalListNext + !
-
-			t@ process@ PsProcess_GlobalListPrev + !
-			process@ t@ PsProcess_GlobalListNext + !
-			process@ PsProcessListTail!
-		end
-	end
-
 	PsProcessTrimListTail@ t!
 
 	if (t@ ~~)
@@ -739,6 +702,69 @@ fn PsProcessInsert { locked trim process -- }
 		t@ process@ PsProcess_TrimListPrev + !
 		process@ t@ PsProcess_TrimListNext + !
 		process@ PsProcessTrimListTail!
+	end
+
+	if (locked@ ~~)
+		PsProcessListUnlockForTrim
+	end
+end
+
+fn PsProcessRemove { locked process -- }
+	fnsection "PAGE$text"
+
+	if (locked@ ~~)
+		0 PsProcessListLock drop
+	end
+
+	auto ls
+	auto ns
+
+	1 PsActiveProcessCount -=
+
+	process@ PsProcess_GlobalListPrev + @ ls!
+	process@ PsProcess_GlobalListNext + @ ns!
+
+	if (ls@)
+		ns@ ls@ PsProcess_GlobalListNext + !
+	end else
+		ns@ PsProcessListHead!
+	end
+
+	if (ns@)
+		ls@ ns@ PsProcess_GlobalListPrev + !
+	end else
+		ls@ PsProcessListTail!
+	end
+
+	if (locked@ ~~)
+		PsProcessListUnlock
+	end
+end
+
+fn PsProcessInsert { locked process -- }
+	fnsection "PAGE$text"
+
+	if (locked@ ~~)
+		0 PsProcessListLock drop
+	end
+
+	1 PsActiveProcessCount +=
+
+	auto t
+	PsProcessListTail@ t!
+
+	if (t@ ~~)
+		0 process@ PsProcess_GlobalListNext + !
+		0 process@ PsProcess_GlobalListPrev + !
+
+		process@ PsProcessListHead!
+		process@ PsProcessListTail!
+	end else
+		0 process@ PsProcess_GlobalListNext + !
+
+		t@ process@ PsProcess_GlobalListPrev + !
+		process@ t@ PsProcess_GlobalListNext + !
+		process@ PsProcessListTail!
 	end
 
 	if (locked@ ~~)

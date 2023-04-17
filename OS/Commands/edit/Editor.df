@@ -22,6 +22,77 @@ public EditorBuffer
 var EditorRunning 0
 public EditorRunning
 
+fn (OSSignalHandler) EditorSignalTerm { context signum -- }
+	// we receive this signal from amssrv when it decides to murder our
+	// session, and also from the kernel when it is shutting down. we want
+	// to take this opportunity to quicksave the file into the user's home
+	// directory if we can.
+
+	if (EditorFileModified@ ~~)
+		OSSIGNAL_TERM 128 + OSExit
+
+		return
+	end
+
+	// explicitly mask this signal so it doesn't get unmasked when we return,
+	// i.e. we don't want to do this twice.
+
+	OSSIGNALACTION_IGNORE // action
+	OSSIGNAL_TERM // signum
+	OSSignalSetAction drop
+
+	// clear terminal
+
+	TermResetMode
+
+	"\[[0m\[[1;1H\[[2J" Printf
+
+	OSFlushLine
+
+	// try to create a path to quicksave into.
+
+	auto qspath
+	OSFILEPATHMAX alloc qspath!
+
+	0 qspath@ sb
+
+	qspath@ // env
+	"HOME" // name
+	OSFILEPATHMAX 64 - // bufsize
+	OSGetEnvironmentVariable drop
+
+	qspath@ qspath@ strlen + // dest
+	"/" // src
+	strcpy
+
+	qspath@ qspath@ strlen + // dest
+	EditorFileName@ // src
+	strcpy
+
+	qspath@ qspath@ strlen + // dest
+	".sav" // src
+	strcpy
+
+	// perform the quicksave
+
+	qspath@ "edit: quicksaving into %s...\n" OSGetStdErr FPrintf
+
+	auto ok
+	1 // quicksave
+	OSNONE // filehandle
+	qspath@ // path
+	EditorBuffer@ // buffer
+	BufferSave ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "edit: quicksave failed: %s\n" OSGetStdErr FPrintf
+	end
+
+	// exit
+
+	OSSIGNAL_TERM 128 + OSExit
+end
+
 fn Editor { -- }
 	auto ok
 
@@ -48,6 +119,16 @@ fn Editor { -- }
 	TermSetMode
 
 	DrawAll
+
+	// make it so OSSIGNAL_TERM will only be delivered when we next wait.
+
+	OSSIGNAL_TERM // signal
+	OSCURRENTTHREAD // threadhandle
+	OSThreadDeliverOnWaitSignal drop
+
+	pointerof EditorSignalTerm // action
+	OSSIGNAL_TERM // signum
+	OSSignalSetAction drop
 
 	1 EditorRunning!
 
@@ -118,6 +199,7 @@ fn InputCharacter { c -- }
 			end elseif (c@ 19 ==)
 				auto ok
 
+				0 // quicksave
 				EditorFileHandle@ // filehandle
 				EditorFileName@ // path
 				EditorBuffer@ // buffer

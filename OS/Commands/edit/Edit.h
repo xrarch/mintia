@@ -50,7 +50,7 @@ extern BufferCreate { -- buffer ok }
 
 extern BufferPopulate { filehandle buffer -- ok }
 
-extern BufferSave { filehandle path buffer -- ok }
+extern BufferSave { quicksave filehandle path buffer -- ok }
 
 extern BufferGetChar { location buffer -- char ok }
 

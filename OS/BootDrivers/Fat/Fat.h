@@ -341,6 +341,7 @@ extern FatConvertToShortName { shortname name -- }
 extern FatBuildDotEntry { name fatdate fattime fcb fatdirent -- }
 extern FatCopyVolumeLabel { setcreationdate fatdirent dest src -- }
 extern FatUppercaseAndVerifyVolumeLabel { label -- ok }
+extern FatNameToDefaultPermissions { name -- permissions }
 
 struct FatShortNameContext
 	4 Index

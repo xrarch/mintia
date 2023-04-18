@@ -46,6 +46,8 @@ externptr LdrInterruptStackTop
 
 externptr LdrSystemEntryPoint
 
+externptr LdrAlwaysRelink
+
 const OSLOADERINTERRUPTSTACKPAGES 1
 
 const LDRSTATUS_SUCCESS                0

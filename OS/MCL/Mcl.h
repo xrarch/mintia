@@ -72,6 +72,7 @@ struct MclpParseContext
 	4 LexValidLength
 	4 LexInputLength
 	4 LexLineNumber
+	4 LexLastLineNumber
 
 	4 Depth
 
@@ -118,7 +119,6 @@ extern MclpLexNextToken { peek tokbuf ctx -- tokflag toklen ok }
 extern MclpLexNextNonemptyToken { stopnl tokbuf ctx -- tokflag toklen ok }
 extern MclpLexLastToken { ctx -- }
 
-extern MclpParseNodeCreate { type size ctx -- node ok }
 extern MclpParseNodeRef { node -- }
 
 extern MclpParseSubtreeFree { node -- }

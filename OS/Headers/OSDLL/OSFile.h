@@ -28,6 +28,9 @@ const OSACCESSFLAG_ASYNC       4
 // wait unalertably for completion.
 const OSACCESSFLAG_UNALERTABLE 8
 
+// wait alertably for completion.
+const OSACCESSFLAG_ALERTABLE   16
+
 // set of flags that are reserved for system usage
 const OSACCESSFLAG_KERNELSET   OSACCESSFLAG_ASYNC
 

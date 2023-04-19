@@ -26,7 +26,8 @@ fn KeAPCInitialize { thread specialfunc normalfunc apc -- }
 	0 apc@ KeAPC_Prev + !
 	0 apc@ KeAPC_Next + !
 
-	0 apc@ KeAPC_Enqueued + !
+	0 apc@ KeAPC_EnqueuedB + sb
+	KERNELMODE apc@ KeAPC_ModeB + sb
 end
 
 fn KeAPCDequeue { apc -- ok }
@@ -35,7 +36,7 @@ fn KeAPCDequeue { apc -- ok }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (apc@ KeAPC_Enqueued + @ ~~)
+	if (apc@ KeAPC_EnqueuedB + gb ~~)
 		rs@ HALCPUInterruptRestore
 
 		STATUS_NOT_ENQUEUED ok!
@@ -67,7 +68,7 @@ fn KeAPCDequeue { apc -- ok }
 	0 apc@ KeAPC_Next + !
 	0 apc@ KeAPC_Prev + !
 
-	0 apc@ KeAPC_Enqueued + !
+	0 apc@ KeAPC_EnqueuedB + sb
 
 	rs@ HALCPUInterruptRestore
 end
@@ -78,7 +79,7 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	if (apc@ KeAPC_Enqueued + @)
+	if (apc@ KeAPC_EnqueuedB + gb)
 		ipl@ KeIPLLower
 
 		STATUS_ALREADY_ENQUEUED ok!
@@ -90,7 +91,15 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	apc@ KeAPC_Thread + @ thread!
 
 	if (thread@ KeThread_KernelStackCanBeSwappedB + gb ~~)
+		if (DEBUGCHECKS)
+			if (apc@ KeAPC_ModeB + gb KERNELMODE ==)
+				"KeAPCEnqueue: kernel APC enqueued after all I/O ran down\n" KeCrash
+			end
+		end
+
 		ipl@ KeIPLLower
+
+		// thread is exiting.
 
 		-1 ok!
 
@@ -103,7 +112,7 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	context1@ apc@ KeAPC_Context1 + !
 	context2@ apc@ KeAPC_Context2 + !
 
-	1 apc@ KeAPC_Enqueued + !
+	1 apc@ KeAPC_EnqueuedB + sb
 
 	auto t
 

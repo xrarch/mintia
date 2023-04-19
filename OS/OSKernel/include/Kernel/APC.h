@@ -15,7 +15,10 @@ struct KeAPC
 	4 Context1
 	4 Context2
 
-	4 Enqueued
+	1 EnqueuedB
+	1 ModeB
+	1 Reserved1B
+	1 Reserved2B
 endstruct
 
 extern KeAPCInitialize { thread specialfunc normalfunc apc -- }

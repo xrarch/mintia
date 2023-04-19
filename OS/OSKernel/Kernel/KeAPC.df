@@ -135,19 +135,40 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 
 	1 apc@ KeAPC_EnqueuedB + sb
 
+	auto t
+
 	if (apc@ KeAPC_ModeB + gb USERMODE ==)
-		threadstatus@ // threadstatus
-		thread@ // thread
-		priboost@ // priboost
-		apc@ // apc
-		KiAPCEnqueueUserMode
+		thread@ KeThread_UserAPCListHead + @ t!
+
+		if (t@ ~~)
+			apc@ thread@ KeThread_UserAPCListTail + !
+		end else
+			apc@ t@ KeAPC_Prev + !
+			t@ apc@ KeAPC_Next + !
+		end
+
+		apc@ thread@ KeThread_UserAPCListHead + !
+
+		if (threadstatus@ THREADSTATUS_WAITINGALERTABLE ==)
+			if (thread@ KeThread_WaitModeB + gb USERMODE ==)
+				if (thread@ KeThread_WaitIPLB + gb IPLLOW ==)
+					// target thread is waiting on behalf of usermode, alertably,
+					// at IPLLOW. cause a wakeup.
+
+					1 thread@ KeThread_UserAPCTriggeredB + sb
+
+					STATUS_USER_APC // waitstatus
+					priboost@ // priboost
+					thread@ // thread
+					KiThreadWakeup
+				end
+			end
+		end
 
 		ipl@ KeIPLLower
 
 		return
 	end
-
-	auto t
 
 	// place APC on target thread's kernel mode APC queue
 
@@ -214,38 +235,6 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	end
 
 	ipl@ KeIPLLower
-end
-
-fn KiAPCEnqueueUserMode { threadstatus thread priboost apc -- }
-	// place on user APC queue.
-
-	auto t
-	thread@ KeThread_UserAPCListHead + @ t!
-
-	if (t@ ~~)
-		apc@ thread@ KeThread_UserAPCListTail + !
-	end else
-		apc@ t@ KeAPC_Prev + !
-		t@ apc@ KeAPC_Next + !
-	end
-
-	apc@ thread@ KeThread_UserAPCListHead + !
-
-	if (threadstatus@ THREADSTATUS_WAITINGALERTABLE ==)
-		if (thread@ KeThread_WaitModeB + gb USERMODE ==)
-			if (thread@ KeThread_WaitIPLB + gb IPLLOW ==)
-				// target thread is waiting on behalf of usermode, alertably,
-				// at IPLLOW. cause a wakeup.
-
-				1 thread@ KeThread_UserAPCTriggeredB + sb
-
-				STATUS_USER_APC // waitstatus
-				priboost@ // priboost
-				thread@ // thread
-				KiThreadWakeup
-			end
-		end
-	end
 end
 
 fn KiAPCDispatchQueue { -- }

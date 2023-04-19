@@ -86,6 +86,44 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		auto waitipl
 		IPLDPC KeIPLRaise waitipl!
 
+		// inlined check for USERMODE && IPLLOW && pending user event so that
+		// we don't have to call the heavy-duty KeThreadIsKilled in the non-
+		// contended case. we don't check for ALL events here, just the ones
+		// that only occur on any attempt to wait. others such as having been
+		// terminated will be caught on return to usermode anyway.
+
+		if (waitmode@ USERMODE ==)
+			if (waitipl@ IPLLOW ==)
+				if (alertable@)
+					if (current@ KeThread_UserAPCListHead + @)
+						// there are pending user APCs.
+
+						1 current@ KeThread_UserAPCTriggeredB + sb
+
+						waitipl@ KeIPLLower
+
+						STATUS_USER_APC ok!
+
+						return
+					end elseif (current@ KeThread_Signals + @
+								current@ KeThread_SignalAcceptMask + @ &
+								current@ KeThread_SignalDeliverOnWaitMask + @ &)
+
+						// there are pending deliver-on-wait signals.
+
+						current@ KeThread_Signals + @ ~
+						current@ KeThread_SignalDeliverOnWaitMask + @ &=
+
+						waitipl@ KeIPLLower
+
+						STATUS_SIGNALLED ok!
+
+						return
+					end
+				end
+			end
+		end
+
 		waitblocktable@ current@ KeThread_WaitBlockTable + !
 		objectcount@ current@ KeThread_WaitBlockCountB + sb
 
@@ -255,6 +293,44 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 
 		auto waitipl
 		IPLDPC KeIPLRaise waitipl!
+
+		// inlined check for USERMODE && IPLLOW && pending user event so that
+		// we don't have to call the heavy-duty KeThreadIsKilled in the non-
+		// contended case. we don't check for ALL events here, just the ones
+		// that only occur on any attempt to wait. others such as having been
+		// terminated will be caught on return to usermode anyway.
+
+		if (waitmode@ USERMODE ==)
+			if (waitipl@ IPLLOW ==)
+				if (alertable@)
+					if (current@ KeThread_UserAPCListHead + @)
+						// there are pending user APCs.
+
+						1 current@ KeThread_UserAPCTriggeredB + sb
+
+						waitipl@ KeIPLLower
+
+						STATUS_USER_APC ok!
+
+						return
+					end elseif (current@ KeThread_Signals + @
+								current@ KeThread_SignalAcceptMask + @ &
+								current@ KeThread_SignalDeliverOnWaitMask + @ &)
+
+						// there are pending deliver-on-wait signals.
+
+						current@ KeThread_Signals + @ ~
+						current@ KeThread_SignalDeliverOnWaitMask + @ &=
+
+						waitipl@ KeIPLLower
+
+						STATUS_SIGNALLED ok!
+
+						return
+					end
+				end
+			end
+		end
 
 		current@ KeThread_WaitBlocks + current@ KeThread_WaitBlockTable + !
 		1 current@ KeThread_WaitBlockCountB + sb

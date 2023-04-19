@@ -11,6 +11,7 @@ const OSFILEFLAG_MUSTCREATE  16
 const OSFILEFLAG_EXCLUSIVE   32
 const OSFILEFLAG_PAGEFILE    64
 const OSFILEFLAG_APPENDONLY  128 // atomic append
+const OSFILEFLAG_UNALERTABLE 256 // unalertable I/O. any handle that is to be set as stdout should be opened this way.
 
 // set of flags that are reserved for system usage
 const OSFILEFLAG_KERNELSET   OSFILEFLAG_PAGEFILE

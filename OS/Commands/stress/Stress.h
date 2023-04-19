@@ -18,6 +18,7 @@ extern OpenCloseTest { -- ok }
 extern NullSysTest { -- ok }
 extern SysAbort { -- ok }
 extern JobsTest { -- ok }
+extern AsyncIOEventTest { -- ok }
 
 externptr ArgTable
 externptr ArgCount

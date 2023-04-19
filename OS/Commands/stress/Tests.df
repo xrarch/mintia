@@ -748,8 +748,6 @@ fn (StressTestF) AsyncIOTest { -- ok }
 	count@ requestblock@ OSRequest_Context + !
 	statusblock@ requestblock@ OSRequest_StatusBlock + !
 
-	pointerof TestCompletionRoutine requestblock@ OSRequest_CompletionRoutine + !
-
 	requestblock@ // requestblock
 	0 // flags
 	0 // offset
@@ -786,8 +784,6 @@ fn (StressTestF) AsyncIOTest { -- ok }
 				OSFileCancelIO drop
 
 				continue
-			end elseif (ok@ STATUS_USER_APC ==)
-				continue
 			end else
 				ok@ OSStatusGetName "[server] couldn't receive: %s\n" OSError
 			end
@@ -820,15 +816,141 @@ fn (StressTestF) AsyncIOTest { -- ok }
 
 			count@ "q'd with new context: %x\n" Printf
 
-			// explicitly test for user APCs to deliver in case the I/O was
-			// instantaneous (a possible occurrence in emulation).
-
-			0 OSThreadSleep drop
-
 			1 count +=
 		end else
 			rxmsg@ OSMessageHeader_TypeB + gb "[server] dunno type %d\n" Printf
 		end
+	end
+end
+
+fn (StressTestF) AsyncIOEventTest { -- ok }
+	auto diskname
+	"bigfile.bin" diskname!
+
+	if (ArgCount@ 3 ==)
+		ArgTable@ 2 4 * + @ diskname!
+	end
+
+	auto count
+	0 count!
+
+	auto diskhandle
+	OSDEFAULTFILEPERMISSIONS // permissions
+	OSFILEFLAG_MUSTBEFILE OSFILEFLAG_NOCACHE | // flags
+	ACCESS_READ ACCESS_WRITE | // access
+	diskname@ // path
+	OSFileCreate ok! diskhandle!
+
+	if (ok@)
+		ok@ OSStatusGetName diskname@ "couldn't open %s: %s\n" OSError
+	end
+
+	524288 // newsize
+	1 // growing
+	diskhandle@ // handle
+	OSFileTruncate drop drop
+
+	auto eventhandle
+	0 // signaled
+	OSEVENT_SYNCH // type
+	ACCESS_OWNER_ALL // permissions
+	"TestEvent" // name
+	OSEventCreate ok! eventhandle!
+
+	if (ok@)
+		ok@ ok@ OSStatusGetName "couldn't create event: %s %i\n" OSError
+	end
+
+	auto bigbuf
+	524288 // length
+	USERMAP // startva
+	OSCURRENTPROCESS // processhandle
+	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
+	0 // flags
+	OSAllocate ok! bigbuf!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't allocate buffer: %s\n" OSError
+	end
+
+	auto bytes
+	524288 bytes!
+
+	auto ptr
+	bigbuf@ ptr!
+
+	while (bytes@)
+		ptr@ ptr@!
+
+		4 ptr +=
+		4 bytes -=
+	end
+
+	auto statusblock
+	OSStatusBlock_SIZEOF alloc statusblock!
+
+	auto requestblock
+	OSRequest_SIZEOF alloc requestblock!
+
+	requestblock@ OSRequestInitialize
+
+	eventhandle@ requestblock@ OSRequest_EventHandle + !
+	count@ requestblock@ OSRequest_Context + !
+	statusblock@ requestblock@ OSRequest_StatusBlock + !
+
+	pointerof TestCompletionRoutine requestblock@ OSRequest_CompletionRoutine + !
+
+	requestblock@ // requestblock
+	0 // flags
+	0 // offset
+	524288 // length
+	bigbuf@ // buffer
+	diskhandle@ // filehandle
+	OSFileWriteAsync ok!
+
+	if (ok@)
+		ok@ OSStatusGetName "couldn't write: %s\n" OSError
+	end
+
+	count@ "q'd with new context: %x\n" Printf
+
+	1 count +=
+
+	while (1)
+		1 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		eventhandle@ // objecthandle
+		OSWaitForObject ok!
+
+		if (ok@)
+			if (ok@ STATUS_USER_APC ==)
+				continue
+			end
+
+			ok@ OSStatusGetName "couldn't wait: %s\n" OSError
+		end
+
+		statusblock@ OSStatusBlock_Status + @
+		statusblock@ OSStatusBlock_Length + @
+		"bytes=%d status=%i\n" Printf
+
+		count@ requestblock@ OSRequest_Context + !
+
+		requestblock@ // requestblock
+		0 // flags
+		0 // offset
+		524288 // length
+		bigbuf@ // buffer
+		diskhandle@ // filehandle
+		OSFileWriteAsync ok!
+
+		if (ok@)
+			ok@ OSStatusGetName "couldn't write: %s\n" OSError
+		end
+
+		count@ "q'd with new context: %x\n" Printf
+
+		1 count +=
 	end
 end
 

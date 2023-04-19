@@ -698,8 +698,6 @@ fn KiCopySignalFrame { signum dispatchfunc thread trapframe -- }
 		thread@ KeThread_Process + @ // process
 		KeProcessSignal drop
 
-		1 recheck!
-
 		return
 	end
 
@@ -715,6 +713,45 @@ fn KiCopySignalFrame { signum dispatchfunc thread trapframe -- }
 	1 signum@ << ~ thread@ KeThread_SignalAcceptMask + &=
 
 	rs@ HALCPUInterruptRestore
+end
+
+fn KiCopyAPCFrame { context userfunc dispatchfunc thread trapframe -- }
+	auto usp
+	trapframe@ OSContext_sp + @ usp!
+
+	if (DEBUGCHECKS)
+		if (trapframe@ OSContext_eflagsB + gb FOX32_RS_USER & ~~)
+			trapframe@ "KiCopyAPCFrame: not usermode trapframe %x\n" KeCrash
+		end
+	end
+
+	OSContext_SIZEOF usp -=
+
+	auto ok
+	usp@ // dest
+	trapframe@ // src
+	OSContext_SIZEOF // sz
+	KeSafeCopyOut ok!
+
+	if (ok@)
+		// failed to copy out signal frame, this is fatal to the entire
+		// process.
+		// XXX should it be???
+
+		128 OSSIGNAL_KILL + thread@ KeThread_Process + @ KeProcess_KilledStatus + !
+
+		OSSIGNAL_KILL // signal
+		thread@ KeThread_Process + @ // process
+		KeProcessSignal drop
+
+		return
+	end
+
+	usp@ trapframe@ OSContext_sp + !
+	dispatchfunc@ trapframe@ OSContext_epc + !
+	context@ trapframe@ OSContext_a0 + !
+	usp@ trapframe@ OSContext_a1 + !
+	userfunc@ trapframe@ OSContext_a2 + !
 end
 
 fn KeThreadContinue { signum context thread -- ok }

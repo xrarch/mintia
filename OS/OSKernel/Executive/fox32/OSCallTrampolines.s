@@ -100,6 +100,7 @@
 .extern OSThreadSetFilePermissions
 .extern OSThreadGetFilePermissions
 .extern OSThreadSleep
+.extern OSThreadSleepEx
 .extern OSThreadCreate
 .extern OSThreadTerminate
 .extern OSThreadSuspend
@@ -128,7 +129,7 @@
 
 OSCallCount:
 .global OSCallCount
-	.dl 123
+	.dl 124
 
 OSCallTable:
 .global OSCallTable
@@ -231,31 +232,32 @@ OSCallTable:
 	.dl OSTOSThreadSetFilePermissions                    ;96
 	.dl OSTOSThreadGetFilePermissions                    ;97
 	.dl OSTOSThreadSleep                                 ;98
-	.dl OSTOSThreadCreate                                ;99
-	.dl OSTOSThreadTerminate                             ;100
-	.dl OSTOSThreadSuspend                               ;101
-	.dl OSTOSThreadResume                                ;102
-	.dl OSTOSThreadReadStatus                            ;103
-	.dl OSTOSThreadQuery                                 ;104
-	.dl OSTOSThreadSignal                                ;105
-	.dl OSTOSThreadMaskSignal                            ;106
-	.dl OSTOSThreadDeliverOnWaitSignal                   ;107
-	.dl OSTOSJobCreate                                   ;108
-	.dl OSTOSJobAddProcess                               ;109
-	.dl OSTOSJobRemoveProcess                            ;110
-	.dl OSTOSJobSignal                                   ;111
-	.dl OSTOSSetSystemConsole                            ;112
-	.dl OSTOSConsoleSignal                               ;113
-	.dl OSTOSIsAConsole                                  ;114
-	.dl OSTOSDuplexCreate                                ;115
-	.dl OSTOSCheckPermission                             ;116
-	.dl OSTOSGrantPermission                             ;117
-	.dl OSTOSPortCreate                                  ;118
-	.dl OSTOSPortConnect                                 ;119
-	.dl OSTOSPortAccept                                  ;120
-	.dl OSTOSPortSendAndWaitReceive                      ;121
-	.dl OSTOSPortSendAndWaitReply                        ;122
-	.dl OSTOSPortOpenProcessByClientID                   ;123
+	.dl OSTOSThreadSleepEx                               ;99
+	.dl OSTOSThreadCreate                                ;100
+	.dl OSTOSThreadTerminate                             ;101
+	.dl OSTOSThreadSuspend                               ;102
+	.dl OSTOSThreadResume                                ;103
+	.dl OSTOSThreadReadStatus                            ;104
+	.dl OSTOSThreadQuery                                 ;105
+	.dl OSTOSThreadSignal                                ;106
+	.dl OSTOSThreadMaskSignal                            ;107
+	.dl OSTOSThreadDeliverOnWaitSignal                   ;108
+	.dl OSTOSJobCreate                                   ;109
+	.dl OSTOSJobAddProcess                               ;110
+	.dl OSTOSJobRemoveProcess                            ;111
+	.dl OSTOSJobSignal                                   ;112
+	.dl OSTOSSetSystemConsole                            ;113
+	.dl OSTOSConsoleSignal                               ;114
+	.dl OSTOSIsAConsole                                  ;115
+	.dl OSTOSDuplexCreate                                ;116
+	.dl OSTOSCheckPermission                             ;117
+	.dl OSTOSGrantPermission                             ;118
+	.dl OSTOSPortCreate                                  ;119
+	.dl OSTOSPortConnect                                 ;120
+	.dl OSTOSPortAccept                                  ;121
+	.dl OSTOSPortSendAndWaitReceive                      ;122
+	.dl OSTOSPortSendAndWaitReply                        ;123
+	.dl OSTOSPortOpenProcessByClientID                   ;124
 
 
 OSTOSConsolePutCharacter:
@@ -2564,6 +2566,28 @@ OSTOSThreadSleep:
 	mov  a0, [t0]
 
 	call OSThreadSleep
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	pop  fp
+	ret
+
+OSTOSThreadSleepEx:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	call OSThreadSleepEx
 
 
 	mov  t0, s17

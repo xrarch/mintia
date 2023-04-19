@@ -53,6 +53,7 @@ DLLThreadExit:
 	nop
 
 .extern DLLSignalDispatchHL
+.extern DLLAPCDispatchHL
 
 DLLSignalDispatch:
 .global DLLSignalDispatch
@@ -60,8 +61,13 @@ DLLSignalDispatch:
 	mov  long [sp], zero
 
 	jal DLLSignalDispatchHL
-	nop
-	nop
+
+DLLAPCDispatch:
+.global DLLAPCDispatch
+	subi sp, sp, 4
+	mov  long [sp], zero
+
+	jal DLLAPCDispatchHL
 
 .section data
 

@@ -67,7 +67,8 @@ struct OSRequest
 	4 EventHandle
 	4 StatusBlock
 	4 Context
-	8 Reserved
+	4 CompletionRoutine
+	4 Reserved
 endstruct
 
 externptr OSStdIn

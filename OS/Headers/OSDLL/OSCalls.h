@@ -146,6 +146,7 @@ extern OSQuotaQuery { query processhandle -- ok }
 extern OSThreadSetFilePermissions { filepermissions -- ok }
 extern OSThreadGetFilePermissions { -- filepermissions ok }
 extern OSThreadSleep { ms -- ok }
+extern OSThreadSleepEx { alertable ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
 extern OSThreadTerminate { status threadhandle -- ok }
 extern OSThreadSuspend { threadhandle -- ok }

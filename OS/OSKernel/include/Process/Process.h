@@ -110,6 +110,7 @@ struct PsOSDLLInfo
 	4 StartFunction
 	4 ExitFunction
 	4 SignalDispatchFunction
+	4 APCDispatchFunction
 
 #ifdef FOX32
 	4 InterlockedIncStart

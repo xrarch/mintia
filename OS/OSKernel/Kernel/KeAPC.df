@@ -30,6 +30,16 @@ fn KeAPCInitialize { thread specialfunc normalfunc apc -- }
 	KERNELMODE apc@ KeAPC_ModeB + sb
 end
 
+fn KeUserAPCInitialize { thread kernelfunc userfunc special apc -- }
+	thread@ // thread
+	kernelfunc@ // specialfunc
+	userfunc@ // normalfunc
+	apc@ // apc
+	KeAPCInitialize
+
+	USERMODE apc@ KeAPC_ModeB + sb
+end
+
 fn KeAPCDequeue { apc -- ok }
 	0 ok!
 
@@ -56,13 +66,21 @@ fn KeAPCDequeue { apc -- ok }
 	if (n@)
 		p@ n@ KeAPC_Prev + !
 	end else // no next means we were the tail
-		p@ thread@ KeThread_APCListTail + !
+		if (apc@ KeAPC_ModeB + gb KERNELMODE ==)
+			p@ thread@ KeThread_APCListTail + !
+		end else
+			p@ thread@ KeThread_UserAPCListTail + !
+		end
 	end
 
 	if (p@)
 		n@ p@ KeAPC_Next + !
 	end else // no prev means we were the head
-		n@ thread@ KeThread_APCListHead + !
+		if (apc@ KeAPC_ModeB + gb KERNELMODE ==)
+			n@ thread@ KeThread_APCListHead + !
+		end else
+			n@ thread@ KeThread_UserAPCListHead + !
+		end
 	end
 
 	0 apc@ KeAPC_Next + !
@@ -90,6 +108,9 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	auto thread
 	apc@ KeAPC_Thread + @ thread!
 
+	auto threadstatus
+	thread@ KeThread_StatusB + gb threadstatus!
+
 	if (thread@ KeThread_KernelStackCanBeSwappedB + gb ~~)
 		if (DEBUGCHECKS)
 			if (apc@ KeAPC_ModeB + gb KERNELMODE ==)
@@ -113,6 +134,18 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	context2@ apc@ KeAPC_Context2 + !
 
 	1 apc@ KeAPC_EnqueuedB + sb
+
+	if (apc@ KeAPC_ModeB + gb USERMODE ==)
+		threadstatus@ // threadstatus
+		thread@ // thread
+		priboost@ // priboost
+		apc@ // apc
+		KiAPCEnqueueUserMode
+
+		ipl@ KeIPLLower
+
+		return
+	end
 
 	auto t
 
@@ -150,9 +183,6 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 		IPLAPC KiSoftwareInterruptRequest
 	end
 
-	auto threadstatus
-	thread@ KeThread_StatusB + gb threadstatus!
-
 	if (threadstatus@ THREADSTATUS_WAITINGALERTABLE == threadstatus@ THREADSTATUS_WAITINGUNALERTABLE == ||)
 		if (thread@ KeThread_WaitIPLB + gb IPLLOW ==)
 			// target thread is waiting, and is at IPLLOW
@@ -184,6 +214,38 @@ fn KeAPCEnqueue { context1 context2 priboost apc -- ok }
 	end
 
 	ipl@ KeIPLLower
+end
+
+fn KiAPCEnqueueUserMode { threadstatus thread priboost apc -- }
+	// place on user APC queue.
+
+	auto t
+	thread@ KeThread_UserAPCListHead + @ t!
+
+	if (t@ ~~)
+		apc@ thread@ KeThread_UserAPCListTail + !
+	end else
+		apc@ t@ KeAPC_Prev + !
+		t@ apc@ KeAPC_Next + !
+	end
+
+	apc@ thread@ KeThread_UserAPCListHead + !
+
+	if (threadstatus@ THREADSTATUS_WAITINGALERTABLE ==)
+		if (thread@ KeThread_WaitModeB + gb USERMODE ==)
+			if (thread@ KeThread_WaitIPLB + gb IPLLOW ==)
+				// target thread is waiting on behalf of usermode, alertably,
+				// at IPLLOW. cause a wakeup.
+
+				1 thread@ KeThread_UserAPCTriggeredB + sb
+
+				STATUS_USER_APC // waitstatus
+				priboost@ // priboost
+				thread@ // thread
+				KiThreadWakeup
+			end
+		end
+	end
 end
 
 fn KiAPCDispatchQueue { -- }
@@ -226,6 +288,9 @@ fn KiAPCDispatchQueue { -- }
 
 		apc@ KeAPC_FunctionNormal + @ normalfunc@!
 
+		// make sure NEVER TO TOUCH THE APC after the special function has
+		// been called, as the APC may have been reused for another purpose.
+
 		if (apc@ KeAPC_FunctionNormal + @ ~~)
 			// this is a special kernel APC, it should always be dispatched if
 			// IPL < IPLAPC.
@@ -234,7 +299,10 @@ fn KiAPCDispatchQueue { -- }
 
 			ipl@ KeIPLLower
 
-			normalfunc@ context1@ context2@ apc@
+			normalfunc@ // normalfunc
+			context1@ // context1
+			context2@ // context2
+			apc@ // apc
 			apc@ KeAPC_FunctionSpecial + @ KeAPCFunctionSpecial
 
 			IPLDPC KeIPLRaise ipl!
@@ -257,8 +325,9 @@ fn KiAPCDispatchQueue { -- }
 
 					IPLLOW KeIPLLower
 
-					context1@@ context2@@
-					apc@ KeAPC_FunctionNormal + @ KeAPCFunctionNormal
+					context1@@ // context1
+					context2@@ // context2
+					normalfunc@@ KeAPCFunctionNormal
 
 					IPLAPC KeIPLRaise ipl!
 				end
@@ -274,4 +343,54 @@ fn KiAPCDispatchQueue { -- }
 	ipl@ KeIPLLower
 
 	KeThreadCurrent@ KeThreadAcceptKill drop
+end
+
+fn KeAPCDispatchQueueUser { dispatchfunc trapframe -- }
+	auto thread
+	KeThreadCurrent@ thread!
+
+	auto context1
+	4 alloc context1!
+
+	auto context2
+	4 alloc context2!
+
+	auto normalfunc
+	4 alloc normalfunc!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto apc
+	thread@ KeThread_UserAPCListHead + @ apc!
+
+	if (apc@ ~~)
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	apc@ KeAPCDequeue drop
+
+	ipl@ KeIPLLower
+
+	apc@ KeAPC_Context1 + @ context1@!
+	apc@ KeAPC_Context2 + @ context2@!
+
+	apc@ KeAPC_FunctionNormal + @ normalfunc@!
+
+	normalfunc@ // normalfunc
+	context1@ // context1
+	context2@ // context2
+	apc@ // apc
+	apc@ KeAPC_FunctionSpecial + @ KeAPCFunctionSpecial
+
+	if (normalfunc@@)
+		context1@@ // context
+		normalfunc@@ // userfunc
+		dispatchfunc@ // dispatchfunc
+		thread@ // thread
+		trapframe@ // trapframe
+		KiCopyAPCFrame
+	end
 end

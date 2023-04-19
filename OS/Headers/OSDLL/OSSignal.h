@@ -1,4 +1,5 @@
 fnptr OSSignalHandler { context signum -- }
+fnptr OSUserAPCRoutine { context apccontext -- }
 
 const OSSIGNALACTION_DEFAULT 0
 const OSSIGNALACTION_IGNORE  1

@@ -116,7 +116,8 @@ struct IOPacketHeaderUserAsync
 
 	// things required for user async IO completion.
 	// an APC is required to write out the IO status block and/or enqueue the
-	// completion message.
+	// completion message and/or enqueue the completion APC. will be reused as
+	// the user completion APC if required.
 
 	KeAPC_SIZEOF CompletionAPC
 
@@ -132,6 +133,10 @@ struct IOPacketHeaderUserAsync
 	// pointer to the pre-initialized completion message (if any).
 
 	4 CompletionMessage
+
+	// pointer to the user completion APC function.
+
+	4 UserAPCFunction
 
 	// links for the per-thread list of pending IOPs.
 

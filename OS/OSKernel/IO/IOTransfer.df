@@ -256,11 +256,21 @@ fn IOReadWriteAsync { requestblock flags length offset buffer fileobject functio
 	auto iop
 	auto iopl
 
+	auto iopflags
+	IOPFLAG_COMPLMDL IOPFLAG_QUOTA | iopflags!
+
+	if (requestblock@ OSRequest_CompletionRoutine + @ ~~)
+		// only free the IOP if there's no completion routine.
+		// otherwise we will do it in the kernel function for the user APC.
+
+		IOPFLAG_FREEIOP iopflags |=
+	end
+
 	USERMODE // mode
 	IOPTYPE_USERASYNC // type
 	0 // kflags
 	fileobject@ IOFile_FileControlBlock + @ // fcb
-	IOPFLAG_COMPLMDL IOPFLAG_QUOTA | IOPFLAG_FREEIOP | // iopflags
+	iopflags@ // iopflags
 	IOPacketAllocateForFile ok! iop! iopl!
 
 	if (ok@)
@@ -279,6 +289,13 @@ fn IOReadWriteAsync { requestblock flags length offset buffer fileobject functio
 	0 // normalfunc
 	iop@ IOPacketHeaderUserAsync_CompletionAPC + // apc
 	KeAPCInitialize
+
+	// stash the context in the completion APC.
+	// when IOPacketComplete enqueues the APC, it will preserve whatever is in
+	// the Context2 field of the APC.
+
+	requestblock@ OSRequest_Context + @
+	iop@ IOPacketHeaderUserAsync_CompletionAPC + KeAPC_Context2 + !
 
 	if (requestblock@ OSRequest_PortHandle + @)
 		// allocate a completion message from the port object.
@@ -310,6 +327,8 @@ fn IOReadWriteAsync { requestblock flags length offset buffer fileobject functio
 
 	requestblock@ OSRequest_EventHandle + @ iop@ IOPacketHeader_Event + !
 	requestblock@ OSRequest_StatusBlock + @ iop@ IOPacketHeaderUserAsync_UserStatusBlock + !
+
+	requestblock@ OSRequest_CompletionRoutine + @ iop@ IOPacketHeaderUserAsync_UserAPCFunction + !
 
 	mdl@ iop@ IOPacketHeader_MDL + !
 
@@ -410,7 +429,40 @@ fn (KeAPCFunctionSpecial) IOiUserAsyncAPCRoutine { normalfunc context1 context2 
 
 	iop@ IOPacketHeaderUserAsync_FileObject + @ ObObjectDereferenceByPointer drop
 
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_DOCOMPLT &)
+		if (iop@ IOPacketHeaderUserAsync_UserAPCFunction + @)
+			// reinitialize the APC and re-enqueue it as a user APC.
+
+			KeThreadCurrent@ // thread
+			pointerof IOiUserAsyncUserRoutine // kernelfunc
+			iop@ IOPacketHeaderUserAsync_UserAPCFunction + @ // userfunc
+			0 // special
+			apc@ // apc
+			KeUserAPCInitialize
+
+			context2@@ // context1
+			iop@ // context2
+			0 // priboost
+			apc@ // apc
+			KeAPCEnqueue drop
+		end
+	end
+
 	iop@ IOPacketFinishEitherContext
+end
+
+fn (KeAPCFunctionSpecial) IOiUserAsyncUserRoutine { normalfunc context1 context2 apc -- }
+	fnsection "PAGE$text"
+
+	// just free the IO packet.
+	// couldn't be done before this point because the APC lives in the IO
+	// packet.
+
+	context2@@
+	context1@@
+	"we be dispatching user APCs context1=%x context2=%x\n" Printf
+
+	context2@@ IOPacketFree
 end
 
 fn IOReadWrite { timeout flags length offset buffer fileobject functioncode -- bytes ok }
@@ -420,21 +472,6 @@ fn IOReadWrite { timeout flags length offset buffer fileobject functioncode -- b
 		if (KeIPLCurrentGet IPLLOW ~=)
 			"IOReadWrite: ipl != IPLLOW\n" KeCrash
 		end
-	end
-
-	auto cancelfunc
-	fileobject@ IOFile_FileControlBlock + @ IOFileControlBlock_DispatchTable + @ IODispatchTable_Cancel + @ cancelfunc!
-
-	auto waitmode
-	auto alertable
-
-	if (cancelfunc@)
-		USERMODE waitmode!
-		1 alertable!
-	end else
-		OSWAIT_TIMEOUTINFINITE timeout!
-		KERNELMODE waitmode!
-		0 alertable!
 	end
 
 	0 bytes!
@@ -490,8 +527,8 @@ fn IOReadWrite { timeout flags length offset buffer fileobject functioncode -- b
 
 	if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 		auto wok
-		waitmode@ // waitmode
-		alertable@ // alertable
+		USERMODE // waitmode
+		1 // alertable
 		timeout@ // timeout
 		event@ // object
 		KeThreadWaitForObject wok!
@@ -501,12 +538,23 @@ fn IOReadWrite { timeout flags length offset buffer fileobject functioncode -- b
 				wok@ ok!
 			end
 
-			IPLAPC KeIPLRaise drop
+			// the wait was interrupted.
+			// cancel the IO if possible, and then wait for its total
+			// completion.
 
-			iop@ // iop
-			cancelfunc@ IODispatchCancelFunction drop
+			auto cancelfunc
+			fileobject@ IOFile_FileControlBlock + @
+			IOFileControlBlock_DispatchTable + @
+			IODispatchTable_Cancel + @ cancelfunc!
 
-			IPLLOW KeIPLLower
+			if (cancelfunc@)
+				IPLAPC KeIPLRaise drop
+
+				iop@ // iop
+				cancelfunc@ IODispatchCancelFunction drop
+
+				IPLLOW KeIPLLower
+			end
 
 			if (event@ KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 				KERNELMODE // waitmode

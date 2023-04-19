@@ -112,6 +112,10 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	0 thread@ KeThread_APCListHead + !
 	0 thread@ KeThread_APCListTail + !
+
+	0 thread@ KeThread_UserAPCListHead + !
+	0 thread@ KeThread_UserAPCListTail + !
+
 	0 thread@ KeThread_APCInProgressB + sb
 	0 thread@ KeThread_APCDisableCount + !
 
@@ -119,6 +123,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_WaitBlockCountB + sb
 
 	0 thread@ KeThread_QuantumEndCountB + sb
+
+	0 thread@ KeThread_UserAPCTriggeredB + sb
 end
 
 fn KeThreadUninitialize { thread -- }
@@ -371,6 +377,37 @@ fn KeThreadRundown { thread -- }
 	end
 
 	ipl@ KeIPLLower
+
+	auto context1
+	4 alloc context1!
+
+	auto context2
+	4 alloc context2!
+
+	auto normalfunc
+	4 alloc normalfunc!
+
+	while (thread@ KeThread_UserAPCListHead + @)
+		auto apc
+		thread@ KeThread_UserAPCListHead + @ apc!
+
+		apc@ KeAPC_Context1 + @ context1@!
+		apc@ KeAPC_Context2 + @ context2@!
+
+		apc@ KeAPC_FunctionNormal + @ normalfunc@!
+
+		apc@ KeAPCDequeue drop
+
+		// just call the special function, for user APCs this should delete
+		// the APC and currently nobody needs any indication that this is
+		// rundown time and not normal dispatch time.
+
+		normalfunc@ // normalfunc
+		context1@ // context1
+		context2@ // context2
+		apc@ // apc
+		apc@ KeAPC_FunctionSpecial + @ KeAPCFunctionSpecial
+	end
 end
 
 fn KeThreadIsKilled { mode alertable waiting thread -- ok }
@@ -405,12 +442,6 @@ fn KeThreadIsKilled { mode alertable waiting thread -- ok }
 		1 OSSIGNAL_KILL << sig |=
 	end
 
-	if (sig@ ~~)
-		// no signals, return now
-
-		return
-	end
-
 	if (sig@ 1 OSSIGNAL_KILL << &)
 		// OSSIGNAL_KILL cannot be ignored
 
@@ -428,6 +459,14 @@ fn KeThreadIsKilled { mode alertable waiting thread -- ok }
 	if (waiting@)
 		// waiting, allow if accepted.
 
+		if (thread@ KeThread_UserAPCListHead + @)
+			1 thread@ KeThread_UserAPCTriggeredB + sb
+
+			STATUS_USER_APC ok!
+
+			return
+		end
+
 		if (thread@ KeThread_SignalAcceptMask + @ sig@ &)
 			// clear pending signals from deliver-on-wait mask
 
@@ -435,14 +474,26 @@ fn KeThreadIsKilled { mode alertable waiting thread -- ok }
 
 			STATUS_SIGNALLED ok!
 		end
-	end elseif (thread@ KeThread_SignalAcceptMask + @
-				thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
-				sig@ &)
+	end else
+		if (thread@ KeThread_UserAPCTriggeredB + gb)
+			0 thread@ KeThread_UserAPCTriggeredB + sb
 
-		// not waiting, only allow if accepted and not specified as
-		// deliver-on-wait.
+			if (thread@ KeThread_UserAPCListHead + @)
+				STATUS_USER_APC ok!
 
-		STATUS_SIGNALLED ok!
+				return
+			end
+		end
+
+		if (thread@ KeThread_SignalAcceptMask + @
+			thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
+			sig@ &)
+
+			// not waiting, only allow if accepted and not specified as
+			// deliver-on-wait.
+
+			STATUS_SIGNALLED ok!
+		end
 	end
 end
 
@@ -501,7 +552,7 @@ fn KeThreadDispatchSignal { dispatchfunc trapframe -- }
 	dispatchfunc@ // dispatchfunc
 	thread@ // thread
 	trapframe@ // trapframe
-	KiCopySignalFrame drop
+	KiCopySignalFrame
 end
 
 fn KiThreadInitializeAddToList { thread process -- }

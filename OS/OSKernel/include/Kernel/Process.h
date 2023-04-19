@@ -111,6 +111,9 @@ struct KeThread
 	4 APCListHead
 	4 APCListTail
 
+	4 UserAPCListHead
+	4 UserAPCListTail
+
 	4 APCDisableCount
 	4 IgnoreKill
 
@@ -132,7 +135,7 @@ struct KeThread
 	1 WaitBlockCountB
 	1 WasPreemptedB
 	1 QuantumEndCountB // since last voluntary block
-	1 AlignmentB
+	1 UserAPCTriggeredB
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }
@@ -146,8 +149,6 @@ extern KeSafeGetByte { src -- byte ok }
 extern KeSafeProbeSystemByte { src -- byte ok }
 
 extern KeInterlockedIncrement { inc ptr -- oldcount }
-
-extern KeCopySignalFrame { signum dispatchfunc thread trapframe -- recheck }
 
 extern KeThreadContinue { signum context thread -- ok }
 

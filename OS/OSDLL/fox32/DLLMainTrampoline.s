@@ -50,14 +50,19 @@ DLLThreadExit:
 	nop
 
 .extern DLLSignalDispatchHL
+.extern DLLAPCDispatchHL
 
 DLLSignalDispatch:
 .global DLLSignalDispatch
 	push 0
 
 	call DLLSignalDispatchHL
-	nop
-	nop
+
+DLLAPCDispatch:
+.global DLLAPCDispatch
+	push 0
+
+	call DLLAPCDispatchHL
 
 .section data
 

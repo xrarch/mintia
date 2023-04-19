@@ -22,6 +22,7 @@ struct KeAPC
 endstruct
 
 extern KeAPCInitialize { thread specialfunc normalfunc apc -- }
+extern KeUserAPCInitialize { thread kernelfunc userfunc special apc -- }
 extern KeAPCDequeue { apc -- ok }
 extern KeAPCEnqueue { context1 context2 priboost apc -- ok }
-extern KeAPCDispatchQueue { -- }
+extern KeAPCDispatchQueueUser { dispatchfunc trapframe -- }

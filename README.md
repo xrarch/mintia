@@ -51,9 +51,10 @@ Logging in as `guest` has no password, and the default password for `root` is `m
 
 ## Features
 
+- Targets a 2MB RAM minimum for headless use, 4MB for graphical.
+
 ### Kernel
 
-- [x] Targets a 2MB RAM minimum for headless use, 4MB for graphical.
 - [x] Dynamically-linked kernel.
 - [x] Priority-based preemptive multitasking with wait boosting.
 - [x] Waiting on multiple objects simultaneously.

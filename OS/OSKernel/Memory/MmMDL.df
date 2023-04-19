@@ -429,6 +429,41 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		end
 	end
 
+	if (lockforwrite@)
+		// force any COWs and discover any read-only violations.
+		// we can do this safely here because we hold the map lock.
+
+		auto i
+		0 i!
+
+		while (i@ pages@ <)
+			vaddr@ KeSafeProbeWrite ok!
+
+			if (ok@)
+				process@ MiMapUnlock
+
+				return
+			end
+
+			1 i +=
+			PAGESIZE vaddr +=
+
+			// mask the vaddr so that we probe at the start of each subsequent
+			// page after the first one. the reason for this is that
+			// KeSafeProbeWrite works by reading and then writing the same
+			// byte from the given address. this is acceptable within the
+			// buffer because its contents mid-syscall ought to be expected to
+			// be unpredictable anyway, but it is not acceptable to do this to
+			// random memory that may be just beyond the buffer because it
+			// will cause satanic race conditions with any other threads in
+			// this process.
+
+			PAGENUMBERMASK vaddr &=
+		end
+
+		mdl@ MmMDLHeader_VirtualAddress + @ vaddr!
+	end
+
 	pages@ // count
 	process@ // process
 	MmMDLChargePinnedPages ok!
@@ -439,7 +474,7 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		return
 	end
 
-	// touch all of the pages until their PTE is valid. call MmMDLUnpin to
+	// probe all of the pages until their PTE is valid. call MmMDLUnpin to
 	// clean up the partial pin if we fail at any point.
 
 	auto mdlpos
@@ -460,56 +495,26 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 	auto pinnedvaddr
 
+	auto ipl
+
+	// don't raise IPL here -- it will get raised following the pinning of the
+	// first PTE. this is a little faster.
+
 	while (pages@)
-		if (lockforwrite@)
-			// force any COWs and discover any read-only violations.
-
-			vaddr@ KeSafeProbeWrite ok!
-
-			if (ok@)
-				process@ MiMapUnlock
-
-				if (ptpfdbe@)
-					process@ MiVADListLockUnalertable
-
-					pinnedvaddr@ // vaddr
-					ptpfdbe@ // ptpfdbe
-					MiPTEUnpin
-
-					process@ MmVADListUnlock
-				end
-
-				mdl@ MmMDLUnpin
-
-				return
-			end
-		end
-
 		auto pte
 
 		while (1)
-			// poke the buffer page to make sure it is resident.
-			vaddr@ KeSafeGetByte ok! drop
-
-			if (ok@)
-				process@ MiMapUnlock
-
+			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
 				if (ptpfdbe@)
-					process@ MiVADListLockUnalertable
+					// only lower IPL if this isn't the pinning of the first
+					// PTE, since if it is, we haven't raised it yet.
 
-					pinnedvaddr@ // vaddr
-					ptpfdbe@ // ptpfdbe
-					MiPTEUnpin
-
-					process@ MmVADListUnlock
+					ipl@ KeIPLLower
 				end
 
-				mdl@ MmMDLUnpin
+				// pin the page table so we can check the PTE with raised IPL
+				// fearlessly.
 
-				return
-			end
-
-			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
 				if (ptpfdbe@)
 					pinnedvaddr@ // vaddr
 					ptpfdbe@ // ptpfdbe
@@ -523,22 +528,41 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 				process@ MmVADListUnlock
 
 				if (ptpfdbe@ ~~)
+					// the page table doesn't exist, try to create the PTE by
+					// faulting on the page.
+
+					vaddr@ KeSafeGetByte ok! drop
+
+					IPLDPC KeIPLRaise ipl!
+
+					if (ok@)
+						break
+					end
+
 					continue
 				end
 
 				vaddr@ pinnedvaddr!
-			end
 
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
+				IPLDPC KeIPLRaise ipl!
+			end
 
 			auto pfdbe
 			pte@ // pteaddr
 			MiPTEInterpret ok! drop pfdbe!
 
 			if (ok@)
-				// not resident, loop, re-poke, and try again.
+				// not resident. (re-)probe and try again.
+
 				ipl@ KeIPLLower
+
+				vaddr@ KeSafeGetByte ok! drop
+
+				IPLDPC KeIPLRaise ipl!
+
+				if (ok@)
+					break
+				end
 
 				continue
 			end
@@ -557,21 +581,19 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 			break
 		end
 
+		if (ok@)
+			break
+		end
+
 		4 mdlpos +=
 		1 pages -=
 		PAGESIZE vaddr +=
 		PTESIZE pte +=
-
-		// this is so that we probe at the start of each subsequent page after
-		// the first one. the reason for this is that KeSafeProbeWrite works
-		// by reading and then writing the same byte from the given address.
-		// this is acceptable within the buffer because its contents
-		// mid-syscall ought to be expected to be unpredictable anyway, but it
-		// is not acceptable to do this to random memory that may be just
-		// beyond the buffer because it will cause satanic race conditions
-		// with any other threads in this process.
-		PAGENUMBERMASK vaddr &=
 	end
+
+	ipl@ KeIPLLower
+
+	process@ MiMapUnlock
 
 	if (ptpfdbe@)
 		process@ MiVADListLockUnalertable
@@ -583,7 +605,9 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		process@ MmVADListUnlock
 	end
 
-	process@ MiMapUnlock
+	if (ok@)
+		mdl@ MmMDLUnpin
+	end
 end
 
 fn MmMDLUnpin { mdl -- }

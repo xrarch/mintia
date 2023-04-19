@@ -12,6 +12,16 @@ var FBAddress 0
 
 var BytesPerRow 0
 
+var MouseHandle 0
+
+var MouseX 0
+var MouseY 0
+
+var MouseRCur 0
+
+buffer MousePacket OSMousePacket_SIZEOF
+buffer MouseStatusBlock OSStatusBlock_SIZEOF
+
 const BOXROWS 8
 const BOXCOLS 8
 
@@ -109,19 +119,18 @@ end
 fn Main { ... -- ret }
 	0 ret!
 
-	auto mousehandle
-	0 // flags
+	OSFILEFLAG_NOCACHE // flags
 	ACCESS_READ // access
 	":mouse2" // path
 	0 // ftype
-	OSFileOpen ret! mousehandle!
+	OSFileOpen ret! MouseHandle!
 
 	if (ret@)
-		0 // flags
+		OSFILEFLAG_NOCACHE // flags
 		ACCESS_READ // access
 		":foxmouse0" // path
 		0 // ftype
-		OSFileOpen ret! mousehandle!
+		OSFileOpen ret! MouseHandle!
 
 		if (ret@)
 			ret@ OSStatusGetName "mousedemo: couldn't open mouse device: %s\n" OSError
@@ -146,9 +155,6 @@ fn Main { ... -- ret }
 			ret@ OSStatusGetName "mousedemo: couldn't open framebuffer device: %s\n" OSError
 		end
 	end
-
-	auto mousepacket
-	OSMousePacket_SIZEOF alloc mousepacket!
 
 	auto videoquery
 	OSVideoQuery_SIZEOF alloc videoquery!
@@ -190,77 +196,118 @@ fn Main { ... -- ret }
 
 	FBAddress@ YRes@ XRes@ "framebuffer %dx%d mapped at 0x%08x\n" Printf
 
-	auto mouseX
-	20 mouseX!
+	20 MouseX!
+	20 MouseY!
 
-	auto mouseY
-	20 mouseY!
+	MouseX@ MouseY@ InvertBox
 
-	mouseX@ mouseY@ InvertBox
+	1 MouseRCur!
 
-	auto rcur
-	1 rcur!
+	// this does not have to be asynchronous I/O with a user APC for
+	// completion, but it is cooler to do it like that.
+
+	auto requestblock
+	OSRequest_SIZEOF alloc requestblock!
+
+	requestblock@ OSRequestInitialize
+
+	MouseStatusBlock requestblock@ OSRequest_StatusBlock + !
+	pointerof MouseCompletionRoutine requestblock@ OSRequest_CompletionRoutine + !
+
+	requestblock@ // requestblock
+	0 // flags
+	0 // offset
+	OSMousePacket_SIZEOF // length
+	MousePacket // buffer
+	MouseHandle@ // filehandle
+	OSFileReadAsync ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: couldn't read mouse packet: %s\n" OSError
+	end
 
 	while (1)
-		OSWAIT_TIMEOUTINFINITE // timeout
-		0 // flags
-		OSMousePacket_SIZEOF // length
-		mousepacket@ // buffer
-		mousehandle@ // handle
-		OSFileRead ret! drop
+		OSWAIT_TIMEOUTINFINITE OSThreadSleep ret!
+	end
+end
 
-		if (ret@)
-			ret@ OSStatusGetName "mousedemo: couldn't read mouse packet: %s\n" OSError
+fn (OSUserAPCRoutine) MouseCompletionRoutine { context apccontext -- }
+	auto status
+	MouseStatusBlock OSStatusBlock_Status + @ status!
+
+	if (status@)
+		status@ OSStatusGetName "mousedemo: failed to read mouse: %s\n" OSError
+	end
+
+	auto ret
+
+	auto eventtype
+	MousePacket OSMousePacket_EventType + @ eventtype!
+
+	if (eventtype@ OSMOUSEEVENT_MOVED ==
+		eventtype@ OSMOUSEEVENT_MOVEDABS == ||)
+		if (MouseRCur@)
+			MouseX@ MouseY@ InvertBox
 		end
 
-		auto eventtype
-		mousepacket@ OSMousePacket_EventType + @ eventtype!
+		auto dx
+		MousePacket OSMousePacket_Info + @ 16 >> dx!
 
-		if (eventtype@ OSMOUSEEVENT_MOVED ==
-			eventtype@ OSMOUSEEVENT_MOVEDABS == ||)
-			if (rcur@)
-				mouseX@ mouseY@ InvertBox
+		auto dy
+		MousePacket OSMousePacket_Info + @ 0xFFFF & dy!
+
+		if (eventtype@ OSMOUSEEVENT_MOVED ==)
+			if (dx@ 0x8000 &)
+				0xFFFF0000 dx |=
 			end
 
-			auto dx
-			mousepacket@ OSMousePacket_Info + @ 16 >> dx!
-
-			auto dy
-			mousepacket@ OSMousePacket_Info + @ 0xFFFF & dy!
-
-			if (eventtype@ OSMOUSEEVENT_MOVED ==)
-				if (dx@ 0x8000 &)
-					0xFFFF0000 dx |=
-				end
-
-				if (dy@ 0x8000 &)
-					0xFFFF0000 dy |=
-				end
-
-				dy@ mouseY +=
-				dx@ mouseX +=
-			end elseif (eventtype@ OSMOUSEEVENT_MOVEDABS ==)
-				dx@ mouseX!
-				dy@ mouseY!
+			if (dy@ 0x8000 &)
+				0xFFFF0000 dy |=
 			end
 
-			if (mouseX@ z<)
-				0 mouseX!
-			end elseif (mouseX@ BOXCOLS + XRes@ >=)
-				XRes@ BOXCOLS - mouseX!
-			end
-
-			if (mouseY@ z<)
-				0 mouseY!
-			end elseif (mouseY@ BOXROWS + YRes@ >=)
-				YRes@ BOXROWS - mouseY!
-			end
-
-			mouseX@ mouseY@ InvertBox
-		end elseif (eventtype@ OSMOUSEEVENT_PRESSED ==)
-			0 rcur!
-		end elseif (eventtype@ OSMOUSEEVENT_RELEASED ==)
-			1 rcur!
+			dy@ MouseY +=
+			dx@ MouseX +=
+		end elseif (eventtype@ OSMOUSEEVENT_MOVEDABS ==)
+			dx@ MouseX!
+			dy@ MouseY!
 		end
+
+		if (MouseX@ z<)
+			0 MouseX!
+		end elseif (MouseX@ BOXCOLS + XRes@ >=)
+			XRes@ BOXCOLS - MouseX!
+		end
+
+		if (MouseY@ z<)
+			0 MouseY!
+		end elseif (MouseY@ BOXROWS + YRes@ >=)
+			YRes@ BOXROWS - MouseY!
+		end
+
+		MouseX@ MouseY@ InvertBox
+	end elseif (eventtype@ OSMOUSEEVENT_PRESSED ==)
+		0 MouseRCur!
+	end elseif (eventtype@ OSMOUSEEVENT_RELEASED ==)
+		1 MouseRCur!
+	end
+
+	auto requestblock
+	OSRequest_SIZEOF alloc requestblock!
+
+	requestblock@ OSRequestInitialize
+
+	MouseStatusBlock requestblock@ OSRequest_StatusBlock + !
+	pointerof MouseCompletionRoutine requestblock@ OSRequest_CompletionRoutine + !
+
+	requestblock@ // requestblock
+	0 // flags
+	0 // offset
+	OSMousePacket_SIZEOF // length
+	MousePacket // buffer
+	MouseHandle@ // filehandle
+	OSFileReadAsync ret!
+
+	if (ret@)
+		ret@ OSStatusGetName "mousedemo: couldn't read mouse packet: %s\n" OSError
 	end
 end

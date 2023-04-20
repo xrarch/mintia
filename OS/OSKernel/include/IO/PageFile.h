@@ -1,4 +1,4 @@
-extern IOPageFileCreate { minpages maxpages pri path -- ok }
+extern IOPageFileCreate { minpages maxpages pri initialobjecthandle path -- ok }
 extern IOPageFileQuery { query id -- ok }
 
 extern IOSwapPageFree { pno pagefile -- }

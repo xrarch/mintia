@@ -402,8 +402,8 @@ OSIsComputerOnFire:
 
 	ret
 
-OSObjectOpen:
-.global OSObjectOpen
+OSOpenRelative:
+.global OSOpenRelative
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
@@ -750,12 +750,16 @@ OSDirectoryRead:
 
 	ret
 
-OSPageFileCreate:
-.global OSPageFileCreate
+OSPageFileCreateRelative:
+.global OSPageFileCreateRelative
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
+	mov  r31, sp
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 60
 	int  0x30
@@ -1511,12 +1515,16 @@ OSPortCreate:
 
 	ret
 
-OSPortConnect:
-.global OSPortConnect
+OSPortConnectRelative:
+.global OSPortConnectRelative
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
+	mov  r31, sp
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 120
 	int  0x30

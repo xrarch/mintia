@@ -390,7 +390,7 @@ fn (StressTestF) IPCTestServer { -- ok }
 	auto dirh
 	0 // flags
 	ACCESS_WRITE ACCESS_EXEC | // access
-	"//:/" // path
+	"//~/" // path
 	OSOpen ok! dirh!
 
 	if (ok@)
@@ -465,6 +465,7 @@ fn (StressTestF) IPCTestServer { -- ok }
 			rxmsg@ OSMessageHeader_Context + @
 			rxmsg@ OSMessageHeader_ClientID + @ "[server] %d disconnected: ctx=%x\n" Printf
 		end elseif (rxmsg@ OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REQUEST ==)
+if (0)
 			rxmsg@ OSMessageHeader_Handle + @
 			rxmsg@ OSMessageHeader_SubtypeB + gb
 			rxmsg@ OSMessageHeader_ClientID + @ "[server] request from %d: %d (handle %i)\n" Printf
@@ -492,6 +493,7 @@ fn (StressTestF) IPCTestServer { -- ok }
 			OSUnmapView drop
 
 			rxmsg@ OSMessageHeader_Handle + @ OSClose drop
+end
 
 			OSPORT_MESSAGE_REPLY rxmsg@ OSMessageHeader_TypeB + sb
 			realva@ rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
@@ -507,68 +509,77 @@ fn (StressTestF) IPCTestServer { -- ok }
 end
 
 fn (StressTestF) IPCTestClient { -- ok }
-	while (1)
-		auto sectionhandle
-		ACCESS_READ ACCESS_WRITE | // pageprotection
-		0x10000 // anonsize
-		ACCESS_OWNER_ALL // permissions
-		0 // name
-		OSSectionCreate ok! sectionhandle!
+	auto sectionhandle
+	ACCESS_READ ACCESS_WRITE | // pageprotection
+	0x10000 // anonsize
+	ACCESS_OWNER_ALL // permissions
+	0 // name
+	OSSectionCreate ok! sectionhandle!
 
-		if (ok@)
-			ok@ OSStatusGetName "couldn't create section: %s\n" OSError
-		end
+	if (ok@)
+		ok@ OSStatusGetName "couldn't create section: %s\n" OSError
+	end
 
-		auto realva
-		0x10000 // length
-		USERMAP // startva
-		0 // sectionoffset
-		sectionhandle@ // mappedhandle
-		OSCURRENTPROCESS // processhandle
-		ACCESS_READ ACCESS_WRITE | // pageprotection
-		0 // flags
-		OSMapView ok! realva!
+	auto realva
+	0x10000 // length
+	USERMAP // startva
+	0 // sectionoffset
+	sectionhandle@ // mappedhandle
+	OSCURRENTPROCESS // processhandle
+	ACCESS_READ ACCESS_WRITE | // pageprotection
+	0 // flags
+	OSMapView ok! realva!
 
-		if (ok@)
-			ok@ OSStatusGetName "couldn't map section: %s\n" OSError
-		end
+	if (ok@)
+		ok@ OSStatusGetName "couldn't map section: %s\n" OSError
+	end
 
-		0xAABBCCDD realva@!
-		0x01020304 realva@ 0x10000 4 - + !
+	0xAABBCCDD realva@!
+	0x01020304 realva@ 0x10000 4 - + !
 
-		0x10000 // length
-		realva@ // vaddr
-		OSCURRENTPROCESS // processhandle
-		OSUnmapView drop
+	0x10000 // length
+	realva@ // vaddr
+	OSCURRENTPROCESS // processhandle
+	OSUnmapView drop
 
-		auto txmsg
-		OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc txmsg!
+	auto txmsg
+	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc txmsg!
 
-		IPCTestMsgBody_SIZEOF txmsg@ OSMessageHeader_LengthI + si
-		OSNONE txmsg@ OSMessageHeader_Handle + !
+	IPCTestMsgBody_SIZEOF txmsg@ OSMessageHeader_LengthI + si
+	OSNONE txmsg@ OSMessageHeader_Handle + !
 
-		3 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing3 + !
-		2 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing2 + !
-		1 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
+	3 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing3 + !
+	2 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing2 + !
+	1 txmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + !
 
-		auto rxmsg
-		OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc rxmsg!
+	auto rxmsg
+	OSMessageHeader_SIZEOF IPCTestMsgBody_SIZEOF + alloc rxmsg!
 
-		auto porthandle
-		rxmsg@ // rxmsg
-		txmsg@ // txmsg
-		OSWAIT_TIMEOUTINFINITE // timeout
-		"//:/TestPort" // path
-		OSPortConnect ok! porthandle!
+	auto porthandle
+	rxmsg@ // rxmsg
+	txmsg@ // txmsg
+	OSWAIT_TIMEOUTINFINITE // timeout
+	"//~/TestPort" // path
+	OSPortConnect ok! porthandle!
 
-		if (ok@)
-			ok@ OSStatusGetName "[client] couldn't connect: %s\n" OSError
-		end
+	if (ok@)
+		ok@ OSStatusGetName "[client] couldn't connect: %s\n" OSError
+	end
 
+	auto count
+	100000 count!
+
+	auto starttime
+	MSTime starttime!
+
+	while (count@)
 		OSPORT_MESSAGE_REQUEST txmsg@ OSMessageHeader_TypeB + sb
 		32 txmsg@ OSMessageHeader_SubtypeB + sb
+		OSNONE txmsg@ OSMessageHeader_Handle + !
+if (0)
 		sectionhandle@ txmsg@ OSMessageHeader_Handle + !
 		ACCESS_READ ACCESS_WRITE | txmsg@ OSMessageHeader_Access + !
+end
 
 		rxmsg@ // rxmsg
 		txmsg@ // txmsg
@@ -580,12 +591,21 @@ fn (StressTestF) IPCTestClient { -- ok }
 			ok@ OSStatusGetName "[client] couldn't request: %s\n" OSError
 		end
 
+		1 count -=
+
+if (0)
 		rxmsg@ OSMessageHeader_SIZEOF + IPCTestMsgBody_Thing1 + @ "[client] server response: %x\n" Printf
-
-		porthandle@ OSClose drop
-
-		sectionhandle@ OSClose drop
+end
 	end
+
+	auto endtime
+	MSTime endtime!
+
+	endtime@ starttime@ - "took %dms to do 100,000 round trip IPC\n" Printf
+
+	porthandle@ OSClose drop
+
+	sectionhandle@ OSClose drop
 end
 
 fn (StressTestF) InfiniteLoopTest { -- ok }

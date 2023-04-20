@@ -54,7 +54,7 @@ extern OSIsComputerOn { -- ison ok }
 extern OSIsComputerOnFire { -- isonfire ok }
 
 // Ob
-extern OSObjectOpen { flags access initialobjecthandle path -- handle ok }
+extern OSOpenRelative { flags access initialobjecthandle path -- handle ok }
 extern OSQuery { handle query -- ok }
 
 extern OSClose { handle -- ok }
@@ -90,7 +90,7 @@ extern OSDirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 extern OSDirectoryUnlink { name filehandle -- ok }
 extern OSDirectoryRead { dirent filehandle -- ok }
 
-extern OSPageFileCreate { minpages maxpages pri path -- ok }
+extern OSPageFileCreateRelative { minpages maxpages pri initialobjecthandle path -- ok }
 extern OSPageFileQuery { query id -- ok }
 
 extern OSIOControl { arg2 arg1 filehandle -- ret ok }
@@ -178,7 +178,7 @@ extern OSGrantPermission { permission processhandle -- ok }
 // IPC
 extern OSPortCreate { flags maxlen permissions name -- porthandle ok }
 
-extern OSPortConnect { rxmsg txmsg timeout path -- porthandle ok }
+extern OSPortConnectRelative { rxmsg txmsg timeout initialobjecthandle path -- porthandle ok }
 extern OSPortAccept { context txmsg reject porthandle -- ok }
 
 extern OSPortSendAndWaitReceive { rxmsg txmsg timeout porthandle -- ok }

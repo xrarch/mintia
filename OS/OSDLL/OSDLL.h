@@ -2,6 +2,8 @@
 
 extern DLLStringCompareCaseInsensitive { str1 str2 -- eq }
 
+extern DLLPathToHandleAndRelativePath { path -- handle rpath ok }
+
 // init stuff
 
 externptr DLLComponentsInitialized

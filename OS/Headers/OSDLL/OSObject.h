@@ -43,6 +43,7 @@ extern OSGetCWD { cwd bufsize -- ok }
 extern OSChangeCWD { path -- ok }
 
 extern OSOpen { flags access path -- handle ok }
+extern OSPageFileCreate { minpages maxpages pri path -- ok }
 
 const OSHANDLEBITS 2
 

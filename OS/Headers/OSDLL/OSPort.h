@@ -20,6 +20,8 @@ struct OSMessageHeaderIOCompletion
 	4 Reserved
 endstruct
 
+extern OSPortConnect { rxmsg txmsg timeout path -- porthandle ok }
+
 const OSPORT_FLAG_NO_HANDLES    1 // forbid handle passing
 
 const OSPORT_CID_SYSTEM -1

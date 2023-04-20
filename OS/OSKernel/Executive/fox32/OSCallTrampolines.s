@@ -36,7 +36,7 @@
 .extern OSNvramVariableRead
 .extern OSIsComputerOn
 .extern OSIsComputerOnFire
-.extern OSObjectOpen
+.extern OSOpenRelative
 .extern OSQuery
 .extern OSClose
 .extern OSWaitForMultipleObjects
@@ -61,7 +61,7 @@
 .extern OSDirectoryRename
 .extern OSDirectoryUnlink
 .extern OSDirectoryRead
-.extern OSPageFileCreate
+.extern OSPageFileCreateRelative
 .extern OSPageFileQuery
 .extern OSIOControl
 .extern OSGetBootDevicePath
@@ -121,7 +121,7 @@
 .extern OSCheckPermission
 .extern OSGrantPermission
 .extern OSPortCreate
-.extern OSPortConnect
+.extern OSPortConnectRelative
 .extern OSPortAccept
 .extern OSPortSendAndWaitReceive
 .extern OSPortSendAndWaitReply
@@ -168,7 +168,7 @@ OSCallTable:
 	.dl OSTOSNvramVariableRead                           ;32
 	.dl OSTOSIsComputerOn                                ;33
 	.dl OSTOSIsComputerOnFire                            ;34
-	.dl OSTOSObjectOpen                                  ;35
+	.dl OSTOSOpenRelative                                ;35
 	.dl OSTOSQuery                                       ;36
 	.dl OSTOSClose                                       ;37
 	.dl OSTOSWaitForMultipleObjects                      ;38
@@ -193,7 +193,7 @@ OSCallTable:
 	.dl OSTOSDirectoryRename                             ;57
 	.dl OSTOSDirectoryUnlink                             ;58
 	.dl OSTOSDirectoryRead                               ;59
-	.dl OSTOSPageFileCreate                              ;60
+	.dl OSTOSPageFileCreateRelative                      ;60
 	.dl OSTOSPageFileQuery                               ;61
 	.dl OSTOSIOControl                                   ;62
 	.dl OSTOSGetBootDevicePath                           ;63
@@ -253,7 +253,7 @@ OSCallTable:
 	.dl OSTOSCheckPermission                             ;117
 	.dl OSTOSGrantPermission                             ;118
 	.dl OSTOSPortCreate                                  ;119
-	.dl OSTOSPortConnect                                 ;120
+	.dl OSTOSPortConnectRelative                         ;120
 	.dl OSTOSPortAccept                                  ;121
 	.dl OSTOSPortSendAndWaitReceive                      ;122
 	.dl OSTOSPortSendAndWaitReply                        ;123
@@ -976,7 +976,7 @@ OSTOSIsComputerOnFire:
 	pop  fp
 	ret
 
-OSTOSObjectOpen:
+OSTOSOpenRelative:
 	push fp
 	mov  fp, sp
 
@@ -996,7 +996,7 @@ OSTOSObjectOpen:
 	add  t0, 16 ;t4
 	mov  a3, [t0]
 
-	call OSObjectOpen
+	call OSOpenRelative
 
 
 	mov  t0, s17
@@ -1666,7 +1666,7 @@ OSTOSDirectoryRead:
 	pop  fp
 	ret
 
-OSTOSPageFileCreate:
+OSTOSPageFileCreateRelative:
 	push fp
 	mov  fp, sp
 
@@ -1686,13 +1686,18 @@ OSTOSPageFileCreate:
 	add  t0, 16 ;t4
 	mov  a3, [t0]
 
-	call OSPageFileCreate
+	mov  t0, s17
+	add  t0, 20 ;t5
+	push [t0]
+
+	call OSPageFileCreateRelative
 
 
 	mov  t0, s17
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	add  sp, 4
 	pop  fp
 	ret
 
@@ -3083,7 +3088,7 @@ OSTOSPortCreate:
 	pop  fp
 	ret
 
-OSTOSPortConnect:
+OSTOSPortConnectRelative:
 	push fp
 	mov  fp, sp
 
@@ -3103,7 +3108,11 @@ OSTOSPortConnect:
 	add  t0, 16 ;t4
 	mov  a3, [t0]
 
-	call OSPortConnect
+	mov  t0, s17
+	add  t0, 20 ;t5
+	push [t0]
+
+	call OSPortConnectRelative
 
 
 	mov  t0, s17
@@ -3114,6 +3123,7 @@ OSTOSPortConnect:
 	add  t0, 8 ;t2
 	mov  [t0], a1
 
+	add  sp, 4
 	pop  fp
 	ret
 

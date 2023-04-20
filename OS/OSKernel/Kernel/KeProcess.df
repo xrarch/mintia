@@ -23,7 +23,13 @@ public KeProcessListHead
 var KeProcessSwapInListHead 0
 public KeProcessSwapInListHead
 
-fn KeProcessInitialize { name asid parentprocess process -- }
+#ifdef XR17032
+
+externptr KiASIDSequenceNumber
+
+#endif
+
+fn KeProcessInitialize { name parentprocess process -- }
 	fnsection "PAGE$text"
 
 	process@ KeProcess_Name + name@ KEPROCESSNAMELEN 1 - strncpy
@@ -40,7 +46,6 @@ fn KeProcessInitialize { name asid parentprocess process -- }
 	0 process@ KeProcess_KilledStatus + !
 
 	0 process@ KeProcess_PageDirectory + !
-	asid@ process@ KeProcess_ASID + !
 
 	0 process@ KeProcess_UserTimeMs + !
 	0 process@ KeProcess_SystemTimeMs + !
@@ -51,11 +56,19 @@ fn KeProcessInitialize { name asid parentprocess process -- }
 	0 process@ KeProcess_DeferredThreadListHead + !
 	PROCESSSTATE_RESIDENT process@ KeProcess_MemoryStateB + sb
 
-	asid@ HALCPUASIDRegister
+#ifdef XR17032
+	0 process@ KeProcess_ASID + !
+
+	// make the process get assigned a new ASID by giving it a sequence number
+	// that is 4 billion away from the current one. this will probably never
+	// break.
+
+	KiASIDSequenceNumber@ 1 - process@ KeProcess_ASIDSequenceNumber + !
+#endif
 end
 
 fn KeProcessUninitialize { process -- }
-	process@ KeProcess_ASID + @ HALCPUASIDUnregister
+//	process@ KeProcess_ASID + @ HALCPUASIDUnregister
 end
 
 fn KeProcessCurrent { -- current }
@@ -158,9 +171,7 @@ fn KeProcessAttach { try process -- ipl ok }
 	if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ==)
 		// immediately switch to new process.
 
-		process@ KeProcess_ASID + @ // asid
-		process@ KeProcess_PageDirectory + @ // addrinfo
-		HALCPUAddressSpaceSwitch
+		process@ KeAddressSpaceSwitch
 	end else
 		// enqueue thread on process ready list and wake swap thread, then
 		// yield until it processes us.
@@ -231,9 +242,7 @@ fn KeProcessDetach { ipl -- }
 
 	actualprocess@ current@ KeThread_Process + !
 
-	actualprocess@ KeProcess_ASID + @ // asid
-	actualprocess@ KeProcess_PageDirectory + @ // addrinfo
-	HALCPUAddressSpaceSwitch
+	actualprocess@ KeAddressSpaceSwitch
 
 	ipl@ KeIPLLower
 end

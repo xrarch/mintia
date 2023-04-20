@@ -648,6 +648,52 @@ fn KiXr17032Exception { badaddr ecause tf -- }
 	// while (1) end
 end
 
+const MAX_ASID 4096
+
+var KiASIDNext 1
+
+var KiASIDSequenceNumber 0
+public KiASIDSequenceNumber
+
+extern HALXr17032MapSwitch { asid pgtb -- }
+
+fn KeAddressSpaceSwitch { process -- }
+	auto asid
+	process@ KeProcess_ASID + @ asid!
+
+	auto rs
+	HALCPUInterruptDisable rs!
+
+	if (process@ KeProcess_ASIDSequenceNumber + @
+		KiASIDSequenceNumber@ ~=)
+
+		// the ASIDs rolled over at some point, so we have to give this
+		// process a new one.
+
+		KiASIDNext@ asid!
+		asid@ 1 + KiASIDNext!
+
+		if (asid@ MAX_ASID >=)
+			// roll over! flush TLB and increment sequence number.
+
+			1 asid!
+			2 KiASIDNext!
+			1 KiASIDSequenceNumber +=
+
+			HALXr17032TLBFlushAll
+		end
+
+		asid@ process@ KeProcess_ASID + !
+		KiASIDSequenceNumber@ process@ KeProcess_ASIDSequenceNumber + !
+	end
+
+	asid@ // asid
+	process@ KeProcess_PageDirectory + @ // pgtb
+	HALXr17032MapSwitch
+
+	rs@ HALCPUInterruptRestore
+end
+
 fn HALCPUIsUserTrapFrame { tf -- user }
 	tf@ OSContext_ers + @ XR17032_ERS_USER & user!
 end

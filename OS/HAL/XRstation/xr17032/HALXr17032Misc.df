@@ -145,8 +145,8 @@ HALCPURunInContextNoInterrupts:
 
 ; MUST BE CALLED WITH INTERRUPTS DISABLED
 ; asid pgtb --
-HALCPUMapSwitch:
-.global HALCPUMapSwitch
+HALXr17032MapSwitch:
+.global HALXr17032MapSwitch
 	mtcr pgtb, a0
 	lshi a1, a1, 20
 	mtcr tbhi, a1
@@ -202,40 +202,6 @@ HALXr17032TLBFill:
 
 .none:
 	mtcr tbhi, t2
-	mtcr rs, t0
-	ret
-
-HALXr17032TLBFlushASID:
-.global HALXr17032TLBFlushASID
-	mfcr t0, rs
-	subi t1, zero, 3
-	and  t1, t1, t0
-	mtcr rs, t1
-
-	mfcr t1, tbhi
-
-	mtcr tblo, zero
-
-	li   t2, 64
-
-.loop:
-	subi t2, t2, 1	
-
-	mtcr tbindex, t2
-	tbrd
-	mfcr t3, tbhi
-
-	rshi t3, t3, 20
-	sub  t3, t3, a0
-	bne  t3, .noflush
-
-	mtcr tbhi, zero
-	tbwr
-
-.noflush:
-	bne  t2, .loop
-
-	mtcr tbhi, t1
 	mtcr rs, t0
 	ret
 
@@ -309,62 +275,6 @@ HALCPUFence:
 "
 
 extern HALXr17032TLBFlush { vpn asid -- }
-extern HALXr17032TLBFlushASID { asid -- }
 extern HALXr17032TLBFlushAll { -- }
 
 extern LoadInitialContext { -- }
-
-table HALXr17032UsedASIDs[257]
-
-fn HALCPUASIDRegister { asid -- }
-	if (asid@ 0 ==)
-		// kernel process, dont care
-
-		return
-	end
-
-	asid@ 255 & 1 + asid!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	1 [asid@]HALXr17032UsedASIDs +=
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn HALCPUASIDUnregister { asid -- }
-	if (asid@ 0 ==)
-		"HALCPUASIDUnregister: asid==0\n" HALCrash
-	end
-
-	asid@ 255 & 1 + asid!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	1 [asid@]HALXr17032UsedASIDs -=
-
-	asid@ HALXr17032TLBFlushASID
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn HALCPUAddressSpaceSwitch { asid pdir -- }
-	if (asid@)
-		asid@ 255 & 1 + asid!
-	end
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	if (asid@)
-		if ([asid@]HALXr17032UsedASIDs@ 1 >)
-			asid@ HALXr17032TLBFlushASID
-		end
-	end
-
-	asid@ pdir@ HALCPUMapSwitch
-
-	rs@ HALCPUInterruptRestore
-end

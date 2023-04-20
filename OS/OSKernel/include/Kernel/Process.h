@@ -30,7 +30,11 @@ struct KeProcess
 	// memory manager information
 
 	4 PageDirectory
+
+#ifdef XR17032
 	4 ASID
+	4 ASIDSequenceNumber
+#endif
 
 	4 SwapListNext
 	4 DeferredThreadListHead
@@ -155,13 +159,15 @@ extern KeThreadContinue { alertable signum context thread -- ok }
 extern KeProcessQuerySignalThread { query process -- }
 
 extern KeProcessCurrent { -- current }
-extern KeProcessInitialize { name asid parentprocess process -- }
+extern KeProcessInitialize { name parentprocess process -- }
 extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
 extern KeProcessBasePrioritySet { priority process -- }
 
 extern KeProcessAttach { try process -- ipl ok }
 extern KeProcessDetach { ipl -- }
+
+extern KeAddressSpaceSwitch { process -- }
 
 externptr KeProcessListHead
 externptr KeIdleProcess

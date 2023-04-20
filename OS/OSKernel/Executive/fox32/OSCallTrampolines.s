@@ -359,6 +359,10 @@ OSTOSContinue:
 	call OSContinue
 
 
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
 	pop  fp
 	ret
 

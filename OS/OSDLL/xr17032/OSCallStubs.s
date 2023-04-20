@@ -57,6 +57,7 @@ OSContinue:
 	li   t0, 5
 	sys  0
 
+	mov  a0, t1
 
 	ret
 

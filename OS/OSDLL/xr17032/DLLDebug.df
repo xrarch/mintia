@@ -61,9 +61,12 @@ fn DLLDebugGetSymbol { address -- dll symbase symname symbol ok }
 	end
 end
 
-fn DLLDebugTrace { context -- }
+fn DLLPrintContext { context -- }
 	auto ctxrows
 	OSCONTEXTCOUNT 4 + 5 / ctxrows!
+
+	auto stderr
+	OSGetStdErr stderr!
 
 	auto ictx
 	0 ictx!
@@ -81,8 +84,8 @@ fn DLLDebugTrace { context -- }
 				DLLContextNames off@ + @ name!
 
 				if (name@)
-					name@ "%-5s " OSGetStdErr FPrintf
-					context@ off@ + @ "%08x " OSGetStdErr FPrintf
+					name@ "%-5s " stderr@ FPrintf
+					context@ off@ + @ "%08x " stderr@ FPrintf
 				end
 			end
 
@@ -90,23 +93,30 @@ fn DLLDebugTrace { context -- }
 			1 ctxcols -=
 		end
 
-		"\n" OSGetStdErr FPrintf
+		"\n" stderr@ FPrintf
 
 		1 ctxrows -=
 	end
+end
 
-	"Stack trace:\n" OSGetStdErr FPrintf
+fn DLLDebugTrace { context -- }
+	auto stderr
+	OSGetStdErr stderr!
+
+	context@ DLLPrintContext
+
+	"Stack trace:\n" stderr@ FPrintf
 
 	auto link
 	context@ OSContext_sp + @ link!
 
 	if (link@ 0 ==)
-		" zero link!\n" OSGetStdErr FPrintf
+		" zero link!\n" stderr@ FPrintf
 		return
 	end
 
 	if (link@ 3 &)
-		" unaligned!\n" OSGetStdErr FPrintf
+		" unaligned!\n" stderr@ FPrintf
 		return
 	end
 
@@ -114,7 +124,7 @@ fn DLLDebugTrace { context -- }
 	context@ OSContext_epc + @ pc!
 
 	if (pc@ 3 &)
-		" unaligned pc!\n" OSGetStdErr FPrintf
+		" unaligned pc!\n" stderr@ FPrintf
 		return
 	end
 
@@ -123,6 +133,9 @@ fn DLLDebugTrace { context -- }
 
 	auto leaf
 	1 leaf!
+
+	auto lr
+	0 lr!
 
 	while (pc@)
 		auto ok
@@ -136,7 +149,7 @@ fn DLLDebugTrace { context -- }
 
 		if (ok@)
 			pc@
-			"%08x UNKNOWN\n" OSGetStdErr FPrintf
+			"%08x UNKNOWN\n" stderr@ FPrintf
 
 			break
 		end else
@@ -144,12 +157,13 @@ fn DLLDebugTrace { context -- }
 				"NAMELESS" symname!
 			end
 
-			dll@ ComDLL_Name + @ OSLastComponent ictx!
+			auto nm
+			dll@ ComDLL_Name + @ OSLastComponent nm!
 
 			symname@
-			ictx@
+			nm@
 			pc@
-			"%08x %s!%s\n" OSGetStdErr FPrintf
+			"%08x %s!%s\n" stderr@ FPrintf
 
 			if (symname@ "DLLThreadExit" strcmp)
 				// no good will come of tracing further since DLLThreadExit is
@@ -161,39 +175,58 @@ fn DLLDebugTrace { context -- }
 		auto offset
 		0 offset!
 
-		while (pc@ symbase@ >=)
-			if (pc@@ 0xFFFF & 0xF7B4 ==)
-				// found the "subi sp, sp, X" instruction that created the
-				// stack frame. extract the X to find out how big the stack
-				// frame is, so we can offset to the next one.
-				pc@@ 16 >> offset!
-				break
-			end elseif (pc@@ 0xFFFF & 0xFFAA ==)
-				// found a "mov long [sp + X], lr" instruction. that means
-				// this is NOT a leaf function.
-				0 leaf!
-			end
+		if (symname@ "DLLSignalDispatch" strcmp
+			symname@ "DLLAPCDispatch" strcmp ||)
 
-			4 pc -=
+			// next sp is at sp+0, next pc is at sp+4, next lr is at sp+8
+
+			link@ 8 + @ lr!
+			link@ 4 + @ pc!
+			link@@ link!
+
+			1 leaf!
+
+			continue
+		end else
+			while (pc@ symbase@ >=)
+				if (pc@@ 0xFFFF & 0xF7B4 ==)
+					// found the "subi sp, sp, X" instruction that created the
+					// stack frame. extract the X to find out how big the stack
+					// frame is, so we can offset to the next one.
+
+					pc@@ 16 >> offset!
+
+					break
+				end elseif (pc@@ 0xFFFF & 0xFFAA ==)
+					// found a "mov long [sp + X], lr" instruction. that means
+					// this is NOT a leaf function.
+
+					0 leaf!
+				end
+
+				4 pc -=
+			end
 		end
 
-		if (leaf@)
+		if (lr@)
+			lr@ pc!
+			0 lr!
+		end elseif (leaf@)
 			context@ OSContext_lr + @ pc!
+			0 leaf!
 		end else
 			link@@ pc!
 		end
 
-		0 leaf!
-
 		link@ offset@ + link!
 
 		if (pc@ 3 &)
-			" unaligned pc!\n" OSGetStdErr FPrintf
+			" unaligned pc!\n" stderr@ FPrintf
 			return
 		end
 
 		if (link@ 3 &)
-			" unaligned link!\n" OSGetStdErr FPrintf
+			" unaligned link!\n" stderr@ FPrintf
 			return
 		end
 	end

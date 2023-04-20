@@ -766,11 +766,13 @@ fn KeThreadContinue { alertable signum context thread -- ok }
 	if (signum@ -1 ~=)
 		if (signum@ ~~)
 			STATUS_INVALID_ARGUMENT ok!
+
 			return
 		end
 
 		if (signum@ 32 >=)
 			STATUS_INVALID_ARGUMENT ok!
+
 			return
 		end
 	end
@@ -801,24 +803,25 @@ fn KeThreadContinue { alertable signum context thread -- ok }
 	HALCPUInterruptDisable rs!
 
 	if (signum@ -1 ~=)
+		// atomically unmask the signal.
+
 		1 signum@ << thread@ KeThread_SignalAcceptMask + |=
 	end
 
 	if (alertable@)
+		// check for another user APC to deliver, so that they "chain"
+		// properly.
+
 		if (thread@ KeThread_UserAPCListHead + @)
 			1 thread@ KeThread_UserAPCTriggeredB + sb
 		end
 	end
 
-	// perform a direct return
+	// perform a direct return to avoid corrupting the newly-built trapframe
+	// on our way out from the syscall handler, and to make sure we can't
+	// miss any user APCs that get enqueued after we return.
 
 	tf@ PsPrepareUsermode
-
-	if (DEBUGCHECKS)
-		0 KeThreadCurrent@ KeThread_TrapFrame + !
-	end
-
-	0 HALfox32InterruptsDisabled!
 
 	tf@ KiContinue
 end

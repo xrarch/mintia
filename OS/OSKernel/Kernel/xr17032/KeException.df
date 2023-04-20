@@ -52,6 +52,8 @@ externptr KeIPLCurrent
 
 extern HALXr17032TLBFlushAll { -- }
 
+extern KiContinue { tf -- }
+
 asm "
 
 KiXr17032ExceptionVector:
@@ -252,6 +254,11 @@ KiThreadTrampoline:
 	jr   s2
 
 ; a0 - tf
+KiContinue:
+	mov  sp, a0
+	j    KiLoadInitialContext
+
+; a0 - tf
 KiXr17032Syscall:
 .global KiXr17032Syscall
 	subi sp, sp, 20
@@ -439,7 +446,7 @@ fn KiCopyAPCFrame { context userfunc dispatchfunc thread trapframe -- }
 	userfunc@ trapframe@ OSContext_a2 + !
 end
 
-fn KeThreadContinue { signum context thread -- ok }
+fn KeThreadContinue { alertable signum context thread -- ok }
 	if (signum@ -1 ~=)
 		if (signum@ ~~)
 			STATUS_INVALID_ARGUMENT ok!
@@ -474,14 +481,24 @@ fn KeThreadContinue { signum context thread -- ok }
 	// don't modify ers lest we allow our user programs to get kernelmode...
 	ers@ tf@ OSContext_ers + !
 
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	if (signum@ -1 ~=)
-		auto rs
-		HALCPUInterruptDisable rs!
-
 		1 signum@ << thread@ KeThread_SignalAcceptMask + |=
-
-		rs@ HALCPUInterruptRestore
 	end
+
+	if (alertable@)
+		if (thread@ KeThread_UserAPCListHead + @)
+			1 thread@ KeThread_UserAPCTriggeredB + sb
+		end
+	end
+
+	// perform a direct return
+
+	tf@ PsPrepareUsermode
+
+	tf@ KiContinue
 end
 
 fn KiXr17032Exception { badaddr ecause tf -- }

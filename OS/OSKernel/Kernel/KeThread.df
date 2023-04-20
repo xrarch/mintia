@@ -419,31 +419,34 @@ fn KeThreadIsKilled { mode alertable waiting thread -- ok }
 	0 ok!
 
 	if (thread@ KeThread_IgnoreKill + @)
-		// all signals are being hard-ignored by the system
+		// all signals are being hard-ignored by the system.
 
 		return
 	end
 
 	if (alertable@ ~~)
 		if (mode@ KERNELMODE ==)
-			// kernel mode unalertable can block all signals
+			// kernel mode unalertable can block all signals.
 
 			return
 		end
 	end
 
-	auto process
-	thread@ KeThread_Process + @ process!
+	if (thread@ KeThread_Process + @ KeProcess_TerminatedB + gb)
+		// if the process is terminated, then funnel this thread toward its
+		// final destination.
+
+		STATUS_KILLED ok!
+
+		return
+	end
 
 	auto sig
 	thread@ KeThread_Signals + @ sig!
 
-	if (process@ KeProcess_TerminatedB + gb)
-		1 OSSIGNAL_KILL << sig |=
-	end
-
 	if (sig@ 1 OSSIGNAL_KILL << &)
-		// OSSIGNAL_KILL cannot be ignored
+		// OSSIGNAL_KILL is unmaskable by usermode unalertable waits, and
+		// should also be respected by kernelmode alertable waits.
 
 		STATUS_KILLED ok!
 
@@ -451,52 +454,62 @@ fn KeThreadIsKilled { mode alertable waiting thread -- ok }
 	end
 
 	if (mode@ KERNELMODE ==)
+		// none of the remaining events are relevant to kernelmode waits.
+
 		return
 	end
 
 	if (alertable@ ~~)
-		// usermode unalertable can block all signals except OSSIGNAL_KILL
+		// usermode unalertable can block all signals and APCs.
 
 		return
 	end
 
 	if (waiting@)
-		// waiting, allow if accepted.
-
-		if (thread@ KeThread_UserAPCListHead + @)
-			1 thread@ KeThread_UserAPCTriggeredB + sb
-
-			STATUS_USER_APC ok!
-
-			return
-		end
+		// we were called by someone about to block the thread.
 
 		if (thread@ KeThread_SignalAcceptMask + @ sig@ &)
-			// clear pending signals from deliver-on-wait mask
+			// there are pending unmasked signals. clear them from the deliver
+			// -on-wait mask and go do them instead.
 
 			sig@ ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
 
 			STATUS_SIGNALLED ok!
+
+			return
+		end
+
+		if (thread@ KeThread_UserAPCListHead + @)
+			// there is a pending user APC, go do that instead.
+
+			1 thread@ KeThread_UserAPCTriggeredB + sb
+
+			STATUS_USER_APC ok!
 		end
 	end else
-		if (thread@ KeThread_UserAPCTriggeredB + gb)
-			0 thread@ KeThread_UserAPCTriggeredB + sb
-
-			if (thread@ KeThread_UserAPCListHead + @)
-				STATUS_USER_APC ok!
-
-				return
-			end
-		end
+		// we were called on return to usermode.
 
 		if (thread@ KeThread_SignalAcceptMask + @
 			thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
 			sig@ &)
 
-			// not waiting, only allow if accepted and not specified as
-			// deliver-on-wait.
+			// the signal is accepted and not specified in the deliver-on-wait
+			// mask, so deliver it.
 
 			STATUS_SIGNALLED ok!
+
+			return
+		end
+
+		if (thread@ KeThread_UserAPCTriggeredB + gb)
+			// a user APC was previously triggered, report this to the caller
+			// so that it can be delivered.
+
+			0 thread@ KeThread_UserAPCTriggeredB + sb
+
+			if (thread@ KeThread_UserAPCListHead + @)
+				STATUS_USER_APC ok!
+			end
 		end
 	end
 end

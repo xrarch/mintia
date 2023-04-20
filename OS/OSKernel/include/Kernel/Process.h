@@ -150,7 +150,7 @@ extern KeSafeProbeSystemByte { src -- byte ok }
 
 extern KeInterlockedIncrement { inc ptr -- oldcount }
 
-extern KeThreadContinue { signum context thread -- ok }
+extern KeThreadContinue { alertable signum context thread -- ok }
 
 extern KeProcessQuerySignalThread { query process -- }
 

@@ -40,6 +40,8 @@ externptr HALfox32InterruptsDisabled
 
 extern HALfox32TLBFlushAll { -- }
 
+extern KiContinue { tf -- }
+
 asm "
 
 VFox32DismissVector:
@@ -552,6 +554,7 @@ VFox32PageFaultWriteVector:
 	mov  a1, 0x103
 	call KiFox32Exception
 
+ExceptionReturn:
 	pop  t0
 	pop  t1
 	pop  t2
@@ -587,6 +590,11 @@ VFox32PageFaultWriteVector:
 	pop  fp
 	add  sp, 4
 	reti
+
+; a0 - tf
+KiContinue:
+	mov  sp, a0
+	jmp  ExceptionReturn
 
 ; a0 - tf
 KiFox32Syscall:
@@ -754,7 +762,7 @@ fn KiCopyAPCFrame { context userfunc dispatchfunc thread trapframe -- }
 	userfunc@ trapframe@ OSContext_a2 + !
 end
 
-fn KeThreadContinue { signum context thread -- ok }
+fn KeThreadContinue { alertable signum context thread -- ok }
 	if (signum@ -1 ~=)
 		if (signum@ ~~)
 			STATUS_INVALID_ARGUMENT ok!
@@ -789,14 +797,30 @@ fn KeThreadContinue { signum context thread -- ok }
 	// don't modify ers lest we allow our user programs to get kernelmode...
 	ers@ tf@ OSContext_eflagsB + sb
 
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	if (signum@ -1 ~=)
-		auto rs
-		HALCPUInterruptDisable rs!
-
 		1 signum@ << thread@ KeThread_SignalAcceptMask + |=
-
-		rs@ HALCPUInterruptRestore
 	end
+
+	if (alertable@)
+		if (thread@ KeThread_UserAPCListHead + @)
+			1 thread@ KeThread_UserAPCTriggeredB + sb
+		end
+	end
+
+	// perform a direct return
+
+	tf@ PsPrepareUsermode
+
+	if (DEBUGCHECKS)
+		0 KeThreadCurrent@ KeThread_TrapFrame + !
+	end
+
+	0 HALfox32InterruptsDisabled!
+
+	tf@ KiContinue
 end
 
 const EXCDIVZERO        0

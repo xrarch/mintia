@@ -185,7 +185,7 @@ extern KeThreadMaskSignal { signal thread -- ok }
 extern KeThreadDeliverOnWaitSignal { signal thread -- ok }
 extern KeThreadRundown { thread -- }
 extern KeThreadDispatchSignal { dispatchfunc trapframe -- }
-extern KeThreadIsKilled { mode alertable waiting thread -- ok }
+extern KeThreadIsKilled { ipl mode alertable waiting thread -- ok }
 extern KeThreadReady { thread -- }
 extern KeThreadBlock { status -- }
 extern KeThreadPriorityBoost { boost thread -- }

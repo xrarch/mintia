@@ -56,11 +56,11 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nexts
 	bcb@ // lastbcb
 	FatDirectoryGetEntry ok! nextseek! drop bcb! drop
 
-	fcb@ IOFileControlBlockUnlock
-
 	if (bcb@)
 		bcb@ VcBufferDecrementMapAndUnpin
 	end
+
+	fcb@ IOFileControlBlockUnlock
 end
 
 fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
@@ -260,13 +260,13 @@ fn (IODispatchRenameFunction) FatRename { srcname srcfcb destname destfcb -- ok 
 		if (ok@ STATUS_NOT_FOUND ~=)
 			filefcb@ FatFCBDereference
 
-			mount@ FatTreeUnlock
-
 			if (ok@ ~~)
 				bcb@ VcBufferDecrementMapAndUnpin
 
 				STATUS_ALREADY_EXISTS ok!
 			end
+
+			mount@ FatTreeUnlock
 
 			return
 		end
@@ -910,6 +910,11 @@ fn FatRootDirectorySetVolumeLabel { label mount -- ok }
 		return
 	end
 
+	// no need to lock the root FCB or tree mutex since directory truncation,
+	// which occurs in our parse routine which is called with the volume FCB
+	// locked shared, is already blocked out by holding the volume FCB
+	// exclusively right now.
+
 	auto fatdirent
 
 	auto fcb
@@ -959,7 +964,8 @@ fn FatRootDirectorySetVolumeLabel { label mount -- ok }
 
 	if (ok@ STATUS_END_OF_FILE ==)
 		// we found no volume label dirent in the root directory.
-		// lets try to allocate one.
+		// lets try to allocate one. we have to lock the root FCB now to kick
+		// out any shared holders who have it pinned right now.
 
 		fcb@ IOFileControlBlockLock ok!
 
@@ -991,11 +997,11 @@ fn FatRootDirectorySetVolumeLabel { label mount -- ok }
 			fcb@ // dirfcb
 			FatFreeDirents drop
 
-			fcb@ IOFileControlBlockUnlock
-
 			if (bcb@)
 				bcb@ VcBufferDecrementMapAndUnpin
 			end
+
+			fcb@ IOFileControlBlockUnlock
 
 			return
 		end

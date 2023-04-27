@@ -768,58 +768,91 @@ fn (KeAPCFunctionSpecial) MmAnonPageWriterAPCRoutine { normalfunc context1 conte
 end
 
 fn MmGatewayFileDirtying { bytes -- throttled }
-	// forms a gateway for threads that wish to dirty a file so that memory
+	fnsection "PAGE$text"
+
+	// Forms a gateway for threads that wish to dirty a file so that memory
 	// doesn't become full of dirty file pages.
 
-	0 throttled!
-
 	if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+		// Thread is memory-privileged, don't throttle it.
+
 		return
 	end
+
+	0 throttled!
 
 	auto pages
 	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	if (pages@ ~~)
+		// We are throttling for no pages, so just return.
+
 		return
 	end
 
 	auto throttle
 	auto wakelazywriter
-
 	auto throttlemax
+
 	10 throttlemax!
+
+	// Throttle for 100ms until one of:
+	//  o  We've exhausted the maximum number of throttles, which means we
+	//     should probably just escape.
+	//  o  The throttle conditions are alleviated.
 
 	while (throttlemax@)
 		0 throttle!
 		0 wakelazywriter!
 
+		// Calculate the number of modified anonymous pages on the list.
+
 		auto modanon
 		MmModifiedPageCount@ MmModifiedFilePageCount@ - modanon!
 
+		// Check the throttle conditions.
+
 		if (IOModifiedFilePageCountTotal@ pages@ + IODIRTYFILEPAGEMAX >=)
+			// The number of modified file pages would become greater than our
+			// preferred maximum. Kick the lazy writer awake and throttle.
+
 			1 throttle!
 			1 wakelazywriter!
 		end elseif (MmEvictablePageCount@ MmPageFreeCount@ + pages@ MmPageFreeCountLow@ + <)
+			// The number of available pages would become less than the low
+			// count of pages, meaning the modified page writer is probably
+			// hard at work. Throttle.
+
 			1 throttle!
 		end elseif (MmEvictablePageCount@ MmPageFreeCount@ + pages@ MMNORMALTHRESH + 1 + <)
+			// The number of available pages would drop to the bare minimum.
+			// Definitely throttle.
+
 			1 throttle!
 
 			if (MmEvictablePageCount@ MmPageFreeCount@ + MMNORMALTHRESH 10 + <)
-				// already within 10 pages of the threshold...
-				// do another round of waiting
+				// The number of available pages is actually already at the
+				// bare minimum. Not only should we throttle, but we should do
+				// another round of throttling to avoid 
 
 				5 throttlemax!
 			end
 		end elseif (MmModifiedFilePageCount@ pages@ + 100 >)
+			// There are already quite a lot of file pages on the modified
+			// page list. Throttle.
+
 			1 throttle!
 		end
 
 		if (throttle@ ~~)
+			// We decided not to throttle (again), so return.
+
 			return
 		end
 
 		if (wakelazywriter@)
+			// We decided to kick the lazy writer awake.
+
 			IOTriggerWritebehind
 		end
 
@@ -831,6 +864,8 @@ fn MmGatewayFileDirtying { bytes -- throttled }
 		KeThreadSleep drop
 
 		if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+			// We became memory privileged, so break out of the throttle loop.
+
 			return
 		end
 

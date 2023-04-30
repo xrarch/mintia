@@ -13,8 +13,8 @@ struct OSStream
 	4 Flags
 	4 FileHandle
 	4 Access
-	4 BufferOrListHead
-	4 BufferedLengthOrSeek
+	4 Buffer
+	4 BufferedLength
 endstruct
 
 const OSSTREAMPURGE_RELEASE 2

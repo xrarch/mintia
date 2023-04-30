@@ -100,33 +100,4 @@ const DLLNOSTREAM 2
 
 extern DLLStreamInit { -- }
 
-extern DLLStreamWindowFreeAll { streamptr -- }
-extern DLLStreamWindowFlushAll { streamptr -- }
-
-extern DLLStreamWindowRead { length buffer streamptr -- bytesread ok }
-extern DLLStreamWindowWrite { length buffer streamptr -- byteswritten ok }
-
-const DLLSTREAMWINDOWSIZELOG 4 // in pages
-
-const DLLSTREAMWINDOWPAGES (1 DLLSTREAMWINDOWSIZELOG <<)
-const DLLSTREAMWINDOWSIZE  (DLLSTREAMWINDOWPAGES OSPAGESHIFT <<)
-const DLLSTREAMWINDOWOFFSETMASK (DLLSTREAMWINDOWSIZE 1 -)
-const DLLSTREAMWINDOWNUMBERMASK (DLLSTREAMWINDOWOFFSETMASK ~)
-
-const DLLSTREAMWCBCOUNT 32
-
-struct DLLStreamWCB
-	4 FreeNext
-	4 FreePrev
-
-	4 StreamPtr
-	4 StreamNext
-	4 StreamPrev
-
-	4 RefCount
-	4 FileOffset
-	4 VirtualAddress
-	4 Length
-endstruct
-
 #include "../Common/Module.h"

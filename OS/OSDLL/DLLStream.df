@@ -24,6 +24,26 @@
 // respectively.
 //
 
+fn DLLStreamInit { -- }
+	// create stream for stdout
+
+	auto ok
+	-1 ok!
+
+	auto stream
+
+	if (OSPEB OSPEBs_StdOut + @ DLLNOSTREAM ~=)
+		OSSTREAMTYPE_LINEBUFFER // flags
+		ACCESS_WRITE // access
+		OSPEB OSPEBs_StdOut + @ // filehandle
+		OSStreamObjectCreate ok! stream!
+
+		if (ok@ ~~)
+			stream@ DLLStdOutStream!
+		end
+	end
+end
+
 fn OSStreamCreate { streamflags permissions flags access path -- stream ok }
 	auto filehandle
 	permissions@ // permissions
@@ -38,6 +58,7 @@ fn OSStreamCreate { streamflags permissions flags access path -- stream ok }
 
 	if (flags@ OSFILEFLAG_NOCACHE &)
 		filehandle@ stream!
+
 		return
 	end
 
@@ -48,6 +69,7 @@ fn OSStreamCreate { streamflags permissions flags access path -- stream ok }
 
 	if (ok@)
 		filehandle@ OSClose drop
+
 		return
 	end
 end
@@ -66,6 +88,7 @@ fn OSStreamOpen { streamflags flags access path ftype -- stream ok }
 
 	if (flags@ OSFILEFLAG_NOCACHE &)
 		filehandle@ stream!
+
 		return
 	end
 
@@ -76,6 +99,7 @@ fn OSStreamOpen { streamflags flags access path ftype -- stream ok }
 
 	if (ok@)
 		filehandle@ OSClose drop
+
 		return
 	end
 end
@@ -105,25 +129,6 @@ fn OSStreamObjectCreate { flags access filehandle -- stream ok }
 		return
 	end
 
-	if (flags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_FULLBUFFER ==)
-		// if the filehandle represents a character device, force line buffering.
-
-		auto query
-		OSFileInformation_SIZEOF alloc query!
-
-		filehandle@ // filehandle
-		query@ // query
-		OSFileQuery ok!
-
-		if (ok@)
-			return
-		end
-
-		if (query@ OSFileInformation_Type + @ OSFILETYPE_CHARDEVICE ==)
-			flags@ OSSTREAMFLAG_BUFFERTYPEMASK ~ & OSSTREAMTYPE_LINEBUFFER | flags!
-		end
-	end
-
 	OSStream_SIZEOF OSHeapAllocate ok! stream!
 
 	if (ok@)
@@ -132,8 +137,8 @@ fn OSStreamObjectCreate { flags access filehandle -- stream ok }
 
 	flags@ stream@ OSStream_Flags + !
 	filehandle@ stream@ OSStream_FileHandle + !
-	0 stream@ OSStream_BufferOrListHead + !
-	0 stream@ OSStream_BufferedLengthOrSeek + !
+	0 stream@ OSStream_Buffer + !
+	0 stream@ OSStream_BufferedLength + !
 	access@ stream@ OSStream_Access + !
 
 	OSSTREAMHANDLEFLAG stream |=
@@ -162,6 +167,7 @@ end
 fn OSStreamGetFileHandle { stream -- filehandle }
 	if (stream@ OSSTREAMHANDLEFLAG & ~~)
 		stream@ filehandle!
+
 		return
 	end
 
@@ -174,7 +180,11 @@ fn OSStreamSeek { offset stream mode -- newoffset ok }
 	auto filehandle
 
 	if (stream@ OSSTREAMHANDLEFLAG & ~~)
-		offset@ stream@ mode@ OSFileSeek ok! newoffset!
+		offset@ // offset
+		stream@ // filehandle
+		mode@ // mode
+		OSFileSeek ok! newoffset!
+
 		return
 	end
 
@@ -184,43 +194,25 @@ fn OSStreamSeek { offset stream mode -- newoffset ok }
 	auto flags
 	stream@ OSStream_Flags + @ flags!
 
-	if (flags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_LINEBUFFER ==)
-		if (flags@ OSSTREAMFLAG_DIRTY &)
-			0 // purge
-			stream@ // streamptr
-			DLLStreamFlush drop
-		end
-
-		offset@ filehandle@ mode@ OSFileSeek ok! newoffset!
-	end else
-		if (mode@ OSSEEK_SET ==)
-			offset@ // offset
-			filehandle@ // filehandle
-			OSSEEK_SET // mode
-			OSFileSeek ok! newoffset!
-		end elseif (mode@ OSSEEK_END ==)
-			offset@ // offset
-			filehandle@ // filehandle
-			OSSEEK_END // mode
-			OSFileSeek ok! newoffset!
-		end elseif (mode@ OSSEEK_CUR ==)
-			offset@ stream@ OSStream_BufferedLengthOrSeek + @ + // offset
-			filehandle@ // filehandle
-			OSSEEK_SET // mode
-			OSFileSeek ok! newoffset!
-		end
-
-		if (ok@)
-			return
-		end
-
-		newoffset@ stream@ OSStream_BufferedLengthOrSeek + !
+	if (flags@ OSSTREAMFLAG_DIRTY &)
+		0 // purge
+		stream@ // streamptr
+		DLLStreamFlush drop
 	end
+
+	offset@ // offset
+	filehandle@ // filehandle
+	mode@ // mode
+	OSFileSeek ok! newoffset!
 end
 
 fn OSStreamTruncate { newsize growing stream -- oldsize ok }
 	if (stream@ OSSTREAMHANDLEFLAG & ~~)
-		newsize@ growing@ stream@ OSFileTruncate ok! oldsize!
+		newsize@ // newsize
+		growing@ // growing
+		stream@ // filehandle
+		OSFileTruncate ok! oldsize!
+
 		return
 	end
 
@@ -239,13 +231,9 @@ fn OSStreamTruncate { newsize growing stream -- oldsize ok }
 end
 
 fn DLLStreamFreeBuffers { type streamptr -- }
-	if (type@ OSSTREAMTYPE_LINEBUFFER ==)
-		if (streamptr@ OSStream_BufferOrListHead + @)
-			streamptr@ OSStream_BufferOrListHead + @ OSHeapFree
-			0 streamptr@ OSStream_BufferOrListHead + !
-		end
-	end else
-		streamptr@ DLLStreamWindowFreeAll
+	if (streamptr@ OSStream_Buffer + @)
+		streamptr@ OSStream_Buffer + @ OSHeapFree
+		0 streamptr@ OSStream_Buffer + !
 	end
 end
 
@@ -275,28 +263,19 @@ fn DLLStreamFlush { purge streamptr -- ok }
 		return
 	end
 
-	if (type@ OSSTREAMTYPE_LINEBUFFER ==)
-		// assumes nobody seek'd the filehandle directly
+	// assumes nobody seek'd the filehandle directly
 
-		OSACCESSFLAG_UNALERTABLE // flags
-		streamptr@ OSStream_BufferedLengthOrSeek + @ // length
-		streamptr@ OSStream_BufferOrListHead + @ // buffer
-		streamptr@ OSStream_FileHandle + @ // filehandle
-		OSFileWrite ok! drop
+	OSACCESSFLAG_UNALERTABLE // flags
+	streamptr@ OSStream_BufferedLength + @ // length
+	streamptr@ OSStream_Buffer + @ // buffer
+	streamptr@ OSStream_FileHandle + @ // filehandle
+	OSFileWrite ok! drop
 
-		if (ok@)
-			return
-		end
-
-		0 streamptr@ OSStream_BufferedLengthOrSeek + !
-	end else
-		if (purge@ ~~)
-			// if it's being purged, the dirty bits will get flushed into the
-			// PFDBEs anyway, so save time and don't flush in that case.
-
-			streamptr@ DLLStreamWindowFlushAll
-		end
+	if (ok@)
+		return
 	end
+
+	0 streamptr@ OSStream_BufferedLength + !
 
 	if (purge@)
 		type@ streamptr@ DLLStreamFreeBuffers
@@ -316,19 +295,25 @@ end
 
 fn OSStreamFlush { purge stream -- ok }
 	if (stream@ OSSTREAMHANDLEFLAG & ~~)
-		purge@ stream@ OSFileFlush ok!
+		purge@ // purge
+		stream@ // filehandle
+		OSFileFlush ok!
+
 		return
 	end
 
 	OSSTREAMHANDLEFLAG ~ stream &=
 
-	purge@ stream@ DLLStreamFlush ok!
+	purge@ // purge
+	stream@ // streamptr
+	DLLStreamFlush ok!
 end
 
 fn OSStreamRead { timeout flags length buffer stream -- bytesread ok }
 	if (length@ ~~)
 		0 bytesread!
 		0 ok!
+
 		return
 	end
 
@@ -345,39 +330,25 @@ fn OSStreamRead { timeout flags length buffer stream -- bytesread ok }
 
 	OSSTREAMHANDLEFLAG ~ stream &=
 
-	auto streamflags
-	stream@ OSStream_Flags + @ streamflags!
-
-	if (streamflags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_LINEBUFFER ==)
-		if (streamflags@ OSSTREAMFLAG_DIRTY &)
-			0 // purge
-			stream@ // streamptr
-			DLLStreamFlush drop
-		end
-
-		timeout@ // timeout
-		flags@ OSACCESSFLAG_UNALERTABLE | // flags
-		length@ // length
-		buffer@ // buffer
-		stream@ OSStream_FileHandle + @ // filehandle
-		OSFileRead ok! bytesread!
-
-		return
+	if (stream@ OSStream_Flags + @ OSSTREAMFLAG_DIRTY &)
+		0 // purge
+		stream@ // streamptr
+		DLLStreamFlush drop
 	end
 
-	if (DEBUGCHECKS)
-		if (streamflags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_FULLBUFFER ~=)
-			streamflags@ "OSStreamRead %x\n" OSAbort
-		end
-	end
-
-	length@ buffer@ stream@ DLLStreamWindowRead ok! bytesread!
+	timeout@ // timeout
+	flags@ OSACCESSFLAG_UNALERTABLE | // flags
+	length@ // length
+	buffer@ // buffer
+	stream@ OSStream_FileHandle + @ // filehandle
+	OSFileRead ok! bytesread!
 end
 
 fn OSStreamWrite { flags length buffer stream -- byteswritten ok }
 	if (length@ ~~)
 		0 byteswritten!
 		0 ok!
+
 		return
 	end
 
@@ -393,51 +364,52 @@ fn OSStreamWrite { flags length buffer stream -- byteswritten ok }
 
 	OSSTREAMHANDLEFLAG ~ stream &=
 
-	auto streamflags
-	stream@ OSStream_Flags + @ streamflags!
+	if (OSSTREAMLINEBUFFERLENGTH stream@ OSStream_BufferedLength + @ - length@ >=)
+		// there's enough room in the buffer for all of our characters, so put
+		// them in there.
 
-	if (streamflags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_LINEBUFFER ==)
-		if (length@ 1 ==)
+		0 byteswritten!
+
+		while (length@)
 			buffer@ gb // c
-			stream@ OSSTREAMHANDLEFLAG | // stream
-			OSStreamWriteCharacter ok!
-
-			return
-		end
-
-		if (streamflags@ OSSTREAMFLAG_DIRTY &)
-			0 // purge
 			stream@ // streamptr
-			DLLStreamFlush drop
-		end
+			DLLStreamWriteCharacter ok!
 
-		flags@ OSACCESSFLAG_UNALERTABLE | // flags
-		length@ // length
-		buffer@ // buffer
-		stream@ OSStream_FileHandle + @ // filehandle
-		OSFileWrite ok! byteswritten!
+			if (ok@)
+				return
+			end
+
+			1 byteswritten +=
+			1 buffer +=
+			1 length -=
+		end
 
 		return
 	end
 
-	if (DEBUGCHECKS)
-		if (streamflags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_FULLBUFFER ~=)
-			"OSStreamWrite\n" OSAbort
-		end
+	// there isn't enough room in the buffer for our characters, so flush the
+	// buffer and do a direct write call.
+
+	if (stream@ OSStream_Flags + @ OSSTREAMFLAG_DIRTY &)
+		0 // purge
+		stream@ // streamptr
+		DLLStreamFlush drop
 	end
 
-	length@ buffer@ stream@ DLLStreamWindowWrite ok! byteswritten!
+	flags@ OSACCESSFLAG_UNALERTABLE | // flags
+	length@ // length
+	buffer@ // buffer
+	stream@ OSStream_FileHandle + @ // filehandle
+	OSFileWrite ok! byteswritten!
 end
 
 fn OSStreamWriteCharacter { c stream -- ok }
-	0 ok!
-
-	auto littlebuf
-	4 alloc littlebuf!
-
-	c@ littlebuf@ sb
-
 	if (stream@ OSSTREAMHANDLEFLAG & ~~)
+		auto littlebuf
+		4 alloc littlebuf!
+
+		c@ littlebuf@ sb
+
 		OSACCESSFLAG_UNALERTABLE // flags
 		1 // length
 		littlebuf@ // buffer
@@ -449,19 +421,15 @@ fn OSStreamWriteCharacter { c stream -- ok }
 
 	OSSTREAMHANDLEFLAG ~ stream &=
 
-	auto streamflags
-	stream@ OSStream_Flags + @ streamflags!
+	c@ // c
+	stream@ // streamptr
+	DLLStreamWriteCharacter ok!
+end
 
-	if (streamflags@ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_LINEBUFFER ~=)
-		1 // length
-		littlebuf@ // buffer
-		stream@ // streamptr
-		DLLStreamWindowWrite ok! drop
+fn DLLStreamWriteCharacter { c streamptr -- ok }
+	0 ok!
 
-		return
-	end	
-
-	if (stream@ OSStream_BufferOrListHead + @ ~~)
+	if (streamptr@ OSStream_Buffer + @ ~~)
 		auto buffer
 		OSSTREAMLINEBUFFERLENGTH OSHeapAllocate ok! buffer!
 
@@ -469,22 +437,30 @@ fn OSStreamWriteCharacter { c stream -- ok }
 			return
 		end
 
-		buffer@ stream@ OSStream_BufferOrListHead + !
+		buffer@ streamptr@ OSStream_Buffer + !
 	end
 
 	c@
-	stream@ OSStream_BufferOrListHead + @
-	stream@ OSStream_BufferedLengthOrSeek + @ + sb
+	streamptr@ OSStream_Buffer + @
+	streamptr@ OSStream_BufferedLength + @ + sb
 
-	1 stream@ OSStream_BufferedLengthOrSeek + +=
+	1 streamptr@ OSStream_BufferedLength + +=
 
-	OSSTREAMFLAG_DIRTY stream@ OSStream_Flags + |=
+	OSSTREAMFLAG_DIRTY streamptr@ OSStream_Flags + |=
 
-	if (stream@ OSStream_BufferedLengthOrSeek + @ OSSTREAMLINEBUFFERLENGTH ==
-		c@ '\n' == ||)
-
+	if (streamptr@ OSStream_BufferedLength + @ OSSTREAMLINEBUFFERLENGTH ==)
 		0 // purge
-		stream@ // streamptr
+		streamptr@ // streamptr
 		DLLStreamFlush ok!
+
+		return
+	end
+
+	if (streamptr@ OSStream_Flags + @ OSSTREAMFLAG_BUFFERTYPEMASK & OSSTREAMTYPE_LINEBUFFER ==)
+		if (c@ '\n' ==)
+			0 // purge
+			streamptr@ // streamptr
+			DLLStreamFlush ok!
+		end
 	end
 end

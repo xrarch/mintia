@@ -34,6 +34,12 @@ const IOCACHEZEROMAXPAGES (IOCACHEZEROMAX PAGESHIFT >>)
 fn IOCacheZeroData { size offset flags fcb -- ok }
 	fnsection "PAGE$text"
 
+	if (DEBUGCHECKS)
+		if (offset@ fcb@ IOFileControlBlock_SizeInBytes + @ >=)
+			"IOCacheZeroData: offset >= filesize\n" KeCrash
+		end
+	end
+
 	// zeroes the specified range in the FCB. intended for use in efficiently
 	// zeroing new file allocations.
 	//
@@ -44,12 +50,6 @@ fn IOCacheZeroData { size offset flags fcb -- ok }
 	//
 	// expects the FCB to be locked exclusively.
 
-	if (DEBUGCHECKS)
-		if (offset@ fcb@ IOFileControlBlock_SizeInBytes + @ >=)
-			"IOCacheZeroData: offset >= filesize\n" KeCrash
-		end
-	end
-
 	auto pagestozero
 	offset@ PAGEOFFSETMASK & size@ + PAGEOFFSETMASK + PAGESHIFT >> pagestozero!
 
@@ -57,7 +57,7 @@ fn IOCacheZeroData { size offset flags fcb -- ok }
 		if (fcb@ IOFileControlBlock_CacheInfoBlock + @)
 			if (pagestozero@ IOCACHEZEROMAXPAGES <=)
 				if (MmPageFreeCount@ MmEvictablePageCount@ + pagestozero@ + MmPageFreeCountSufficient@ >=)
-					// sufficient resources to zero in the cache
+					// all conditions for zeroing in the cache are met.
 
 					size@ // size
 					offset@ // offset
@@ -65,12 +65,20 @@ fn IOCacheZeroData { size offset flags fcb -- ok }
 					IOiCacheZeroInCache ok!
 
 					if (ok@ ~~)
+						// succeeded, return
+
 						return
 					end
+
+					// failed. drop down to the direct I/O codepath.
 				end
 			end
 		end
 	end
+
+	// some condition for zeroing in the cache was not met. zero the data with
+	// direct noncached I/O requests. We can also get here if zeroing in the
+	// cache failed for some reason.
 
 	size@ // size
 	offset@ // offset

@@ -1,5 +1,3 @@
-extern HALPlatformIPLSet { ipl -- }
-
 const IPLHIGH       31
 const IPLCLOCK      29
 

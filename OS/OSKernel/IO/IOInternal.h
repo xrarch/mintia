@@ -58,6 +58,7 @@ struct IOiCacheInfoBlock
 endstruct
 
 const IOCACHEBLOCKFLAG_TRUNCATING 1
+const IOCACHEBLOCKFLAG_DIRTY      2
 
 // should be kept in sync with MiPageFrameEntryEvictable
 struct IOiPageFrameEntryCache

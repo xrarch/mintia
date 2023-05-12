@@ -146,8 +146,6 @@ extern IOTriggerWritebehind { -- }
 
 extern IOThreadRundown { -- }
 
-extern IOFileControlBlockThrottle { -- }
-
 extern IOFileControlBlockIncrementReclaimable { -- }
 extern IOFileControlBlockDecrementReclaimable { -- }
 

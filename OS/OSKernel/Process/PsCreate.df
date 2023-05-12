@@ -29,19 +29,6 @@
 
 #include "PsInternal.h"
 
-fn PsiProcessInheritConsole { parent process -- }
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	if (parent@ PsProcess_ConsoleObject + @)
-		process@ // process
-		parent@ PsProcess_ConsoleObject + @ // console
-		CoConsoleInsertProcess drop
-	end
-
-	ipl@ KeIPLLower
-end
-
 fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess permissions name -- processobject ok }
 	fnsection "PAGE$text"
 
@@ -323,15 +310,25 @@ fn PsProcessCreateObject { quotauid sectionobject creationflags parentprocess pe
 	processobject@ // process
 	PsProcessInsertForTrim
 
-	if (creationflags@ OSPROCESS_DETACHCONSOLE & ~~)
-		// inherit the console group
-
-		parentprocess@ // parent
-		processobject@ // process
-		PsiProcessInheritConsole
-	end
-
 	if (initial@ ~~)
+		if (creationflags@ OSPROCESS_DETACHCONSOLE & ~~)
+			// inherit the console group.
+			// lock the parent's createdelete lock to synchronize against its
+			// console group changing.
+
+			0 // alertable
+			parentprocess@ // processobject
+			PsProcessCreateDeleteLock drop
+
+			if (parentprocess@ PsProcess_ConsoleObject + @)
+				processobject@ // process
+				parentprocess@ PsProcess_ConsoleObject + @ // console
+				CoConsoleInsertProcess drop
+			end
+
+			parentprocess@ PsProcessCreateDeleteUnlock
+		end
+
 		PsProcessTable@ ExHandleTableUnlock
 	end
 

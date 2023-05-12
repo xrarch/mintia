@@ -159,11 +159,47 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 end
 
 fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
-	// attempt to evict all of the cacheblock's page frames beyond newsize.
-	// also evicts the page that contains newsize, to prevent a weird
+	// Evict all of the cacheblock's page frames beyond newsize.
+	// Also evicts the page that contains newsize, to prevent a weird
 	// interaction with the dirty page writer.
-
-	// the corresponding FCB must have been locked exclusively.
+	// The corresponding FCB must have been locked exclusively.
+	//
+	// This function is intricately involved in the proper synchronization of
+	// FCB deletion and cache writeback. Cache writeback does not necessarily
+	// acquire any FCB locks, and in fact when the writebehind thread finds a
+	// cacheblock on its list, the associated FCB might not even exist
+	// anymore. There are substantial lock-ordering issues associated with
+	// attempting to keep the FCB alive while it is on this list.
+	//	
+	// A similar issue is that of synchronization between file truncation to a
+	// smaller size and writeback, which turns out to be a functionally
+	// equivalent problem from the cache perspective, since both issues stem
+	// from a page -> (fcb existence | disk blocks) dependency.
+	//
+	// The chosen solution to this use-after-free issue is to make a guarantee
+	// that by the time an FCB is either evicted from memory or truncated
+	// on-disk, its page cache is completely devoid of pages, at all or beyond
+	// the new size, respectively, and that there are no writes to such pages
+	// in-flight. Thus, the writebehind thread will never even see any pages
+	// for a deleted FCB.
+	//
+	// To begin with, we need not concern ourselves with new pages being added
+	// or modified while this function works, since all such cases are blocked
+	// out by holding the FCB lock exclusively, and/or checking the MapCount
+	// to ensure there are no mappings into user processes. We also truncate
+	// the corresponding views in the system viewcache to make sure that the
+	// system working set doesn't reference any of the pages we are about to
+	// remove.
+	//
+	// This requires interlocking between this function and IOCachePageWrite.
+	// Our part of the interlocking is to remove the page from the cacheblock
+	// page tree, and therefore prevent 'Write from adding it to the write
+	// cluster. Write's part of the interlocking is to set an IOINPROGRESS
+	// flag in the PFDBE for each page it adds to the cluster, a flag which we
+	// wait on until it is clear before we remove the page from the tree.
+	// This two-way interlock guarantees that by the time we leave this
+	// function, there is absolutely no way that a write is in-flight or can
+	// become in-flight to one of the pages that we removed.
 
 	auto maxpage
 	newsize@ PAGENUMBERMASK & maxpage!

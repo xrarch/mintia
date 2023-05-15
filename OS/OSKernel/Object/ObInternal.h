@@ -23,16 +23,13 @@ struct ObiDirectory
 endstruct
 
 // modify OBHANDLEENTRYSIZELOG if you change the size of this structure
+
 struct ObiObjectTableEntry
 	4 Object
 	4 Access
 endstruct
 
 const OBHANDLEENTRYSIZELOG 1 // 4<<1 = 8 bytes
-
-
-
-
 
 // An object may be allocated from either paged or nonpaged pool depending on
 // what is specified in its type object. It is allocated in two pieces: one is

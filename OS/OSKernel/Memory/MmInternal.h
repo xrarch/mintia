@@ -264,8 +264,6 @@ const MMPTECOUNTSPERTABLE (MMPTECOUNTTABLESIZE 2 /)
 
 extern MiProcessPTECountGet { pri vaddr process -- ptect ok }
 
-extern MiFlushUserTLBAll { -- }
-
 extern MiPageDirectoryDestroy { process -- }
 extern MiPageDirectoryAlloc { process -- ok }
 extern MiPageDirectoryReference { pri process -- ok }

@@ -81,11 +81,5 @@ struct ObiPagedHeader
 	4 NonpagedQuotaCharge
 endstruct
 
-
-
-
-
-
-
 extern ObiObjectHandleCountIncrement { object -- oldcount }
 extern ObiObjectHandleCountDecrement { object -- oldcount }

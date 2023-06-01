@@ -273,21 +273,14 @@ KiXr17032Syscall:
 	mov  t1, long [a0 + OSContext_t0]
 	beq  t1, .sysout
 
-	mfcr s0, rs
-	ori  s1, s0, XR17032_RS_INT
-	mtcr rs, s1
-
 	mov  t0, long [OSCallCount]
 	slt  t0, t0, t1
-	bne  t0, .sysoutrs
+	bne  t0, .sysout
 
 	la   t0, OSCallTable
 	mov  t0, long [t0 + t1 LSH 2]
 
 	jalr lr, t0, 0
-
-.sysoutrs:
-	mtcr rs, s0
 
 .sysout:
 	mov  lr, long [sp + 16]
@@ -524,64 +517,54 @@ fn KiXr17032Exception { badaddr ecause tf -- }
 		tf@ KeThreadCurrent@ KeThread_TrapFrame + !
 	end
 
-	if (tf@ OSContext_ers + @ XR17032_ERS_INT & ~~)
-		0 handled!
-	end
+	0 handled!
 
-	if (handled@)
-		0 handled!
+	if (ecause@ ECAUSEINTERRUPT ==)
+		1 KeStatistics OSStatistics_Interrupts + +=
 
-		if (ecause@ ECAUSEINTERRUPT ==)
-			1 KeStatistics OSStatistics_Interrupts + +=
+		tf@ HALInterrupt
 
-			tf@ // trapframe
-			HALInterrupt
+		// this is an inlined version of what KeIPLLower also does
 
-			// this is an inlined version of what KeIPLLower also does
+		auto ipl
+		KeIPLCurrent@ ipl!
 
-			auto ipl
-			KeIPLCurrent@ ipl!
+		if (ipl@ IPLDPC <)
+			if (KiPendingSoftwareInterrupts@)
+				auto p
+				KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 
-			if (ipl@ IPLDPC <)
-				if (KiPendingSoftwareInterrupts@)
-					auto p
+				while (p@)
+					[p@]KiPendingSoftwareInterruptFirst@ KiSoftwareInterruptHandlerF
+
 					KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
-
-					while (p@)
-						[p@]KiPendingSoftwareInterruptFirst@ KiSoftwareInterruptHandlerF
-
-						KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
-					end
 				end
-
-				ipl@ KeIPLCurrent!
 			end
 
-			0 signal!
-			1 handled!
-		end elseif (ecause@ ECAUSESYS ==)
+			ipl@ KeIPLCurrent!
+		end
+
+		0 signal!
+		1 handled!
+	end else
+		HALCPUInterruptEnable
+
+		if (ecause@ ECAUSESYS ==)
 			1 KeStatistics OSStatistics_SystemCalls + +=
 
 			tf@ KiXr17032Syscall
+
 			1 handled!
 		end elseif (ecause@ ECAUSEPAGEFAULT ==)
-			HALCPUInterruptEnable
-
 			0 // writing
 			badaddr@ // badaddr
 			tf@ // trapframe
 			MmPageFault handled!
-
-			HALCPUInterruptDisable drop
 		end elseif (ecause@ ECAUSEPAGEWRITE ==)
-			HALCPUInterruptEnable
-
 			1 // writing
 			badaddr@ // badaddr
 			tf@ // trapframe
 			MmPageFault handled!
-
-			HALCPUInterruptDisable drop
 		end elseif (ecause@ ECAUSEINVALID ==)
 			OSSIGNAL_ILL signal!
 		end elseif (ecause@ ECAUSEPRIVVIOL ==)
@@ -606,12 +589,15 @@ fn KiXr17032Exception { badaddr ecause tf -- }
 
 				if (abort@)
 					// thought this might happen.
+
 					STATUS_FAULT abort@ tf@ HALCPUTrapFrameAbort
 
 					1 handled!
 				end
 			end
 		end
+
+		HALCPUInterruptDisable drop
 	end
 
 	if (handled@ ~~)
@@ -640,12 +626,37 @@ fn KiXr17032Exception { badaddr ecause tf -- }
 	end
 
 	if (tf@ OSContext_ers + @ XR17032_ERS_USER &)
-		// we interrupted usermode code
-
 		tf@ PsPrepareUsermode
 	end
+end
 
-	// while (1) end
+fn KeEnterUserMode { teb exitfunc context ustack entryfunc -- }
+	// make a fake trap frame to return to
+
+	auto tf
+	OSContext_SIZEOF alloc tf!
+
+	tf@ // ptr
+	OSContext_SIZEOF // sz
+	0 // word
+	memset
+
+	teb@ tf@ OSContext_s18 + !
+
+	XR17032_ERS_UTHREAD XR17032_RS_MMU | tf@ OSContext_ers + !
+
+	entryfunc@ tf@ OSContext_epc + !
+	exitfunc@ tf@ OSContext_lr + !
+
+	context@ tf@ OSContext_a0 + !
+
+	ustack@ tf@ OSContext_sp + !
+
+	HALCPUInterruptDisable drop
+
+	tf@ PsPrepareUsermode
+
+	tf@ KiContinue
 end
 
 const MAX_ASID 4096

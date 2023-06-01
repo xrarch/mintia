@@ -155,6 +155,7 @@ extern KeSafeProbeSystemByte { src -- byte ok }
 extern KeInterlockedIncrement { inc ptr -- oldcount }
 
 extern KeThreadContinue { alertable signum context thread -- ok }
+extern KeEnterUserMode { teb exitfunc context ustack entryfunc -- }
 
 extern KeProcessQuerySignalThread { query process -- }
 

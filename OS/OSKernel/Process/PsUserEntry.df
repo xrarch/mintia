@@ -53,25 +53,14 @@ fn PsThreadUserEntry { context1 context2 -- }
 	OSThreadEnvironmentBlock_SIZEOF // size
 	KeSafeCopyOut drop
 
-#ifdef FOX32
-	KeThreadCurrent@ PsThread_StackTop + @ 4 - // dest
-	PsOSDLLInformation PsOSDLLInfo_ExitFunction + // src
-	4 // size
-	KeSafeCopyOut drop
-#endif
-
-	HALCPUInterruptDisable drop
-
-	0 PsPrepareUsermode
-
 	thread@ PsThread_UTEB + @ // teb
 	PsOSDLLInformation PsOSDLLInfo_ExitFunction + @ // exitfunc
 	context2@ // context
 	KeThreadCurrent@ PsThread_StackTop + @ // ustack
 	context1@ // entryfunc
-	HALCPUEnterUserMode
+	KeEnterUserMode
 
-	// HALCPUEnterUserMode should not return
+	// KeEnterUserMode should not return
 
 	"PsThreadUserEntry\n" KeCrash
 end
@@ -80,79 +69,33 @@ fn PsPrepareUsermode { trapframe -- }
 	// called before the exception handler returns to usermode.
 	// handles thread termination and signal dispatch.
 
-	// called with all interrupts disabled.
-
-	auto whatnow
+	// called with all interrupts disabled, which is unique for code running
+	// outside of Ke...
 
 	auto process
 	KeProcessCurrent process!
 
-	auto current
-	KeThreadCurrent@ current!
+	auto thread
+	KeThreadCurrent@ thread!
 
 	while (1)
-		if (DEBUGCHECKS)
-			if (KeIPLCurrentGet IPLLOW ~=)
-				"PsPrepareUsermode: ipl != IPLLOW (%d)\n" KeCrash
-			end
-		end
-	
-		IPLLOW // ipl
-		USERMODE // mode
-		1 // alertable
-		0 // waiting
-		current@ // thread
-		KeThreadIsKilled whatnow!
+		// loop until there are no more events.
 
-		if (whatnow@ STATUS_KILLED ==)
-			// don't return to userland.
-			// our journey ends here
+		if (process@ KeProcess_TerminatedB + gb
+			thread@ KeThread_Signals + @ 1 OSSIGNAL_KILL << & ||)
 
 			HALCPUInterruptEnable
 
 			PsiThreadExit
 
 			if (DEBUGCHECKS)
-				// PsiThreadExit should not return
-
 				"PsPrepareUsermode\n" KeCrash
 			end
-		end elseif (current@ KeThread_SuspendedB + gb)
-			// suspend!
+		end
 
-			HALCPUInterruptEnable
-
-			KeThreadWaitSuspended
-
-			HALCPUInterruptDisable drop
-
-			// continue and recheck signals because things probably
-			// changed since we napped.
-			continue
-		end elseif (whatnow@ STATUS_USER_APC ==)
-			if (trapframe@ ~~)
-				continue
-			end
-
-			HALCPUInterruptEnable
-
-			PsOSDLLInformation PsOSDLLInfo_APCDispatchFunction + @ // dispatchfunc
-			trapframe@ // trapframe
-			KeAPCDispatchQueueUser
-
-			HALCPUInterruptDisable drop
-
-			continue
-		end elseif (whatnow@ STATUS_SIGNALLED ==)
-			if (trapframe@ ~~)
-				// the thread was signalled before it had a chance to enter
-				// userspace for the first time. just ignore this because
-				// this condition is user-caused and the signal will be
-				// delivered "eventually" due to the action of the interval
-				// timer interrupt.
-
-				break
-			end
+		if (thread@ KeThread_SignalAcceptMask + @
+			thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
+			thread@ KeThread_Signals + @ &)
 
 			HALCPUInterruptEnable
 
@@ -163,8 +106,38 @@ fn PsPrepareUsermode { trapframe -- }
 			HALCPUInterruptDisable drop
 
 			continue
-		end else
-			break
 		end
+
+		if (thread@ KeThread_SuspendedB + gb)
+			// suspend!
+
+			HALCPUInterruptEnable
+
+			KeThreadWaitSuspended
+
+			HALCPUInterruptDisable drop
+
+			continue
+		end
+
+		if (thread@ KeThread_UserAPCTriggeredB + gb)
+			// a user APC was previously triggered, deliver it.
+
+			0 thread@ KeThread_UserAPCTriggeredB + sb
+
+			if (thread@ KeThread_UserAPCListHead + @)
+				HALCPUInterruptEnable
+
+				PsOSDLLInformation PsOSDLLInfo_APCDispatchFunction + @ // dispatchfunc
+				trapframe@ // trapframe
+				KeAPCDispatchQueueUser
+
+				HALCPUInterruptDisable drop
+
+				continue
+			end
+		end
+
+		return
 	end
 end

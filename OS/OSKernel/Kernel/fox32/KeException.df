@@ -593,6 +593,7 @@ ExceptionReturn:
 
 ; a0 - tf
 KiContinue:
+	mov  [HALfox32InterruptsDisabled], 0
 	mov  sp, a0
 	jmp  ExceptionReturn
 
@@ -1019,6 +1020,47 @@ fn KeAddressSpaceSwitch { process -- }
 	process@ KeProcess_PageDirectory + @ HALfox32MapSwitch
 
 	rs@ HALCPUInterruptRestore
+end
+
+fn KeEnterUserMode { teb exitfunc context ustack entryfunc -- }
+	// make a fake trap frame to return to
+
+	auto tf
+	OSContext_SIZEOF alloc tf!
+
+	tf@ // ptr
+	OSContext_SIZEOF // sz
+	0 // word
+	memset
+
+	teb@ tf@ OSContext_tp + !
+
+	FOX32_RS_UTHREAD tf@ OSContext_eflagsB + sb
+
+	entryfunc@ tf@ OSContext_epc + !
+
+	context@ tf@ OSContext_a0 + !
+
+	ustack@ 4 - tf@ OSContext_sp + !
+
+	// put exitfunc somewhere on the stack so we can copy it out with
+	// KeSafeCopyOut.
+
+	auto exitfuncr
+	4 alloc exitfuncr!
+
+	exitfunc@ exitfuncr@!
+
+	ustack@ 4 - // dest
+	exitfuncr@ // src
+	4 // size
+	KeSafeCopyOut drop
+
+	HALCPUInterruptDisable drop
+
+	tf@ PsPrepareUsermode
+
+	tf@ KiContinue
 end
 
 fn KiCPUInit { -- }

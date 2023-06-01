@@ -151,9 +151,6 @@ externptr PsSystemInitProcess
 externptr PsOSDLLInformation
 externptr PsOSDLLFileObject
 
-externptr PsProcessCreationCount
-externptr PsProcessDeletionCount
-
 extern PsProcessListLock { alertable -- ok }
 extern PsProcessListUnlock { -- }
 

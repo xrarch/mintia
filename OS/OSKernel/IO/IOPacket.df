@@ -105,7 +105,11 @@ fn IOiPacketZonesInit { -- }
 	auto smallpagingcount
 	auto smallasynccount
 
-	// only this many MPW file pageouts can be in flight at once anyway.
+	// Only this many file page writer pageouts can be in flight at once
+	// anyway. It would be nice to be able to allocate the IOPs inline with
+	// the transfer structure, as is done with pagefile transfers, but file
+	// pages can go anywhere in the driver stack, so we can't know how many
+	// IOPLs we need ahead of time.
 
 	MPWFILETRANSFERS smallpagingcount!
 	MPWFILETRANSFERS largepagingcount!
@@ -245,7 +249,9 @@ fn IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 
 	if (iopflags@ IOPFLAG_QUOTA &)
 		if (kflags@ IOKFLAG_PAGING &)
-			// nope, don't charge quota for paging IO
+			// Never charge quota for paging IO, we need it to work at all
+			// costs.
+
 			IOPFLAG_QUOTA ~ iopflags &=
 		end else
 			KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
@@ -279,7 +285,8 @@ fn IOPacketAllocate { mode type kflags stacksize iopflags -- ioplzero iop ok }
 		rs@ HALCPUInterruptRestore
 
 		if (ok@)
-			// no IOPs left in the zone.
+			// There are no IOPs left in the zone, so we will have to hit the
+			// nonpaged pool.
 
 			0 iop!
 			0 zone!
@@ -349,15 +356,10 @@ fn IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzer
 	0 iop@ IOPacketHeader_DeviceQueueNext + !
 	0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
-	// subsequent IOPs have a single-biased IOCount, because the final IOPL
-	// will be enqueued to a device. this means that on an error return, the
-	// driver must complete the IOP, unless it has already given the same IOP
-	// to a lower driver, in which case it shouldn't (since that driver now
-	// owns it).
-
 	1 iop@ IOPacketHeader_IOCountI + si
 
-	// initialize the IOPLs of the packet to indicate their stack location.
+	// Initialize the IOPLs of the packet to indicate their stack location.
+	// XXX This could probably be done earlier for zone-allocated IOPs.
 
 	auto iopl
 	iop@ [type@]IOiPacketHeaderSizes@ + iopl!
@@ -384,9 +386,6 @@ fn IOPacketInitialize { quotablock type kflags stacksize iopflags iop -- ioplzer
 		1 i +=
 		IOPacketLocation_SIZEOF iopl +=
 	end
-
-	// initialize the zeroth IOPL to refer to the device object.
-	// XXX actually, don't do that.
 
 	iop@ [type@]IOiPacketHeaderSizes@ + ioplzero!
 end
@@ -423,11 +422,17 @@ fn IOPacketLocationNext { iopl -- nextiopl }
 end
 
 fn IOPacketLocationMappedBuffer { iopl -- vaddr }
-	iopl@ IOPacketLocation_IOPH + @ IOPacketHeader_MDL + @ MmMDLHeader_MappedAddress + @ iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
+	iopl@ IOPacketLocation_IOPH + @
+	IOPacketHeader_MDL + @
+	MmMDLHeader_MappedAddress + @
+	iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
 end
 
 fn IOPacketLocationVirtualBuffer { iopl -- vaddr }
-	iopl@ IOPacketLocation_IOPH + @ IOPacketHeader_MDL + @ MmMDLHeader_VirtualAddress + @ iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
+	iopl@ IOPacketLocation_IOPH + @
+	IOPacketHeader_MDL + @
+	MmMDLHeader_VirtualAddress + @
+	iopl@ IOPacketLocation_OffsetInMDL + @ + vaddr!
 end
 
 fn IOPacketWasEnqueued { iop -- }
@@ -436,10 +441,11 @@ fn IOPacketWasEnqueued { iop -- }
 end
 
 fn IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok }
-	// allocate an IOP to later associate with the master IOP.
-	// it does not associate it yet because the driver may still fail, and
+	// Allocate an IOP to later associate with the master IOP.
+	// It does not associate it yet because the driver may still fail, and
 	// there is no good way to clean up associated IOPs.
-	// useful for when you want to give this IOP to another driver stack.
+	// Useful for when you want to target this IOP to another driver stack,
+	// laterally.
 
 	auto mode
 
@@ -462,11 +468,11 @@ fn IOPacketAllocateAssoc { kflags stacksize iopflags iop -- ioplzero associop ok
 end
 
 fn IOPacketAllocateAssocStack { kflags iopflags iopl -- ioplzero associop ok }
-	// allocate an IOP to later associate with the master IOP.
-	// it does not associate it yet because the driver may still fail, and
+	// Allocate an IOP to later associate with the master IOP.
+	// It does not associate it yet because the driver may still fail, and
 	// there is no good way to clean up associated IOPs.
-	// gives it as many stack locations as needed for the given IOPL minus
-	// one. useful for when you want to give this IOP directly to the lower
+	// Gives it as many stack locations as needed for the given IOPL minus
+	// one. Useful for when you want to give this IOP directly to the lower
 	// level driver.
 
 	auto iop
@@ -504,8 +510,8 @@ fn IOPacketAllocateAssocStack { kflags iopflags iopl -- ioplzero associop ok }
 end
 
 fn IOPacketAssociate { associop iop -- }
-	// associate the given IOP with the master IOP.
-	// this biases the IOCount on the master IOP and adds the associated IOP
+	// Associate the given IOP with the master IOP.
+	// This biases the IOCount on the master IOP and adds the associated IOP
 	// to the current thread's deferred enqueue list.
 
 	if (DEBUGCHECKS)
@@ -544,7 +550,7 @@ fn IOPacketAssociate { associop iop -- }
 end
 
 fn IOPacketEnqueue { iop -- ok }
-	// enqueue the IOP, and any associated IOPs that appear.
+	// Enqueue the IOP, and any associated IOPs that appear.
 
 	auto current
 	KeThreadCurrent@ current!
@@ -600,15 +606,16 @@ fn IOPacketEnqueue { iop -- ok }
 			func@ IODispatchEnqueueIOPFunction eok! done!
 
 			if (masteriop@)
-				// don't propagate errors to the caller if it's from an
+				// Don't propagate an error to the caller if it's from an
 				// associated IOP.
 
 				eok@ ok!
 			end
 
 			if (eok@ done@ IODONE_NOLOCATIONS == ||)
-				// error, or done indicated; don't proceed to next stack
-				// location. the IOP may or may not exist anymore.
+				// Error or done indicated; don't proceed to next stack
+				// location. Also, the IOP may or may not exist anymore, so
+				// don't touch it again.
 
 				break
 			end
@@ -626,8 +633,9 @@ fn IOPacketEnqueue { iop -- ok }
 		niop@ iop!
 
 		if (iop@ ~~)
-			// no next associated IOP, so this must have been a master one, or
-			// a lone associated one. try to process the deferred IOP list.
+			// There's no next associated IOP, so this must have been a master
+			// one, or a lone associated one. Try to process the deferred IOP
+			// list that was accumulated while processing the last IOP.
 
 			auto rs
 			HALCPUInterruptDisable rs!
@@ -647,7 +655,8 @@ fn IOPacketEnqueue { iop -- ok }
 end
 
 fn IOPacketCompleteLow { status priboost iop -- }
-	// can be called from >IPLLOW. use this if it varies.
+	// Unlike IOPacketComplete, this routine can be called from <IPLDPC.
+	// This can also be used if calling IPL varies.
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -664,8 +673,8 @@ fn IOPacketComplete { status priboost iop -- }
 		end
 	end
 
-	// complete the IOP and also complete any parent IOPs that are completed
-	// by completing this IOP.
+	// Complete the IOP, and also decrement the IO count on the parent IOP, if
+	// there is one.
 
 	while (1)
 		if (priboost@)
@@ -673,12 +682,12 @@ fn IOPacketComplete { status priboost iop -- }
 		end
 
 		if (status@)
-			// status given for completing this IOP, save it.
+			// A status was given for completing this IOP, save it.
 
 			status@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + !
 		end else
-			// no status given for completing this IOP.
-			// try to propagate an existing status to the parent.
+			// No status given for completing this IOP.
+			// Try to propagate an existing status to the parent.
 
 			iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ status!
 		end
@@ -695,21 +704,22 @@ fn IOPacketComplete { status priboost iop -- }
 		oldcount@ 1 - iop@ IOPacketHeader_IOCountI + si
 
 		if (oldcount@ 1 >)
-			// there are still IO ops depending on this IOP
+			// There are still IOPs depending on this IOP, so break out now.
+
 			break
 		end
 
 		if (iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Status + @ ~~)
-			// since the status is successful, always do full completion.
-			// this covers the cases where a driver does an early-out
-			// successful completion, i.e. a filesystem driver discovers
-			// that the transfer is zero-length.
+			// Since the status is successful, always do full completion.
+			// This covers the cases where a driver does an early-out
+			// successful completion, i.e. a filesystem driver discovers that
+			// the transfer is zero-length.
 
 			iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_DOCOMPLT |
 			iop@ IOPacketHeader_IOPFlagsB + sb
 		end
 
-		// call completion routines
+		// Call completion routines.
 
 		auto iopl
 		iop@ iop@ IOPacketHeader_HeaderSizeB + gb + iopl!
@@ -727,7 +737,7 @@ fn IOPacketComplete { status priboost iop -- }
 			1 depth -=
 		end
 
-		// operation is completely done
+		// Operation is completely done.
 
 		iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_COMPLETE |
 		iop@ IOPacketHeader_IOPFlagsB + sb
@@ -737,6 +747,10 @@ fn IOPacketComplete { status priboost iop -- }
 
 		auto flags
 		iop@ IOPacketHeader_IOPFlagsB + gb flags!
+
+		// If this is a paging or user async IOP, we have to enqueue an APC to
+		// do the rest of the completion processing. Otherwise, rundown the
+		// packet now.
 
 		if (iop@ IOPacketHeader_TypeB + gb IOPTYPE_PAGING ==)
 			iop@ // context1
@@ -763,7 +777,7 @@ fn IOPacketComplete { status priboost iop -- }
 end
 
 fn IOPacketFinishEitherContext { iop -- }
-	// the final steps of IOP completion, which can be done from either DPC
+	// The final steps of IOP completion, which can be done from either DPC
 	// or APC context.
 
 	auto event

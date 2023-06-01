@@ -275,8 +275,8 @@ fn IOPageFileCreate { minpages maxpages pri initialobjecthandle path -- ok }
 	auto transfersize
 	IOTransfer_SIZEOF IOPacketHeaderPagingIO_SIZEOF + stacksize@ IOPacketLocation_SIZEOF * + transfersize!
 
-	// do an inline allocation of the pagefile, two transfer structures, and
-	// the bitmap.
+	// Do an inline allocation of the pagefile structure, two transfer
+	// structures (including an inline IOP), and the pagefile bitmap.
 
 	auto pagefile
 	IOiPageFile_SIZEOF
@@ -523,6 +523,7 @@ fn IOSwapPageFree { pno pagefile -- }
 
 	if (MmAnonTransfersAvailable@ ~~
 		pagefile@ IOiPageFile_CurrentSize + @ pagefile@ IOiPageFile_UsedCount + @ - IOPAGEFILEFREELOW >= ||)
+
 		pagefile@ IOiPageFile_TransferSize + @ // transfersize
 		pagefile@ IOiPageFile_SIZEOF + // transfer1
 		MmMPWAssessTransfers
@@ -588,11 +589,11 @@ fn IOSwapPageReadPTE { kflags pfdbe pte -- ok }
 		return
 	end
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	// XXX No synchronization here, since these are just for statistics.
+	// This means it may drop a few counts sometimes, but that's fine.
+
 	1 IOSwapPagesRead +=
 	1 MmPageInCount +=
-	rs@ HALCPUInterruptRestore
 end
 
 fn IOPageFileWriteMDL { pagecount offset mdl -- ok }
@@ -806,22 +807,23 @@ fn IOiPageFileSatisfyExtension { extension -- }
 	extension@ IOPageFileExtension_Pages + @ pages!
 
 	if (pages@ z<)
-		// absolute pagefile extension request from system; the pagefiles are
+		// Absolute pagefile extension request from system; the pagefiles are
 		// low on space but there are a lot of modified anonymous pages, so it
 		// wants to grow the pagefiles in an absolute fashion rather than
-		// relative to the current commit usage. if we did the latter, this
-		// routine would go "oh, there's plenty of commit" and immediately
-		// succeed the request without extending any pagefiles.
+		// relative to the current commit usage.
+		// If we did the latter, this routine would go "oh, there's plenty of
+		// commit" and immediately succeed the request without extending any
+		// pagefiles.
 
 		pages@ abs requiredextension!
 	end else
-		// commit extension request.
+		// This is an extension request originating from commit charge.
 
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
 		if (pages@ MmCommitUsage@ + MmCommitLimit@ <=)
-			// immediately succeed
+			// Immediately succeed the request.
 
 			ipl@ KeIPLLower
 
@@ -849,7 +851,7 @@ fn IOiPageFileSatisfyExtension { extension -- }
 		pages@ MmCommitUsage@ + MmCommitLimit@ - requiredextension!
 
 		if (avail@ requiredextension@ <)
-			// immediately fail
+			// Immediately fail the request.
 
 			ipl@ KeIPLLower
 
@@ -897,17 +899,17 @@ fn IOiPageFileTryExtendAll { extension -- ok }
 			auto count
 			[pri@]IOPageFilePriorityCount@ count!
 
-			// try to evenly distribute the extension thru-out the priority
+			// Try to evenly distribute the extension throughout the priority
 			// level.
 
 			auto extensionpart
 
 			if (tries@ 1 <)
-				// try to evenly distribute.
+				// Try to evenly distribute.
 
 				extension@ count@ 1 - + count@ / extensionpart!
 			end else
-				// we tried too many times, try all now.
+				// We tried too many times, try the entire extension now.
 
 				extension@ extensionpart!
 			end
@@ -922,7 +924,8 @@ fn IOiPageFileTryExtendAll { extension -- ok }
 					1 onesuccess!
 				end
 
-				// move pagefile to tail of priority list
+				// Move the pagefile to the tail of the priority list so that
+				// we don't try to extend it again for a while.
 
 				pagefile@ IOiPageFile_Next + @ [pri@]IOPageFilePriorityListHeads!
 
@@ -940,7 +943,7 @@ fn IOiPageFileTryExtendAll { extension -- ok }
 
 				[pri@]IOPageFilePriorityListHeads@ pagefile!
 
-				// figure out if that extension was good enough
+				// Figure out if that extension was good enough.
 
 				if (realextension@ extension@ >)
 					0 extension!
@@ -962,7 +965,7 @@ fn IOiPageFileTryExtendAll { extension -- ok }
 			end
 
 			if (onesuccess@ ~~)
-				// not even one success on this priority level, move on.
+				// Not even one success on this priority level, move on.
 
 				break
 			end
@@ -1033,9 +1036,12 @@ fn IOiPageFileTryExtend { extension pagefile -- realextension }
 
 	tryextension@ realextension!
 
-	// growing the pagefile succeeded. update the structures.
+	// Growing the pagefile succeeded. Update the structures.
 
 	realextension@ [pagefile@ IOiPageFile_Priority + @]IOPageFilePriorityExtensionSpace -=
+
+	// IPL synch is needed here to synchronize against the activity of the
+	// modified page writer.
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -1061,11 +1067,11 @@ end
 fn IOiPageFileContract { -- }
 	fnsection "PAGE$text"
 
-	// called by the worker thread every 5 seconds to scan the pagefiles and
+	// Called by a worker thread every 5 seconds to scan the pagefiles and
 	// determine if any of them should be shrunk.
 
 	if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ <)
-		// don't shrink pagefiles while pages are being dumped to disk
+		// Don't shrink pagefiles while pages are being dumped to disk.
 
 		return
 	end
@@ -1074,7 +1080,7 @@ fn IOiPageFileContract { -- }
 	MmCommitLimit@ MmCommitUsage@ - potentialcontraction!
 
 	if (potentialcontraction@ IOPAGEFILEMINIMUMEXTENSION <)
-		// if commit usage is within 512KB of the commit limit then it
+		// If commit usage is within 512KB of the commit limit, then it
 		// probably isn't worth it to bother scanning the pagefiles.
 
 		return
@@ -1114,7 +1120,7 @@ end
 fn IOiPageFileTryContractAll { contraction -- }
 	fnsection "PAGE$text"
 
-	// try to contract from the lowest priority level to the highest.
+	// Try to contract from the lowest priority level to the highest.
 
 	IOiPageFileCreateLock
 
@@ -1141,17 +1147,17 @@ fn IOiPageFileTryContractAll { contraction -- }
 				break
 			end
 
-			// try to evenly distribute the contraction thru-out the priority
+			// Try to evenly distribute the contraction thoughout the priority
 			// level.
 
 			auto contractionpart
 
 			if (tries@ 1 <)
-				// try to evenly distribute.
+				// Try to evenly distribute.
 
 				contraction@ count@ 1 - + count@ / contractionpart!
 			end else
-				// we tried too many times, try all now.
+				// We tried too many times, try all now.
 
 				contraction@ contractionpart!
 			end
@@ -1166,7 +1172,8 @@ fn IOiPageFileTryContractAll { contraction -- }
 					1 onesuccess!
 				end
 
-				// move pagefile to tail of priority list
+				// Move the pagefile to the tail of the priority list so that
+				// we don't try to contract it again for a while.
 
 				pagefile@ IOiPageFile_Next + @ [pri@]IOPageFilePriorityListHeads!
 
@@ -1184,7 +1191,7 @@ fn IOiPageFileTryContractAll { contraction -- }
 
 				[pri@]IOPageFilePriorityListHeads@ pagefile!
 
-				// figure out if that contraction was good enough
+				// Figure out if that contraction was good enough.
 
 				if (realcontraction@ contraction@ >)
 					0 contraction!
@@ -1204,7 +1211,7 @@ fn IOiPageFileTryContractAll { contraction -- }
 			end
 
 			if (onesuccess@ ~~)
-				// not even one success on this priority level, move on.
+				// Not even one success on this priority level, move on.
 
 				break
 			end
@@ -1236,8 +1243,8 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 	end
 
 	if (contraction@ MmCommitLimit@ >)
-		// this check is fine since the currently executing thread is the only
-		// one that is allowed to shrink the commit limit. others can grow it,
+		// This check is fine since the currently executing thread is the only
+		// one that is allowed to shrink the commit limit. Others can grow it,
 		// but it can only be shrunk by this one worker thread.
 
 		return
@@ -1247,8 +1254,8 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		// only contract if the new commit limit would leave a margin of >=64
-		// pages from the current commit usage. this attempts to avoid
+		// Only contract if the new commit limit would leave a margin of >=64
+		// pages from the current commit usage. This attempts to avoid
 		// excessive expansion and contraction cycles.
 
 		if (MmCommitLimit@ contraction@ - MmCommitUsage@ 64 + >=)
@@ -1259,7 +1266,7 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 			ComBitmapCheckClearBits clear!
 
 			if (clear@)
-				// chop!
+				// Chop!
 
 				contraction@ // runlength
 				pagefile@ IOiPageFile_CurrentSize + @ contraction@ - // index
@@ -1297,23 +1304,23 @@ fn IOiPageFileTryContract { contraction pagefile -- contractedby }
 end
 
 fn IOPageFileFullOrFragmented { fragmented -- }
-	// called at IPLDPC when the modified page writer discovers that a
-	// pagefile is full. this is a problem since it makes us unable to clean
-	// any more modified anonymous pages. first check to see whether there's
+	// Called at IPLDPC when the modified page writer discovers that a
+	// pagefile is full. This is a problem since it makes us unable to clean
+	// any more modified anonymous pages. First, check to see whether there's
 	// really an issue (i.e. the pagefiles are really super full), and then
 	// issue an expansion request if needed.
 
 	auto oughttohave
 
 	if (fragmented@)
-		// too fragmented, always extend by one minimum extension unit.
-		// if we were to check the pagefiles, we would likely decide they
+		// Too fragmented, always extend by one minimum extension unit.
+		// If we were to check the pagefiles, we would likely decide they
 		// have enough space already and return, which we don't want.
 
 		IOPAGEFILEMINIMUMEXTENSION oughttohave!
 	end else
-		// not enough space to clean the modified page list.
-		// figure out what the situation is and how we can resolve it.
+		// Not enough space to clean the modified page list.
+		// Figure out what the situation is and how we can resolve it.
 
 		auto i
 		0 i!
@@ -1329,7 +1336,7 @@ fn IOPageFileFullOrFragmented { fragmented -- }
 		auto used
 		0 used!
 
-		// no synchronization is required since IOPageFileCount isn't
+		// No synchronization is required since IOPageFileCount isn't
 		// incremented until a pagefile has been completely initialized.
 
 		while (i@ IOPageFileCount@ <)
@@ -1347,7 +1354,7 @@ fn IOPageFileFullOrFragmented { fragmented -- }
 			return
 		end
 
-		// yes, there is a problem, we ought to extend the pagefiles.
+		// Yes, there is a problem, we ought to extend the pagefiles.
 
 		total@ oughttohave -=
 
@@ -1360,8 +1367,8 @@ fn IOPageFileFullOrFragmented { fragmented -- }
 		end
 	end
 
-	// negative pages indicates an absolute extension request.
-	// positive means relative to current commit usage, which we don't
+	// Negative pages indicates an absolute extension request.
+	// Positive means relative to current commit usage, which we don't
 	// want here.
 
 	IPLDPC // ipl

@@ -421,41 +421,24 @@ fn ObObjectReferenceByHandleProcess { type handle process -- access object ok }
 end
 
 fn ObiObjectHandleCountIncrement { object -- oldcount }
-	auto npheader
-	object@ ObiCommonHeader_SIZEOF - ObiCommonHeader_NonpagedHeader + @ npheader!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	npheader@ ObiNonpagedHeader_HandleCount + @ oldcount!
-
-	oldcount@ 1 + npheader@ ObiNonpagedHeader_HandleCount + !
-
-	rs@ HALCPUInterruptRestore
+	1 // increment
+	object@ ObiCommonHeader_SIZEOF -
+	ObiCommonHeader_NonpagedHeader + @
+	ObiNonpagedHeader_HandleCount + // ptr
+	KeInterlockedIncrement oldcount!
 end
 
 fn ObiObjectHandleCountDecrement { object -- oldcount }
 	auto npheader
 	object@ ObiCommonHeader_SIZEOF - ObiCommonHeader_NonpagedHeader + @ npheader!
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	npheader@ ObiNonpagedHeader_HandleCount + @ oldcount!
+	-1 npheader@ ObiNonpagedHeader_HandleCount + KeInterlockedIncrement oldcount!
 
 	if (DEBUGCHECKS)
 		if (oldcount@ 0 ==)
 			"ObiObjectHandleCountDecrement: attempt to decrement below 0\n" KeCrash
 		end
-
-		// if (oldcount@ object@ ObHeader_PointerCount + @ ==)
-		// 	"ObiObjectHandleCountDecrement: attempt to decrement below pointer count\n" KeCrash
-		// end
 	end
-
-	oldcount@ 1 - npheader@ ObiNonpagedHeader_HandleCount + !
-
-	rs@ HALCPUInterruptRestore
 
 	if (oldcount@ 1 ==)
 		if (object@ ObiCommonHeader_SIZEOF - ObiCommonHeader_PagedHeader + @ ObiPagedHeader_DirectoryObject + @)
@@ -516,10 +499,6 @@ fn ObObjectDereferenceByPointer { object -- oldcount }
 		if (oldcount@ 0 ==)
 			"ObObjectDereferenceByPointer: underflow\n" KeCrash
 		end
-
-		// if (oldcount@ 1 - object@ ObHeader_HandleCount + @ <)
-		// 	"ObObjectDereferenceByPointer: pointer count < handle count\n" KeCrash
-		// end
 	end
 
 	oldcount@ 1 - npheader@ ObiNonpagedHeader_PointerCount + !
@@ -584,17 +563,17 @@ fn ObReaperEnqueue { object npheader -- }
 
 	object@ npheader@ ObiNonpagedHeader_HandleCount + !
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	ObReaperListHead@ npheader@ ObiNonpagedHeader_PointerCount + !
 	npheader@ ObReaperListHead!
 
+	rs@ HALCPUInterruptRestore
+
 	0 // priboost
 	PsReaperEvent // event
 	KeEventSignal
-
-	ipl@ KeIPLLower
 end
 
 fn ObReaperPop { -- object }
@@ -826,18 +805,24 @@ fn ObSetSecurity { uid gid permissions handle -- ok }
 
 		if (uid@ -1 ~=)
 			// changing UID
+
 			if (process@ PsProcess_PagedArea + @ PsProcessPaged_UID + @ uid@ ~=)
 				// not setting to the same UID, forbidden
+
 				STATUS_FORBIDDEN_OPERATION ok!
+
 				return
 			end
 		end
 
 		if (gid@ -1 ~=)
 			// changing GID
+
 			if (process@ PsProcess_PagedArea + @ PsProcessPaged_GID + @ gid@ ~=)
 				// not setting to the same GID, forbidden
+
 				STATUS_FORBIDDEN_OPERATION ok!
+
 				return
 			end
 		end
@@ -857,6 +842,7 @@ fn ObSetSecurity { uid gid permissions handle -- ok }
 	if (notadmin@)
 		if (object@ ObObjectPagedHeader ObiPagedHeader_UID + @
 			process@ PsProcess_PagedArea + @ PsProcessPaged_UID + @ ~=)
+
 			// not the owner of the object, forbidden
 			
 			object@ ObObjectDereferenceByPointer drop

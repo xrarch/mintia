@@ -28,6 +28,9 @@ buffer Fox32VsyncDPC KeDPC_SIZEOF
 
 const VSYNC_INTERVAL_MS 17 // roughly
 
+var Fox32BootTimestamp 0
+var Fox32BootUptime 0
+
 const RTC_PORT       0x80000700
 const RTC_PORT_YEAR  0
 const RTC_PORT_MONTH 1
@@ -38,7 +41,7 @@ const RTC_PORT_SEC   5
 const RTC_PORT_UPTME 6
 const RTC_PORT_ISDST 7
 
-fn (HALRTCQueryF) DriverRTCQuery { time -- }
+fn Fox32MakeUnix { -- }
 	// read fox32 RTC and convert the datestamp to a unix epoch timestamp.
 
 	auto year
@@ -87,9 +90,19 @@ fn (HALRTCQueryF) DriverRTCQuery { time -- }
 		3600 secpart -=
 	end
 
-	secpart@ time@ KeTime_SecPart + !
+	secpart@ Fox32BootTimestamp!
 
-	RTC_PORT RTC_PORT_UPTME | HALfox32In 1000 % time@ KeTime_MsPart + !
+	RTC_PORT RTC_PORT_UPTME | HALfox32In Fox32BootUptime!
+end
+
+fn (HALRTCQueryF) DriverRTCQuery { time -- }
+	auto uptime
+	RTC_PORT RTC_PORT_UPTME | HALfox32In uptime!
+
+	Fox32BootUptime@ uptime -=
+
+	Fox32BootTimestamp@ uptime@ 1000 / + time@ KeTime_SecPart + !
+	uptime@ 1000 % time@ KeTime_MsPart + !
 end
 
 fn (HALRTCSetF) DriverRTCSet { time -- ok }
@@ -109,6 +122,8 @@ fn (FDriverInit) DriverInit { stage -- ok }
 
 	if (stage@ STAGE_PRETASKING ==)
 		1 HALRTCIsLocalTime!
+
+		Fox32MakeUnix
 
 		VSYNC_INTERVAL_MS HALRTCInterval!
 		pointerof DriverRTCQuery HALRTCQueryFunction!

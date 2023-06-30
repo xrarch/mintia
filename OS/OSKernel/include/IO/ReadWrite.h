@@ -14,8 +14,8 @@ extern IODirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 
 extern IODirectoryUnlink { name filehandle -- ok }
 
-extern IODirectoryRead { dirent filehandle -- ok }
-extern IODirectoryReadObject { dirent fileobject -- ok }
+extern IODirectoryRead { count dirent filehandle -- readcount ok }
+extern IODirectoryReadObject { count dirent fileobject -- readcount ok }
 
 // direct transfer helpers
 

@@ -156,29 +156,49 @@ fn OSFileSetInformation { info filehandle -- ok }
 	kinfo@ filehandle@ IOFileSetInformation ok!
 end
 
-fn OSDirectoryRead { dirent filehandle -- ok }
+fn OSDirectoryRead { count dirent filehandle -- readcount ok }
 	fnsection "PAGE$text"
 
-	auto kdirent
-	OSDirectoryEntry_SIZEOF alloc kdirent!
+	// allocate an MDL to pin the user buffer with
 
-	kdirent@ // ptr
-	OSDirectoryEntry_SIZEOF // size
-	0 // word
-	memset
-
-	kdirent@ // dirent
-	filehandle@ // filehandle
-	IODirectoryRead ok!
+	auto mdl
+	count@ OSDirectoryEntry_SIZEOF * // length
+	dirent@ // vaddr
+	0 // kflags
+	MmMDLAllocateWithQuota ok! mdl!
 
 	if (ok@)
 		return
 	end
 
-	dirent@ // dest
-	kdirent@ // src
-	OSDirectoryEntry_SIZEOF // size
-	KeSafeCopyOut ok!
+	1 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		mdl@ MmMDLFree
+
+		return
+	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		mdl@ MmMDLUnpin
+
+		mdl@ MmMDLFree
+
+		return
+	end
+
+	count@ // count
+	mdl@ MmMDLHeader_MappedAddress + @ // dirent
+	filehandle@ // filehandle
+	IODirectoryRead ok! readcount!
+
+	mdl@ MmMDLUnmap
+	mdl@ MmMDLUnpin
+	mdl@ MmMDLFree
 end
 
 fn OSPageFileCreateRelative { minpages maxpages pri initialobjecthandle path -- ok }

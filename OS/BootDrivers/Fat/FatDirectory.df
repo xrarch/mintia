@@ -27,8 +27,10 @@
 
 #include "Fat.h"
 
-fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nextseek ok }
+fn (IODispatchReadDirectoryFunction) FatReadDirectory { count seek dirent fcb -- nextseek readcount ok }
 	fnsection "PAGE$text"
+
+	0 readcount!
 
 	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
 		fcb@ IOFileControlBlockCacheCheck ok! drop
@@ -38,23 +40,39 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { seek dirent fcb -- nexts
 		end
 	end
 
+	auto bcb
+	0 bcb!
+
+	seek@ nextseek!
+
 	fcb@ IOFileControlBlockLockShared ok!
 
 	if (ok@)
 		return
 	end
 
-	auto bcb
-	0 bcb!
+	while (count@)
+		1 // includelong
+		nextseek@ // seek
+		dirent@ // dirent
+		fcb@ // fcb
+		bcb@ // lastbcb
+		FatDirectoryGetEntry ok! nextseek! drop bcb! drop
 
-	auto fatdirent
+		if (ok@)
+			if (ok@ STATUS_END_OF_FILE == readcount@ &&)
+				// at least one dirent was read, so report this as successful
 
-	1 // includelong
-	seek@ // seek
-	dirent@ // dirent
-	fcb@ // fcb
-	bcb@ // lastbcb
-	FatDirectoryGetEntry ok! nextseek! drop bcb! drop
+				0 ok!
+			end
+
+			break
+		end
+
+		1 count -=
+		1 readcount +=
+		OSDirectoryEntry_SIZEOF dirent +=
+	end
 
 	if (bcb@)
 		bcb@ VcBufferDecrementMapAndUnpin

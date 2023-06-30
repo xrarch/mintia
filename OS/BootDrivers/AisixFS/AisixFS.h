@@ -146,7 +146,7 @@ extern AFSDeleteObject { object -- ok }
 extern AFSReadWriteFile { iopl -- done ok }
 
 extern AFSDirectoryAllocateEntry { fcb -- dirent bcb ok }
-extern AFSReadDirectory { seek dirent fcb -- nextseek ok }
+extern AFSReadDirectory { count seek dirent fcb -- nextseek readcount ok }
 extern AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 extern AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }
 

@@ -303,7 +303,7 @@ extern FatMountReference { mount -- }
 extern FatMountDereference { mount -- }
 
 extern FatReadWriteFile { iopl -- done ok }
-extern FatReadDirectory { seek dirent fcb -- nextseek ok }
+extern FatReadDirectory { count seek dirent fcb -- nextseek readcount ok }
 extern FatOpen { access fileobject -- ok }
 extern FatClose { lasthandlecount access fileobject -- ok }
 extern FatTruncate { newsize zero flags fcb -- ok }

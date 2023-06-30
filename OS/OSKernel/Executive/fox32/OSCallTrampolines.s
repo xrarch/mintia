@@ -1664,12 +1664,20 @@ OSTOSDirectoryRead:
 	add  t0, 8 ;t2
 	mov  a1, [t0]
 
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
 	call OSDirectoryRead
 
 
 	mov  t0, s17
 	add  t0, 4 ;t1
 	mov  [t0], a0
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  [t0], a1
 
 	pop  fp
 	ret

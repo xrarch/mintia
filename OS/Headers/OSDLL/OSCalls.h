@@ -88,7 +88,7 @@ extern OSFileCancelIO { wait filehandle -- ok }
 
 extern OSDirectoryRename { srcname srcfilehandle destname destfilehandle -- ok }
 extern OSDirectoryUnlink { name filehandle -- ok }
-extern OSDirectoryRead { dirent filehandle -- ok }
+extern OSDirectoryRead { count dirent filehandle -- readcount ok }
 
 extern OSPageFileCreateRelative { minpages maxpages pri initialobjecthandle path -- ok }
 extern OSPageFileQuery { query id -- ok }

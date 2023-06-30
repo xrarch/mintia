@@ -100,9 +100,11 @@ fn Main { ... -- ret }
 	end
 end
 
+const READCOUNT 32
+
 buffer FileInformation OSFileInformation_SIZEOF
 buffer ObjectQuery OSObjectQuery_SIZEOF
-buffer DirectoryEntry OSDirectoryEntry_SIZEOF
+buffer DirectoryEntry (OSDirectoryEntry_SIZEOF READCOUNT *)
 
 fn FileQueryHandle { handle -- ok }
 	handle@ // handle
@@ -205,7 +207,7 @@ end
 
 var Gap 26
 
-const PATHBUFSZ 128
+const PATHBUFSZ OSFILEPATHMAX
 buffer Pathbuf PATHBUFSZ
 
 fn ListDir { path handle -- }
@@ -225,9 +227,11 @@ fn ListDir { path handle -- }
 	path@ strlen pl!
 
 	while (1)
+		auto direntcount
+		READCOUNT // count
 		DirectoryEntry // dirent
 		handle@ // filehandle
-		OSDirectoryRead ok!
+		OSDirectoryRead ok! direntcount!
 
 		if (ok@ STATUS_END_OF_FILE ==)
 			break
@@ -235,44 +239,34 @@ fn ListDir { path handle -- }
 			ok@ OSStatusGetName path@ "ls: couldn't read %s: %s\n" OSError
 		end
 
-		if (DirectoryEntry OSDirectoryEntry_Name + gb '.' ~= AFlag@ ||)
-			auto buf
-			auto alloced
-			0 alloced!
+		auto dirent
+		DirectoryEntry dirent!
 
-			auto namelen
-			DirectoryEntry OSDirectoryEntry_Name + strlen namelen!
+		while (direntcount@)
+			if (dirent@ OSDirectoryEntry_Name + gb '.' ~= AFlag@ ||)
+				auto namelen
+				dirent@ OSDirectoryEntry_Name + strlen namelen!
 
-			if (namelen@ pl@ + 2 + PATHBUFSZ >=)
-				// avoid using heap if possible
-				namelen@ pl@ + 2 + Malloc buf!
-				1 alloced!
-			end else
+				auto buf
 				Pathbuf buf!
-			end
 
-			buf@ path@ strcpy
+				buf@ path@ strcpy
 
-			'/' buf@ pl@ + sb
+				'/' buf@ pl@ + sb
 
-			buf@ pl@ + 1 + DirectoryEntry OSDirectoryEntry_Name + strcpy
+				buf@ pl@ + 1 + dirent@ OSDirectoryEntry_Name + strcpy
 
-			buf@ FileQueryPath ok!
-			if (ok@)
-				ok@ OSStatusGetName buf@ "ls: couldn't stat %s: %s\n" OSGetStdErr FPrintf
+				buf@ FileQueryPath ok!
 
-				if (alloced@)
-					buf@ Free
+				if (ok@)
+					ok@ OSStatusGetName buf@ "ls: couldn't stat %s: %s\n" OSGetStdErr FPrintf
+				end else
+					dirent@ OSDirectoryEntry_Name + EInfo
 				end
-
-				continue
 			end
 
-			DirectoryEntry OSDirectoryEntry_Name + EInfo
-
-			if (alloced@)
-				buf@ Free
-			end
+			1 direntcount -=
+			OSDirectoryEntry_SIZEOF dirent +=
 		end
 	end
 

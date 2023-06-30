@@ -979,10 +979,12 @@ OSDirectoryRead:
 
 	mov  t1, a0
 	mov  t2, a1
+	mov  t3, a2
 
 	mov  t0, 59
 	int  0x30
 
+	mov  a1, t2
 	mov  a0, t1
 
 	pop  fp

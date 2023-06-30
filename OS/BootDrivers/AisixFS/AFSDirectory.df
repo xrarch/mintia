@@ -130,7 +130,8 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 
 	if (DEBUGCHECKS)
 		if (fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ OSFILETYPE_DIRECTORY ~=)
-			// should have been caught by the IO system code
+			// should have been caught by the IO system
+
 			"AFSDirectoryGetEntry: not a directory\n" KeCrash
 		end
 	end
@@ -209,8 +210,10 @@ fn AFSDirectoryGetEntry { seek afsdirent fcb -- nextseek ok }
 	STATUS_END_OF_FILE ok!
 end
 
-fn (IODispatchReadDirectoryFunction) AFSReadDirectory { seek dirent fcb -- nextseek ok }
+fn (IODispatchReadDirectoryFunction) AFSReadDirectory { count seek dirent fcb -- nextseek readcount ok }
 	fnsection "PAGE$text"
+
+	0 readcount!
 
 	if (fcb@ IOFileControlBlock_CacheInfoBlock + @ ~~)
 		fcb@ IOFileControlBlockCacheCheck ok! drop
@@ -220,30 +223,44 @@ fn (IODispatchReadDirectoryFunction) AFSReadDirectory { seek dirent fcb -- nexts
 		end
 	end
 
+	auto afsdirent
+	AFSDirEnt_SIZEOF alloc afsdirent!
+
+	seek@ nextseek!
+
 	fcb@ IOFileControlBlockLockShared ok!
 
 	if (ok@)
 		return
 	end
 
-	auto afsdirent
-	AFSDirEnt_SIZEOF alloc afsdirent!
+	while (count@)
+		nextseek@ // seek
+		afsdirent@ // afsdirent
+		fcb@ // fcb
+		AFSDirectoryGetEntry ok! nextseek!
 
-	seek@ // seek
-	afsdirent@ // afsdirent
-	fcb@ // fcb
-	AFSDirectoryGetEntry ok! nextseek!
+		if (ok@)
+			if (ok@ STATUS_END_OF_FILE == readcount@ &&)
+				// at least one dirent was read, so report this as successful
 
-	fcb@ IOFileControlBlockUnlock
+				0 ok!
+			end
 
-	if (ok@)
-		return
+			break
+		end
+
+		dirent@ OSDirectoryEntry_Name + // dest
+		afsdirent@ AFSDirEnt_name + // src
+		63 // max
+		strncpy
+
+		OSDirectoryEntry_SIZEOF dirent +=
+		1 readcount +=
+		1 count -=
 	end
 
-	dirent@ OSDirectoryEntry_Name + // dest
-	afsdirent@ AFSDirEnt_name + // src
-	63 // max
-	strncpy
+	fcb@ IOFileControlBlockUnlock
 end
 
 fn AFSDirectoryFindEntry { name dirfcb -- dirent bcb ok }

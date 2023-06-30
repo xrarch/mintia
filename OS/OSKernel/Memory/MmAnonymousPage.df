@@ -305,6 +305,9 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		end
 
 		if (localpteaddr@ -1 ==)
+			// -1 is a special value that indicates we want to release locks
+			// but we don't actually have a local PTE.
+
 			0 localpteaddr!
 		end
 	end
@@ -390,6 +393,8 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		pfdbe@ MmEvictablePageReference drop
 
 		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+			// IOINPROGRESS flag is set, so wait for IO completion.
+
 			lockprocess@ // process
 			pri@ CANBLOCK | // pri
 			pfdbe@ // pfdbe
@@ -405,18 +410,19 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			// working set since the owner of this IO is going to do that.
 
 			STATUS_REFAULT ok!
+		end elseif (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+			// this is a page table, so make it writable now, since we can't
+			// tolerate taking write faults on PTEs.
+
+			phyaddr@ // phyaddr
+			PTE_V PTE_W | PTE_D | // flags
+			pteaddr@ // pteaddr
+			MiPTEUpdate drop drop
 		end else
-			if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
-				phyaddr@ // phyaddr
-				PTE_V PTE_W | PTE_D | // flags
-				pteaddr@ // pteaddr
-				MiPTEUpdate drop drop
-			end else
-				phyaddr@ // phyaddr
-				PTE_V // flags
-				pteaddr@ // pteaddr
-				MiPTEUpdate drop drop
-			end
+			phyaddr@ // phyaddr
+			PTE_V // flags
+			pteaddr@ // pteaddr
+			MiPTEUpdate drop drop
 		end
 	end elseif (capturedpte@ PTE_INSWAP &)
 		// page was written to swap and then evicted. we are responsible
@@ -444,12 +450,20 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		capturedpte@ pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
 		if (refpfdbe@)
+			// caller gave us a PFDBE to reference in the case that the PTE
+			// was INSWAP; the PFDBE is usually that of a page table.
+
 			refpfdbe@ MmEvictablePageReference drop
 		end
 
 		PAGESHIFT phyaddr <<=
 
+		// mark the page as undergoing paging IO, so that collided threads can
+		// wait for us to finish.
+
 		pfdbe@ MmEvictablePageStartIO
+
+		// create a transition PTE to indicate the ongoing IO with.
 
 		auto transitionpte
 
@@ -458,6 +472,10 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		end else
 			phyaddr@ PTE_TRANSITION | transitionpte!
 		end
+
+		// set the transition PTE at both the real PTE (which may be either a
+		// prototype PTE or a page table PTE) and the local PTE (which is only
+		// ever a page table PTE).
 
 		transitionpte@ pteaddr@!
 
@@ -471,7 +489,11 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		IPLAPC KeIPLLower
 
 		if (evictflag@ MMEVICTFLAG_PRIVATE &)
+			// private pages need some special treatment.
+
 			if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+				// page table pages need special initialization.
+
 				vaddr@ // vaddr
 				pfdbe@ // pfdbe
 				process@ // process
@@ -480,6 +502,11 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 				process@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
 				vaddr@ pfdbe@ MiPageFrameEntryAnonymous_VirtualAddress + !
 			end
+
+			// the prototype PTE address recorded in a private page is a
+			// physical address in order to allow access from any context via
+			// quick mapping, to allow reclamation to work correctly, since
+			// these PTEs are located in page tables.
 
 			pfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
 			pfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + !
@@ -495,6 +522,12 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (pri@ SYSTEMSPACE &)
 			IOKFLAG_SYSSPC kflags |=
 		end
+
+		// issue the page-in IO.
+		// TODO streamline and unroll a lot of this stuff to avoid unnecessary
+		// violence to the icache and give the ability to cluster page-ins in
+		// a more general manner, which will allow reducing overhead of things
+		// like VAD lookup and mutex locking...
 
 		kflags@ // kflags
 		pfdbe@ // pfdbe
@@ -521,41 +554,64 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 
 			if (localpteaddr@)
 				if (localpteaddr@@ transitionpte@ ~=)
+					// the local PTE was deleted, same basic case.
+
 					STATUS_REFAULT ok!
 				end
 			end
 		end elseif (pteaddr@@ transitionpte@ ==)
-			// the PTE didn't get deleted, but there was an error, so reset.
+			// the PTE didn't get deleted, but there was an error, so reset it.
 			// delete the pfdbe since that hasn't been done.
 
-			// prevent the swap page from being deleted.
+			// prevent the swap page from being freed.
+
 			SWAPPTE_DEMANDZERO pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
 			// restore the old PTE.
+
 			capturedpte@ pteaddr@!
+
+			// mark the pfdbe for deletion.
 
 			pfdbe@ MiAnonymousPageDelete
 		end
 
 		if (ok@)
+			// in the case of any error, reset the local PTE.
+
 			if (localpteaddr@)
 				if (localpteaddr@@ transitionpte@ ==)
 					capturedlocalpte@ pteaddr@!
 				end
 			end
 
+			// if there was a pfdbe we were asked to reference, dereference
+			// it since we didn't accomplish anything here.
+
 			if (refpfdbe@)
 				refpfdbe@ MmEvictablePageDereference drop
 			end
+
+			// dereference the pfdbe. if it was marked for deletion, this is
+			// where it gets put on the free list.
 
 			pfdbe@ MmEvictablePageDereference drop
 
 			return
 		end
 
+		// we successfully performed a page-in, so increment the hard page
+		// fault count.
+
 		1 MmHardPageFaultCount +=
 
+		// update the PTE to reflect the new location of the page in physical
+		// memory.
+
 		if (vaddr@ PAGETABLE >= vaddr@ SYSPAGETABLE < &&)
+			// this is a page table, so make it writable now, since we can't
+			// tolerate taking write faults on PTEs.
+
 			phyaddr@ // phyaddr
 			PTE_V PTE_W | PTE_D | // flags
 			pteaddr@ // pteaddr

@@ -106,15 +106,13 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 
 		pfdbe@ MmEvictablePageReference drop
 
-		while (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb
+		if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb
 			MMEVICTFLAG_VALID MMEVICTFLAG_IOINPROGRESS | & MMEVICTFLAG_IOINPROGRESS ==)
-			// this page is in transition. wait for the I/O to complete.
 
-			// XXX there was a race condition here where when a page read
-			// failed and left the page invalid but satisfied, the wait here
-			// would be satisfied but then it wouldn't set the IOINPROGRESS
-			// flag because it was written as an if elseif. these kinds of
-			// subtle bugs are extremely important to be vigilant for...
+			// this page is in transition. wait for the I/O to complete.
+			// we check for the valid flag to be clear, since if its set, that
+			// means that the IOINPROGRESS flag actually indicates page-out
+			// rather than page-in, and we only have to wait for the latter.
 
 			process@ // process
 			pri@ // pri
@@ -123,8 +121,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 
 			if (ok@)
 				pfdbe@ MmEvictablePageDereference drop
-
-				break
 			end elseif (process@)
 				pfdbe@ MmEvictablePageDereference drop
 
@@ -137,6 +133,14 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 		if (ok@ ~~)
 			if (iointent@)
 				if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
+					// the caller has an intent to perform page-in IO on this
+					// page if it isn't already valid, and the page isn't
+					// valid, so mark the page as IOINPROGRESS. this has to be
+					// done atomically here before we drop IPL, otherwise
+					// someone else can swoop in and try to own the IO after
+					// we already determined that we didn't have to wait
+					// above.
+
 					pfdbe@ MmEvictablePageStartIO
 				end
 			end
@@ -150,6 +154,12 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 	end
 
 	// not in the cache -- allocate a page for it.
+
+	// we want to allocate a page of zeroes if this is either an incomplete
+	// page of data (due to this being the final page of the file and the size
+	// of the file not being page-aligned), or if the caller has specifically
+	// requested it. the former is for security reasons, and the latter is
+	// used as an optimization during writes of full pages.
 
 	auto zeroes
 	filesize@ offset@ - PAGESIZE <
@@ -167,6 +177,9 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 	MmEvictablePageGet ok! drop pfdbe!
 
 	if (iointent@)
+		// we definitely own this IO, since we're the ones who created the
+		// page, so mark the page as IOINPROGRESS.
+
 		pfdbe@ MmEvictablePageStartIO
 	end
 
@@ -178,6 +191,8 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 		return
 	end
 
+	// initialize this new file cache PFDBE.
+
 	if (kflags@ IOKFLAG_ZEROES &)
 		pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_VALID |
 		pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + sb
@@ -187,6 +202,8 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 	fcb@ pfdbe@ IOiPageFrameEntryCache_FCB + !
 
 	1 IOCachePagesUsed +=
+
+	// insert the PFDBE in the cacheblock splay tree for this file.
 
 	pfdbe@ IOiPageFrameEntryCache_Parent + // node
 	cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr

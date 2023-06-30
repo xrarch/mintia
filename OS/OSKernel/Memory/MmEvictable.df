@@ -426,6 +426,9 @@ fn MiEvictSinglePage { -- pfdbe ok }
 end
 
 fn MmEvictablePageWait { process pri pfdbe -- ok }
+	// wait for IO to complete on a page.
+	// entered at IPLDPC, and assumes the PFDBE's refcount is biased.
+
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"MmEvictablePageWait: ipl != IPLDPC\n" KeCrash
@@ -438,10 +441,6 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 
 	auto current
 	KeThreadCurrent@ current!
-
-	// wait for IO to complete on a cache page.
-
-	// entered at IPLDPC
 
 	0 ok!
 
@@ -489,6 +488,10 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 			eventblock@ MmFree
 			pfdbe@ MiPageFrameEntryWaitable_EventBlock + @ eventblock!
 		end else
+			// our eventblock is the one that this, and any subsequent
+			// collided threads, will use to wait for IO completion.
+			// initialize it.
+
 			eventblock@ pfdbe@ MiPageFrameEntryWaitable_EventBlock + !
 
 			0 // signaled
@@ -509,15 +512,23 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 	end
 
 	if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
-		// i am a memory privileged thread! before i block and potentially
+		// I am a memory privileged thread! before I block and potentially
 		// deadlock the system, sneeze on the thread performing IO on this
 		// page and give it the memory privilege sickness temporarily.
+
+		// XXX this is pretty much a hack that is only needed since pagefile
+		// metadata isn't currently pinned, which means the modified page
+		// writer can collide with a normal user thread on a page of FAT or
+		// whatever other filesystem metadata. this can go away as soon as that
+		// situation is resolved (it's on the TODO list for after the rewrite).
 
 		if (eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + @ ~~)
 			1 eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + !
 			1 pfdbe@ MiPageFrameEntryWaitable_OwningThread + @ PsThread_MemoryPrivilegedCount + +=
 		end
 	end
+
+	// bias the eventblock refcount so it can't go away while we're using it.
 
 	1 eventblock@ MiEvictablePageEvent_References + +=
 
@@ -539,6 +550,9 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 
 	IPLDPC KeIPLRaise drop
 
+	// unbias the eventblock refcount and free it if we're the last waiter to
+	// exit here.
+
 	1 eventblock@ MiEvictablePageEvent_References + -=
 
 	if (eventblock@ MiEvictablePageEvent_References + @ ~~)
@@ -547,6 +561,10 @@ fn MmEvictablePageWait { process pri pfdbe -- ok }
 end
 
 fn MmEvictablePageSatisfy { pfdbe -- }
+	// satisfy the paging IO for this PFDBE. wakes up any waiters that may
+	// have accumulated, and removes the IOINPROGRESS flag. this is used to
+	// alert waiters for both page-in and writeback completion.
+
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"MmEvictablePageSatisfy: ipl != IPLDPC \n" KeCrash
@@ -565,6 +583,9 @@ fn MmEvictablePageSatisfy { pfdbe -- }
 
 	if (eventblock@)
 		if (eventblock@ MiEvictablePageEvent_WasMemoryPrivileged + @)
+			// strip ourselves of the temporary memory privilege that one of
+			// the waiters gave us.
+
 			1 KeThreadCurrent@ PsThread_MemoryPrivilegedCount + -=
 		end
 
@@ -575,6 +596,9 @@ fn MmEvictablePageSatisfy { pfdbe -- }
 end
 
 fn MmEvictablePageStartIO { pfdbe -- }
+	// mark the PFDBE as IOINPROGRESS and record the current thread as the
+	// owner of the page IO. this is used for both page-in and writeback.
+
 	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS |
 	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 

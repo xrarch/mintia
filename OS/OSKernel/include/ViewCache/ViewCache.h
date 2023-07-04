@@ -8,7 +8,6 @@ const FILEVIEWNUMBERMASK (FILEVIEWOFFSETMASK ~)
 
 const VCBCBTYPE_NORMAL    1 // allocated from nonpaged pool, mapped into VIEWSPACE
 const VCBCBTYPE_PERMANENT 2 // pre-allocated as part of a cacheblock
-const VCBCBTYPE_LARGE     3 // allocated from nonpaged pool, mapped into POOLSPACE
 
 struct VcBuffer
 // transparent

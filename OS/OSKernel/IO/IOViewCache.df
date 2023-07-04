@@ -81,25 +81,18 @@ fn VcBufferFree { bcb -- }
 	// if the BCB is non-permanent, free it.
 
 	if (bcb@ VcBuffer_WindowAddress + @)
-		if (bcb@ VcBuffer_Type + @ VCBCBTYPE_LARGE ==)
-			bcb@ VcBuffer_Length + @ // length
-			bcb@ VcBuffer_WindowAddress + @ // vaddr
-			PsSystemProcess@ // processobject
-			MmUnmapViewProcess drop
-		end else
-			bcb@ MmBufferUnmap
+		bcb@ MmBufferUnmap
 
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
 
-			bcb@ VcBuffer_Parent + // node
-			bcb@ VcBuffer_FileControlBlock + @ IOFileControlBlock_CacheInfoBlock + @ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
-			ExSplayTreeRemove
+		bcb@ VcBuffer_Parent + // node
+		bcb@ VcBuffer_FileControlBlock + @ IOFileControlBlock_CacheInfoBlock + @ IOiCacheInfoBlock_BCBTreeRoot + // rootptr
+		ExSplayTreeRemove
 
-			ipl@ KeIPLLower
+		ipl@ KeIPLLower
 
-			bcb@ VcBuffer_WindowAddress + @ VcWindowFree
-		end
+		bcb@ VcBuffer_WindowAddress + @ VcWindowFree
 	end
 
 	if (bcb@ VcBuffer_Type + @ VCBCBTYPE_PERMANENT ==)
@@ -301,9 +294,6 @@ fn VcBufferDecrementMapCount { bcb -- oldcount }
 	// decrement the MapCount for the BCB. if it became zero, insert it into
 	// the reclaimable list.
 
-	auto free
-	0 free!
-
 	auto rs
 	HALCPUInterruptDisable rs!
 
@@ -318,81 +308,27 @@ fn VcBufferDecrementMapCount { bcb -- oldcount }
 	oldcount@ 1 - bcb@ VcBuffer_MapCountI + si
 
 	if (oldcount@ 1 ==)
-		if (bcb@ VcBuffer_Type + @ VCBCBTYPE_LARGE ~=)
-			// insert into reclaimable list
+		// insert into reclaimable list
 
-			auto t
-			VcBufferReclaimListTail@ t!
+		auto t
+		VcBufferReclaimListTail@ t!
 
-			if (t@ ~~)
-				0 bcb@ VcBuffer_ReclaimNext + !
-				0 bcb@ VcBuffer_ReclaimPrev + !
+		if (t@ ~~)
+			0 bcb@ VcBuffer_ReclaimNext + !
+			0 bcb@ VcBuffer_ReclaimPrev + !
 
-				bcb@ VcBufferReclaimListHead!
-				bcb@ VcBufferReclaimListTail!
-			end else
-				0 bcb@ VcBuffer_ReclaimNext + !
-
-				t@ bcb@ VcBuffer_ReclaimPrev + !
-				bcb@ t@ VcBuffer_ReclaimNext + !
-				bcb@ VcBufferReclaimListTail!
-			end
+			bcb@ VcBufferReclaimListHead!
+			bcb@ VcBufferReclaimListTail!
 		end else
-			1 free!
+			0 bcb@ VcBuffer_ReclaimNext + !
+
+			t@ bcb@ VcBuffer_ReclaimPrev + !
+			bcb@ t@ VcBuffer_ReclaimNext + !
+			bcb@ VcBufferReclaimListTail!
 		end
 	end
 
 	rs@ HALCPUInterruptRestore
-
-	if (free@)
-		bcb@ VcBufferFree
-	end
-end
-
-fn VcBufferLargeMap { offset length fileobject -- vaddr bcb ok }
-	// XXX this should probably go away since it didn't end up being used for
-	// anything; this could simplify a lot of the code in here if it doesn't
-	// need to account for the "large BCB" thing.
-
-	VcBuffer_SIZEOF // bytes
-	'VcBl' // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! bcb!
-
-	if (ok@)
-		return
-	end
-
-	VCBCBTYPE_LARGE bcb@ VcBuffer_Type + !
-	fileobject@ IOFile_FileControlBlock + @ bcb@ VcBuffer_FileControlBlock + !
-
-	1 bcb@ VcBuffer_MapCountI + si
-
-	length@ PAGEOFFSETMASK + PAGENUMBERMASK & bcb@ VcBuffer_Length + !
-
-	0 bcb@ VcBuffer_Parent + !
-	0 bcb@ VcBuffer_LeftChild + !
-	0 bcb@ VcBuffer_RightChild + !
-	offset@ PAGENUMBERMASK & bcb@ VcBuffer_FileOffset + !
-
-	length@ PAGEOFFSETMASK + PAGENUMBERMASK & // length
-	0 // startva
-	offset@ PAGENUMBERMASK & // sectionoffset
-	fileobject@ // mappedobject
-	PsSystemProcess@ // processobject
-	PAGEACCESS_READ PAGEACCESS_WRITE | // pageprotection
-	0 // flags
-	MmMapViewProcessObject ok! vaddr!
-
-	if (ok@)
-		bcb@ MmFree
-
-		return
-	end
-
-	vaddr@ bcb@ VcBuffer_WindowAddress + !
-
-	offset@ PAGEOFFSETMASK & vaddr +=
 end
 
 fn VcBufferDirty { bcb -- }
@@ -402,8 +338,6 @@ end
 fn VcCacheInfoBlockTruncate { newsize cacheblock -- }
 	// unmap and free all the BCBs in the cacheblock's splay tree that contain
 	// the offset at newsize.
-	// this does not remove "LARGE" BCBs since those are special-purpose and
-	// should have all been removed by now.
 
 	// this is only called from IOCacheInfoBlockTruncate. the corresponding
 	// FCB must have been locked exclusive.
@@ -469,48 +403,6 @@ fn VcCacheInfoBlockTruncate { newsize cacheblock -- }
 	end
 
 	ipl@ KeIPLLower
-end
-
-fn VcFileMap { offset length fileobject -- vaddr bcb ok }
-	// expects FCB to be locked either shared or exclusive; truncation must be
-	// blocked out.
-
-	auto fcb
-	fileobject@ IOFile_FileControlBlock + @ fcb!
-
-	auto cacheblock
-	fcb@ IOFileControlBlock_CacheInfoBlock + @ cacheblock!
-
-	if (DEBUGCHECKS)
-		if (cacheblock@ ~~)
-			"VcFileMap: no cacheblock\n" KeCrash
-		end
-	end
-
-	auto large
-	0 large!
-
-	if (length@)
-		if (length@ FILEVIEWGRANULARITY >)
-			1 large!
-		end elseif (offset@ FILEVIEWNUMBERMASK &
-			offset@ length@ + 1 - FILEVIEWNUMBERMASK & ~=)
-			1 large!
-		end
-	end
-
-	if (large@)
-		// allocate a LARGE bcb and map it into POOLSPACE.
-
-		offset@ // offset
-		length@ // length
-		fileobject@ // fileobject
-		VcBufferLargeMap ok! bcb! vaddr!
-	end else
-		offset@ // offset
-		fcb@ // fcb
-		VcFileControlBlockMap ok! bcb! vaddr!
-	end
 end
 
 fn VcFileControlBlockMap { offset fcb -- vaddr bcb ok }

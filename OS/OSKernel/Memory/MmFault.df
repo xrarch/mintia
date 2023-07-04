@@ -126,7 +126,12 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 		// it even if we wanted to.
 
 		if (kernelmapping@ ~~)
-			process@ MmVADListLock drop
+			auto vlok
+			process@ MmVADListLock vlok!
+
+			if (vlok@)
+				vlok@ "ahh 4! %i\n" KeCrash
+			end
 		end
 
 		while (signal@ STATUS_REFAULT ==)
@@ -158,7 +163,11 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 					IPLAPC KeIPLRaise ipl!
 
 					if (kernelmapping@ ~~)
-						process@ MmVADListLock drop
+			process@ MmVADListLock vlok!
+
+			if (vlok@)
+				vlok@ "ahh 1! %i\n" KeCrash
+			end
 					end
 				end
 			end
@@ -639,7 +648,12 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 
 		// NOW we have to lock the kernel VAD list mutex.
 
-		process@ MmVADListLock drop
+			auto vlok
+			process@ MmVADListLock vlok!
+
+			if (vlok@)
+				vlok@ "ahh 2! %i\n" KeCrash
+			end
 
 		// Double check that the PTE is still zero and that nobody else has
 		// faulted it in while we didn't have the lock held and IPL was
@@ -817,6 +831,7 @@ fn MiNormalFault { vaddr process -- signal }
 
 		if (ok@)
 			OSSIGNAL_KILL signal!
+
 			return
 		end
 	end else
@@ -1202,7 +1217,12 @@ fn MiWriteFault { pteaddr vaddr process -- signal }
 		// Lock the system VAD list now since, unlike the user VAD list lock,
 		// it doesn't get grabbed earlier.
 
-		process@ MmVADListLock drop
+			auto vlok
+			process@ MmVADListLock vlok!
+
+			if (vlok@)
+				vlok@ "ahh 3! %i\n" KeCrash
+			end
 	end
 
 	// We have to look up the VAD at lower IPL since they're allocated from
@@ -1271,130 +1291,107 @@ end
 fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 	auto ok
 	auto pfdbe
-
 	auto cowpfdbe
 	auto cowaddr
-	0 cowaddr!
 
+	0 cowaddr!
 	0 signal!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	while (1)
-		// Re-check the PTE with raised IPL, since it may have
-		// been trimmed since we decided it was valid. We know that it's the same
-		// PTE if it's still valid, and hasn't been switched out with something
-		// else, because the VAD list mutex is held during all such events.
+	// Re-check the PTE with raised IPL, since it may have
+	// been trimmed since we decided it was valid. We know that it's the same
+	// PTE if it's still valid, and hasn't been switched out with something
+	// else, because the VAD list mutex is held during all such events.
 
-		auto phyaddr
-		pteaddr@ // pteaddr
-		MiPTEInterpret ok! drop phyaddr!
+	auto phyaddr
+	pteaddr@ // pteaddr
+	MiPTEInterpret ok! drop phyaddr!
 
-		if (ok@)
-			// The PTE became invalid again, so REFAULT.
-
-			STATUS_REFAULT signal!
-
-			break
-		end
-
-		phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-		// COW, allocate a page frame and copy the old page frame into it.
-
-		if (cowaddr@ ~~)
-			auto waited
-			process@ // process
-			CANBLOCK // priority
-			MmPageWait ok! waited!
-
-			if (waited@)
-				STATUS_REFAULT signal!
-
-				break
-			end
-
-			pteaddr@ // pte
-			FREEFIRST // pri
-			MiAnonymousPageGet ok! cowaddr! cowpfdbe!
-
-			ipl@ KeIPLLower
-
-			if (ok@)
-				OSSIGNAL_KILL signal!
-
-				return
-			end
-
-			if (process@ PsSystemProcess@ ==)
-				SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MiPageFrameEntryAnonymous_SwapPTE + |=
-			end
-
-			cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-			cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
-
-			// We lowered IPL so we have to recheck everything...
-
-			IPLDPC KeIPLRaise ipl!
-
-			continue
-		end
-
-		cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE |
-		cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
-
-		cowpfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
-		cowpfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + !
-
-		process@ cowpfdbe@ MiPageFrameEntryAnonymous_Process + !
-		vaddr@ cowpfdbe@ MiPageFrameEntryAnonymous_VirtualAddress + !
-
-		PAGESHIFT cowaddr <<=
-
-		// Map the COW page into the thread's quickpage so we can perform
-		// the copy. We copy directly from userspace here since we know the
-		// PTE is valid.
-
-		auto copyaddr
-		cowaddr@ MiMapQuickPage copyaddr!
-
-		copyaddr@ // dest
-		vaddr@ PAGENUMBERMASK & // src
-		PAGESIZE // size
-		KeSafeCopyIn drop
-
-		copyaddr@ MiUnmapQuickPage
-
-		// Update the PTE to point to the new COW page.
-
-		cowaddr@ // phyaddr
-		PTE_V PTE_W | // flags
-		pteaddr@ // pteaddr
-		MiPTEUpdate drop drop
-
-		// We COW'd over top of the old page frame and no longer have it
-		// mapped, so dereference it.
-
-		pfdbe@ MmEvictablePageDereference drop
+	if (ok@)
+		// The PTE became invalid again, so REFAULT.
 
 		ipl@ KeIPLLower
 
-		1 vad@ MiVAD_COWCount + +=
+		STATUS_REFAULT signal!
 
 		return
 	end
 
+	phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
+
+	// COW, allocate a page frame and copy the old page frame into it.
+
+	auto waited
+	process@ // process
+	CANBLOCK // priority
+	MmPageWait ok! waited!
+
+	if (waited@)
+		ipl@ KeIPLLower
+
+		STATUS_REFAULT signal!
+
+		return
+	end
+
+	pteaddr@ // pte
+	FREEFIRST // pri
+	MiAnonymousPageGet ok! cowaddr! cowpfdbe!
+
+	if (ok@)
+		ipl@ KeIPLLower
+
+		OSSIGNAL_KILL signal!
+
+		return
+	end
+
+	if (process@ PsSystemProcess@ ==)
+		SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MiPageFrameEntryAnonymous_SwapPTE + |=
+	end
+
+	cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE | MMEVICTFLAG_MODIFIED |
+	cowpfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
+
+	cowpfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + @ MmVirtualToPhysical
+	cowpfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + !
+
+	process@ cowpfdbe@ MiPageFrameEntryAnonymous_Process + !
+	vaddr@ cowpfdbe@ MiPageFrameEntryAnonymous_VirtualAddress + !
+
+	PAGESHIFT cowaddr <<=
+
+	// Map the COW page into the thread's quickpage so we can perform
+	// the copy. We copy directly from userspace here since we know the
+	// PTE is valid.
+
+	auto copyaddr
+	cowaddr@ MiMapQuickPage copyaddr!
+
+	copyaddr@ // dest
+	vaddr@ PAGENUMBERMASK & // src
+	PAGESIZE // size
+	memcpy
+
+	copyaddr@ MiUnmapQuickPage
+
+	// Update the PTE to point to the new COW page.
+
+	cowaddr@ // phyaddr
+	PTE_V PTE_W | // flags
+	pteaddr@ // pteaddr
+	MiPTEUpdate drop drop
+
+	// We COW'd over top of the old page frame and no longer have it
+	// mapped, so dereference it.
+
+	pfdbe@ MmEvictablePageDereference drop
+
 	ipl@ KeIPLLower
 
-	if (cowaddr@)
-		// Something weird happened but there's still a COW page hanging
-		// around so delete it.
-
-		cowpfdbe@ MiAnonymousPageDelete
-
-		cowpfdbe@ MmEvictablePageDereference drop
-	end
+	1 vad@ MiVAD_COWCount + +=
 end
 
 fn MiDirtyFault { checked pteaddr -- signal }

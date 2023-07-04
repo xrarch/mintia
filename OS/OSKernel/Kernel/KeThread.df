@@ -68,8 +68,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_InSwapListB + sb
 
 	0 thread@ KeThread_WaitStatus + !
-	0 thread@ KeThread_WaitModeB + sb
-	0 thread@ KeThread_WaitIPLB + sb
+	KERNELMODE thread@ KeThread_WaitModeB + sb
+	IPLLOW thread@ KeThread_WaitIPLB + sb
 
 	0 thread@ KeThread_MutexListHead + !
 
@@ -284,11 +284,13 @@ fn KeThreadDeliverOnWaitSignal { signal thread -- ok }
 
 	if (sigabs@ ~~)
 		STATUS_INVALID_ARGUMENT ok!
+
 		return
 	end
 
 	if (sigabs@ 32 >=)
 		STATUS_INVALID_ARGUMENT ok!
+
 		return
 	end
 
@@ -613,56 +615,85 @@ fn KiThreadResume { thread -- }
 end
 
 fn KiThreadWakeForSignal { thread -- }
+	// determine whether we need to wake the thread up due to signal state or
+	// termination.
+
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"KiThreadWakeForSignal: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
-	// determine whether we need to wake the thread up
-
 	if (thread@ KeThread_IgnoreKill + @)
-		// no
+		// the system is ignoring all events for this thread.
+
+		return
+	end
+
+	if (thread@ KeThread_WaitIPLB + gb IPLAPC >=)
+		// the thread is waiting at IPL >= IPLAPC, which blocks all events.
+		//
+		// N.B. its possible that the thread isn't waiting, so the WaitIPL is
+		// actually meaningless, but that's fine since in the non-waiting
+		// case we wouldn't have woken the thread anyway.
+
 		return
 	end
 
 	auto sig
 	thread@ KeThread_Signals + @ sig!
 
-	auto status
-	if (sig@ 1 OSSIGNAL_KILL << &)
-		STATUS_KILLED status!
-	end elseif (sig@ thread@ KeThread_SignalAcceptMask + @ &)
-		STATUS_SIGNALLED status!
-	end else
-		return
-	end
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGUNALERTABLE ==)
+		if (thread@ KeThread_WaitModeB + gb KERNELMODE ==)
+			// kernel mode unalertable masks everything.
 
-	if (thread@ KeThread_SuspendedB + gb)
-		thread@ KiThreadResume
-	end
+			return
+		end
 
-	if (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGALERTABLE ==)
-		// yes, wake it up
+		// user mode unalertable masks everything except kill.
 
-		// but first, clear pending signals from deliver-on-wait mask
+		if (sig@ 1 OSSIGNAL_KILL << &)
+			STATUS_KILLED // waitstatus
+			0 // priboost
+			thread@ // thread
+			KiThreadWakeup
+		end
+	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGALERTABLE ==)
+		// either mode alertable does not mask kill.
+
+		if (sig@ 1 OSSIGNAL_KILL << &)
+			STATUS_KILLED // waitstatus
+			0 // priboost
+			thread@ // thread
+			KiThreadWakeup
+
+			return
+		end
+
+		if (thread@ KeThread_WaitModeB + gb KERNELMODE ==)
+			// kernel mode alertable masks all signals.
+
+			return
+		end
+
+		// check for unmasked signals.
+
+		thread@ KeThread_SignalAcceptMask + @ sig &=
+
+		if (sig@ ~~)
+			// no unmasked signals.
+
+			return
+		end
+
+		// clear these signals from the deliver-on-wait mask so that they
+		// prevent future attempts to wait and eventually get delivered.
 
 		sig@ ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
 
-		status@ // waitstatus
+		STATUS_SIGNALLED // waitstatus
 		0 // priboost
 		thread@ // thread
 		KiThreadWakeup
-	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_WAITINGUNALERTABLE ==)
-		if (thread@ KeThread_WaitModeB + gb USERMODE ==)
-			if (sig@ 1 OSSIGNAL_KILL << &)
-				// yes, wake it up
-
-				status@ // waitstatus
-				0 // priboost
-				thread@ // thread
-				KiThreadWakeup
-			end
-		end
 	end
 end

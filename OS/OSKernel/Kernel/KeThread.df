@@ -440,21 +440,14 @@ fn KeThreadIsKilled { ipl mode alertable waiting thread -- ok }
 		end
 	end
 
-	if (thread@ KeThread_Process + @ KeProcess_TerminatedB + gb)
-		// if the process is terminated, then funnel this thread toward its
-		// final destination.
-
-		STATUS_KILLED ok!
-
-		return
-	end
-
 	auto sig
 	thread@ KeThread_Signals + @ sig!
 
 	if (sig@ 1 OSSIGNAL_KILL << &)
 		// OSSIGNAL_KILL is unmaskable by usermode unalertable waits, and
 		// should also be respected by kernelmode alertable waits.
+
+		0 thread@ KeThread_SuspendedB + sb
 
 		STATUS_KILLED ok!
 
@@ -482,6 +475,8 @@ fn KeThreadIsKilled { ipl mode alertable waiting thread -- ok }
 
 			sig@ ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
 
+			0 thread@ KeThread_SuspendedB + sb
+
 			STATUS_SIGNALLED ok!
 
 			return
@@ -491,6 +486,8 @@ fn KeThreadIsKilled { ipl mode alertable waiting thread -- ok }
 			// there is a pending user APC, go do that instead.
 
 			1 thread@ KeThread_UserAPCTriggeredB + sb
+
+			0 thread@ KeThread_SuspendedB + sb
 
 			STATUS_USER_APC ok!
 		end
@@ -504,6 +501,8 @@ fn KeThreadIsKilled { ipl mode alertable waiting thread -- ok }
 
 		// the signal is accepted and not specified in the deliver-on-wait
 		// mask, so deliver it.
+
+		0 thread@ KeThread_SuspendedB + sb
 
 		STATUS_SIGNALLED ok!
 
@@ -690,7 +689,7 @@ fn KiThreadWakeForSignal { thread -- }
 			return
 		end
 
-		// un-suspend the thread.
+		// un-suspend the thread if it's suspended.
 
 		0 thread@ KeThread_SuspendedB + sb
 

@@ -210,6 +210,9 @@ fn MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 
 			pfdbe@ MmEvictablePageDereference drop
 		end else
+			// clear the PTE to indicate that it is not tracking any page
+			// anymore.
+
 			if (process@)
 				0 // phyaddr
 				0 // flags
@@ -220,7 +223,7 @@ fn MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 			end
 
 			if (capturedpte@ PTE_INSWAP &)
-				// free private page in swap
+				// this is a page in swap, free it right now.
 
 				ipl@ KeIPLLower
 
@@ -228,22 +231,47 @@ fn MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 
 				capturedpte@ IOSwapPageFreePTE
 			end elseif (capturedpte@ PTE_TRANSITION &)
-				// free private page
+				// TRANSITION bit is set, look up page and figure out what to
+				// do with it.
 
 				capturedpte@ PAGENUMBERMASK & PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
 				if (process@)
-					// this page may actually be a shared page currently
-					// undergoing page-in, in which case we do not want to
-					// delete that page, or in fact delete the PTE, since the
-					// former isn't our responsibility and the latter will be
-					// done by the faulting thread when it realizes this PTE
-					// was unmapped while it was blocked.
+					// the caller specified a process, so this is a local PTE
+					// for sure. we have to check if the page specified by this
+					// PTE is PRIVATE or shared. if the page is PRIVATE, then
+					// there are two cases here:
 					//
-					// note that concurrent actions while deleting a shared
-					// object (like a section object) are impossible because
-					// it *cannot* be mapped if the refcount has reached zero,
-					// which is the prerequisite for deletion.
+					//   1. It has been trimmed from the working set and is
+					//      in transition due to being on the standby list.
+					//   2. It is currently being paged in by some other
+					//      thread.
+					//
+					// in either case, we want to actually mark the page
+					// deleted here. if this is case #1, then this is as simple
+					// as it is and we're done. for case #2, this sounds
+					// deadly, since the faulting thread will wake up and find
+					// the page vanished out from under it. the trick here is
+					// that page deletion doesn't actually occur until the
+					// refcount drops to zero; all we do here is set a flag.
+					// when the faulting thread wakes up, it sees the PTE
+					// changed due to us clearing it a little bit ago, and
+					// cleans up appropriately; the page is only deleted when
+					// the faulting thread drops its reference to it.
+					//
+					// if the page is shared (non-PRIVATE), then this is
+					// always a page that is currently undergoing page-in.
+					// the reason is that when a shared page is trimmed from
+					// the working set, the PTE is always zeroed out, not set
+					// to TRANSITION; so there's only one TRANSITION case for
+					// shared pages in local PTEs, which is ongoing page-in.
+					// in this case, we actually don't want to do anything to
+					// the page, because the page is tracked with a prototype
+					// PTE that lives somewhere in a section object, not with
+					// our local PTE, so its sufficient to just clear our local
+					// PTE to indicate to the faulting thread that it got
+					// unmapped, since the section object deletion routine will
+					// take care of the page for real later.
 
 					if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_PRIVATE &)
 						pfdbe@ MmEvictablePageReference drop
@@ -259,6 +287,15 @@ fn MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 						0 deletepte!
 					end
 				end else
+					// there is no process specified, which means this is a
+					// prototype PTE in a section object. in this case, finding
+					// a TRANSITION PTE can only mean this page is undergoing
+					// page-in. this is sort of an edge case where a mapping of
+					// a section object is unmapped by one thread in a process
+					// while another is faulting it in, causing the section
+					// object to be deleted. read the comment above for why
+					// marking the page deleted during that, isn't deadly.
+
 					pfdbe@ MmEvictablePageReference drop
 
 					ipl@ KeIPLLower

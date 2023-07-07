@@ -29,13 +29,9 @@
 
 #include "MmInternal.h"
 
-buffer MiPoolSpaceBitmapHeader ComBitmapHeader_SIZEOF
-public MiPoolSpaceBitmapHeader
-
 buffer MiPoolSpacePagedEndBitmapHeader ComBitmapHeader_SIZEOF
 public MiPoolSpacePagedEndBitmapHeader
 
-buffer MiPoolSpaceBitmap (POOLPAGES 7 + 3 >>)
 buffer MiPoolSpacePagedEndBitmap (POOLPAGES 7 + 3 >>)
 
 var MmNonpagedPoolBytesUsed 0
@@ -50,6 +46,9 @@ public MmNonpagedPoolBytesPeak
 var MmPagedPoolBytesPeak 0
 public MmPagedPoolBytesPeak
 
+var MiPoolPTEListHead 0
+var MiPoolPTEFirst 0
+
 var MiPoolPageListHead 0
 
 // The heap is managed within a 32MB region of kernel space called
@@ -57,20 +56,36 @@ var MiPoolPageListHead 0
 // allocator within pool pages. Allocations of a page size or more are handled
 // by directly allocating pool pages.
 
+struct MiPoolPTEBlock
+	4 Next
+	4 Size
+endstruct
+
 extern MiHeapInit { -- }
 
 fn MiPoolInit { -- }
 	fnsection "INIT$text"
 
 	POOLPAGES // sizeinbits
-	MiPoolSpaceBitmap // data	
-	MiPoolSpaceBitmapHeader // header
-	ComBitmapInitialize
-
-	POOLPAGES // sizeinbits
 	MiPoolSpacePagedEndBitmap // data	
 	MiPoolSpacePagedEndBitmapHeader // header
 	ComBitmapInitialize
+
+	// initialize the free list of POOLSPACE PTEs as one big block.
+
+	auto pteaddr
+	POOLSPACE MmVirtualtoPTEAddress pteaddr!
+
+	pteaddr@ MiPoolPTEFirst!
+
+	// set the size PTE to indicate the entire POOLSPACE.
+	POOLPAGES PTE_POOL_INFO_SHIFT << pteaddr@ MiPoolPTEBlock_Size + !
+
+	// set the offset PTE to zero, indicating the end of the free list.
+	0 pteaddr@ MiPoolPTEBlock_Next + !
+
+	// set the head of the free list.
+	pteaddr@ MiPoolPTEListHead!
 
 	MiHeapInit
 end
@@ -290,90 +305,263 @@ var MiPoolSpaceUsed 0
 public MiPoolSpaceUsed
 
 fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
-	auto bmpheader
-	MiPoolSpaceBitmapHeader bmpheader!
+	auto prev
+	0 prev!
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto pteaddr
+	MiPoolPTEListHead@ pteaddr!
+
+	if (pteaddr@ ~~)
+		ipl@ KeIPLLower
+
+		if (pri@ CANBLOCK &)
+			// CANBLOCK nonpaged allocations are never supposed to fail.
+
+			"Out of POOLSPACE\n" KeCrash
+		end
+
+		STATUS_NO_MEMORY ok!
+
+		return
+	end
 
 	while (1)
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
+		auto next
+		pteaddr@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
 
-		MiPoolPageHint@ // hint
-		pagesneeded@ // runlength
-		bmpheader@ // header
-		ComBitmapFindRun ok! offset!
+		auto ptecount
 
-		if (ok@)
-			if (pri@ PAGED CANBLOCK | & ~~
-				DEBUGCHECKS ||)
+		if (pteaddr@@ PTE_POOL_SINGLETON &)
+			1 ptecount!
+		end else
+			pteaddr@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
+		end
+
+		if (ptecount@ pagesneeded@ >=)
+			// theres at least enough in this block to satisfy the request.
+			// figure out whether to direct return or split.
+
+			pagesneeded@ MiPoolSpaceUsed +=
+
+			if (ptecount@ pagesneeded@ ==)
+				// there's exactly enough to satisfy the request.
+				// grab the whole chunk.
+
+				if (prev@)
+					// save next link in prev
+
+					prev@@ PTE_POOL_INFO_MASK PTE_POOL_INFO_SHIFT << ~ &
+					next@ PTE_POOL_INFO_SHIFT << | prev@!
+				end elseif (next@)
+					next@ MiPoolPTEFirst@ + MiPoolPTEListHead!
+				end else
+					0 MiPoolPTEListHead!
+				end
 
 				ipl@ KeIPLLower
 
-				// just crash right away if can't block or checked build
+				pteaddr@ MiPoolPTEFirst@ - PTESIZE / offset!
 
-				bmpheader@ ComBitmapDump
-				ok@ pagesneeded@ "\n\n%d (%i)\n" Printf
-
-				POOLPAGES
-				MiPoolSpaceUsed@
-				"used: %d / %d\n" Printf
-
-				MmPagedPoolBytesUsed@ PAGESHIFT >>
-				"pagedpool: %d\n" Printf
-
-				"out of poolspace\n" KeCrash
+				0 ok!
 
 				return
 			end
 
-			// wait aimlessly for 100 milliseconds and repeat the request.
-			// this is a last resort for stability purposes on release builds.
-			// we should never ever get to this point; POOLSPACE is not
-			// designed to be a scarce resource like physical and virtual
-			// memory are, since the chicken and egg problem has to have a
-			// first chicken somewhere. this is not a problem during normal
-			// operation since pool quota prevents user processes from
-			// consuming this much POOLSPACE, and its honestly difficult to
-			// run out of POOLSPACE without running out of other resources
-			// first (which can be coped with) anyway.
+			// split the chunk by carving off the end.
+			// we do this so that we don't have to manipulate the next link in
+			// the prev entry.
+
+			// calculate how many PTEs will be in the new chunk.
+
+			pagesneeded@ ptecount -=
+
+			// save this.
+
+			if (ptecount@ 1 ==)
+				// the remaining free chunk is becoming a singleton, record that
+
+				PTE_POOL_SINGLETON pteaddr@ |=
+			end else
+				pteaddr@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_MASK PTE_POOL_INFO_SHIFT << ~ &
+				ptecount@ PTE_POOL_INFO_SHIFT << | pteaddr@ MiPoolPTEBlock_Size + !
+			end
 
 			ipl@ KeIPLLower
 
-			100 // ms
-			KERNELMODE // waitmode
-			0 // alertable
-			KeThreadSleep drop
+			ptecount@ PTESIZE * pteaddr +=
 
-			continue
+			pteaddr@ MiPoolPTEFirst@ - PTESIZE / offset!
+
+			0 ok!
+
+			return
 		end
 
-		offset@ MiPoolPageHint!
+		if (next@ ~~)
+			ipl@ KeIPLLower
 
-		pagesneeded@ // runlength
-		offset@ // index
-		bmpheader@ // header
-		ComBitmapSetBits
+			if (pri@ CANBLOCK &)
+				"Out of POOLSPACE\n" KeCrash
+			end
 
-		pagesneeded@ MiPoolSpaceUsed +=
+			STATUS_NO_MEMORY ok!
 
-		ipl@ KeIPLLower
+			return
+		end
 
-		break
+		pteaddr@ prev!
+		next@ MiPoolPTEFirst@ + pteaddr!
+	end
+
+	if (DEBUGCHECKS)
+		"MiPoolSpaceReserve: unreachable\n" KeCrash
 	end
 end
 
 fn MiPoolSpaceRelease { pages offset -- }
+	auto prev
+	0 prev!
+
+	offset@ PTESIZE * offset!
+
+	auto pteaddr
+	offset@ MiPoolPTEFirst@ + pteaddr!
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	pages@ // runlength
-	offset@ // index
-	MiPoolSpaceBitmapHeader // header
-	ComBitmapClearBits
-
 	pages@ MiPoolSpaceUsed -=
+
+	// insertion sort the free block into the list
+
+	auto freepte
+	MiPoolPTEListHead@ freepte!
+
+	if (freepte@ ~~)
+		0 pteaddr@!
+
+		if (pages@ 1 ==)
+			PTE_POOL_SINGLETON pteaddr@ |=
+		end else
+			pages@ PTE_POOL_INFO_SHIFT << pteaddr@ MiPoolPTEBlock_Size + !
+		end
+
+		pteaddr@ MiPoolPTEListHead!
+
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	while (1)
+		auto next
+		freepte@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
+
+		if (offset@ next@ < next@ ~~ ||)
+			// insert after the chunk currently pointed at by freepte.
+			// if freepte turns out to be physically contiguous with us,
+			// we can merge left. then we can check if we wanna merge right.
+
+			auto ptecount
+
+			if (freepte@@ PTE_POOL_SINGLETON &)
+				1 ptecount!
+			end else
+				freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
+			end
+
+			if (freepte@ ptecount@ PTESIZE * + pteaddr@ ==)
+				// we can merge left, it turns out.
+
+				freepte@ pteaddr!
+				ptecount@ pages +=
+			end else
+				// make him point to our new chunk.
+
+				freepte@@ PTE_POOL_INFO_MASK PTE_POOL_INFO_SHIFT << ~ &
+				offset@ PTE_POOL_INFO_SHIFT << | freepte@!
+			end
+
+			if (next@)
+				next@ MiPoolPTEFirst@ + freepte!
+
+				if (pteaddr@ pages@ PTESIZE * + freepte@ ==)
+					// we can merge right, it turns out.
+
+					if (freepte@@ PTE_POOL_SINGLETON &)
+						1 ptecount!
+					end else
+						freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
+					end
+
+					ptecount@ pages +=
+
+					freepte@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
+				end
+			end
+
+			// encode the size, next link, etc in our new freed chunk.
+
+			next@ PTE_POOL_INFO_SHIFT << pteaddr@!
+
+			if (pages@ 1 ==)
+				PTE_POOL_SINGLETON pteaddr@ |=
+			end else
+				pages@ PTE_POOL_INFO_SHIFT << pteaddr@ MiPoolPTEBlock_Size + !
+			end
+
+			ipl@ KeIPLLower
+
+			return
+		end
+
+		next@ MiPoolPTEFirst@ + freepte!
+	end
+end
+
+#ifdef DEBUGCHECKS
+
+fn PrintPoolPTEList { -- }
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto freepte
+	MiPoolPTEListHead@ freepte!
+
+	if (freepte@ ~~)
+		return
+	end
+
+	while (1)
+		auto next
+		freepte@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
+
+		auto ptecount
+
+		if (freepte@@ PTE_POOL_SINGLETON &)
+			1 ptecount!
+		end else
+			freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
+		end
+
+		ptecount@
+		freepte@ MiPoolPTEFirst@ - PTESIZE /
+		"\n%d: %d\n" Printf
+
+		if (next@ ~~)
+			break
+		end
+
+		next@ MiPoolPTEFirst@ + freepte!
+	end
 
 	ipl@ KeIPLLower
 end
+
+#endif
 
 fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 	// this is a kernel mapping, so reserve POOLSPACE and use that as the
@@ -715,9 +903,6 @@ fn MiNonpagedPoolFreePages { noaccount ptr -- }
 		PAGESIZE ptr +=
 		1 i +=
 	end
-
-	auto bmpheader
-	MiPoolSpaceBitmapHeader bmpheader!
 
 	auto rs
 	HALCPUInterruptDisable rs!

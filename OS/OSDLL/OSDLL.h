@@ -55,35 +55,39 @@ extern DLLGetSymbolAddress { name dll -- address ok }
 
 // heap stuff
 
-const DLLHEAPSWIFTMAGIC  0x1DCE
-const DLLHEAPFREEMAGIC   0xE433
-const DLLHEAPDIRECTMAGIC 0xCE19
+const DLLHEAPSWIFTMAGIC  0xCE
+const DLLHEAPFREEMAGIC   0xE4
+const DLLHEAPDIRECTMAGIC 0xAF
 
 const DLLHEAPBLOCKSIZESHIFT 6
 const DLLHEAPBLOCKMINSIZE   (1 DLLHEAPBLOCKSIZESHIFT <<)
 const DLLHEAPBLOCKSIZEMASK  (DLLHEAPBLOCKMINSIZE 1 -)
 
-const DLLHEAPBLOCKBUCKETS (OSPAGESIZE DLLHEAPBLOCKMINSIZE /)
+const DLLHEAPBLOCKBUCKETS (OSPAGESHIFT DLLHEAPBLOCKSIZESHIFT - 1 +)
 
 struct DLLAllocatedHeapBlock
-	1 BucketIndex
-	1 LastBucketIndex
-	2 Magic
+	1 BucketIndexB
+	1 LastSizeB // in units of minimum heap block size
+	1 SizeB
+	1 MagicB
 endstruct
 
 struct DLLHeapBlock
-	1 BucketIndex
-	1 LastBucketIndex
-	2 Magic
+	1 BucketIndexB
+	1 LastSizeB // in units of minimum heap block size
+	1 SizeB
+	1 MagicB
+
 	4 NextFree
 	4 PrevFree
 endstruct
 
 struct DLLDirectHeapBlock
 	4 Size
-	1 BucketIndex
-	1 LastBucketIndex
-	2 Magic
+	1 Unused1B
+	1 Unused2B
+	1 Unused3B
+	1 MagicB
 endstruct
 
 extern DLLHeapInit { -- }

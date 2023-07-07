@@ -1,0 +1,812 @@
+//
+// Implements the "duplex" generic character I/O device driver.
+// Client routines.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/OSDLL/OSConsoleControl.h"
+
+#include "CoDuplex.h"
+
+fn CoDuplexClientRead { iopl -- ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	// client fcb, reading from the receive buffer.
+	// this may pend.
+
+	auto flags
+	iopl@ IOPacketLocation_Flags + @ flags!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	if (flags@ OSACCESSFLAG_RETURNANY &)
+		REQFLAG_RETURNANY flags!
+	end else
+		0 flags!
+	end
+
+	auto done
+	0 done!
+
+	0 ok!
+
+	auto bytecnt
+	0 bytecnt!
+
+	if (duplex@ CoDuplex_ClientReadListHead + @)
+		// if there's a pending request already, then that means the receive
+		// buffer has been drained.
+
+		if (iop@ IOPacketHeader_Timeout + @)
+			STATUS_OTHER_CONDITION ok!
+		end else
+			0 iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+			0 ok!
+		end
+	end else
+		// read as much as possible from the buffer. if this completes, cool.
+		// if it does not complete, then we need to enqueue the request.
+
+		auto header
+		duplex@ CoDuplex_ReceiveBuffer + header!
+
+		auto rp
+		header@ CoDuplexBuffer_ReadIndex + @ rp!
+
+		header@ CoDuplexBuffer_WriteIndex + @ rp@ - bytecnt! // bytes available
+
+		if (iopl@ IOPacketLocation_Length + @ bytecnt@ <)
+			iopl@ IOPacketLocation_Length + @ bytecnt!
+		end
+
+		if (bytecnt@)
+			auto bufp
+			header@ CoDuplexBuffer_Buffer + @ bufp!
+
+			auto bufsize
+			header@ CoDuplexBuffer_Size + @ bufsize!
+
+			auto bufmask
+			bufsize@ 1 - bufmask!
+
+			if (rp@ bufmask@ ~ & rp@ bytecnt@ + 1 - bufmask@ ~ & ==)
+				// doesn't cross the boundary, do a single copy
+
+				if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_PIPE &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bytecnt@ // sz
+					0 // ctrld
+					CoDuplexCookedCopy done |= bytecnt!
+				end elseif (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bytecnt@ // sz
+					memcpy
+				end else
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bytecnt@ // sz
+					1 // ctrld
+					CoDuplexCookedCopy done |= bytecnt!
+				end
+			end else
+				// crosses the boundary, do two copies
+
+				auto bc
+
+				if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_PIPE &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					0 // ctrld
+					CoDuplexCookedCopy done |= bc!
+
+					if (done@ ~~)
+						buf@ bufsize@ rp@ bufmask@ & - + // dest
+						bufp@ // src
+						rp@ bytecnt@ + bufmask@ & // sz
+						0 // ctrld
+						CoDuplexCookedCopy done |= bc +=
+					end
+
+					bc@ bytecnt!
+				end elseif (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					memcpy
+
+					buf@ bufsize@ rp@ bufmask@ & - + // dest
+					bufp@ // src
+					rp@ bytecnt@ + bufmask@ & // sz
+					memcpy
+				end else
+					buf@ // dest
+					bufp@ rp@ bufmask@ & + // src
+					bufsize@ rp@ bufmask@ & - // sz
+					1 // ctrld
+					CoDuplexCookedCopy done |= bc!
+
+					if (done@ ~~)
+						buf@ bufsize@ rp@ bufmask@ & - + // dest
+						bufp@ // src
+						rp@ bytecnt@ + bufmask@ & // sz
+						1 // ctrld
+						CoDuplexCookedCopy done |= bc +=
+					end
+
+					bc@ bytecnt!
+				end
+			end
+
+			if (done@ DONE_CTRLD &)
+				if (bytecnt@ 1 >)
+					rp@ bytecnt@ + 1 - header@ CoDuplexBuffer_ReadIndex + !
+					bytecnt@ 1 - header@ CoDuplexBuffer_RemainingSpace + +=
+				end else
+					rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+					bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
+				end
+			end else
+				rp@ bytecnt@ + header@ CoDuplexBuffer_ReadIndex + !
+				bytecnt@ header@ CoDuplexBuffer_RemainingSpace + +=
+			end
+
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
+				DONE_NORMAL done |=
+			end
+		end
+
+		// bytecnt now contains the amount of bytes that have been read.
+
+		// try to complete as many server writes as possible by reading
+		// from their buffer.
+
+		while (done@ ~~)
+			auto otheriop
+			duplex@ CoDuplex_ServerWriteListHead + @ otheriop!
+
+			if (otheriop@ ~~)
+				break
+			end
+
+			auto otheriopl
+			otheriop@ IOPacketCurrentLocation otheriopl!
+
+			if (DEBUGCHECKS)
+				if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_CONSOLE &)
+					"CoDuplexClientRead: console read of enqueued server write\n" KeCrash
+				end
+			end
+
+			// calculate available bytes in buffer.
+
+			header@ CoDuplexBuffer_UserBufferLength + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
+
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
+			end
+
+			buf@ bytecnt@ + // dest
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + // src
+			rp@ // sz
+			memcpy
+
+			rp@ header@ CoDuplexBuffer_UserBufferIndex + +=
+
+			rp@ bytecnt +=
+
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
+				DONE_NORMAL done |=
+			end
+
+			if (header@ CoDuplexBuffer_UserBufferIndex + @
+				header@ CoDuplexBuffer_UserBufferLength + @ ==)
+
+				// complete the server MDL.
+
+				header@ CoDuplexBuffer_UserBufferIndex + @
+				otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+				// unlink the server request.
+
+				auto niop
+				otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+				0 // status
+				duplex@ CoDuplex_ServerBoost + @ // priboost
+				otheriop@ // iop
+				IOPacketCompleteLow
+
+				niop@ otheriop!
+
+				otheriop@ duplex@ CoDuplex_ServerWriteListHead + !
+
+				if (otheriop@)
+					otheriop@ IOPacketCurrentLocation otheriopl!
+
+					0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
+
+					otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+					otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+					otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+				end else
+					0 duplex@ CoDuplex_ServerWriteListTail + !
+				end
+			end
+		end
+
+		if (flags@ REQFLAG_RETURNANY &)
+			if (bytecnt@)
+				DONE_NORMAL done |=
+				bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+			end
+		end
+
+		if (done@ ~~)
+			if (iop@ IOPacketHeader_Timeout + @ duplex@ CoDuplex_Disconnected + @ ~~ &&)
+				// switch to user buffer.
+
+				STATUS_OTHER_CONDITION ok!
+			end else
+				bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+				0 ok!
+			end
+		end else
+			if (done@ DONE_CTRLD &)
+				1 bytecnt -=
+			end
+
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+		end
+	end
+
+	if (ok@ STATUS_OTHER_CONDITION ==)
+		// enqueue the request at the tail of the appropriate queue.
+
+		bytecnt@ // lengthdone
+		flags@ // flags
+		iopl@ // iopl
+		CoDuplexEnqueueRequest
+	end
+end
+
+fn CoDuplexTXCharacter { c txfunc duplex -- done }
+	auto ok
+
+	0 done!
+
+	if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_STOPPED &)
+		return
+	end
+
+	if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+		c@ // c
+		duplex@ // duplex
+		txfunc@ CoDuplexTXFunction ok!
+
+		if (ok@ ~~)
+			DONE_NORMAL done!
+		end
+	end elseif (c@ '\n' ==)
+		if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
+			'\n' // c
+			duplex@ // duplex
+			txfunc@ CoDuplexTXFunction ok!
+
+			if (ok@ ~~)
+				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
+				DONE_NORMAL done!
+			end
+		end else
+			'\r' // c
+			duplex@ // duplex
+			txfunc@ CoDuplexTXFunction ok!
+
+			if (ok@ ~~)
+				'\n' // c
+				duplex@ // duplex
+				txfunc@ CoDuplexTXFunction ok!
+
+				if (ok@)
+					DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_InternalFlags + |=
+				end else
+					DONE_NORMAL done!
+				end
+			end
+		end
+	end else
+		c@ // c
+		duplex@ // duplex
+		txfunc@ CoDuplexTXFunction ok!
+
+		if (ok@ ~~)
+			DONE_NORMAL done!
+		end
+	end
+end
+
+fn CoDuplexWriteCharacter { c duplex -- ok }
+	auto ipl
+	duplex@ // duplex
+	1 // alertable
+	CoDuplexLock ok! ipl!
+
+	if (ok@)
+		return
+	end
+
+	// client fcb, writing to the transmit buffer and/or server buffers.
+	// this may pend.
+
+	0 ok!
+
+	// try to satisfy as many server reads as possible.
+	// then resort to filling the transmit buffer.
+
+	auto done
+	0 done!
+
+	if (duplex@ CoDuplex_TXFunc + @)
+		c@ // c
+		duplex@ CoDuplex_TXFunc + @ // txfunc
+		duplex@ // duplex
+		CoDuplexTXCharacter done |=
+	end
+
+	auto header
+	duplex@ CoDuplex_TransmitBuffer + header!
+
+	auto bufwritten
+	1 bufwritten!
+
+	auto rp
+
+	while (done@ ~~)
+		auto otheriop
+		duplex@ CoDuplex_ServerReadListHead + @ otheriop!
+
+		if (otheriop@ ~~)
+			break
+		end
+
+		auto otheriopl
+		otheriop@ IOPacketCurrentLocation otheriopl!
+
+		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+			c@
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+			DONE_NORMAL done!
+		end elseif (c@ '\n' ==)
+			if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
+				'\n'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+				DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
+
+				DONE_NORMAL done!
+			end elseif (header@ CoDuplexBuffer_UserBufferLength + @
+						header@ CoDuplexBuffer_UserBufferIndex + @ - 1 >)
+				'\r'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+				'\n'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + 1 + sb
+
+				2 bufwritten!
+
+				DONE_NORMAL done!
+			end else
+				'\r'
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+				DUPLEXFLAG_PENDING_LF duplex@ CoDuplex_InternalFlags + |=
+			end
+		end else
+			c@
+			header@ CoDuplexBuffer_UserBuffer + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ + sb
+
+			DONE_NORMAL done!
+		end
+
+		bufwritten@ header@ CoDuplexBuffer_UserBufferIndex + +=
+
+		if (header@ CoDuplexBuffer_UserBufferIndex + @
+			header@ CoDuplexBuffer_UserBufferLength + @ ==
+			otheriopl@ IOPacketLocation_Flags + @ REQFLAG_RETURNANY & ||)
+
+			// complete the server MDL.
+
+			header@ CoDuplexBuffer_UserBufferIndex + @
+			otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+			// unlink the server request.
+
+			auto niop
+			otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+			0 // status
+			duplex@ CoDuplex_ServerBoost + @ // priboost
+			otheriop@ // iop
+			IOPacketCompleteLow
+
+			niop@ otheriop!
+
+			otheriop@ duplex@ CoDuplex_ServerReadListHead + !
+
+			if (otheriop@)
+				otheriop@ IOPacketCurrentLocation otheriopl!
+
+				0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
+
+				otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+				otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+				otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+			end else
+				0 duplex@ CoDuplex_ServerReadListTail + !
+			end
+		end
+	end
+
+	if (done@ ~~)
+		// try to copy to the transmit buffer.
+
+		auto bufp
+		header@ CoDuplexBuffer_Buffer + @ bufp!
+
+		header@ CoDuplexBuffer_RemainingSpace + @ rp!
+
+		if (rp@)
+			auto bufsize
+			header@ CoDuplexBuffer_Size + @ bufsize!
+
+			auto bufmask
+			bufsize@ 1 - bufmask!
+
+			auto index
+			header@ CoDuplexBuffer_WriteIndex + @ index!
+
+			if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				c@
+				bufp@ index@ bufmask@ & + sb
+
+				DONE_NORMAL done!
+			end elseif (c@ '\n' ==)
+				if (duplex@ CoDuplex_InternalFlags + @ DUPLEXFLAG_PENDING_LF &)
+					'\n'
+					bufp@ index@ bufmask@ & + sb
+
+					DUPLEXFLAG_PENDING_LF ~ duplex@ CoDuplex_InternalFlags + &=
+
+					DONE_NORMAL done!
+				end elseif (rp@ 1 >)
+					'\r'
+					bufp@ index@ bufmask@ & + sb
+
+					'\n'
+					bufp@ index@ 1 + bufmask@ & + sb
+
+					2 bufwritten!
+
+					DONE_NORMAL done!
+				end
+			end else
+				c@
+				bufp@ index@ bufmask@ & + sb
+
+				DONE_NORMAL done!
+			end
+
+			index@ bufwritten@ + header@ CoDuplexBuffer_WriteIndex + !
+			bufwritten@ header@ CoDuplexBuffer_RemainingSpace + -=
+		end
+	end
+
+	ipl@ duplex@ CoDuplexUnlock
+end
+
+fn CoDuplexClientWrite { iopl -- ok }
+	// duplex is locked (which means IPL may be >=IPLDPC).
+	// MDL is pinned.
+
+	// client fcb, writing to the transmit buffer and/or server buffers.
+	// this may pend.
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto buf
+	iopl@ IOPacketLocationMappedBuffer buf!
+
+	0 ok!
+
+	auto bytecnt
+	0 bytecnt!
+
+	auto done
+	0 done!
+
+	if (duplex@ CoDuplex_ClientWriteListHead + @)
+		// there's already a pending request, so add ours to the end and return.
+
+		0 // lengthdone
+		REQFLAG_WRITE // flags
+		iopl@ // iopl
+		CoDuplexEnqueueRequest
+
+		STATUS_OTHER_CONDITION ok!
+	end else
+		auto header
+		duplex@ CoDuplex_TransmitBuffer + header!
+
+		if (header@ CoDuplexBuffer_WriteIndex + @ header@ CoDuplexBuffer_ReadIndex + @ - ~~)
+			// only write directly to device if the ringbuffer is empty,
+			// otherwise characters may be written out of order in certain
+			// conditions.
+
+			auto txfunc
+			duplex@ CoDuplex_TXFunc + @ txfunc!
+
+			if (txfunc@)
+				while (1)
+					if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
+						DONE_NORMAL done |=
+						break
+					end
+
+					buf@ bytecnt@ + gb // c
+					txfunc@ // txfunc
+					duplex@ // duplex
+					CoDuplexTXCharacter ok!
+
+					if (ok@ ~~)
+						break
+					end
+
+					0 ok!
+
+					1 bytecnt +=
+				end
+			end
+		end
+
+		// try to satisfy as many server reads as possible.
+		// then resort to filling the transmit buffer. then, if we still have
+		// characters, enqueue our own request.
+
+		auto rp
+
+		while (done@ ~~)
+			auto otheriop
+			duplex@ CoDuplex_ServerReadListHead + @ otheriop!
+
+			if (otheriop@ ~~)
+				break
+			end
+
+			auto otheriopl
+			otheriop@ IOPacketCurrentLocation otheriopl!
+
+			// calculate available bytes in buffer.
+
+			header@ CoDuplexBuffer_UserBufferLength + @
+			header@ CoDuplexBuffer_UserBufferIndex + @ - rp!
+
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
+			end
+
+			auto bufwritten
+
+			if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + // dest
+				buf@ bytecnt@ + // src
+				rp@ // sz
+				memcpy
+
+				rp@ bufwritten!
+			end else
+				header@ CoDuplexBuffer_UserBuffer + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ + // dest
+				buf@ bytecnt@ + // src
+				header@ CoDuplexBuffer_UserBufferLength + @
+				header@ CoDuplexBuffer_UserBufferIndex + @ - // maxdest
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxsrc
+				duplex@ // duplex
+				CoDuplexCookedCopyClient rp! bufwritten!
+			end
+
+			rp@ header@ CoDuplexBuffer_UserBufferIndex + +=
+
+			bufwritten@ bytecnt +=
+
+			if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
+				DONE_NORMAL done |=
+			end
+
+			if (header@ CoDuplexBuffer_UserBufferIndex + @
+				header@ CoDuplexBuffer_UserBufferLength + @ ==
+				otheriopl@ IOPacketLocation_Flags + @ REQFLAG_RETURNANY & ||)
+
+				// complete the server MDL.
+
+				header@ CoDuplexBuffer_UserBufferIndex + @
+				otheriop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+
+				// unlink the server request.
+
+				auto niop
+				otheriop@ IOPacketHeader_DeviceQueueNext + @ niop!
+
+				0 // status
+				duplex@ CoDuplex_ServerBoost + @ // priboost
+				otheriop@ // iop
+				IOPacketCompleteLow
+
+				niop@ otheriop!
+
+				otheriop@ duplex@ CoDuplex_ServerReadListHead + !
+
+				if (otheriop@)
+					otheriop@ IOPacketCurrentLocation otheriopl!
+
+					0 otheriop@ IOPacketHeader_DeviceQueuePrev + !
+
+					otheriopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+					otheriopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+					otheriopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+				end else
+					0 duplex@ CoDuplex_ServerReadListTail + !
+				end
+			end
+		end
+
+		if (done@ ~~)
+			// try to copy to the transmit buffer.
+
+			auto bufp
+			header@ CoDuplexBuffer_Buffer + @ bufp!
+
+			header@ CoDuplexBuffer_RemainingSpace + @ rp!
+
+			if (iopl@ IOPacketLocation_Length + @ bytecnt@ - rp@ <)
+				iopl@ IOPacketLocation_Length + @ bytecnt@ - rp!
+			end
+
+			if (rp@)
+				auto bufsize
+				header@ CoDuplexBuffer_Size + @ bufsize!
+
+				auto index
+				header@ CoDuplexBuffer_WriteIndex + @ index!
+
+				if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+					auto endp
+					index@ rp@ + endp!
+
+					if (index@ bufsize@ 1 - ~ & endp@ 1 - bufsize@ 1 - ~ & ==)
+						// doesn't cross the boundary, do a single copy
+
+						bufp@ index@ bufsize@ 1 - & + // dest
+						buf@ bytecnt@ + // src
+						rp@ // sz
+						memcpy
+					end else
+						// crosses the boundary, do two copies
+
+						bufp@ index@ bufsize@ 1 - & + // dest
+						buf@ bytecnt@ + // src
+						bufsize@ index@ bufsize@ 1 - & - // sz
+						memcpy
+
+						bufp@ // dest
+						buf@ bytecnt@ + bufsize@ index@ bufsize@ 1 - & - + // src
+						endp@ bufsize@ 1 - & // sz
+						memcpy
+					end
+
+					rp@ bufwritten!
+				end else
+					// the geometry of what this does is 1-dimensional but
+					// still too complicated for me to feel like writing a
+					// comment explaining it.
+
+					if (header@ CoDuplexBuffer_ReadIndex + @ bufsize@ 1 - & index@ bufsize@ 1 - & <)
+						bufp@ index@ bufsize@ 1 - & + // dest
+						buf@ bytecnt@ + // src
+						bufsize@ index@ bufsize@ 1 - & - // maxdest
+						iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxsrc
+						duplex@ // duplex
+						CoDuplexCookedCopyClient rp! bufwritten!
+
+						if (iopl@ IOPacketLocation_Length + @ bytecnt@ - bufwritten@ ~=)
+							bufp@ // dest
+							buf@ bytecnt@ + bufwritten@ + // src
+							header@ CoDuplexBuffer_ReadIndex + @ bufsize@ 1 - & // maxdest
+							iopl@ IOPacketLocation_Length + @ bytecnt@ - bufwritten@ - // maxsrc
+							duplex@ // duplex
+							CoDuplexCookedCopyClient rp += bufwritten +=
+						end
+					end else
+						bufp@ index@ bufsize@ 1 - & + // dest
+						buf@ bytecnt@ + // src
+						header@ CoDuplexBuffer_ReadIndex + @ bufsize@ 1 - & index@ bufsize@ 1 - & - // maxdest
+						iopl@ IOPacketLocation_Length + @ bytecnt@ - // maxsrc
+						duplex@ // duplex
+						CoDuplexCookedCopyClient rp! bufwritten!
+					end
+				end
+
+				index@ rp@ + header@ CoDuplexBuffer_WriteIndex + !
+				rp@ header@ CoDuplexBuffer_RemainingSpace + -=
+
+				bufwritten@ bytecnt +=
+
+				if (bytecnt@ iopl@ IOPacketLocation_Length + @ ==)
+					DONE_NORMAL done |=
+				end
+			end
+		end
+
+		if (done@ ~~)
+			// enqueue the request.
+
+			bytecnt@ // lengthdone
+			REQFLAG_WRITE // flags
+			iopl@ // iopl
+			CoDuplexEnqueueRequest
+
+			STATUS_OTHER_CONDITION ok!
+		end else
+			bytecnt@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
+		end
+	end
+end

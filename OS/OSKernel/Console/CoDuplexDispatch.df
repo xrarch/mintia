@@ -1,0 +1,433 @@
+//
+// Implements the "duplex" generic character I/O device driver.
+// Dispatch routines.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALArgs.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/Console.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<ll>/OSDLL/OSConsoleControl.h"
+
+#include "CoDuplex.h"
+
+fn (IODispatchIOControlFunction) CoDuplexIOControl { arg2 arg1 access fcb lastmode -- ret ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+	0 ret!
+
+	auto deviceobject
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_DeviceObject + @ deviceobject!
+
+	auto duplex
+	deviceobject@ IODevice_Extension + @ duplex!
+
+	auto console
+	deviceobject@ IODevice_ConsoleHeader + @ console!
+
+	if (console@ ~~)
+		STATUS_NOT_SUPPORTED ok!
+		return
+	end
+
+	if (arg1@ OSCONSOLEIOCONTROL_QUERY ==)
+		auto query
+
+		if (lastmode@ USERMODE ==)
+			OSConsoleQuery_SIZEOF alloc query!
+
+			query@ // ptr
+			OSConsoleQuery_SIZEOF // size
+			0 // word
+			memset
+		end else
+			arg2@ query!
+		end
+
+		console@ CoConsoleHeader_Mode + @ query@ OSConsoleQuery_Mode + !
+
+		if (lastmode@ USERMODE ==)
+			arg2@ // dest
+			query@ // src
+			OSConsoleQuery_SIZEOF // size
+			KeSafeCopyOut ok!
+		end
+	end elseif (arg1@ OSCONSOLEIOCONTROL_SETMODE ==)
+		console@ CoConsoleHeader_Mode + @ ret!
+		arg2@ console@ CoConsoleHeader_Mode + !
+	end elseif (arg1@ OSCONSOLEIOCONTROL_RESETMODE ==)
+		console@ CoConsoleHeader_Mode + @ ret!
+		0 console@ CoConsoleHeader_Mode + !
+	end elseif (arg1@ OSCONSOLEIOCONTROL_EXPEDITE ==)
+		if (duplex@ CoVideoConsole@ ==)
+			CoVideoConsoleExpediteRedraw
+		end
+	end else
+		STATUS_NOT_SUPPORTED ok!
+	end
+end
+
+fn (IODispatchCancelFunction) CoDuplexCancel { iop -- ok }
+	0 ok!
+
+	auto iopl
+	iop@ IOPacketCurrentLocation iopl!
+
+	auto duplex
+	iopl@ IOPacketLocation_Context + @ duplex!
+
+	auto ipl
+	duplex@ // duplex
+	0 // alertable
+	CoDuplexLock drop ipl!
+
+	if (iop@ IOPacketHeader_IOPFlagsB + gb IOPFLAG_COMPLETE &)
+		// already completed, nothing to do
+		ipl@ duplex@ CoDuplexUnlock
+		return
+	end
+
+	auto flags
+	iopl@ IOPacketLocation_Flags + @ flags!
+
+	auto header
+	0 header!
+
+	auto ls
+	auto ns
+
+	iop@ IOPacketHeader_DeviceQueuePrev + @ ls!
+	iop@ IOPacketHeader_DeviceQueueNext + @ ns!
+
+	if (flags@ REQFLAG_SERVER &)
+		if (flags@ REQFLAG_WRITE &)
+			if (ls@)
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
+			end else
+				ns@ duplex@ CoDuplex_ServerWriteListHead + !
+				duplex@ CoDuplex_ReceiveBuffer + header!
+			end
+
+			if (ns@)
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
+			end else
+				ls@ duplex@ CoDuplex_ServerWriteListTail + !
+			end
+		end else
+			if (ls@)
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
+			end else
+				ns@ duplex@ CoDuplex_ServerReadListHead + !
+				duplex@ CoDuplex_TransmitBuffer + header!
+			end
+
+			if (ns@)
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
+			end else
+				ls@ duplex@ CoDuplex_ServerReadListTail + !
+			end
+		end
+	end else
+		if (flags@ REQFLAG_WRITE &)
+			if (ls@)
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
+			end else
+				ns@ duplex@ CoDuplex_ClientWriteListHead + !
+				duplex@ CoDuplex_TransmitBuffer + header!
+			end
+
+			if (ns@)
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
+			end else
+				ls@ duplex@ CoDuplex_ClientWriteListTail + !
+			end
+		end else
+			if (ls@)
+				ns@ ls@ IOPacketHeader_DeviceQueueNext + !
+			end else
+				ns@ duplex@ CoDuplex_ClientReadListHead + !
+				duplex@ CoDuplex_ReceiveBuffer + header!
+			end
+
+			if (ns@)
+				ls@ ns@ IOPacketHeader_DeviceQueuePrev + !
+			end else
+				ls@ duplex@ CoDuplex_ClientReadListTail + !
+			end
+		end
+	end
+
+	if (header@ ns@ &&)
+		auto nsiopl
+		ns@ IOPacketCurrentLocation nsiopl!
+
+		nsiopl@ IOPacketLocationMappedBuffer header@ CoDuplexBuffer_UserBuffer + !
+		nsiopl@ IOPacketLocation_Offset + @ header@ CoDuplexBuffer_UserBufferIndex + !
+		nsiopl@ IOPacketLocation_Length + @ header@ CoDuplexBuffer_UserBufferLength + !
+	end
+
+	ipl@ duplex@ CoDuplexUnlock
+
+	STATUS_IO_CANCELLED // status
+	0 // priboost
+	iop@ // iop
+	IOPacketCompleteLow
+end
+
+fn (IODispatchEnqueueIOPFunction) CoDuplexRead { iopl -- done ok }
+	0 ok!
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	auto fcb
+	iopl@ IOPacketLocation_FileControlBlock + @ fcb!
+
+	auto deviceobject
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_DeviceObject + @ deviceobject!
+
+	auto duplex
+	deviceobject@ IODevice_Extension + @ duplex!
+
+	duplex@ iopl@ IOPacketLocation_Context + !
+
+	if (iopl@ IOPacketLocation_Length + @ ~~)
+		0 // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	auto isserver
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlock_Extension + @ isserver!
+
+	if (isserver@)
+		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
+			return
+		end
+	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	auto ipl
+	duplex@ // duplex
+	1 // alertable
+	CoDuplexLock ok! ipl!
+
+	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	if (isserver@)
+		iopl@ CoDuplexServerRead ok!
+	end else
+		iopl@ CoDuplexClientRead ok!
+	end
+
+	ipl@ duplex@ CoDuplexUnlock
+
+	if (ok@ STATUS_OTHER_CONDITION ~=)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+	end else
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
+end
+
+fn (IODispatchEnqueueIOPFunction) CoDuplexWrite { iopl -- done ok }
+	0 ok!
+	1 done!
+
+	auto iop
+	iopl@ IOPacketFromLocation iop!
+
+	auto fcb
+	iopl@ IOPacketLocation_FileControlBlock + @ fcb!
+
+	auto deviceobject
+	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_DeviceObject + @ deviceobject!
+
+	auto duplex
+	deviceobject@ IODevice_Extension + @ duplex!
+
+	duplex@ iopl@ IOPacketLocation_Context + !
+
+	if (iopl@ IOPacketLocation_Length + @ ~~)
+		0 // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	auto isserver
+	iopl@ IOPacketLocation_FileControlBlock + @ IOFileControlBlock_Extension + @ isserver!
+
+	if (isserver@ ~~)
+		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
+			STATUS_FORBIDDEN_OPERATION ok!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
+			return
+		end
+	end
+
+	auto mdl
+	iop@ IOPacketHeader_MDL + @ mdl!
+
+	0 // lockforwrite
+	mdl@ // mdl
+	MmMDLPin ok!
+
+	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	mdl@ MmMDLMap ok!
+
+	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	auto ipl
+	duplex@ // duplex
+	1 // alertable
+	CoDuplexLock ok! ipl!
+
+	if (ok@)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+
+		return
+	end
+
+	if (isserver@)
+		if (duplex@ CoDuplex_Disconnected + @)
+			ipl@ duplex@ CoDuplexUnlock
+
+			0 // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
+			0 ok!
+
+			return
+		end
+
+		if (duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + @ OSCONSOLEMODE_RAW &)
+			iopl@ CoDuplexServerWriteRaw ok!
+		end else
+			iopl@ CoDuplexServerWriteCooked ok!
+		end
+	end else
+		if (duplex@ CoDuplex_Disconnected + @)
+			ipl@ duplex@ CoDuplexUnlock
+
+			STATUS_CONSOLE_HUNG_UP ok!
+
+			ok@ // status
+			0 // priboost
+			iop@ // iop
+			IOPacketCompleteLow
+
+			return
+		end
+
+		iopl@ CoDuplexClientWrite ok!
+	end
+
+	ipl@ duplex@ CoDuplexUnlock
+
+	if (ok@ STATUS_OTHER_CONDITION ~=)
+		ok@ // status
+		0 // priboost
+		iop@ // iop
+		IOPacketCompleteLow
+	end else
+		// this means the request was enqueued successfully, so report success
+		0 ok!
+	end
+end

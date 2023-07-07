@@ -176,8 +176,8 @@ const MMHEAPBLOCKSIZESHIFT 5
 const MMHEAPBLOCKMINSIZE   (1 MMHEAPBLOCKSIZESHIFT <<)
 const MMHEAPBLOCKSIZEMASK  (MMHEAPBLOCKMINSIZE 1 -)
 
-const MMHEAPSWIFTMAGIC  0x1DC0
-const MMHEAPFREEMAGIC   0xE433
+const MMHEAPSWIFTMAGIC  0xC0 // least significant 4 bits MUST be zero
+const MMHEAPFREEMAGIC   0xE4
 
 const MMHEAPNORMAL      0
 const MMHEAPMSL2        1
@@ -185,16 +185,22 @@ const MMHEAPMS          2
 const MMHEAPPAGED       3
 
 struct MiAllocatedHeapBlock
-	1 BucketIndex
-	1 LastBucketIndex
-	2 Magic // least significant 4 bits of magic are used to store heap level
+	1 BucketIndexB
+	1 LastSizeB // in units of minimum heap block size
+	1 MagicB // least significant 4 bits are used to store heap level
+	1 SizeB
+
 	4 Tag
 endstruct
 
 struct MiHeapBlock
-	1 BucketIndex
-	1 LastBucketIndex
-	2 Magic
+	1 BucketIndexB
+	1 LastSizeB // in units of minimum heap block size
+	1 MagicB // least significant 4 bits are used to store heap level
+	1 SizeB
+
+	4 Tag
+
 	4 NextFree
 	4 PrevFree
 endstruct

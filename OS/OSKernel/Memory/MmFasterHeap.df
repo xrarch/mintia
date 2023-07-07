@@ -1,0 +1,723 @@
+//
+// Implements the free-list allocator for the kernel pool.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "MmInternal.h"
+
+// heap allocation functions. should be called only through MmAllocWithTag and
+// MmFree. manages free-list allocations within pages.
+
+// we allocate in multiple "levels" in the interest of stability during tight
+// memory situations. the levels are as follows:
+//
+// - NORMAL
+// - MUSTSUCCEEDL2
+// - MUSTSUCCEED
+//
+// the allocation request will begin by searching the NORMAL free lists for a
+// block to return or split. if they are empty, and the MUSTSUCCEEDL2 or
+// MUSTSUCCEED flag has been specified, it will search those lists in that
+// order until it either finds an appropriate block or reaches the last level
+// it may allocate from. if it reaches this level without having found a
+// block, it will allocate a page from the corresponding MmPageAlloc priority
+// and split it into blocks to place on that level's free lists.
+
+const MMHEAPBLOCKBUCKETS (PAGESHIFT MMHEAPBLOCKSIZESHIFT -)
+
+table MmHeapNormalListHeads[MMHEAPBLOCKBUCKETS]
+table MmHeapMSL2ListHeads[MMHEAPBLOCKBUCKETS]
+table MmHeapMustSucceedListHeads[MMHEAPBLOCKBUCKETS]
+
+table MmHeapPagedListHeads[MMHEAPBLOCKBUCKETS]
+
+table MmHeapListHeads
+	pointerof MmHeapNormalListHeads
+	pointerof MmHeapMSL2ListHeads
+	pointerof MmHeapMustSucceedListHeads
+	pointerof MmHeapPagedListHeads
+endtable
+
+table MmHeapLevelPriorities
+	0
+	MUSTSUCCEEDL2
+	MUSTSUCCEED
+	0
+endtable
+
+var MmNonpagedHeapBytesUsedInternally 0
+public MmNonpagedHeapBytesUsedInternally
+
+var MmNonpagedHeapBytesUsedPeak 0
+public MmNonpagedHeapBytesUsedPeak
+
+var MmNonpagedHeapBytesUsedExternally 0
+public MmNonpagedHeapBytesUsedExternally
+
+var MmPagedHeapBytesUsedInternally 0
+public MmPagedHeapBytesUsedInternally
+
+var MmPagedHeapBytesUsedPeak 0
+public MmPagedHeapBytesUsedPeak
+
+var MmPagedHeapBytesUsedExternally 0
+public MmPagedHeapBytesUsedExternally
+
+buffer MiPagedHeapMutex KeMutex_SIZEOF
+
+fn MiHeapInit { -- }
+	fnsection "INIT$text"
+
+	"MiPagedHeapMutex" // name
+	KERNELMODE // mode
+	MiPagedHeapMutex
+	KeMutexInitialize
+end
+
+fn MiHeapAlloc { bytes tag flags -- ptr ok }
+	auto maxlevel
+
+	auto ipl
+
+	if (flags@ PAGED &)
+		IPLAPC KeIPLRaise ipl!
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		MiPagedHeapMutex // object
+		KeThreadWaitForObject drop
+
+		-1 // ipl
+		bytes@ // bytes
+		tag@ // tag
+		MMHEAPPAGED // level
+		flags@ // flags
+		MiHeapAllocateLevel ok! ptr!
+
+		0 // abandon
+		MiPagedHeapMutex // mutex
+		KeMutexRelease drop
+
+		ipl@ KeIPLLower
+
+		return
+	end
+
+	if (flags@ MUSTSUCCEED &)
+		MMHEAPMS maxlevel!
+	end elseif (flags@ MUSTSUCCEEDL2 &)
+		MMHEAPMSL2 maxlevel!
+	end else
+		MMHEAPNORMAL maxlevel!
+	end
+
+	auto level
+	MMHEAPNORMAL level!
+
+	while (level@ maxlevel@ <=)
+		IPLDPC KeIPLRaise ipl!
+
+		if (level@ maxlevel@ ==)
+			ipl@ // ipl
+			bytes@ // bytes
+			tag@ // tag
+			level@ // level
+			flags@ // flags
+			MiHeapAllocateLevel ok! ptr!
+		end else
+			ipl@ // ipl
+			bytes@ // bytes
+			tag@ // tag
+			level@ // level
+			[level@]MmHeapLevelPriorities@ // flags
+			MiHeapAllocateLevel ok! ptr!
+		end
+
+		ipl@ KeIPLLower
+
+		if (ok@ ~~)
+			return
+		end
+
+		1 level +=
+	end
+end
+
+fn MiHeapAllocateLevel { ipl bytes tag level flags -- ptr ok }
+	// called at IPLDPC if nonpaged, or with MiPagedHeapMutex held if paged.
+
+	MiAllocatedHeapBlock_SIZEOF bytes +=
+
+	bytes@ MMHEAPBLOCKSIZEMASK + MMHEAPBLOCKSIZESHIFT >> bytes!
+
+	// bytes now actually stores size units rather than real bytes.
+
+	auto bucketindex
+	0 bucketindex!
+
+	// we want to start searching in the bucket ceil(log_2(units)).
+	// we place blocks in bucket floor(log_2(units)).
+	// the following algorithm is a very naive way to calculate the former:
+
+	auto n
+	1 n!
+
+	while (n@ bytes@ <)
+		1 bucketindex +=
+		1 n <<=
+	end
+
+	// to get the floor version, we do this little ditty:
+
+	auto logfloor
+	bucketindex@ logfloor!
+
+	if (n@ bytes@ ~=)
+		1 logfloor -=
+	end
+
+	auto listhead
+	[level@]MmHeapListHeads@ bucketindex@ 2 << + listhead!
+
+	auto i
+	bucketindex@ i!
+
+	auto newblocksize
+	auto newblock
+	auto newbucketindex
+
+	while (i@ MMHEAPBLOCKBUCKETS <)
+		listhead@@ ptr!
+
+		if (ptr@)
+			if (ptr@ MiHeapBlock_MagicB + gb MMHEAPFREEMAGIC ~=)
+				ptr@ MiHeapBlock_MagicB + gb "MiHeapAllocate: bad magic 0x%02x\n" KeCrash
+			end
+
+			if (ptr@ MiHeapBlock_BucketIndexB + gb i@ ~=)
+				i@ ptr@ MiHeapBlock_BucketIndexB + gb "MiHeapAllocate: bad bucketindex %d (expected %d)\n" KeCrash
+			end
+
+			// this block is either perfectly sized, or at least big enough to
+			// satisfy the allocation request. in either case, we want to
+			// unlink it from the bucket's free list.
+
+			ptr@ MiHeapBlock_NextFree + @ n!
+
+			if (n@)
+				0 n@ MiHeapBlock_PrevFree + !
+			end
+
+			n@ listhead@!
+
+			ptr@ MiHeapBlock_SizeB + gb newblocksize!
+
+			if (newblocksize@ bytes@ ==)
+				// just big enough.
+
+				// set magic to indicate allocated
+				MMHEAPSWIFTMAGIC level@ | ptr@ MiHeapBlock_MagicB + sb
+
+				if (flags@ PAGED &)
+					bytes@ MMHEAPBLOCKSIZESHIFT << MmPagedHeapBytesUsedInternally +=
+
+					if (MmPagedHeapBytesUsedInternally@ MmPagedHeapBytesUsedPeak@ >)
+						MmPagedHeapBytesUsedInternally@ MmPagedHeapBytesUsedPeak!
+					end
+				end else
+					bytes@ MMHEAPBLOCKSIZESHIFT << MmNonpagedHeapBytesUsedInternally +=
+
+					if (MmNonpagedHeapBytesUsedInternally@ MmNonpagedHeapBytesUsedPeak@ >)
+						MmNonpagedHeapBytesUsedInternally@ MmNonpagedHeapBytesUsedPeak!
+					end
+				end
+
+				tag@ ptr@ MiAllocatedHeapBlock_Tag + !
+
+				// return block
+				MiAllocatedHeapBlock_SIZEOF ptr +=
+
+				0 ok!
+
+				return
+			end
+
+			// the block must be split.
+
+			// calculate the size of the new block.
+
+			bytes@ newblocksize -=
+
+			if (DEBUGCHECKS)
+				if (newblocksize@ z<)
+					i@
+					ptr@ MiHeapBlock_SizeB + gb
+					bytes@
+					"MiHeapAllocate: request=%d thisblock=%d bucketindex=%d\n" KeCrash
+				end
+			end
+
+			// set new bucketindex in old block header.
+			// already has correct lastsize, don't need to touch that.
+
+			logfloor@ ptr@ MiHeapBlock_BucketIndexB + sb
+			MMHEAPSWIFTMAGIC level@ | ptr@ MiHeapBlock_MagicB + sb
+			bytes@ ptr@ MiHeapBlock_SizeB + sb
+
+			// calculate index of bucket to place split block in.
+
+			0 newbucketindex!
+
+			1 n!
+
+			while (n@ newblocksize@ <)
+				1 newbucketindex +=
+				1 n <<=
+			end
+
+			if (n@ newblocksize@ ~=)
+				1 newbucketindex -=
+			end
+
+			// get a pointer to the new block.
+
+			ptr@ bytes@ MMHEAPBLOCKSIZESHIFT << + newblock!
+
+			// create new block header
+
+			newblocksize@ newblock@ MiHeapBlock_SizeB + sb
+			bytes@ newblock@ MiHeapBlock_LastSizeB + sb
+			newbucketindex@ newblock@ MiHeapBlock_BucketIndexB + sb
+			MMHEAPFREEMAGIC newblock@ MiHeapBlock_MagicB + sb
+
+			// update next block to point to new block unless it is page
+			// -aligned which means theres no next block
+
+			newblock@ newblocksize@ MMHEAPBLOCKSIZESHIFT << + n!
+
+			if (n@ PAGEOFFSETMASK &)
+				newblocksize@ n@ MiHeapBlock_LastSizeB + sb
+			end
+
+			// insert in new bucket list
+
+			[level@]MmHeapListHeads@ newbucketindex@ 2 << + @ n!
+
+			if (n@)
+				newblock@ n@ MiHeapBlock_PrevFree + !
+			end
+
+			n@ newblock@ MiHeapBlock_NextFree + !
+			0 newblock@ MiHeapBlock_PrevFree + !
+
+			newblock@ [level@]MmHeapListHeads@ newbucketindex@ 2 << + !
+
+			if (flags@ PAGED &)
+				bytes@ MMHEAPBLOCKSIZESHIFT << MmPagedHeapBytesUsedInternally +=
+
+				if (MmPagedHeapBytesUsedInternally@ MmPagedHeapBytesUsedPeak@ >)
+					MmPagedHeapBytesUsedInternally@ MmPagedHeapBytesUsedPeak!
+				end
+			end else
+				bytes@ MMHEAPBLOCKSIZESHIFT << MmNonpagedHeapBytesUsedInternally +=
+
+				if (MmNonpagedHeapBytesUsedInternally@ MmNonpagedHeapBytesUsedPeak@ >)
+					MmNonpagedHeapBytesUsedInternally@ MmNonpagedHeapBytesUsedPeak!
+				end
+			end
+
+			// set tag
+			tag@ ptr@ MiAllocatedHeapBlock_Tag + !
+
+			// return block
+			MiAllocatedHeapBlock_SIZEOF ptr +=
+
+			0 ok!
+
+			return
+		end
+
+		4 listhead +=
+		1 i +=
+	end
+
+	// no sufficient block! allocate a page.
+	// store pfdbe in n.
+
+	if (flags@ PAGED &)
+		PAGESIZE // bytes
+		'PgHp' // tag
+		flags@ POOLEXP | // flags
+		MiPagedPoolAllocPages ok! ptr!
+
+		if (ok@)
+			return
+		end
+	end else
+		if (flags@ CANBLOCK &)
+			ipl@ KeIPLLower
+		end
+
+		PAGESIZE // bytes
+		'NpHp' // tag
+		flags@ POOLEXP | // flags
+		MiNonpagedPoolAllocPages ok! ptr! n!
+
+		if (flags@ CANBLOCK &)
+			IPLDPC KeIPLRaise drop
+		end
+
+		if (ok@)
+			return
+		end
+
+		// initialize the pfdbe
+		level@ n@ MiPageFrameEntryHeap_Level + !
+		0 n@ MiPageFrameEntryHeap_Permanent + !
+		//n@ MiPoolPageInsert
+	end
+
+	// set bucketindex in our block header
+
+	0 ptr@ MiHeapBlock_LastSizeB + sb
+	logfloor@ ptr@ MiHeapBlock_BucketIndexB + sb
+	MMHEAPSWIFTMAGIC level@ | ptr@ MiHeapBlock_MagicB + sb
+	bytes@ ptr@ MiHeapBlock_SizeB + sb
+
+	// calculate index of bucket to place split block in
+
+	PAGESIZE MMHEAPBLOCKSIZESHIFT >> bytes@ - newblocksize!
+
+	0 newbucketindex!
+
+	1 n!
+
+	while (n@ newblocksize@ <)
+		1 newbucketindex +=
+		1 n <<=
+	end
+
+	if (n@ newblocksize@ ~=)
+		1 newbucketindex -=
+	end
+
+	ptr@ bytes@ MMHEAPBLOCKSIZESHIFT << + newblock!
+
+	// create free block header
+
+	newblocksize@ newblock@ MiHeapBlock_SizeB + sb
+	bytes@ newblock@ MiHeapBlock_LastSizeB + sb
+	newbucketindex@ newblock@ MiHeapBlock_BucketIndexB + sb
+	MMHEAPFREEMAGIC newblock@ MiHeapBlock_MagicB + sb
+
+	// insert in free list
+
+	[level@]MmHeapListHeads@ newbucketindex@ 2 << + @ n!
+
+	if (n@)
+		newblock@ n@ MiHeapBlock_PrevFree + !
+	end
+
+	n@ newblock@ MiHeapBlock_NextFree + !
+	0 newblock@ MiHeapBlock_PrevFree + !
+
+	newblock@ [level@]MmHeapListHeads@ newbucketindex@ 2 << + !
+
+	if (flags@ PAGED &)
+		PAGESIZE MmPagedHeapBytesUsedExternally +=
+		bytes@ MMHEAPBLOCKSIZESHIFT << MmPagedHeapBytesUsedInternally +=
+
+		if (MmPagedHeapBytesUsedInternally@ MmPagedHeapBytesUsedPeak@ >)
+			MmPagedHeapBytesUsedInternally@ MmPagedHeapBytesUsedPeak!
+		end
+	end else
+		PAGESIZE MmNonpagedHeapBytesUsedExternally +=
+		bytes@ MMHEAPBLOCKSIZESHIFT << MmNonpagedHeapBytesUsedInternally +=
+
+		if (MmNonpagedHeapBytesUsedInternally@ MmNonpagedHeapBytesUsedPeak@ >)
+			MmNonpagedHeapBytesUsedInternally@ MmNonpagedHeapBytesUsedPeak!
+		end
+	end
+
+	// set tag
+	tag@ ptr@ MiAllocatedHeapBlock_Tag + !
+
+	MiAllocatedHeapBlock_SIZEOF ptr +=
+
+	0 ok!
+end
+
+fn MiHeapFree { ptr -- }
+	MiAllocatedHeapBlock_SIZEOF ptr -=
+
+	// check if the block has free blocks physically to its left or right.
+	// if so, merge.
+
+	// then, place the resulting block on the relevant free list.
+
+	auto bucketindex
+	auto lastblocksize
+	auto nb
+	auto n
+	auto merged
+	auto blocksize
+
+	0 merged!
+
+	ptr@ MiHeapBlock_SizeB + gb blocksize!
+
+	ptr@ MiHeapBlock_BucketIndexB + gb bucketindex!
+
+	if (ptr@ MiHeapBlock_MagicB + gb 15 ~ & MMHEAPSWIFTMAGIC ~=)
+		ptr@ MiHeapBlock_MagicB + gb "MiHeapFree: bad magic %02x\n" KeCrash
+	end
+
+	auto level
+	ptr@ MiHeapBlock_MagicB + gb 15 & level!
+
+	auto listheads
+	[level@]MmHeapListHeads@ listheads!
+
+	auto ipl
+
+	if (level@ MMHEAPPAGED ~=)
+		IPLDPC KeIPLRaise ipl!
+
+		blocksize@ MMHEAPBLOCKSIZESHIFT << MmNonpagedHeapBytesUsedInternally -=
+	end else
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAIT_TIMEOUTINFINITE // timeout
+		MiPagedHeapMutex // object
+		KeThreadWaitForObject drop
+
+		blocksize@ MMHEAPBLOCKSIZESHIFT << MmPagedHeapBytesUsedInternally -=
+	end
+
+	if (ptr@ PAGEOFFSETMASK &)
+		// we're not at the start of the page, check left
+
+		ptr@ MiHeapBlock_LastSizeB + gb lastblocksize!
+
+		ptr@ lastblocksize@ MMHEAPBLOCKSIZESHIFT << - nb!
+
+		if (nb@ MiHeapBlock_SizeB + gb lastblocksize@ ~=)
+			lastblocksize@ nb@ MiHeapBlock_SizeB + gb "MiHeapFree: bad blocksize %d (expected %d)\n" KeCrash
+		end
+
+		if (nb@ MiHeapBlock_MagicB + gb MMHEAPFREEMAGIC ==)
+			// free! merge left.
+
+			1 merged!
+
+			// remove from old free list
+
+			nb@ MiHeapBlock_NextFree + @ n!
+
+			if (n@)
+				nb@ MiHeapBlock_PrevFree + @ n@ MiHeapBlock_PrevFree + !
+			end
+
+			nb@ MiHeapBlock_PrevFree + @ n!
+
+			if (n@)
+				nb@ MiHeapBlock_NextFree + @ n@ MiHeapBlock_NextFree + !
+			end else
+				nb@ MiHeapBlock_NextFree + @ listheads@ nb@ MiHeapBlock_BucketIndexB + gb 2 << + !
+			end
+
+			// turn block into bigger block
+
+			lastblocksize@ blocksize +=
+
+			// fields will get updated later.
+
+			// invalidate magic number of old block
+
+			0 ptr@ MiHeapBlock_MagicB + sb
+
+			// set block pointer to last block
+
+			nb@ ptr!
+		end
+	end
+
+	ptr@ blocksize@ MMHEAPBLOCKSIZESHIFT << + nb!
+
+	if (nb@ PAGEOFFSETMASK &)
+		// next block exists, see if it can be merged
+
+		nb@ MiHeapBlock_SizeB + gb lastblocksize!
+
+		if (nb@ MiHeapBlock_MagicB + gb MMHEAPFREEMAGIC ==)
+			// free! merge right
+
+			1 merged!
+
+			// remove from old free list
+
+			nb@ MiHeapBlock_NextFree + @ n!
+
+			if (n@)
+				nb@ MiHeapBlock_PrevFree + @ n@ MiHeapBlock_PrevFree + !
+			end
+
+			nb@ MiHeapBlock_PrevFree + @ n!
+
+			if (n@)
+				nb@ MiHeapBlock_NextFree + @ n@ MiHeapBlock_NextFree + !
+			end else
+				nb@ MiHeapBlock_NextFree + @ listheads@ nb@ MiHeapBlock_BucketIndexB + gb 2 << + !
+			end
+
+			// turn block into bigger block
+
+			lastblocksize@ blocksize +=
+
+			// fields will get updated later.
+
+			// invalidate magic number of old block
+
+			0 nb@ MiHeapBlock_MagicB + sb
+		end
+	end
+
+	if (blocksize@ PAGESIZE MMHEAPBLOCKSIZESHIFT >> ==)
+		// we managed to create a free block that is the size of a whole page,
+		// so free this page.
+
+		if (level@ MMHEAPPAGED ==)
+			PAGESIZE MmPagedHeapBytesUsedExternally -=
+
+			0 // abandon
+			MiPagedHeapMutex // mutex
+			KeMutexRelease drop
+
+			1 // noaccount
+			ptr@ // ptr
+			MiPagedPoolFreePages
+
+			return
+		end else
+			PAGESIZE MmNonpagedHeapBytesUsedExternally -=
+
+			ipl@ KeIPLLower
+
+			1 // noaccount
+			ptr@ // ptr
+			MiNonpagedPoolFreePages
+
+			return
+		end
+	end
+
+	if (merged@)
+		// re-calculate bucket index and set new fields.
+
+		0 bucketindex!
+
+		1 n!
+
+		while (n@ blocksize@ <)
+			1 bucketindex +=
+			1 n <<=
+		end
+
+		if (n@ blocksize@ ~=)
+			1 bucketindex -=
+		end
+
+		bucketindex@ ptr@ MiHeapBlock_BucketIndexB + sb
+		blocksize@ ptr@ MiHeapBlock_SizeB + sb
+
+		// set last size of block to our right, if there is one.
+
+		ptr@ blocksize@ MMHEAPBLOCKSIZESHIFT << + nb!
+
+		if (nb@ PAGEOFFSETMASK &)
+			blocksize@ nb@ MiHeapBlock_LastSizeB + sb
+		end
+	end
+
+	// set free magic
+
+	MMHEAPFREEMAGIC ptr@ MiHeapBlock_MagicB + sb
+
+	// put on relevant free list
+
+	listheads@ bucketindex@ 2 << + @ nb!
+
+	if (nb@)
+		ptr@ nb@ MiHeapBlock_PrevFree + !
+	end
+
+	nb@ ptr@ MiHeapBlock_NextFree + !
+	0 ptr@ MiHeapBlock_PrevFree + !
+
+	ptr@ listheads@ bucketindex@ 2 << + !
+
+	if (level@ MMHEAPPAGED ==)
+		0 // abandon
+		MiPagedHeapMutex // mutex
+		KeMutexRelease drop
+	end else
+		ipl@ KeIPLLower
+	end
+end
+
+fn MmHeapChargeBytesGet { bytes -- charge }
+	bytes@ MiAllocatedHeapBlock_SIZEOF +
+	MMHEAPBLOCKSIZEMASK + MMHEAPBLOCKSIZEMASK ~ & charge!
+end
+
+fn MmHeapChargeGet { block -- charge }
+	MiAllocatedHeapBlock_SIZEOF block -=
+
+	if (block@ MiAllocatedHeapBlock_MagicB + gb 15 ~ & MMHEAPSWIFTMAGIC ~=)
+		block@ MiAllocatedHeapBlock_MagicB + gb
+		block@ "MmHeapChargeGet: ptr 0x%08x had bad magic 0x%02x\n" KeCrash
+	end
+
+	block@ MiAllocatedHeapBlock_SizeB + gb MMHEAPBLOCKSIZESHIFT << charge!
+end
+
+extern MmHeapPrintTag { tag -- }
+
+fn MmHeapDumpPage { tag page -- usage }
+	0 usage!
+
+	while (1)
+		if (page@ MiHeapBlock_MagicB + gb 15 ~ & MMHEAPSWIFTMAGIC ==)
+			if (page@ MiAllocatedHeapBlock_Tag + @ tag@ == tag@ ~~ ||)
+				page@ MiAllocatedHeapBlock_Tag + @ MmHeapPrintTag
+
+				page@ MiHeapBlock_SizeB + gb MMHEAPBLOCKSIZESHIFT <<
+				page@ MiAllocatedHeapBlock_SIZEOF +
+				" %08x (%d bytes)\n" Printf
+
+				page@ MiHeapBlock_SizeB + gb MMHEAPBLOCKSIZESHIFT << usage +=
+			end
+		end
+
+		page@ MiHeapBlock_SizeB + gb MMHEAPBLOCKSIZESHIFT << page +=
+
+		if (page@ PAGEOFFSETMASK & ~~)
+			return
+		end
+	end
+end

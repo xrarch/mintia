@@ -12,8 +12,8 @@ extern MmQuery { query -- ok }
 extern MmKflagToPriority { kflags -- pri }
 
 extern MmPageWait { process priority -- waited ok }
-extern MmPageGet { priority -- pfdbe pfn ok }
-extern MmPageAlloc { priority -- pfdbe pfn ok }
+extern MmPageGet { priority -- pfdbe ok }
+extern MmPageAlloc { priority -- pfdbe }
 
 extern MmHeapCheck { -- }
 extern MmHeapDumpBuckets { -- }

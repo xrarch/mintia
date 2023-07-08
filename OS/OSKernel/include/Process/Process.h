@@ -35,7 +35,6 @@ struct PsProcess // contains things that may need to be accessed at all times
 	4 PageFaultCount
 	4 ReFaultCount
 
-	4 MmHeaderPTE
 	4 MmHeader
 endstruct
 

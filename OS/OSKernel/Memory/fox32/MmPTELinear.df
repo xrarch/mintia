@@ -39,7 +39,7 @@ fn MiPTECreate { vaddr -- pteaddr ok }
 	KeProcessCurrent process!
 
 	auto pagemap
-	process@ KeProcess_PageDirectory + @ pagemap!
+	process@ KeProcess_PageDirectory + @ PAGENUMBERMASK & pagemap!
 
 	auto ptecount
 	auto pfdbe
@@ -70,15 +70,9 @@ fn MiPTECreate { vaddr -- pteaddr ok }
 
 		// private page prototype PTEs are physical addresses.
 
-		auto pfn
-
 		pagemap@ vaddr@ 22 >> 2 << + // pte
 		ZEROMUST // priority
-		MiAnonymousPageAlloc ok! pfn! pfdbe!
-
-		if (ok@)
-			return
-		end
+		MiAnonymousPageAlloc pfdbe!
 
 		1 ptecount@ si
 		ptecount@ pfdbe@ MiPageFrameEntryPageTable_PTECountTableEntry + !
@@ -89,7 +83,7 @@ fn MiPTECreate { vaddr -- pteaddr ok }
 
 		// create a transition PTE so we can fault this new page table in.
 
-		pfn@ PAGESHIFT << PTE_TRANSITION | pdeaddr@!
+		pfdbe@ MmPFDBEToPhysicalAddress PTE_TRANSITION | pdeaddr@!
 
 		pagemap@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ +
 		MmEvictablePageReference drop
@@ -373,6 +367,7 @@ fn MmVirtualAddressIsValid { vaddr -- isvalid }
 
 	if (pteaddr@@ PTE_V & ~~)
 		0 isvalid!
+
 		return
 	end
 
@@ -426,6 +421,12 @@ fn MiPTEUpdate { phyaddr flags pteaddr -- oldphyaddr oldflags }
 	// update a PTE based on a physical address and generic flags. this could
 	// do a number of things:
 
+	auto pte
+	pteaddr@@ pte!
+
+	pte@ 3 & oldflags!
+	pte@ 12 >> PAGESHIFT << oldphyaddr!
+
 	if (pteaddr@ PAGETABLE < pteaddr@ PAGETABLETOP >= ||)
 		phyaddr@ PAGESHIFT >> 12 << flags@ 3 & | pteaddr@!
 		return
@@ -433,12 +434,6 @@ fn MiPTEUpdate { phyaddr flags pteaddr -- oldphyaddr oldflags }
 
 	auto vaddr
 	pteaddr@ PAGETABLE - 2 >> PAGESHIFT << vaddr!
-
-	auto pte
-	pteaddr@@ pte!
-
-	pte@ 3 & oldflags!
-	pte@ 12 >> PAGESHIFT << oldphyaddr!
 
 	phyaddr@ PAGESHIFT >> 12 << flags@ 3 & | pte!
 

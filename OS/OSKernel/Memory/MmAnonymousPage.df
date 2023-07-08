@@ -80,7 +80,7 @@ fn (MmEvictionFunction) MiAnonymousEvictionFunction { pfdbe -- }
 	1 MmAnonymousPageCount -=
 end
 
-fn MiAnonymousPageGet { pte pri -- pfdbe pfn ok }
+fn MiAnonymousPageGet { pteaddr pri -- pfdbe ok }
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
 			"MiAnonymousPageGet: ipl != IPLDPC\n" KeCrash
@@ -95,7 +95,7 @@ fn MiAnonymousPageGet { pte pri -- pfdbe pfn ok }
 	MMEVICTFLAG_WORKINGSET // flags
 	MMEVICTTYPE_ANON // evictabletype
 	pri@ // priority
-	MmEvictablePageGet ok! pfn! pfdbe!
+	MmEvictablePageGet ok! pfdbe!
 
 	if (ok@)
 		return
@@ -103,72 +103,27 @@ fn MiAnonymousPageGet { pte pri -- pfdbe pfn ok }
 
 	SWAPPTE_DEMANDZERO pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
-	pte@ pfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + !
+	pteaddr@ pfdbe@ MiPageFrameEntryAnonymous_PrototypePTE + !
 
 	1 MmAnonymousPageCount KeInterlockedIncrement drop
 end
 
-fn MiAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
+fn MiAnonymousPageAlloc { pteaddr pri -- pfdbe }
+	// no error status since this operation is infallible if commit has been
+	// charged.
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
 	0 // process
 	pri@ CANBLOCK | // priority
-	MmPageWait ok! drop
+	MmPageWait drop drop
 
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
-
-	pte@ pri@ MiAnonymousPageGet ok! pfn! pfdbe!
+	pteaddr@ // pteaddr
+	pri@ // pri
+	MiAnonymousPageGet drop pfdbe!
 
 	ipl@ KeIPLLower
-end
-
-fn MiAnonymousSwapIn { pri pte pno ipl -- pfdbe pfn ok }
-	// XXX this needs to go away
-
-	if (DEBUGCHECKS)
-		if (KeIPLCurrentGet IPLDPC ~=)
-			"MiAnonymousSwapIn: ipl != IPLDPC\n" KeCrash
-		end
-	end
-
-	pte@ // pte
-	pri@ FREEFIRST | // pri
-	MiAnonymousPageGet ok! pfn! pfdbe!
-
-	ipl@ KeIPLLower
-
-	if (ok@)
-		return
-	end
-
-	auto kflags
-	IOKFLAG_PAGEIN kflags!
-
-	if (pri@ SYSTEMSPACE &)
-		IOKFLAG_SYSSPC kflags |=
-	end
-
-	kflags@ // kflags
-	pfdbe@ // pageframe
-	pte@@ // pte
-	IOSwapPageReadPTE ok!
-
-	if (ok@)
-		pfdbe@ MiAnonymousPageDelete
-
-		pfdbe@ MmEvictablePageDereference drop
-
-		return
-	end
-
-	pte@@ pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
-
-	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
-	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 end
 
 fn MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
@@ -328,7 +283,7 @@ fn MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
 	end
 end
 
-fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr localpteaddr -- pfdbe phyaddr ok }
+fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr localpteaddr -- pfdbe ok }
 	// assumes caller already did a MmPageWait and determined that the PTE is
 	// not valid if it wants to do its own processing in that case.
 
@@ -337,6 +292,8 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			"MiAnonymousPageReference: ipl != IPLDPC\n" KeCrash
 		end
 	end
+
+	auto phyaddr
 
 	auto lockprocess
 	0 lockprocess!
@@ -377,15 +334,11 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (dzpte@ PTE_KERNEL_DEMANDZERO ==)
 			pteaddr@ // pte
 			FREEFIRST pri@ | // pri
-			MiAnonymousPageGet ok! phyaddr! pfdbe!
+			MiAnonymousPageGet drop pfdbe!
 		end else
 			pteaddr@ // pte
 			ZEROMUST pri@ | // pri
-			MiAnonymousPageGet ok! phyaddr! pfdbe!
-		end
-
-		if (ok@)
-			return
+			MiAnonymousPageGet drop pfdbe!
 		end
 
 		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb evictflag@ | MMEVICTFLAG_MODIFIED |
@@ -394,8 +347,6 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		dzpte@ pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
 
 		1 MmSoftPageFaultCount +=
-
-		PAGESHIFT phyaddr <<=
 
 		if (evictflag@ MMEVICTFLAG_PRIVATE &)
 			process@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
@@ -408,6 +359,8 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (refpfdbe@)
 			refpfdbe@ MmEvictablePageReference drop
 		end
+
+		pfdbe@ MmPFDBEToPhysicalAddress phyaddr!
 
 		// unconditionally setting the PTE writable is okay since this is
 		// either a private fault where we're writing the PTE directly here,
@@ -426,7 +379,7 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (DEBUGCHECKS)
 			if (capturedpte@ PTE_KERNELSTACK &)
 				if (process@)
-					"Faulted on a transition kernel stack\n" KeCrash
+					"Faulted on a TRANSITION system page\n" KeCrash
 				end
 			end
 		end
@@ -475,18 +428,14 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 		if (DEBUGCHECKS)
 			if (capturedpte@ PTE_KERNELSTACK &)
 				if (process@)
-					"Faulted on a swapped-out kernel stack\n" KeCrash
+					"Faulted on an INSWAP system page\n" KeCrash
 				end
 			end
 		end
 
 		pteaddr@ // pte
 		pri@ FREEFIRST | // pri
-		MiAnonymousPageGet ok! phyaddr! pfdbe!
-
-		if (ok@)
-			return
-		end
+		MiAnonymousPageGet drop pfdbe!
 
 		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb evictflag@ |
 		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
@@ -500,7 +449,7 @@ fn MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pt
 			refpfdbe@ MmEvictablePageReference drop
 		end
 
-		PAGESHIFT phyaddr <<=
+		pfdbe@ MmPFDBEToPhysicalAddress phyaddr!
 
 		// mark the page as undergoing paging IO, so that collided threads can
 		// wait for us to finish.

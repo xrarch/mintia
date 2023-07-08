@@ -28,15 +28,7 @@
 fn MiPageDirectoryDestroy { process -- }
 	fnsection "PAGE$text"
 
-	auto pagemap
-	process@ KeProcess_PageDirectory + @ pagemap!
-
-	auto pfdbe
-	pagemap@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-	pfdbe@ MiAnonymousPageDelete
-
-	pfdbe@ MmEvictablePageDereference drop
+	process@ KeProcess_PageDirectory + MiSystemPageFree
 
 	auto quotablock
 	process@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
@@ -60,31 +52,12 @@ fn MiPageDirectoryAlloc { process -- ok }
 		return
 	end
 
-	auto pdir
 	auto pfdbe
-	process@ KeProcess_PageDirectory + // pte
-	ZEROMUST // priority
-	MiAnonymousPageAlloc ok! pdir! pfdbe!
+	ZEROMUST // pri
+	process@ KeProcess_PageDirectory + // pteaddr
+	MiSystemPageAllocate pfdbe!
 
-	if (ok@)
-		1 // charge
-		quotablock@ // quotablock
-		MmQuotaBlockUnchargeWS
-
-		return
-	end
-
-	process@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
-
-	pfdbe@ // pfdbe
-	0 // process
-	MmEvictablePageModify
-
-	PAGESHIFT pdir <<=
-
-	pdir@ MiPageDirectoryCopy
-
-	pdir@ process@ KeProcess_PageDirectory + !
+	pfdbe@ MmPFDBEToPhysicalAddress MiPageDirectoryCopy
 end
 
 fn MiPageDirectoryCopy { pdir -- }
@@ -108,76 +81,31 @@ fn MiPageDirectoryCopy { pdir -- }
 	ipl@ KeIPLLower
 end
 
-fn MiPageDirectoryReference { pri process -- ok }
-	if (DEBUGCHECKS)
-		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"MiPageDirectoryReference: thread could be killed\n" KeCrash
-		end
-	end
-
-	0 ok!
-
+fn MiPageDirectoryReference { process -- }
 	auto pfdbe
+	PAGEDIRECTORY // vaddr
+	process@ KeProcess_PageDirectory + // pteaddr
+	MiSystemPageIn pfdbe!
+
+	auto pdir
+	pfdbe@ MmPFDBEToPhysicalAddress pdir!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	0 // process
-	pri@ CANBLOCK | // priority
-	MmPageWait ok! drop
+	auto qp
+	pdir@ MiMapQuickPage qp!
 
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
+	// re-create recursive mapping of page tables since the physical
+	// address of the page directory may have changed.
 
-	if (process@ KeProcess_PageDirectory + @ PTE_INSWAP &)
-		auto pt
+	pdir@ PTE_V | PTE_W | qp@ PAGETABLE 22 >> 2 << + !
 
-		pri@ // priority
-		process@ KeProcess_PageDirectory + // pte
-		process@ KeProcess_PageDirectory + @ PAGESHIFT >> // pno
-		ipl@ // ipl
-		MiAnonymousSwapIn ok! pt! pfdbe!
+	qp@ MiUnmapQuickPage
 
-		if (ok@)
-			return
-		end
-
-		pt@ PAGESHIFT << process@ KeProcess_PageDirectory + !
-
-		IPLDPC KeIPLRaise ipl!
-
-		auto qp
-		pt@ PAGESHIFT << MiMapQuickPage qp!
-
-		// re-create recursive mapping of page tables since the physical
-		// address of the page directory has probably changed.
-
-		pt@ PAGESHIFT << PTE_V | PTE_W |
-		qp@ PAGETABLE 22 >> 2 << + !
-
-		process@ pfdbe@ MiPageFrameEntryAnonymous_Process + !
-
-		qp@ MiUnmapQuickPage
-
-		ipl@ KeIPLLower
-	end else
-		process@ KeProcess_PageDirectory + @ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-		
-		pfdbe@ MmEvictablePageReference drop
-
-		ipl@ KeIPLLower
-	end
-
-	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
-		pfdbe@ // pfdbe
-		0 // process
-		MmEvictablePageModify
-	end
+	ipl@ KeIPLLower
 end
 
 fn MiPageDirectoryDereference { process -- }
-	process@ KeProcess_PageDirectory + @ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ +
-	MmEvictablePageDereference drop
+	process@ KeProcess_PageDirectory + MiSystemPageOut
 end

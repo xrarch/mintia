@@ -1,0 +1,146 @@
+//
+// Implements generic management for untracked system pages.
+// These are pages that aren't kept in any working set and have special rules
+// for when they can be paged out. These include kernel stacks, process
+// headers, and page directories.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "MmInternal.h"
+
+fn MiSystemPageAllocate { pri pteaddr -- pfdbe }
+	pteaddr@ // pteaddr
+	pri@ // pri
+	MiAnonymousPageAlloc pfdbe!
+
+	SWAPPTE_DEMANDZERO PTE_TLBHACK | PTE_KERNELSTACK | pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
+
+	pfdbe@ // pfdbe
+	0 // process
+	MmEvictablePageModify
+
+	pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
+	PTE_V PTE_W | PTE_D | // flags
+	pteaddr@ // pteaddr
+	MiPTEUpdate drop drop
+end
+
+fn MiSystemPageFree { pteaddr -- }
+	auto pfdbe
+	auto flags
+
+	auto pte
+	pteaddr@@ pte!
+
+	0 // phyaddr
+	0 // flags
+	pteaddr@ // pteaddr
+	MiPTEUpdate flags! pfdbe!
+
+	if (DEBUGCHECKS)
+		if (flags@ PTE_V & ~~)
+			pte@ "MiSystemPageFree: invalid system page PTE %x\n" KeCrash
+		end
+	end
+
+	pfdbe@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
+
+	if (DEBUGCHECKS)
+		if (pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
+			"MiSystemPageFree: system page had swap page\n" KeCrash
+		end
+
+		if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi 1 ~=)
+			pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi
+			"MiSystemPageFree: system page had %d references\n" KeCrash
+		end
+	end
+
+	pfdbe@ MiAnonymousPageDelete
+
+	pfdbe@ MmEvictablePageDereference drop
+end
+
+fn MiSystemPageIn { vaddr pteaddr -- pfdbe }
+	auto ok
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	0 // process
+	CANBLOCK // priority
+	MmPageWait drop drop
+
+	if (DEBUGCHECKS)
+		if (pteaddr@@ PTE_KERNELSTACK & ~~)
+			pteaddr@@ "MiSystemPageIn: lost the KERNELSTACK debug bit: %x\n" KeCrash
+		end
+	end
+
+	-1 // dzpte
+	0 // evictflag
+	0 // refpfdbe
+	0 // process
+	SYSTEMSPACE // pri
+	vaddr@ // vaddr
+	pteaddr@ // pteaddr
+	0 // localpteaddr
+	MiAnonymousPageReferenceByPTE ok! pfdbe!
+
+	ipl@ KeIPLLower
+
+	if (ok@)
+		ok@ "Failed to page in system page (%i)\n" KeCrash
+	end
+
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+		pfdbe@ // pfdbe
+		0 // process
+		MmEvictablePageModify
+	end
+
+	// make sure its writable
+
+	pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
+	PTE_V PTE_W | // flags
+	pteaddr@ // pteaddr
+	MiPTEUpdate drop drop
+end
+
+fn MiSystemPageOut { pteaddr -- }
+	auto phyaddr
+	auto pfdbe
+	auto flags
+	auto ok
+
+	pteaddr@ MiPTEInterpret ok! flags! phyaddr!
+
+	if (DEBUGCHECKS)
+		if (ok@)
+			pteaddr@@ "MiSystemPageOut: invalid PTE %x\n" KeCrash
+		end
+	end
+
+	phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
+
+	// unmap
+
+	phyaddr@ PTE_TRANSITION | PTE_KERNELSTACK | // pte
+	pteaddr@ // pteaddr
+	MiPTESet
+
+	pfdbe@ MmEvictablePageDereference drop
+end

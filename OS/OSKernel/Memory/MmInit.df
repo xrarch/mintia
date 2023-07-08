@@ -278,13 +278,11 @@ rosection "INIT$text"
 	auto vaddr
 	0 // pri
 	2 // pages
-	MiPoolSpaceReserve ok! vaddr!
+	MiPoolSpaceReserve ok! drop vaddr!
 
 	if (ok@)
 		"MmInitPhase0: couldn't allocate the zero thread pool page\n" KeCrash
 	end
-
-	vaddr@ PAGESHIFT << POOLSPACE + vaddr!
 
 	vaddr@ MiQuickPage!
 	vaddr@ PAGESIZE + MiZeroingPage!
@@ -292,8 +290,13 @@ rosection "INIT$text"
 	// allocate one constantly-zeroed page which will be used by a lot of
 	// stuff.
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
 	ZEROMUST MUSTSUCCEED | // priority
-	MmPageGet ok! drop pfdbe!
+	MmPageGet ok! pfdbe!
+
+	ipl@ KeIPLLower
 
 	if (ok@)
 		"MmInitPhase0: couldn't allocate the constant zero page\n" KeCrash
@@ -683,27 +686,16 @@ fn MmResourceJettison { -- }
 			// XXX assumes boot resources are allocated contiguously in
 			// physical memory, which is OSLoader's current behavior.
 
-			auto pteaddr
-			rsrc@ LdrBootResource_Data + @ // vaddr
-			MmVirtualtoPTEAddress pteaddr!
-
-			pteaddr@ MiPTEInterpret ok! drop start!
-
-			if (DEBUGCHECKS)
-				if (ok@)
-					"MmResourceJettison: invalid PTE\n" KeCrash
-				end
-			end
-
-			PAGESHIFT start >>=
+			auto pfdbe
+			rsrc@ LdrBootResource_Data + @ MmVirtualToPFDBE pfdbe!
 
 			while (sz@)
-				start@ MiPageFree
+				pfdbe@ MiPageFreeByEntry
 
 				// the page is now un-wired
 				1 MmPageTotal KeInterlockedIncrement drop
 
-				1 start +=
+				MiPageFrameEntry_SIZEOF pfdbe +=
 				1 sz -=
 			end
 
@@ -823,6 +815,9 @@ fn MiUnwireKernel { -- }
 				end
 			end
 
+			auto pfdbe
+			phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
+
 			if (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_FREE ==)
 				// unmap the page
 
@@ -833,15 +828,12 @@ fn MiUnwireKernel { -- }
 
 				// free the page frame
 
-				phyaddr@ PAGESHIFT >> MiPageFree
+				pfdbe@ MiPageFreeByEntry
 
 				1 MmPageTotal KeInterlockedIncrement drop
 			end elseif (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_PAGE ==)
 				// convert the page to a modified private anonymous page, and
 				// set the PTE to transition.
-
-				auto pfdbe
-				phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 				
 				MMEVICTFLAG_PRIVATE MMEVICTFLAG_MODIFIED | MMEVICTFLAG_WORKINGSET | // flags
 				MMEVICTTYPE_ANON // evictabletype

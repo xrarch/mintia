@@ -11,7 +11,8 @@ extern IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 extern IOCachePageModified { pfdbe -- }
 
-extern IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
+extern IOCacheAddZeroPage { modify offset fcb -- }
+
 extern IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 
 extern IOCachePageWrite { transfer kflags pfdbe -- ok }

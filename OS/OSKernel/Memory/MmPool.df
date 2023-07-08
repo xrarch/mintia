@@ -304,24 +304,17 @@ var MiPoolPageHint 0
 var MiPoolSpaceUsed 0
 public MiPoolSpaceUsed
 
-fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
+fn MiPoolSpaceReserve { pri pagesneeded -- vaddr pteaddr ok }
 	auto prev
 	0 prev!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	auto pteaddr
 	MiPoolPTEListHead@ pteaddr!
 
 	if (pteaddr@ ~~)
 		ipl@ KeIPLLower
-
-		if (pri@ CANBLOCK &)
-			// CANBLOCK nonpaged allocations are never supposed to fail.
-
-			"Out of POOLSPACE\n" KeCrash
-		end
 
 		STATUS_NO_MEMORY ok!
 
@@ -363,7 +356,7 @@ fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
 
 				ipl@ KeIPLLower
 
-				pteaddr@ MiPoolPTEFirst@ - PTESIZE / offset!
+				pteaddr@ MiPoolPTEFirst@ - PTESIZE / PAGESHIFT << POOLSPACE + vaddr!
 
 				0 ok!
 
@@ -393,7 +386,7 @@ fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
 
 			ptecount@ PTESIZE * pteaddr +=
 
-			pteaddr@ MiPoolPTEFirst@ - PTESIZE / offset!
+			pteaddr@ MiPoolPTEFirst@ - PTESIZE / PAGESHIFT << POOLSPACE + vaddr!
 
 			0 ok!
 
@@ -402,10 +395,6 @@ fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
 
 		if (next@ ~~)
 			ipl@ KeIPLLower
-
-			if (pri@ CANBLOCK &)
-				"Out of POOLSPACE\n" KeCrash
-			end
 
 			STATUS_NO_MEMORY ok!
 
@@ -421,14 +410,18 @@ fn MiPoolSpaceReserve { pri pagesneeded -- offset ok }
 	end
 end
 
-fn MiPoolSpaceRelease { pages offset -- }
+fn MiPoolSpaceRelease { pages pteaddr -- }
+	if (DEBUGCHECKS)
+		if (pages@ 0 ==)
+			"MiPoolSpaceRelease: zero pages\n" KeCrash
+		end
+	end
+
 	auto prev
 	0 prev!
 
-	offset@ PTESIZE * offset!
-
-	auto pteaddr
-	offset@ MiPoolPTEFirst@ + pteaddr!
+	auto offset
+	pteaddr@ MiPoolPTEFirst@ - offset!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -579,10 +572,10 @@ fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 		return
 	end
 
-	auto startva
+	auto pteaddr
 	CANBLOCK // pri
 	pages@ // pages
-	MiPoolSpaceReserve ok! startva!
+	MiPoolSpaceReserve ok! pteaddr! realva!
 
 	if (ok@)
 		pages@ PAGESHIFT << // charge
@@ -599,7 +592,7 @@ fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 	IPLDPC KeIPLRaise ipl!
 
 	1 // runlength
-	startva@ pages@ 1 - + // index
+	realva@ POOLSPACE - PAGESHIFT >> pages@ 1 - + // index
 	MiPoolSpacePagedEndBitmapHeader // header
 	ComBitmapSetBits
 
@@ -613,11 +606,6 @@ fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 
 	ipl@ KeIPLLower
 
-	// calculate the vaddr from the index MiPoolSpaceReserve gave us.
-
-	startva@ PAGESHIFT << POOLSPACE + startva!
-	startva@ realva!
-
 	// initialize the PTEs in that region of POOLSPACE as kernel demand-
 	// zero. this avoids having to allocate a VAD for private kernel
 	// mappings, which makes them much cheaper. we can't do this for user-
@@ -627,19 +615,10 @@ fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 	// placed in paged pool, which will cause a dependency cycle if we use
 	// them for private kernel mappings.
 
-	auto pteaddr
-	0 pteaddr!
-
 	while (pages@)
-		if (startva@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
-			startva@ // vaddr
-			MmVirtualtoPTEAddress pteaddr!
-		end
-
 		PTE_KERNEL_DEMANDZERO pteaddr@!
 
 		PTESIZE pteaddr +=
-		PAGESIZE startva +=
 		1 pages -=
 	end
 
@@ -647,12 +626,6 @@ fn MiPagedPoolAllocPages { bytes tag flags -- realva ok }
 end
 
 fn MiPagedPoolFreePages { noaccount vaddr -- }
-	auto pteaddr
-	0 pteaddr!
-
-	auto offset
-	vaddr@ POOLSPACE - PAGESHIFT >> offset!
-
 	auto pages
 	0 pages!
 
@@ -671,7 +644,7 @@ fn MiPagedPoolFreePages { noaccount vaddr -- }
 	MiPoolSpacePagedEndBitmapHeader bmph!
 
 	auto off
-	offset@ off!
+	vaddr@ POOLSPACE - PAGESHIFT >> off!
 
 	while (off@ bmph@ ComBitmapBitGet ~~)
 		1 off +=
@@ -702,12 +675,13 @@ fn MiPagedPoolFreePages { noaccount vaddr -- }
 	auto count
 	pages@ count!
 
-	while (count@)
-		if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ pteaddr@ ~~ ||)
-			vaddr@ // vaddr
-			MmVirtualtoPTEAddress pteaddr!
-		end
+	auto firstpteaddr
+	vaddr@ MmVirtualtoPTEAddress firstpteaddr!
 
+	auto pteaddr
+	firstpteaddr@ pteaddr!
+
+	while (count@)
 		if (pteaddr@@ PTE_KERNEL_DEMANDZERO ~=)
 			0 // deletepte
 			pteaddr@ // pteaddr
@@ -724,7 +698,7 @@ fn MiPagedPoolFreePages { noaccount vaddr -- }
 	end
 
 	pages@ // pages
-	offset@ // offset
+	firstpteaddr@ // pteaddr
 	MiPoolSpaceRelease
 
 	pages@ PAGESHIFT << // charge
@@ -743,11 +717,10 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 	auto pagesneeded
 	bytes@ PAGEOFFSETMASK + PAGESHIFT >> pagesneeded!
 
-	auto offset
-
+	auto firstpteaddr
 	flags@ // pri
 	pagesneeded@ // pagesneeded
-	MiPoolSpaceReserve ok! offset!
+	MiPoolSpaceReserve ok! firstpteaddr! ptr!
 
 	if (ok@)
 		return
@@ -759,7 +732,7 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 
 	if (ok@)
 		pagesneeded@ // pages
-		offset@ // offset
+		firstpteaddr@ // pteaddr
 		MiPoolSpaceRelease
 
 		return
@@ -773,54 +746,71 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 	// since nobody else is going to touch this range.
 
 	auto pfdbe
+	auto ipl
+	auto phyaddr
 
 	auto vaddr
-	offset@ PAGESHIFT << POOLSPACE + vaddr!
-
-	vaddr@ ptr!
+	ptr@ vaddr!
 
 	auto i
 	0 i!
 
 	0 firstpfdbe!
 
-	while (i@ pagesneeded@ <)
-		auto phyaddr
+	auto pteaddr
+	firstpteaddr@ pteaddr!
 
-		flags@ MmPageAlloc ok! phyaddr! pfdbe!
+	while (i@ pagesneeded@ <)
+		IPLDPC KeIPLRaise ipl!
+
+		0 // process
+		flags@ // priority
+		MmPageWait ok! drop
 
 		if (ok@)
-			// failed to allocate... gotta go back and free/unmap those pages
+			ipl@ KeIPLLower
+
+			// failed to wait... gotta go back and free/unmap those pages.
+			// this can happen because the flags may or may not contain
+			// CANBLOCK.
 
 			while (i@)
-				PAGESIZE vaddr -=
+				PTESIZE pteaddr -=
 				1 i -=
 
 				0 // phyaddr
 				0 // flags
-				vaddr@ // vaddr
-				MiPTEUpdateByVirtual drop phyaddr!
+				pteaddr@ // pteaddr
+				MiPTEUpdate drop phyaddr!
 
-				phyaddr@ PAGESHIFT >> MiPageFree
+				phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
+
+				pfdbe@ MiPageFreeByEntry
 			end
 
 			pagesneeded@ MmUnchargeCommit
 
 			pagesneeded@ // pages
-			offset@ // offset
+			firstpteaddr@ // pteaddr
 			MiPoolSpaceRelease
 
 			return
 		end
 
+		flags@ MmPageGet drop pfdbe!
+
+		ipl@ KeIPLLower
+
 		if (firstpfdbe@ ~~)
 			pfdbe@ firstpfdbe!
 		end
 
-		phyaddr@ PAGESHIFT << // phyaddr
+		pfdbe@ MmPFDBEToPhysicalAddress phyaddr!
+
+		phyaddr@ // phyaddr
 		PTE_W PTE_V | // flags
-		vaddr@ // vaddr
-		MiPTEUpdateByVirtual drop drop
+		pteaddr@ // pteaddr
+		MiPTEUpdate drop drop
 
 		tag@ pfdbe@ MiPageFrameEntryPool_Tag + !
 		pagesneeded@ PAGESHIFT << pfdbe@ MiPageFrameEntryPool_ByteSize + !
@@ -828,7 +818,7 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 		0 pfdbe@ MiPageFrameEntryPool_ZeroIfNonPaged + !
 		-1 pfdbe@ MiPageFrameEntryPool_Level + !
 
-		PAGESIZE vaddr +=
+		PTESIZE pteaddr +=
 		1 i +=
 	end
 
@@ -845,7 +835,6 @@ fn MiNonpagedPoolAllocPages { bytes tag flags -- firstpfdbe ptr ok }
 		rs@ HALCPUInterruptRestore
 	end
 
-	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
 	pagesneeded@ MiPhysicalUsage +=
@@ -870,42 +859,19 @@ fn MiNonpagedPoolFreePages { noaccount ptr -- }
 		end
 	end
 
-	auto offset
-	ptr@ POOLSPACE - PAGESHIFT >> offset!
+	auto pteaddr
+	ptr@ MmVirtualtoPTEAddress pteaddr!
 
 	auto pfdbe
-	ptr@ MmPoolPageGetPhysical pfdbe! drop
+	ptr@ MmVirtualToPFDBE pfdbe!
+
+	auto pages
+	pfdbe@ MiPageFrameEntryPool_ByteSize + @ PAGEOFFSETMASK + PAGESHIFT >> pages!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
 	pfdbe@ MiPoolPageRemove
-
-	ipl@ KeIPLLower
-
-	auto pages
-	pfdbe@ MiPageFrameEntryPool_ByteSize + @ PAGEOFFSETMASK + PAGESHIFT >> pages!
-
-	auto i
-	0 i!
-
-	while (i@ pages@ <)
-		auto phyaddr
-		auto ok
-
-		0 // phyaddr
-		0 // flags
-		ptr@ // vaddr
-		MiPTEUpdateByVirtual drop phyaddr!
-
-		phyaddr@ PAGESHIFT >> MiPageFree
-
-		PAGESIZE ptr +=
-		1 i +=
-	end
-
-	auto rs
-	HALCPUInterruptDisable rs!
 
 	if (noaccount@ ~~)
 		pages@ PAGESHIFT << MmNonpagedPoolBytesUsed -=
@@ -913,13 +879,30 @@ fn MiNonpagedPoolFreePages { noaccount ptr -- }
 
 	pages@ MiPhysicalUsage -=
 
-	rs@ HALCPUInterruptRestore
+	ipl@ KeIPLLower
 
-	pages@ MmUnchargeCommit
+	auto i
+	0 i!
+
+	while (i@ pages@ <)
+		ptr@ MmVirtualToPFDBE pfdbe!
+
+		0 // phyaddr
+		0 // flags
+		ptr@ // vaddr
+		MiPTEUpdateByVirtual drop drop
+
+		pfdbe@ MiPageFreeByEntry
+
+		PAGESIZE ptr +=
+		1 i +=
+	end
 
 	pages@ // pages
-	offset@ // offset
+	pteaddr@ // pteaddr
 	MiPoolSpaceRelease
+
+	pages@ MmUnchargeCommit
 end
 
 fn MmChargeBytesGet { bytes -- charge }
@@ -1011,42 +994,6 @@ fn MmBlockChargeGet { block -- charge }
 	// not page aligned. charge is defined by pool header.
 
 	block@ MmHeapChargeGet charge!
-end
-
-fn MmPoolPageGetPhysical { ptr -- pfn pfdbe }
-	if (DEBUGCHECKS)
-		if (ptr@ POOLSPACE <)
-			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x < POOLSPACE\n" KeCrash
-		end
-
-		if (ptr@ POOLSPACE POOLSIZE + >=)
-			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x beyond pool space\n" KeCrash
-		end
-
-		if (ptr@ 3 &)
-			ptr@ "MmPoolPageGetPhysical: ptr 0x%08x not aligned\n" KeCrash
-		end
-	end
-
-	auto pteaddr
-	auto phyaddr
-	auto ok
-
-	ptr@ // vaddr
-	MmVirtualtoPTEAddress pteaddr!
-
-	pteaddr@ // pteaddr
-	MiPTEInterpret ok! drop phyaddr!
-
-	if (DEBUGCHECKS)
-		if (ok@)
-			ok@ ptr@ "MmPoolPageGetPhysical: ptr %08x wasn't mapped 2 (%i)\n" KeCrash
-		end
-	end
-
-	phyaddr@ PAGESHIFT >> pfn!
-
-	pfn@ MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 end
 
 fn MiPoolPageRemove { pfdbe -- }

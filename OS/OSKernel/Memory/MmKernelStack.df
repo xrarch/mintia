@@ -33,99 +33,34 @@ fn MmKernelStackAlloc { -- kstack ok }
 	// reserve enough pages in POOLSPACE for the size of our kernel stack and
 	// for a guard page.
 
-	auto offset
+	auto vaddr
+	auto pteaddr
+
 	CANBLOCK // pri
 	KETHREADSTACKSIZE PAGESHIFT >> 1 + // pagesneeded
-	MiPoolSpaceReserve ok! offset!
+	MiPoolSpaceReserve ok! pteaddr! vaddr!
 
 	if (ok@)
 		return
 	end
 
-	auto vaddr
-	POOLSPACE offset@ PAGESHIFT << + PAGESIZE + vaddr!
+	vaddr@ PAGESIZE + kstack!
 
-	// allocate all the page frames needed for our kernel stack.
+	// map the guard page at the bottom
 
-	auto stackpagestab
-	KETHREADSTACKSIZE PAGESHIFT >> 2 << alloc stackpagestab!
+	MMGUARDPTE pteaddr@!
+
+	PTESIZE pteaddr +=
 
 	auto i
 	0 i!
 
-	auto ptr
-	stackpagestab@ ptr!
-
-	auto pteaddr
-
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
-		auto pfdbe
-		auto phyaddr
+		FREEFIRST // pri
+		pteaddr@ // pteaddr
+		MiSystemPageAllocate drop
 
-		vaddr@ MmVirtualtoPTEAddress pteaddr!
-
-		pteaddr@ // pte
-		FREEFIRST CANBLOCK | // pri
-		MiAnonymousPageAlloc ok! phyaddr! pfdbe!
-
-		if (ok@)
-			// failed, free the ones we just allocated
-
-			while (i@)
-				4 stackpagestab -=
-				1 i -=
-
-				stackpagestab@@ MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-				pfdbe@ MiAnonymousPageDelete
-
-				pfdbe@ MmEvictablePageDereference drop
-			end
-
-			KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
-			offset@ // offset
-			MiPoolSpaceRelease
-
-			return
-		end
-
-		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED |
-		pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
-
-		SWAPPTE_DEMANDZERO PTE_TLBHACK | PTE_KERNELSTACK | pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + !
-
-		phyaddr@ ptr@!
-
-		PAGESIZE vaddr +=
-		4 ptr +=
-		1 i +=
-	end
-
-	// map the guard page at the bottom
-	POOLSPACE offset@ PAGESHIFT << + // vaddr
-	MmVirtualtoPTEAddress pteaddr!
-
-	// set special guard page magic pte
-	MMGUARDPTE pteaddr@!
-
-	// as a separate step, map in the page frames for our kernel stack.
-
-	POOLSPACE offset@ PAGESHIFT << + PAGESIZE + vaddr!
-
-	vaddr@ kstack!
-
-	stackpagestab@ ptr!
-
-	0 i!
-
-	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
-		ptr@@ PAGESHIFT << // phyaddr
-		PTE_V PTE_W | // flags
-		vaddr@ // vaddr
-		MiPTEUpdateByVirtual drop drop
-
-		PAGESIZE vaddr +=
-		4 ptr +=
+		PTESIZE pteaddr +=
 		1 i +=
 	end
 end
@@ -147,56 +82,30 @@ fn MmKernelStackFree { kstack -- }
 	end
 
 	// clear special guard page magic pte
+
 	PTE_KERNEL_ZERO pteaddr@!
 
-	auto offset
-	kstack@ POOLSPACE - PAGESHIFT >> offset!
+	auto firstpteaddr
+	pteaddr@ firstpteaddr!
 
 	// unmap and free all the kernel stack page frames.
 
-	PAGESIZE kstack +=
+	PTESIZE pteaddr +=
 
 	auto i
 	0 i!
 
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
-		auto phyaddr
-		auto flags
+		pteaddr@ MiSystemPageFree
 
-		0 // phyaddr
-		0 // flags
-		kstack@ // vaddr
-		MiPTEUpdateByVirtual flags! phyaddr!
-
-		if (DEBUGCHECKS)
-			if (flags@ PTE_V & ~~)
-				"MmKernelStackFree: invalid stack page\n" KeCrash
-			end
-		end
-
-		auto pfdbe
-		phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-		pfdbe@ MmEvictablePageDelete
-
-		-1 MmAnonymousPageCount KeInterlockedIncrement drop
-
-		if (DEBUGCHECKS)
-			if (pfdbe@ MiPageFrameEntryAnonymous_SwapPTE + @ PTE_INSWAP &)
-				"MmKernelStackFree: had a swap page\n" KeCrash
-			end
-		end
-
-		pfdbe@ MmEvictablePageDereference drop
-
-		PAGESIZE kstack +=
+		PTESIZE pteaddr +=
 		1 i +=
 	end
 
 	// release the POOLSPACE.
 
 	KETHREADSTACKSIZE PAGESHIFT >> 1 + // pages
-	offset@ // offset
+	firstpteaddr@ // pteaddr
 	MiPoolSpaceRelease
 end
 
@@ -208,38 +117,16 @@ fn MiKernelStackSwapOut { thread -- }
 	auto vaddr
 	thread@ KeThread_KernelStackTop + @ KETHREADSTACKSIZE - vaddr!
 
+	auto pteaddr
+	vaddr@ MmVirtualtoPTEAddress pteaddr!
+
 	auto i
 	0 i!
 
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
-		auto ok
-		auto pteaddr
+		pteaddr@ MiSystemPageOut
 
-		vaddr@ MmVirtualtoPTEAddress pteaddr!
-
-		auto phyaddr
-		auto pfdbe
-		auto flags
-
-		pteaddr@ MiPTEInterpret ok! flags! phyaddr!
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				pteaddr@@ "MiKernelStackSwapOut: invalid PTE %x\n" KeCrash
-			end
-		end
-
-		phyaddr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-		// unmap
-
-		phyaddr@ PTE_TRANSITION | PTE_KERNELSTACK | // pte
-		pteaddr@ // pteaddr
-		MiPTESet
-
-		pfdbe@ MmEvictablePageDereference drop
-
-		PAGESIZE vaddr +=
+		PTESIZE pteaddr +=
 		1 i +=
 	end
 end
@@ -253,76 +140,18 @@ fn MiKernelStackSwapIn { thread -- }
 	auto vaddr
 	thread@ KeThread_KernelStackTop + @ KETHREADSTACKSIZE - vaddr!
 
+	auto pteaddr
+	vaddr@ MmVirtualtoPTEAddress pteaddr!
+
 	auto i
 	0 i!
 
 	while (i@ KETHREADSTACKSIZE PAGESHIFT >> <)
-		auto ok
-		auto pteaddr
-
-		vaddr@ MmVirtualtoPTEAddress pteaddr!
-
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		auto phyaddr
-		auto pfdbe
-		auto flags
-
-		if (DEBUGCHECKS)
-			pteaddr@ // pteaddr
-			MiPTEInterpret ok! flags! phyaddr!
-
-			if (ok@ ~~)
-				"MiKernelStackSwapIn: valid PTE\n" KeCrash
-			end
-
-			if (pteaddr@@ PTE_KERNELSTACK & ~~)
-				pteaddr@@ "MiKernelStackSwapIn: lost the KERNELSTACK debug bit: %x\n" KeCrash
-			end
-		end
-
-		0 // process
-		CANBLOCK // pri
-		MmPageWait ok! drop
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				ok@ "MiKernelStackSwapIn: failed to wait for page (%i)\n" KeCrash
-			end
-		end
-
-		-1 // dzpte
-		0 // evictflag
-		0 // refpfdbe
-		0 // process
-		SYSTEMSPACE // pri
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		0 // localpteaddr
-		MiAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+		MiSystemPageIn drop
 
-		ipl@ KeIPLLower
-
-		if (DEBUGCHECKS)
-			if (ok@)
-				ok@ "MiKernelStackSwapIn: failed to reference kernel stack (%i)\n" KeCrash
-			end
-		end
-
-		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
-			pfdbe@ // pfdbe
-			0 // process
-			MmEvictablePageModify
-		end
-
-		// make sure its writable
-
-		phyaddr@ // phyaddr
-		PTE_V PTE_W | // flags
-		pteaddr@ // pteaddr
-		MiPTEUpdate drop drop
-
+		PTESIZE pteaddr +=
 		PAGESIZE vaddr +=
 		1 i +=
 	end

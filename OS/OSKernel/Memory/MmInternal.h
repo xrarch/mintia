@@ -96,7 +96,6 @@ struct MiEvictablePageEvent
 	4 WasMemoryPrivileged
 endstruct
 
-extern MiPageFree { pfn -- }
 extern MiPageFreeByEntry { pfdbe -- }
 
 extern MiPoolInit { -- }
@@ -150,8 +149,8 @@ const MMPROCESSPINGUARANTEE 8
 const MMSYSTEMPROMISE         8
 const MMPHYSICALCOMMITMINIMUM 64
 
-extern MiPoolSpaceReserve { pri pagesneeded -- offset ok }
-extern MiPoolSpaceRelease { pages offset -- }
+extern MiPoolSpaceReserve { pri pagesneeded -- vaddr pteaddr ok }
+extern MiPoolSpaceRelease { pages pteaddr -- }
 
 extern MiMapQuickPage { phyaddr -- vaddr }
 extern MiUnmapQuickPage { vaddr -- }
@@ -235,7 +234,7 @@ const MMMODIFIEDPAGETHROTTLE 16
 extern MiProcessHeaderCreate { process -- ok }
 extern MiProcessHeaderDestroy { process -- }
 
-extern MiProcessHeaderReference { pri process -- ok }
+extern MiProcessHeaderReference { process -- }
 extern MiProcessHeaderDereference { process -- }
 
 
@@ -272,7 +271,7 @@ extern MiProcessPTECountGet { pri vaddr process -- ptect ok }
 
 extern MiPageDirectoryDestroy { process -- }
 extern MiPageDirectoryAlloc { process -- ok }
-extern MiPageDirectoryReference { pri process -- ok }
+extern MiPageDirectoryReference { process -- }
 extern MiPageDirectoryDereference { process -- }
 
 
@@ -313,14 +312,12 @@ endstruct
 extern MiFilePrepareForMap { prot endofview offset fileobject -- ok }
 extern MiFileUnprepareForMap { fileobject -- }
 
-extern MiAnonymousSwapIn { pri pte pno ipl -- pfdbe pfn ok }
-
-extern MiAnonymousPageAlloc { pte pri -- pfdbe pfn ok }
-extern MiAnonymousPageGet { pte pri -- pfdbe pfn ok }
+extern MiAnonymousPageAlloc { pteaddr pri -- pfdbe }
+extern MiAnonymousPageGet { pteaddr pri -- pfdbe ok }
 extern MiAnonymousPageDeleteByPTE { deletepte pteaddr vaddr process -- }
-extern MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr localpteaddr -- pfdbe phyaddr ok }
+extern MiAnonymousPageReferenceByPTE { dzpte evictflag refpfdbe process pri vaddr pteaddr localpteaddr -- pfdbe ok }
 extern MiAnonymousPageDelete { pfdbe -- }
-extern MiSectionPageGet { localpteaddr pri sectionoffset sectionobject -- phyaddr pfdbe ok }
+extern MiSectionPageGet { localpteaddr pri sectionoffset sectionobject -- pfdbe ok }
 
 externptr MiAnonymousEvictableFunctions
 
@@ -403,3 +400,13 @@ extern MiManageWorkingSets { -- success }
 
 
 extern MiMDLZonesInit { -- }
+
+
+// system page stuff
+
+
+extern MiSystemPageAllocate { pri pteaddr -- pfdbe }
+extern MiSystemPageFree { pteaddr -- }
+
+extern MiSystemPageIn { vaddr pteaddr -- pfdbe }
+extern MiSystemPageOut { pteaddr -- }

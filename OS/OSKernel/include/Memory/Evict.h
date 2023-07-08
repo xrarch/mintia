@@ -12,7 +12,7 @@ const MMEVICTTYPE_FILE       0
 const MMEVICTTYPE_ANON       1
 
 extern MmEvictablePageInitialize { flags evictabletype pfdbe -- }
-extern MmEvictablePageGet { flags evictabletype priority -- pfdbe pfn ok }
+extern MmEvictablePageGet { flags evictabletype priority -- pfdbe ok }
 extern MmEvictablePageDelete { pfdbe -- }
 extern MmEvictablePageDereference { pfdbe -- oldcount }
 extern MmEvictablePageReference { pfdbe -- oldcount }

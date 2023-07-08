@@ -54,10 +54,12 @@ fn MiProcessHeaderCreate { process -- ok }
 		return
 	end
 
-	auto offset
+	auto vaddr
+	auto pteaddr
+
 	CANBLOCK // pri
 	1 // pagesneeded
-	MiPoolSpaceReserve ok! offset!
+	MiPoolSpaceReserve ok! pteaddr! vaddr!
 
 	if (ok@)
 		PAGESIZE // charge
@@ -71,71 +73,27 @@ fn MiProcessHeaderCreate { process -- ok }
 		return
 	end
 
-	auto vaddr
-	POOLSPACE offset@ PAGESHIFT << + vaddr!
-
-	auto phdr
-	auto pfdbe
-
-	process@ PsProcess_MmHeaderPTE + // pte
-	FREEFIRST // priority
-	MiAnonymousPageAlloc ok! phdr! pfdbe!
-
-	if (ok@)
-		1 // pages
-		offset@ // offset
-		MiPoolSpaceRelease
-
-		PAGESIZE // charge
-		quotablock@ // quotablock
-		MmQuotaBlockUnchargeVM
-
-		1 // charge
-		quotablock@ // quotablock
-		MmQuotaBlockUnchargeWS
-
-		return
-	end
-
-	pfdbe@ // pfdbe
-	0 // process
-	MmEvictablePageModify
-
-	phdr@ PAGESHIFT << phdr!
-
-	phdr@ process@ PsProcess_MmHeaderPTE + !
 	vaddr@ process@ PsProcess_MmHeader + !
 
-	phdr@ // phyaddr
-	PTE_V PTE_W | // flags
-	vaddr@ // vaddr
-	MiPTEUpdateByVirtual drop drop
+	ZEROMUST // pri
+	pteaddr@ // pteaddr
+	MiSystemPageAllocate drop
 end
 
 fn MiProcessHeaderDestroy { process -- }
 	fnsection "PAGE$text"
 
-	auto phdr
-	process@ PsProcess_MmHeaderPTE + @ phdr!
-
-	auto pfdbe
-	phdr@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
 	auto vaddr
 	process@ PsProcess_MmHeader + @ vaddr!
 
-	0 // phyaddr
-	0 // flags
-	vaddr@ // vaddr
-	MiPTEUpdateByVirtual drop drop
+	auto pteaddr
+	vaddr@ MmVirtualtoPTEAddress pteaddr!
+
+	pteaddr@ MiSystemPageFree
 
 	1 // pages
-	vaddr@ POOLSPACE - PAGESHIFT >> // offset
+	pteaddr@ // pteaddr
 	MiPoolSpaceRelease
-
-	pfdbe@ MiAnonymousPageDelete
-
-	pfdbe@ MmEvictablePageDereference drop
 
 	auto quotablock
 	process@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
@@ -149,64 +107,12 @@ fn MiProcessHeaderDestroy { process -- }
 	MmQuotaBlockUnchargeWS
 end
 
-fn MiProcessHeaderReference { pri process -- ok }
-	if (DEBUGCHECKS)
-		if (KeThreadCurrent@ KeThread_IgnoreKill + @ ~~)
-			"MiProcessHeaderReference: thread could be killed\n" KeCrash
-		end
-	end
-
-	0 ok!
-
-	auto pfdbe
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	0 // process
-	pri@ CANBLOCK | // priority
-	MmPageWait ok! drop
-
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
-
-	if (process@ PsProcess_MmHeaderPTE + @ PTE_INSWAP &)
-		auto pt
-
-		pri@ // priority
-		process@ PsProcess_MmHeaderPTE + // pte
-		process@ PsProcess_MmHeaderPTE + @ PAGESHIFT >> // pno
-		ipl@ // ipl
-		MiAnonymousSwapIn ok! pt! pfdbe!
-
-		if (ok@)
-			return
-		end
-
-		pt@ PAGESHIFT << process@ PsProcess_MmHeaderPTE + !
-
-		pt@ PAGESHIFT << // phyaddr
-		PTE_V PTE_W | // flags
-		process@ PsProcess_MmHeader + @ // vaddr
-		MiPTEUpdateByVirtual drop drop
-	end else
-		process@ PsProcess_MmHeaderPTE + @ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-		
-		pfdbe@ MmEvictablePageReference drop
-
-		ipl@ KeIPLLower
-	end
-
-	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
-		pfdbe@ // pfdbe
-		0 // process
-		MmEvictablePageModify
-	end
+fn MiProcessHeaderReference { process -- }
+	process@ PsProcess_MmHeader + @ // vaddr
+	process@ PsProcess_MmHeader + @ MmVirtualtoPTEAddress // pteaddr
+	MiSystemPageIn drop
 end
 
 fn MiProcessHeaderDereference { process -- }
-	process@ PsProcess_MmHeaderPTE + @ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ +
-	MmEvictablePageDereference drop
+	process@ PsProcess_MmHeader + @ MmVirtualtoPTEAddress MiSystemPageOut
 end

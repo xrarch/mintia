@@ -366,7 +366,6 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	auto ok
 	auto pteaddr
-	auto phyaddr
 	auto flags
 	auto pfdbe
 	auto wsleptr
@@ -419,7 +418,7 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	if (ok@ ~~)
 		pteaddr@ // pteaddr
-		MiPTEInterpret ok! flags! phyaddr!
+		MiPTEInterpret ok! flags! drop
 
 		if (ok@ ~~)
 			// Lower IPL since the PTE is valid.
@@ -496,26 +495,11 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 				if (kernelmapping@)
 					0 // process
 					CANBLOCK // priority
-					MmPageWait ok! waited!
+					MmPageWait drop waited!
 				end else
 					process@ // process
 					CANBLOCK // priority
-					MmPageWait ok! waited!
-				end
-
-				if (ok@)
-					// We failed to wait for a page, so back out of the page
-					// fault with an OSSIGNAL_KILL.
-
-					ipl@ KeIPLLower
-
-					if (ptpfdbe@)
-						vaddr@ ptpfdbe@ MiPTEUnpin
-					end
-
-					OSSIGNAL_KILL signal!
-
-					return
+					MmPageWait drop waited!
 				end
 
 				if (waited@)
@@ -570,7 +554,7 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
 					0 // localpteaddr
-					MiAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+					MiAnonymousPageReferenceByPTE ok! pfdbe!
 				end else
 					-1 // dzpte
 					MMEVICTFLAG_PRIVATE // evictflag
@@ -580,7 +564,7 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
 					-1 // localpteaddr
-					MiAnonymousPageReferenceByPTE ok! phyaddr! pfdbe!
+					MiAnonymousPageReferenceByPTE ok! pfdbe!
 				end
 
 				if (ok@)
@@ -723,8 +707,6 @@ fn MiNormalFault { vaddr process -- signal }
 	auto wsli
 	auto wsleptr
 
-	auto phyaddr
-
 	auto kernelmapping
 	process@ PsSystemProcess@ == kernelmapping!
 
@@ -799,8 +781,6 @@ fn MiNormalFault { vaddr process -- signal }
 				MiSatisfyCharFault ok!
 
 				if (ok@)
-					// Any error status here is converted to an OSSIGNAL_KILL.
-
 					ok@ signal!
 				end
 
@@ -838,24 +818,7 @@ fn MiNormalFault { vaddr process -- signal }
 	auto waited
 	process@ // process
 	CANBLOCK // priority
-	MmPageWait ok! waited!
-
-	if (ok@)
-		// We failed to wait for a page, so back out of the page
-		// fault with an OSSIGNAL_KILL.
-
-		ipl@ KeIPLLower
-
-		if (kernelmapping@ ~~)
-			1 // deref
-			pteaddr@ // pteaddr
-			MiPTEDelete
-		end
-
-		OSSIGNAL_KILL signal!
-
-		return
-	end
+	MmPageWait drop waited!
 
 	if (waited@)
 		// MmPageWait dropped IPL and waited, so back out of the
@@ -907,7 +870,7 @@ fn MiNormalFault { vaddr process -- signal }
 		process@ // process
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		MiSatisfyPrivatePageFault ok! phyaddr!
+		MiSatisfyPrivatePageFault ok!
 	end elseif (flags@ MMVADFLAG_FILE &)
 		// There's a file object, so this is a shared file page fault.
 
@@ -915,7 +878,7 @@ fn MiNormalFault { vaddr process -- signal }
 		capturedfcb@ // fcb
 		offset@ // offset
 		pteaddr@ // pteaddr
-		MiSatisfyFileFault ok! phyaddr!
+		MiSatisfyFileFault ok!
 	end else
 		// There's a section object, so this is a shared anon page fault.
 
@@ -924,7 +887,7 @@ fn MiNormalFault { vaddr process -- signal }
 		object@ // section
 		offset@ // offset
 		pteaddr@ // pteaddr
-		MiSatisfyAnonFault ok! phyaddr!
+		MiSatisfyAnonFault ok!
 	end
 
 	if (ok@)
@@ -1035,7 +998,7 @@ fn MiSatisfyCharFault { vaddr process fileobject offset vad -- ok }
 	MiPTEUpdate drop drop
 end
 
-fn MiSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
+fn MiSatisfyFileFault { process fcb offset pteaddr -- ok }
 	// This is a shared file page fault. Call into the page cache to acquire
 	// a physical address for this file page frame.
 
@@ -1046,18 +1009,17 @@ fn MiSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
 		IOKFLAG_SYSSPC kflags |=
 	end
 
+	auto pfdbe
 	pteaddr@ // localpteaddr
 	0 // flags
 	kflags@ // kflags
 	offset@ PAGENUMBERMASK & // offset
 	fcb@ // fcb
-	IOCachePageRead ok! phyaddr!
+	IOCachePageRead ok! pfdbe!
 
 	if (ok@)
 		return
 	end
-
-	phyaddr@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << phyaddr!
 
 	if (process@ PsSystemProcess@ ==)
 		// Shared pages are assumed to be from the viewcache.
@@ -1065,13 +1027,13 @@ fn MiSatisfyFileFault { process fcb offset pteaddr -- phyaddr ok }
 		1 MmViewCachePageCount +=
 	end
 
-	phyaddr@ // phyaddr
+	pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
 	PTE_V // flags
 	pteaddr@ // pteaddr
 	MiPTEUpdate drop drop
 end
 
-fn MiSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
+fn MiSatisfyAnonFault { vaddr process section offset pteaddr -- ok }
 	// This is a shared anonymous page fault. Call into the section object
 	// support code to acquire a physical address for this anon page frame.
 
@@ -1082,11 +1044,12 @@ fn MiSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 		SYSTEMSPACE pri!
 	end
 
+	auto pfdbe
 	pteaddr@ // localpteaddr
 	pri@ // pri
 	offset@ // sectionoffset
 	section@ // sectionobject
-	MiSectionPageGet ok! drop phyaddr!
+	MiSectionPageGet ok! pfdbe!
 
 	if (ok@)
 		return
@@ -1098,13 +1061,13 @@ fn MiSatisfyAnonFault { vaddr process section offset pteaddr -- phyaddr ok }
 		1 MmViewCachePageCount +=
 	end
 
-	phyaddr@ // phyaddr
+	pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
 	PTE_V // flags
 	pteaddr@ // pteaddr
 	MiPTEUpdate drop drop
 end
 
-fn MiSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
+fn MiSatisfyPrivatePageFault { process vaddr pteaddr -- ok }
 	// This is a private page fault. Call MiAnonymousPageReferenceByPTE.
 
 	SWAPPTE_DEMANDZERO // dzpte
@@ -1115,7 +1078,7 @@ fn MiSatisfyPrivatePageFault { process vaddr pteaddr -- phyaddr ok }
 	vaddr@ // vaddr
 	pteaddr@ // pteaddr
 	0 // localpteaddr
-	MiAnonymousPageReferenceByPTE ok! phyaddr! drop
+	MiAnonymousPageReferenceByPTE ok! drop
 end
 
 fn MiWriteFault { pteaddr vaddr process -- signal }
@@ -1273,10 +1236,6 @@ fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 	auto ok
 	auto pfdbe
 	auto cowpfdbe
-	auto cowaddr
-
-	0 cowaddr!
-	0 signal!
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -1307,7 +1266,7 @@ fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 	auto waited
 	process@ // process
 	CANBLOCK // priority
-	MmPageWait ok! waited!
+	MmPageWait drop waited!
 
 	if (waited@)
 		ipl@ KeIPLLower
@@ -1319,15 +1278,7 @@ fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 
 	pteaddr@ // pte
 	FREEFIRST // pri
-	MiAnonymousPageGet ok! cowaddr! cowpfdbe!
-
-	if (ok@)
-		ipl@ KeIPLLower
-
-		OSSIGNAL_KILL signal!
-
-		return
-	end
+	MiAnonymousPageGet drop cowpfdbe!
 
 	if (process@ PsSystemProcess@ ==)
 		SWAPPTE_DEMANDZERO PTE_TLBHACK | cowpfdbe@ MiPageFrameEntryAnonymous_SwapPTE + |=
@@ -1342,11 +1293,12 @@ fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 	process@ cowpfdbe@ MiPageFrameEntryAnonymous_Process + !
 	vaddr@ cowpfdbe@ MiPageFrameEntryAnonymous_VirtualAddress + !
 
-	PAGESHIFT cowaddr <<=
-
 	// Map the COW page into the thread's quickpage so we can perform
 	// the copy. We copy directly from userspace here since we know the
 	// PTE is valid.
+
+	auto cowaddr
+	cowpfdbe@ MmPFDBEToPhysicalAddress cowaddr!
 
 	auto copyaddr
 	cowaddr@ MiMapQuickPage copyaddr!
@@ -1371,6 +1323,8 @@ fn MiCopyOnWriteFault { vad pteaddr vaddr process -- signal }
 	pfdbe@ MmEvictablePageDereference drop
 
 	ipl@ KeIPLLower
+
+	0 signal!
 
 	1 vad@ MiVAD_COWCount + +=
 end

@@ -37,12 +37,49 @@ public IOCachePagesUsed
 var IOModifiedFilePageCountTotal 0 // not an exact count but that's fine
 public IOModifiedFilePageCountTotal
 
-fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
-	// if localpteaddr is set, we must enter and leave at IPLDPC.
+fn IOCacheAddZeroPage { modify offset fcb -- }
+	auto pfdbe
+	auto ok
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	0 // process
+	CANBLOCK // priority
+	MmPageWait drop drop
+
+	0 // process
+	0 // iointent
+	IOKFLAG_ZEROES // kflags
+	offset@ PAGENUMBERMASK & // offset
+	fcb@ // fcb
+	IOiCachePageGet ok! pfdbe!
+
+	ipl@ KeIPLLower
+
+	if (ok@)
+		return
+	end
+
+	if (modify@)
+		pfdbe@ // pfdbe
+		KeProcessCurrent // process
+		MmEvictablePageModify
+	end
+
+	pfdbe@ MmEvictablePageDereference drop
+end
+
+fn IOiCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
+	// we must enter and leave at IPLDPC.
 
 	if (DEBUGCHECKS)
 		if (offset@ PAGEOFFSETMASK &)
-			"IOCachePageGet: offset wasn't page-aligned\n" KeCrash
+			"IOiCachePageGet: offset wasn't page-aligned\n" KeCrash
+		end
+
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"IOiCachePageGet: ipl != IPLDPC\n" KeCrash
 		end
 	end
 
@@ -56,7 +93,7 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 
 	if (DEBUGCHECKS)
 		if (offset@ filesize@ >=)
-			"IOCachePageGet: offset was beyond end of file\n" KeCrash
+			"IOiCachePageGet: offset was beyond end of file\n" KeCrash
 		end
 	end
 
@@ -65,27 +102,17 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 
 	kflags@ MmKflagToPriority pri |=
 
-	auto ipl
-
-	if (process@ ~~)
-		IPLDPC KeIPLRaise ipl!
-
-		0 // process
-		pri@ // priority
-		MmPageWait ok! drop
-
-		if (ok@)
-			ipl@ KeIPLLower
-
-			return
-		end
-	end
-
 	offset@ // value
 	cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr
 	ExSplayTreeFindNodeByValue pfdbe! drop
 
 	if (pfdbe@)
+		if (kflags@ IOKFLAG_ZEROES &)
+			-1 ok!
+
+			return
+		end
+
 		IOiPageFrameEntryCache_Parent pfdbe -=
 
 		// found the page, it was in the cache already!
@@ -93,10 +120,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 		if (kflags@ IOKFLAG_CLUSTR &)
 			if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS MMEVICTFLAG_VALID | &)
 				-1 ok!
-
-				if (process@ ~~)
-					ipl@ KeIPLLower
-				end
 
 				return
 			end
@@ -146,10 +169,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 			end
 		end
 
-		if (process@ ~~)
-			ipl@ KeIPLLower
-		end
-
 		return
 	end
 
@@ -171,24 +190,19 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 		FREEFIRST pri |=
 	end
 
+	// it shouldn't be possible for MmEvictablePageGet to return an error
+	// status since the caller already waited to ensure an available page.
+
 	MMEVICTFLAG_WORKINGSET // flags
 	MMEVICTTYPE_FILE // evictablefuncs
 	pri@ // priority
-	MmEvictablePageGet ok! drop pfdbe!
+	MmEvictablePageGet drop pfdbe!
 
 	if (iointent@)
 		// we definitely own this IO, since we're the ones who created the
 		// page, so mark the page as IOINPROGRESS.
 
 		pfdbe@ MmEvictablePageStartIO
-	end
-
-	if (ok@)
-		if (process@ ~~)
-			ipl@ KeIPLLower
-		end
-
-		return
 	end
 
 	// initialize this new file cache PFDBE.
@@ -208,12 +222,6 @@ fn IOCachePageGet { process iointent kflags offset fcb -- pfdbe ok }
 	pfdbe@ IOiPageFrameEntryCache_Parent + // node
 	cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr
 	ExSplayTreeInsert
-
-	if (process@ ~~)
-		ipl@ KeIPLLower
-	end
-
-	// no need to ref the page -- it gets ref'd on allocation by MmEvictablePageAlloc
 end
 
 fn (MmEvictionFunction) IOCachePageEvictionFunction { pfdbe -- }
@@ -506,7 +514,7 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 	kflags@ // kflags
 	offset@ // offset
 	fcb@ // fcb
-	IOCachePageGet ok! pfdbe!
+	IOiCachePageGet ok! pfdbe!
 
 	if (ok@)
 		return
@@ -826,7 +834,7 @@ fn IOiCachePageReadCluster { firstpfdbe fcb mdl -- pagecount }
 			IOKFLAG_CLUSTR // kflags
 			offset@ // offset
 			fcb@ // fcb
-			IOCachePageGet ok! pfdbe!
+			IOiCachePageGet ok! pfdbe!
 
 			if (ok@)
 				ipl@ KeIPLLower

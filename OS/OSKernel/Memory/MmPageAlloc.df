@@ -45,11 +45,14 @@ fn MmKflagToPriority { kflags -- pri }
 	end
 end
 
-fn MmPageGet { priority -- pfdbe pfn ok }
-	0 ok!
+fn MmPageGet { priority -- pfdbe ok }
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC ~=)
+			"MmPageGet: ipl != IPLDPC\n" KeCrash
+		end
+	end
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	0 ok!
 
 	if (priority@ 0xFF & FREEFIRST ==)
 		// attempt to get a page from the free list first.
@@ -58,7 +61,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 		MiPageFreeListHead@ pfdbe!
 
 		if (pfdbe@)
-			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
 			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
 			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
@@ -69,7 +71,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 			MiPageZeroListHead@ pfdbe!
 
 			if (pfdbe@)
-				pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
 				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
 				0 pfdbe@ MiPageFrameEntryFree_Next + !
 
@@ -83,7 +84,6 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 		MiPageZeroListHead@ pfdbe!
 
 		if (pfdbe@)
-			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
 			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
 			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
@@ -94,21 +94,16 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 			MiPageFreeListHead@ pfdbe!
 
 			if (pfdbe@)
-				pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
 				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
 				0 pfdbe@ MiPageFrameEntryFree_Next + !
 
 				1 MmPageFreeCount -=
 
-				ipl@ KeIPLLower
-
 				// zero the free page out
 
 				0 // offset
-				pfn@ PAGESHIFT << // phyaddr
+				pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
 				MmPageFrameZero
-
-				IPLDPC KeIPLRaise ipl!
 			end
 		end
 	end elseif (DEBUGCHECKS)
@@ -121,18 +116,12 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 		MiEvictSinglePage ok! pfdbe!
 
 		if (ok@ ~~)
-			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / pfn!
-
 			if (priority@ 0xFF & ZEROMUST ==)
 				// zero out the standby page
 
-				ipl@ KeIPLLower
-
 				0 // offset
-				pfn@ PAGESHIFT << // phyaddr
+				pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
 				MmPageFrameZero
-
-				IPLDPC KeIPLRaise ipl!
 			end
 		end
 	end
@@ -142,36 +131,11 @@ fn MmPageGet { priority -- pfdbe pfn ok }
 		MiEventLowMemory // event
 		KeEventSignal
 	end
-
-	ipl@ KeIPLLower
-end
-
-fn MmPageAlloc { priority -- pfdbe pfn ok }
-	0 ok!
-
-	if (DEBUGCHECKS)
-		if (MiInited@ ~~)
-			"MmPageAlloc: used before MmInit called\n" KeCrash
-		end
-	end
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	0 priority@ MmPageWait ok! drop
-
-	if (ok@)
-		ipl@ KeIPLLower
-		return
-	end
-
-	priority@ MmPageGet ok! pfn! pfdbe!
-
-	ipl@ KeIPLLower
 end
 
 fn MmPageWait { process priority -- waited ok }
 	// wait until the appropriate available page threshold is reached.
+	// will never return an error status if CANBLOCK is specified.
 
 	if (DEBUGCHECKS)
 		if (KeIPLCurrentGet IPLDPC ~=)
@@ -183,6 +147,7 @@ fn MmPageWait { process priority -- waited ok }
 
 	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH >=)
 		0 ok!
+
 		return
 	end
 
@@ -215,6 +180,7 @@ fn MmPageWait { process priority -- waited ok }
 
 		if (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
 			STATUS_NO_MEMORY ok!
+
 			return
 		end
 	end
@@ -284,44 +250,25 @@ end
 fn MiPageFreeByEntry { pfdbe -- }
 	// insert a page frame into the free list
 
-	auto rs
-	HALCPUInterruptDisable rs!
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	MiPageFreeListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
 	pfdbe@ MiPageFreeListHead!
 
 	1 MmPageFreeCount +=
 
-	auto ipl
-
 	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH ==)
-		IPLDPC KeIPLRaise ipl!
-		rs@ HALCPUInterruptRestore
-
 		0 // priboost
 		MiEventPageAvailable // event
 		KeEventSignal
-
-		ipl@ KeIPLLower
 	end elseif (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
-		IPLDPC KeIPLRaise ipl!
-		rs@ HALCPUInterruptRestore
-
 		0 // priboost
 		MiEventMSPageAvailable // event
 		KeEventSignal
-
-		ipl@ KeIPLLower
-	end else
-		rs@ HALCPUInterruptRestore
 	end
-end
 
-fn MiPageFree { pfn -- }
-	auto pfdbe
-	pfn@ MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
-
-	pfdbe@ MiPageFreeByEntry
+	ipl@ KeIPLLower
 end
 
 fn MmPageFrameZero { offset phyaddr -- }

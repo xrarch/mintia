@@ -294,6 +294,8 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 			end
 		end
 
+		// collided write, wait for it to finish.
+
 		0 // process
 		kflags@ MmKflagToPriority CANBLOCK | // pri
 		pfdbe@ // pfdbe
@@ -317,9 +319,12 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	auto off
 	pfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ off!
 
-	// search backward for more modified pages
+	// search backward for more modified pages to cluster
+
 	while (pagecount@ IOCLUSTERMAX PAGESHIFT >> 1 - <)
 		if (off@ ~~)
+			// we're at the start of the file, no more.
+
 			break
 		end
 
@@ -328,20 +333,28 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 		ExSplayTreeNodePrevious spfdbe!
 
 		if (spfdbe@ ~~)
+			// no more cached pages previous to this one.
+
 			break
 		end
 
 		IOiPageFrameEntryCache_Parent spfdbe -=
 
 		if (spfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+			// page isn't modified.
+
 			break
 		end
 
 		if (spfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+			// page is already being written out.
+
 			break
 		end
 
 		if (spfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ off@ PAGESIZE - ~=)
+			// page isn't virtually contiguous with this one.
+
 			break
 		end
 
@@ -360,24 +373,42 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	// now go forward to build the MDL
 	while (pagecount@ IOCLUSTERMAX PAGESHIFT >> <)
 		if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED & ~~)
+			// page isn't modified.
+
 			break
 		end
 
 		if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_IOINPROGRESS &)
+			// page is already being written out.
+
 			break
 		end
 
 		if (off@ -1 ~=)
+			// this isn't the first page in the cluster.
+
 			if (pfdbe@ IOiPageFrameEntryCache_OffsetInFile + @ off@ PAGESIZE + ~=)
+				// this page isn't virtually contiguous with the last one.
+
 				break
 			end
 		end
 
+		// bias the page's refcount to keep it from getting deleted while
+		// in-flight, or getting selected for modified page writing.
+
 		pfdbe@ MmEvictablePageReference drop
+
+		// start the IO on the page. this sets the IOINPROGRESS flag.
+
 		pfdbe@ MmEvictablePageStartIO
+
+		// clear the modified flag.
 
 		pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED ~ &
 		pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + sb
+
+		// save the page in the MDL.
 
 		pfdbe@ mdlpos@!
 
@@ -396,17 +427,6 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 		IOiPageFrameEntryCache_Parent pfdbe -=
 	end
 
-	if (pagecount@ ~~)
-		// no pages to write...
-
-		if (transfer@)
-			transfer@ IOTransferComplete
-		end
-
-		0 ok!
-		return
-	end
-
 	IPLLOW KeIPLLower
 
 	-1 mdlpos@!
@@ -420,10 +440,17 @@ fn IOCachePageWrite { transfer kflags pfdbe -- ok }
 	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
 
 	if (transfer@)
+		// if a transfer MDL was specified, this was a call from the modified
+		// page writer trying to cluster file pages together for the file page
+		// writer. don't dispatch the IO now, it'll be done from the context
+		// of the file page writer thread.
+
 		IPLDPC KeIPLRaise drop
 
 		return
 	end
+
+	// dispatch the write to the file.
 
 	KeThreadCurrent@ KeThreadIgnoreKill drop
 
@@ -596,7 +623,7 @@ fn IOCachePageModified { pfdbe -- }
 
 	// There used to be a check right here that would return if the PFDBE had
 	// the DELETED flag. I have no idea why, since that should be completely
-	// impossible here, so long as IO waits are satisfied after the page is
+	// impossible here, so long as IO waits are satisfied AFTER the page is
 	// re-modified on an error status, but I'm leaving this here just in case
 	// it ends up being the solution to a weird bug I just reintroduced.
 

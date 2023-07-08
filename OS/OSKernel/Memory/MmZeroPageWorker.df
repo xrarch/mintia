@@ -51,15 +51,15 @@ fn MmZeroPageWorker { -- }
 		if (pfdbe@)
 			// there's a page, zero it
 
-			auto rs
-			HALCPUInterruptDisable rs!
+			auto ipl
+			IPLDPC KeIPLRaise ipl!
 
 			MiPageFreeListHead@ pfdbe!
 
 			// make sure the free list didnt become empty in that brief timespan
 
 			if (pfdbe@ ~~)
-				rs@ HALCPUInterruptRestore
+				ipl@ KeIPLLower
 
 				continue
 			end
@@ -71,7 +71,7 @@ fn MmZeroPageWorker { -- }
 
 			1 MmPageFreeCount -=
 
-			rs@ HALCPUInterruptRestore
+			ipl@ KeIPLLower
 
 			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << // phyaddr
 			PTE_V PTE_W | // flags
@@ -85,7 +85,7 @@ fn MmZeroPageWorker { -- }
 			0 // word
 			memset
 
-			HALCPUInterruptDisable rs!
+			IPLDPC KeIPLRaise ipl!
 
 			// place on zero list
 
@@ -94,29 +94,19 @@ fn MmZeroPageWorker { -- }
 
 			1 MmPageFreeCount +=
 
-			auto ipl
+			// make sure that the events are signalled correctly.
 
 			if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH ==)
-				IPLDPC KeIPLRaise ipl!
-				rs@ HALCPUInterruptRestore
-
 				0 // priboost
 				MiEventPageAvailable // event
 				KeEventSignal
-
-				ipl@ KeIPLLower
 			end elseif (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
-				IPLDPC KeIPLRaise ipl!
-				rs@ HALCPUInterruptRestore
-
 				0 // priboost
 				MiEventMSPageAvailable // event
 				KeEventSignal
-
-				ipl@ KeIPLLower
-			end else
-				rs@ HALCPUInterruptRestore
 			end
+
+			ipl@ KeIPLLower
 		end else
 			// there are no free list pages for now, halt
 

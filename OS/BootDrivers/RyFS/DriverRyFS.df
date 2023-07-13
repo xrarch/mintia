@@ -1,0 +1,358 @@
+//
+// Implements the RyFS driver.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALDriver.h"
+#include "<inc>/HALRTC.h"
+#include "<inc>/HALInterrupt.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/IO.h"
+
+#include "<inc>/FSRTL.h"
+
+#include "<inc>/ViewCache.h"
+
+#include "RyFS.h"
+
+datasection "text"
+
+table DriverRyFS
+	IOVERSION_MAJOR                      // ioversion major
+	IOVERSION_MINOR                      // ioversion minor
+
+	"RyFS"                               // name
+	pointerof DriverRyFSDispatch         // dispatch table
+	0                                    // flags
+
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+	0                                    // reserved
+endtable
+
+table DriverRyFSFilesystem
+	0                               // next
+	0                               // prev
+
+	pointerof DriverRyFS            // driver
+
+	pointerof RyMount               // mountfunction
+	pointerof RyUnmount             // unmountfunction
+	pointerof RyFlush               // flushfunction
+	pointerof RyUpdateFlags         // updateflags
+	0                               // flags
+	pointerof RyVolumeQuery         // volumequery
+	pointerof RyReclaim             // reclaimfunction
+	pointerof RyVolumeSet           // volumeset
+
+	0                               // reserved
+	0                               // reserved
+	0                               // reserved
+	0                               // reserved
+	0                               // reserved
+	0                               // reserved
+endtable
+
+table DriverRyFSDispatch
+	pointerof RyOpen                     // open
+	pointerof RyClose                    // close
+	0                                    // iocontrol
+	pointerof RySetFile                  // setfile
+	0                                    // reserved
+	pointerof RyUnlink                   // unlink
+	pointerof RyParse                    // parse
+	0                                    // reserved
+	0                                    // flush
+	pointerof RyDeleteObject             // delete object
+	pointerof RyPoke                     // poke
+	pointerof RySetSecurity              // setsecurity
+	pointerof RyRename                   // rename
+	0                                    // readblock
+	0                                    // writeblock
+	pointerof RyTruncate                 // truncate
+	pointerof RyReadDirectory            // readdirectory
+	0                                    // getpageaddr
+	0                                    // delete device object
+	0                                    // reserved
+	0                                    // cancel
+	pointerof RyReadWriteFile            // read
+	pointerof RyReadWriteFile            // write
+endtable
+
+datasection "data"
+
+fn (FDriverInit) DriverInit { stage -- ok }
+	fnsection "PAGE$text"
+
+	if (stage@ STAGE_THREAD ==)
+		DriverRyFSFilesystem // filesystem
+		IOFilesystemRegister ok!
+
+		if (ok@)
+			return
+		end
+	end
+
+	0 ok!
+end
+
+fn (IOFilesystemMountFunction) RyMount { flags deviceobject -- fsdeviceobject ok }
+	fnsection "PAGE$text"
+
+	if (deviceobject@ IODevice_BlockLog + @ RYSECTORSHIFT <)
+		// device's block size is smaller than we require.
+
+		STATUS_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	auto devicesize
+	deviceobject@ IODevice_FileControlBlock + @ IOFileControlBlock_SizeInBytes + @ devicesize!
+
+	if (devicesize@ 16777216 >=)
+		// device is too large to contain a ryfs volume.
+
+		STATUS_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	auto mount
+	flags@ // mountflags
+	RyData_SIZEOF // extensionsize
+	PAGENUMBERMASK // sizeinbytes
+	DriverRyFSFilesystem // filesystem
+	deviceobject@ // deviceobject
+	IOVolumeDeviceCreate ok! fsdeviceobject! mount!
+
+	if (ok@)
+		return
+	end
+
+	auto pageframe
+	auto bcb
+
+	0 // offset
+	fsdeviceobject@ IODevice_FileControlBlock + @ // fcb
+	VcFileControlBlockMapAndPin ok! bcb! pageframe!
+
+	if (ok@)
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		return
+	end
+
+	RYSECTORSIZE pageframe +=
+
+	if (pageframe@ RyDirectory_MagicI + gi 'RY' ~=)
+		bcb@ VcBufferDecrementMapAndUnpin
+
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		STATUS_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	if (pageframe@ RyDirectory_VersionB + gb 1 ~=)
+		bcb@ VcBufferDecrementMapAndUnpin
+
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		STATUS_BAD_FILESYSTEM ok!
+
+		return
+	end
+
+	auto ryfsdata
+	mount@ IOMount_Extension + @ ryfsdata!
+
+	0 ryfsdata@ RyData_UsedSectors + !
+	devicesize@ ryfsdata@ RyData_TotalVolumeSize + !
+
+	pageframe@ RyDirectory_SectorCountI + gi ryfsdata@ RyData_DirectorySectorCount + !
+	pageframe@ RyDirectory_SectorCountI + gi 1 + ryfsdata@ RyData_BitmapStartSector + !
+	pageframe@ RyDirectory_BitmapCountB + gb ryfsdata@ RyData_BitmapSectorCount + !
+
+	0 ryfsdata@ RyData_WritableFiles + !
+	0 ryfsdata@ RyData_FCBRefTotal + !
+	0 ryfsdata@ RyData_ReclaimableListHead + !
+	0 ryfsdata@ RyData_ReclaimableListTail + !
+	0 ryfsdata@ RyData_FCBDataListHead + !
+	0 ryfsdata@ RyData_FileSplayTreeRoot + !
+
+	ryfsdata@ RyData_Label + // dest
+	pageframe@ RyDirectory_Label + // src
+	8 // sz
+	memcpy
+
+	// ensure null terminated
+
+	0 ryfsdata@ RyData_Label + 7 + sb
+
+	"RyTreeMutex" // name
+	KERNELMODE // mode
+	ryfsdata@ RyData_TreeMutex + // mutex
+	KeMutexInitialize
+
+	bcb@ VcBufferDecrementMapAndUnpin
+
+	// make sure to unpin the bcb BEFORE we set the size.
+
+	ryfsdata@ RyData_BitmapStartSector + @
+	ryfsdata@ RyData_BitmapSectorCount + @ + RYSECTORSHIFT <<
+	fsdeviceobject@ IODevice_FileControlBlock + @ IOFileControlBlock_SizeInBytes + !
+
+	// initialize the bitmap virtual mapping, and the in-memory FAT.
+
+	mount@ RyInitializeVolumeMgmt ok!
+
+	if (ok@)
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		return
+	end
+
+	// create the root directory FCB.
+
+	mount@ RyRootDirectoryCreate ok!
+
+	if (ok@)
+		mount@ RyUninitializeVolumeMgmt
+
+		fsdeviceobject@ IOVolumeDeviceUninitialize
+
+		return
+	end
+end
+
+fn (IOFilesystemUnmountFunction) RyUnmount { fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
+	auto ryfsdata
+	mount@ IOMount_Extension + @ ryfsdata!
+
+	if (ryfsdata@ RyData_FCBRefTotal + @)
+		STATUS_DEVICE_BUSY ok!
+
+		return
+	end
+
+	mount@ RyFCBCacheDestroy
+
+	mount@ RyUninitializeVolumeMgmt
+
+	mount@ FSVolumeFlush drop
+end
+
+fn (IOFilesystemFlushFunction) RyFlush { shutdown fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+end
+
+fn (IOFilesystemUpdateFlagsFunction) RyUpdateFlags { newflags oldflags fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
+	if (newflags@ OSMOUNT_READONLY &)
+		if (oldflags@ OSMOUNT_READONLY & ~~)
+			// volume is being downgraded to read-only.
+			// only allow if there are no writable files opened.
+
+			if (mount@ IOMount_Extension + @ RyData_WritableFiles + @)
+				STATUS_DEVICE_BUSY ok!
+
+				return
+			end
+
+			// flush all dirty pages to ensure the volume
+			// won't be written while read-only.
+
+			mount@ RyFCBCacheFlush
+
+			mount@ FSVolumeFlush drop
+		end
+	end
+end
+
+fn (IOFilesystemVolumeQueryFunction) RyVolumeQuery { query fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	auto mount
+	fsdeviceobject@ IODevice_RelevantMount + @ mount!
+
+	auto ryfsdata
+	mount@ IOMount_Extension + @ ryfsdata!
+
+	ryfsdata@ RyData_TotalVolumeSize + @ query@ OSMountInformation_VolumeCapacity + !
+	ryfsdata@ RyData_UsedSectors + @ RYSECTORSHIFT << query@ OSMountInformation_VolumeUsed + !
+
+	query@ OSMountInformation_VolumeLabel + // dest
+	ryfsdata@ RyData_Label + // src
+	strcpy
+
+	0 ok!
+end
+
+fn (IOFilesystemVolumeSetFunction) RyVolumeSet { query fsdeviceobject -- ok }
+	fnsection "PAGE$text"
+
+	0 ok!
+
+	if (query@ OSMountInformation_SetFlags + @ OSMOUNTSET_VOLUMELABEL &)
+		auto klabel
+		16 alloc klabel!
+
+		klabel@ // dest
+		query@ OSMountInformation_VolumeLabel + // src
+		15 // max
+		strncpy
+
+		klabel@ // label
+		fsdeviceobject@ IODevice_RelevantMount + @ // mount
+		RySetVolumeLabel ok!
+	end
+end
+
+fn RyMountReference { mount -- }
+	fnsection "PAGE$text"
+
+	auto ryfsdata
+	mount@ IOMount_Extension + @ ryfsdata!
+
+	1 ryfsdata@ RyData_FCBRefTotal + KeInterlockedIncrement drop
+end
+
+fn RyMountDereference { mount -- }
+	fnsection "PAGE$text"
+
+	auto ryfsdata
+	mount@ IOMount_Extension + @ ryfsdata!
+
+	-1 ryfsdata@ RyData_FCBRefTotal + KeInterlockedIncrement drop
+end

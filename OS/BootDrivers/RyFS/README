@@ -1,0 +1,43 @@
+!!!!! the implementation of this driver is on pause, pending the MINTIA
+rewrite in the TOWER language !!!!!
+
+
+Read/write driver for the very simple native ryfs filesystem of fox32.
+
+The filesystem has a flat structure, which is very simplifying, but it also
+has metadata inline with the data sectors, which is odd. At mount time we
+construct an in-memory FAT from the state of the used sectors in paged pool,
+which we consult to construct the requests to send off to the disk driver.
+Pagefiles are not supported on ryfs volumes because the read/write routines
+of this driver are always placed in the paged executive, which would create a
+dependency cycle (i.e., deadlock).
+
+The sector allocation bitmap is mapped into virtual memory and manipulated
+directly with the ComBitmap routines. Luckily, the bit-endianness of the ryfs
+bitmap is the same as that which is expected by ComBitmap, so this will work
+just fine.
+
+The cached directory entries are kept in a splay tree.
+
+  Asynchronous I/O
+
+We want to support asynchronous IO, but the data sectors contain "gaps" due to
+the inline headers, which prevents us from doing the IO directly with the user
+buffer. So, we need to direct the disk driver to use bounce buffers
+which we prepare ahead of time, allocated from nonpaged pool. Unfortunately,
+the presence of the bounce buffer means that we cannot use the next IOPL to
+send to the disk driver, and have to allocate associated IOPs in all cases,
+because IOPLs inherit an MDL that describes the original buffer.
+
+For reads, we pin and map the user buffer ahead of time, construct the
+associated IOPs, and return. When the associated IOPs complete, our completion
+routine will execute, which will copy the data from the bounce buffer into the
+mapped user buffer.
+
+For writes, we copy the data from the user buffer into the bounce buffer,
+making sure to leave room for the data headers. The headers are then filled in
+with information from the in-memory FAT, to preserve the chaining of the
+sectors. The associated IOPs are set up, as with reads, to write from the
+bounce buffer rather than the user buffer. Fragmentation is handled etc.
+
+In either case, the completion routine will proceed to free the bounce buffer.

@@ -243,7 +243,7 @@ const FATFILECONTEXT_WRITABLE      2
 const FATFILEFLAG_VALIDATED 2
 
 extern FatFCBCacheFlush { mount -- ok }
-extern FatFCBCacheDestroy { mount -- ok }
+extern FatFCBCacheDestroy { mount -- }
 
 extern FatFCBReclaim { preferredcount fsdeviceobject -- actualcount }
 

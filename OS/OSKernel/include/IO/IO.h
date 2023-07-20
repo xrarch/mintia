@@ -124,9 +124,8 @@ extern IOFileControlBlockLockForPaging { iop fcb -- }
 extern IOFileControlBlockLockSharedForPaging { iop fcb -- }
 extern IOFileControlBlockUnlockForPaging { iop fcb -- }
 
-extern IOFileControlBlockLockUnalertable { fcb -- }
-extern IOFileControlBlockLock { fcb -- ok }
-extern IOFileControlBlockLockShared { fcb -- ok }
+extern IOFileControlBlockLock { alertable fcb -- ok }
+extern IOFileControlBlockLockShared { alertable fcb -- ok }
 extern IOFileControlBlockUnlock { fcb -- }
 
 extern IOFileControlBlockFlush { fcb -- ok }

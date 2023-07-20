@@ -130,9 +130,6 @@ extern AFSFCBRead { flags inum mount -- fcb ok }
 extern AFSBlockBitmapInitialize { mount -- ok }
 extern AFSBlockBitmapUninitialize { mount -- }
 
-extern AFSBlockBitmapLockUnalertable { mount -- }
-extern AFSBlockBitmapUnlock { mount -- }
-
 extern AFSBlockMap { blkoff fcb -- blkno ok }
 extern AFSBlockTruncate { pintable newblocks oldblocks zero flags fcb -- ok }
 

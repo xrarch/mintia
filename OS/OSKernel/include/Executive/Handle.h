@@ -3,10 +3,8 @@ fnptr ExHandleEnumFunction { entryptr handle handletable -- ok }
 extern ExHandleTableDelete { func handletable -- }
 extern ExHandleTableCreate { context quotablock entrysizelog -- handletable ok }
 
-extern ExHandleTableLockUnalertable { handletable -- }
-extern ExHandleTableLockSharedUnalertable { handletable -- }
-extern ExHandleTableLock { handletable -- ok }
-extern ExHandleTableLockShared { handletable -- ok }
+extern ExHandleTableLock { alertable handletable -- ok }
+extern ExHandleTableLockShared { alertable handletable -- ok }
 extern ExHandleTableUnlock { handletable -- }
 
 extern ExHandleDelete { handle handletable locked -- entryptr entryvalue ok }

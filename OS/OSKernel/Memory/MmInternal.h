@@ -366,8 +366,6 @@ extern MiVADListCheckRange { startva endva process -- ok }
 externptr MiVADListHead
 externptr MiVADListTail
 
-extern MiVADListLockUnalertable { processobject -- }
-
 // working set stuff
 
 

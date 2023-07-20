@@ -1,2 +1,2 @@
-extern MmVADListLock { processobject -- ok }
+extern MmVADListLock { alertable processobject -- ok }
 extern MmVADListUnlock { processobject -- }

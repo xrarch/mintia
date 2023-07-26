@@ -354,13 +354,17 @@ fn KiStackOverflow { rs -- }
 	rs@ "Kernel stack overflow %x\n" KeCrash
 end
 
-fn KiCopySignalFrame { signum dispatchfunc thread trapframe -- }
+fn KiInterruptUsermode { context userfunc dispatchfunc trapframe -- }
+	// Cause a usermode interrupt of the current thread by saving the context
+	// on the user stack and redirecting the trapframe to the usermode
+	// interrupt handler. This is used to implement signal and APC dispatch.
+
 	auto usp
 	trapframe@ OSContext_sp + @ usp!
 
 	if (DEBUGCHECKS)
 		if (trapframe@ OSContext_ers + @ XR17032_ERS_USER & ~~)
-			trapframe@ "KiCopySignalFrame: not usermode trapframe %x\n" KeCrash
+			trapframe@ "KiInterruptUsermode: not usermode trapframe %x\n" KeCrash
 		end
 	end
 
@@ -373,64 +377,19 @@ fn KiCopySignalFrame { signum dispatchfunc thread trapframe -- }
 	KeSafeCopyOut ok!
 
 	if (ok@)
-		// failed to copy out signal frame, this is fatal to the entire
+		// Failed to copy out context frame, this is fatal to the entire
 		// process.
-		// XXX should it be???
 
-		128 OSSIGNAL_KILL + thread@ KeThread_Process + @ KeProcess_KilledStatus + !
+		// TODO automatically switch to an overflow stack?
 
 		OSSIGNAL_KILL // signal
-		thread@ KeThread_Process + @ // process
+		KeThreadCurrent@ KeThread_Process + @ // process
 		KeProcessSignal drop
 
 		return
 	end
 
-	usp@ trapframe@ OSContext_sp + !
-	dispatchfunc@ trapframe@ OSContext_epc + !
-	signum@ trapframe@ OSContext_a0 + !
-	usp@ trapframe@ OSContext_a1 + !
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	1 signum@ << ~ thread@ KeThread_Signals + &=
-	1 signum@ << ~ thread@ KeThread_SignalAcceptMask + &=
-
-	rs@ HALCPUInterruptRestore
-end
-
-fn KiCopyAPCFrame { context userfunc dispatchfunc thread trapframe -- }
-	auto usp
-	trapframe@ OSContext_sp + @ usp!
-
-	if (DEBUGCHECKS)
-		if (trapframe@ OSContext_ers + @ XR17032_ERS_USER & ~~)
-			trapframe@ "KiCopyAPCFrame: not usermode trapframe %x\n" KeCrash
-		end
-	end
-
-	OSContext_SIZEOF usp -=
-
-	auto ok
-	usp@ // dest
-	trapframe@ // src
-	OSContext_SIZEOF // sz
-	KeSafeCopyOut ok!
-
-	if (ok@)
-		// failed to copy out signal frame, this is fatal to the entire
-		// process.
-		// XXX should it be???
-
-		128 OSSIGNAL_KILL + thread@ KeThread_Process + @ KeProcess_KilledStatus + !
-
-		OSSIGNAL_KILL // signal
-		thread@ KeThread_Process + @ // process
-		KeProcessSignal drop
-
-		return
-	end
+	// Redirect the trapframe to the usermode interrupt handler.
 
 	usp@ trapframe@ OSContext_sp + !
 	dispatchfunc@ trapframe@ OSContext_epc + !
@@ -440,6 +399,8 @@ fn KiCopyAPCFrame { context userfunc dispatchfunc thread trapframe -- }
 end
 
 fn KeThreadContinue { alertable signum context thread -- ok }
+	// Restore context and continue out of a usermode interrupt handler.
+
 	if (signum@ -1 ~=)
 		if (signum@ ~~)
 			STATUS_INVALID_ARGUMENT ok!

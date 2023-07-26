@@ -18,8 +18,7 @@ extern KiMutexOwnerSet { thread mutex -- }
 
 extern KiThreadPriorityBoost { boost thread -- }
 
-extern KiCopySignalFrame { signum dispatchfunc thread trapframe -- }
-extern KiCopyAPCFrame { context userfunc dispatchfunc thread trapframe -- }
+extern KiInterruptUsermode { context userfunc dispatchfunc trapframe -- }
 
 extern KiTimerExpiration { -- }
 extern KiThreadQuantumEnd { -- }

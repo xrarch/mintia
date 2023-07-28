@@ -54,10 +54,11 @@ extern OSIsComputerOn { -- ison ok }
 extern OSIsComputerOnFire { -- isonfire ok }
 
 // Ob
-extern OSOpenRelative { flags access initialobjecthandle path -- handle ok }
-extern OSQuery { handle query -- ok }
 
+extern OSOpenRelative { filetype objecttype flags access initialobjecthandle path -- handle ok }
 extern OSClose { handle -- ok }
+
+extern OSQuery { handle query -- ok }
 
 extern OSWaitForMultipleObjects { alertable waittype timeout objectcount objecthandletable -- ok }
 extern OSWaitForObject { alertable timeout objecthandle -- ok }
@@ -72,7 +73,11 @@ extern OSObjectDirectoryRemove { objecthandle -- ok }
 
 extern OSSetSecurity { uid gid permissions handle -- ok }
 
+// SysCreateRelative is wrapped by OSFileCreateRelative.
+extern SysCreateRelative { filetype permissions flags access initialobjecthandle path -- handle ok }
+
 // IO
+
 extern OSFileQuery { filehandle query -- ok }
 extern OSFileTruncate { newsize growing handle -- oldsize ok }
 extern OSFileSeek { offset handle mode -- newoffset ok }
@@ -109,6 +114,7 @@ extern OSMountSet { query handle -- ok }
 extern OSFlushModifiedPages { -- ok }
 
 // Mm
+
 extern OSSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
 extern OSMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
 extern OSUnmapView { length vaddr processhandle -- ok }
@@ -123,6 +129,7 @@ extern OSWorkingSetPurge { -- ok }
 extern OSSynchronizeIcache { -- }
 
 // Ps
+
 extern OSProcessCreate { quotauid sectionhandle creationflags permissions name -- processhandle ok }
 extern OSProcessSignal { signal processhandle -- ok }
 extern OSProcessOpenByPID { access pid -- processhandle ok }
@@ -143,8 +150,7 @@ extern OSProcessQueryAll { buffer maxquery -- count ok }
 extern OSSetQuota { quota processhandle -- ok }
 extern OSQuotaQuery { query processhandle -- ok }
 
-extern OSThreadSetFilePermissions { filepermissions -- ok }
-extern OSThreadGetFilePermissions { -- filepermissions ok }
+extern OSThreadGetExceptionStatus { -- status }
 extern OSThreadSleep { ms -- ok }
 extern OSThreadSleepEx { alertable ms -- ok }
 extern OSThreadCreate { context startfunc creationflags permissions name processhandle -- threadhandle ok }
@@ -164,6 +170,7 @@ extern OSJobRemoveProcess { processhandle -- ok }
 extern OSJobSignal { propagate signal jobhandle -- ok }
 
 // Co
+
 extern OSSetSystemConsole { filehandle -- ok }
 
 extern OSConsoleSignal { signal filehandle -- ok }
@@ -172,10 +179,12 @@ extern OSIsAConsole { filehandle -- ok }
 extern OSDuplexCreate { flags name permissions -- duplexhandle filehandle ok }
 
 // Se
+
 extern OSCheckPermission { permission processhandle -- ok }
 extern OSGrantPermission { permission processhandle -- ok }
 
 // IPC
+
 extern OSPortCreate { flags maxlen permissions name -- porthandle ok }
 
 extern OSPortConnectRelative { rxmsg txmsg timeout initialobjecthandle path -- porthandle ok }

@@ -2,6 +2,7 @@ extern ObiDirectoryObjectDelete { object -- }
 
 struct ObiType
 	4 Tag
+	4 TypeIdentifier
 
 	4 ObjectListHead
 

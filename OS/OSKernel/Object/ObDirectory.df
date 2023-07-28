@@ -349,6 +349,12 @@ fn ObDirectoryInsertByPointers { object directory -- ok }
 	auto npheader
 	object@ ObObjectNonpagedHeader npheader!
 
+	if (DEBUGCHECKS)
+		if (npheader@ ObiNonpagedHeader_TypeObject + @ ~~)
+			"ObDirectoryInsertByPointers: typeless object inserted into namespace\n" KeCrash
+		end
+	end
+
 	1 ObRootDirectoryLock ok!
 
 	if (ok@)
@@ -841,11 +847,22 @@ fn ObObjectReferenceByPath { flags path initialobject process -- object ok }
 	end
 end
 
-fn ObObjectOpenByPathProcess { flags access initialobject path process -- handle ok }
+fn ObObjectOpenByPathProcess { filetype objecttype flags access initialobject path process -- handle ok }
 	fnsection "PAGE$text"
 
-	auto object
+	if (objecttype@ OSTYPE_FILE ==)
+		OSFILEFLAG_MUSTBEFILE flags |=
 
+		if (filetype@ OSFILETYPE_DIRECTORY ==)
+			// It's fine to set this flag unconditionally and avoid a branch
+			// because filesystem drivers ignore it if OSFILEFLAG_CREATE isn't
+			// also set.
+
+			OSFILEFLAG_CREATEDIR flags |=
+		end
+	end
+
+	auto object
 	flags@ // flags
 	path@ // path
 	initialobject@ // initialobject
@@ -856,13 +873,46 @@ fn ObObjectOpenByPathProcess { flags access initialobject path process -- handle
 		return
 	end
 
-	if (flags@ OSFILEFLAG_MUSTBEFILE &)
-		if (object@ ObObjectType IOFileTypeObject@ ~=)
+	if (objecttype@)
+		if (object@ ObiCommonHeader_SIZEOF - ObiCommonHeader_NonpagedHeader + @ ObiNonpagedHeader_TypeObject + @ ObiType_TypeIdentifier + @ objecttype@ ~=)
 			object@ ObObjectDereferenceByPointer drop
 
 			STATUS_INVALID_OBJECT_TYPE ok!
 
 			return
+		end
+
+		if (objecttype@ OSTYPE_FILE ==)
+			if (filetype@)
+				auto ftype
+				object@ IOFile_FileControlBlock + @ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_FileType + @ ftype!
+
+				if (filetype@ OSFILETYPE_ANY_STREAM ==)
+					// caller is okay with anything that can be streamed, so,
+					// anything except a directory.
+
+					if (ftype@ OSFILETYPE_DIRECTORY ==)
+						STATUS_IS_A_DIRECTORY ok!
+					end
+				end elseif (filetype@ ftype@ ~=)
+					// caller wanted an exact filetype and there wasn't a
+					// match. return an appropriate error status.
+
+					if (filetype@ OSFILETYPE_DIRECTORY ==)
+						STATUS_NOT_A_DIRECTORY ok!
+					end elseif (filetype@ OSFILETYPE_FILE ==)
+						STATUS_NOT_A_FILE ok!
+					end else
+						STATUS_NOT_CORRECT_FILETYPE ok!
+					end
+				end
+
+				if (ok@)
+					object@ ObObjectDereferenceByPointer drop
+
+					return
+				end
+			end
 		end
 	end
 
@@ -877,7 +927,7 @@ fn ObObjectOpenByPathProcess { flags access initialobject path process -- handle
 	end
 end
 
-fn ObObjectOpenByPath { flags access initialobjecthandle path -- handle ok }
+fn ObObjectOpenByPath { filetype objecttype flags access initialobjecthandle path -- handle ok }
 	fnsection "PAGE$text"
 
 	auto initialobject
@@ -894,6 +944,8 @@ fn ObObjectOpenByPath { flags access initialobjecthandle path -- handle ok }
 		end
 	end
 
+	filetype@ // filetype
+	objecttype@ // objecttype
 	flags@ // flags
 	access@ // access
 	initialobject@ // initialobject

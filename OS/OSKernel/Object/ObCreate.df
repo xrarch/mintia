@@ -25,6 +25,58 @@
 
 externptr ObFullyNonpagedObjects
 
+fn ObiObjectNameValidate { name -- ok }
+	fnsection "PAGE$text"
+
+	// validates an object name.
+
+	0 ok!
+
+	if (name@ "." strcmp)
+		STATUS_ALREADY_EXISTS ok!
+
+		return
+	end
+
+	if (name@ ".." strcmp)
+		STATUS_ALREADY_EXISTS ok!
+
+		return
+	end
+
+	if (name@ gb ~~)
+		STATUS_ALREADY_EXISTS ok!
+
+		return
+	end
+
+	auto length
+	0 length!
+
+	while (name@ gb)
+		if (length@ OSFILEPATHMAX >=)
+			STATUS_NAME_TOO_LONG ok!
+
+			return
+		end
+
+		if (name@ gb 0x20 < name@ gb 0x7F >= ||)
+			STATUS_ILLEGAL_NAME ok!
+
+			return
+		end
+
+		if (name@ gb '/' ==)
+			STATUS_ILLEGAL_NAME ok!
+
+			return
+		end
+
+		1 length +=
+		1 name +=
+	end
+end
+
 fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type -- object ok }
 	fnsection "PAGE$text"
 
@@ -54,6 +106,12 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 	if (name@)
 		name@ strlen namelen!
 		namelen@ 1 + 3 + 3 ~ & namelen!
+
+		name@ ObiObjectNameValidate ok!
+
+		if (ok@)
+			return
+		end
 	end else
 		0 namelen!
 	end
@@ -190,7 +248,7 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 	npcharge@ pheader@ ObiPagedHeader_NonpagedQuotaCharge + !
 
 	if (type@)
-		type@ ObiTypeUnlock
+		type@ ObiTypeLock
 
 		type@ ObiType_ObjectListHead + @ flags!
 
@@ -201,7 +259,7 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 
 		object@ type@ ObiType_ObjectListHead + !
 
-		type@ ObTypeUnlock
+		type@ ObiTypeUnlock
 	end
 end
 
@@ -261,7 +319,7 @@ fn ObObjectDeallocate { object -- }
 	if (type@)
 		// remove from type list
 
-		type@ ObiTypeUnlock
+		type@ ObiTypeLock
 
 		auto n
 		pheader@ ObiPagedHeader_TypeListNext + @ n!
@@ -281,7 +339,7 @@ fn ObObjectDeallocate { object -- }
 			n@ type@ ObiType_ObjectListHead + !
 		end
 
-		type@ ObTypeUnlock
+		type@ ObiTypeUnlock
 	end
 
 	auto quotablock
@@ -343,6 +401,7 @@ fn ObTypeCreate { initializer -- type ok }
 	end
 
 	initializer@ ObTypeInitializer_Tag + @ type@ ObiType_Tag + !
+	initializer@ ObTypeInitializer_TypeIdentifier + @ type@ ObiType_TypeIdentifier + !
 
 	// initialize function fields
 	initializer@ ObTypeInitializer_OpenFunction + @ type@ ObiType_OpenFunction + !
@@ -377,7 +436,7 @@ fn ObTypeCreate { initializer -- type ok }
 	end
 end
 
-fn ObiTypeUnlock { type -- }
+fn ObiTypeLock { type -- }
 	fnsection "PAGE$text"
 
 	KERNELMODE // waitmode
@@ -387,7 +446,7 @@ fn ObiTypeUnlock { type -- }
 	KeThreadWaitForObject drop
 end
 
-fn ObTypeUnlock { type -- }
+fn ObiTypeUnlock { type -- }
 	fnsection "PAGE$text"
 
 	0 // abandon

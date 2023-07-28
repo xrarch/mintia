@@ -1,7 +1,10 @@
-const OSFILETYPE_FILE        1
-const OSFILETYPE_DIRECTORY   2
-const OSFILETYPE_CHARDEVICE  3
-const OSFILETYPE_BLOCKDEVICE 4
+const OSFILETYPE_ANY          0
+const OSFILETYPE_FILE         1
+const OSFILETYPE_DIRECTORY    2
+const OSFILETYPE_CHARDEVICE   3
+const OSFILETYPE_BLOCKDEVICE  4
+
+const OSFILETYPE_ANY_STREAM   0x80000001
 
 const OSFILEFLAG_NOCACHE     1
 const OSFILEFLAG_CREATE      2
@@ -22,7 +25,7 @@ const OSACCESSFLAG_RETURNANY   1
 // avoid readahead in the IO layer
 const OSACCESSFLAG_NOREADAHEAD 2
 
-// return immediately. post IO completion message to port object
+// return immediately, do asynchronous IO completion as specified
 const OSACCESSFLAG_ASYNC       4
 
 // wait unalertably for completion.
@@ -89,12 +92,8 @@ extern OSFileInformationInitialize { info -- }
 extern OSSetUMask { umask -- }
 extern OSGetUMask { -- umask }
 
-extern OSFileOpen { flags access path ftype -- handle ok }
+extern OSFileCreate { filetype permissions flags access path -- handle ok }
+extern OSFileCreateRelative { filetype permissions flags access initialobjecthandle path -- handle ok }
 
-extern OSDirectoryCreate { permissions flags access path -- handle ok }
-extern OSFileCreate { permissions flags access path -- handle ok }
-
-extern OSDirectoryCreateRelative { permissions flags access initialobjecthandle path -- handle ok }
-extern OSFileCreateRelative { permissions flags access initialobjecthandle path -- handle ok }
-
-extern OSFileOpenRelative { flags access initialobjecthandle path ftype -- handle ok }
+extern OSFileOpenRelative { filetype flags access initialobjecthandle path -- handle ok }
+extern OSFileOpen { filetype flags access path -- handle ok }

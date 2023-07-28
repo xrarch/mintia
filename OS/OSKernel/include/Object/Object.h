@@ -2,6 +2,7 @@ struct ObTypeInitializer
 	4 Name
 	4 Tag
 	4 BodySize
+	4 TypeIdentifier
 
 	4 OpenFunction
 	4 CloseFunction

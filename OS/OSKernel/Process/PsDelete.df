@@ -138,6 +138,8 @@ fn PsiReaperWorker { context1 context2 -- }
 	auto object
 
 	while (1)
+		// Wait as USERMODE to allow our kernel stack to be swapped out.
+
 		auto ok
 		USERMODE // waitmode
 		0 // alertable
@@ -194,8 +196,9 @@ fn PsiProcessCleanup { process -- }
 	process@ PsProcess_PagedArea + @ pagedarea!
 
 	if (pagedarea@ PsProcessPaged_CleanedUp + @)
-		// process had a last thread that did all this already.
-		// this is synchronized via the createdelete lock.
+		// The process had a last thread that did all this already.
+		// This is synchronized via the createdelete lock, which is held
+		// across both cases.
 
 		return
 	end
@@ -250,7 +253,9 @@ fn PsiProcessExit { status process -- }
 end
 
 fn PsiThreadExit { -- }
-	// this thread has reached the end of its life. usermode will never regain
+	fnsection "PAGE$text"
+
+	// This thread has reached the end of its life. Usermode will never regain
 	// control.
 
 	auto current
@@ -259,17 +264,26 @@ fn PsiThreadExit { -- }
 	auto process
 	current@ KeThread_Process + @ process!
 
+	// Make our priority really high to expedite the releasing of this
+	// thread's resources.
+
 	PRIORITY_HIGHREALTIME 1 - // priority
 	KeThreadCurrent@ // thread
 	KeThreadPrioritySet
 
-	// ignore kill so nothing bad happens while we're cleaning up
+	// Ignore kill so nothing bad happens while we're cleaning up.
 
 	current@ KeThreadIgnoreKill drop
 
+	// If there are any asynchronous I/O operations in-flight, try to cancel
+	// them and wait for completion.
+
 	if (current@ PsThread_IOListHead + @)
-		// safe to check this in this manner because we are the only one who
-		// can enqueue items to this list and we ain't doing that right now.
+		// It's safe to check this list in this manner because the current
+		// thread is the only one who will ever enqueue items to this list,
+		// and we ain't doing that right now. Although, I/O completion APCs
+		// can asynchronously remove items from it in our context, but that
+		// doesn't matter when we're just checking for emptiness.
 
 		IOThreadRundown
 	end
@@ -287,7 +301,7 @@ fn PsiThreadExit { -- }
 	current@ KeThreadUninitialize
 
 	if (process@ KeProcess_ThreadCountI + gi ~~)
-		// we were the last thread, process is dead now.
+		// We were the last thread, so the process is dead now.
 		
 		current@ KeThread_KilledStatus + @ // status
 		process@ // process
@@ -296,6 +310,29 @@ fn PsiThreadExit { -- }
 
 	process@ PsProcessCreateDeleteUnlock
 
+	// Signal our termination event.
+
+	0 // priboost
+	current@ PsThread_TerminationEvent + // event
+	KeEventSignal
+
+	// Call the nonpaged helper function that enqueues us to the reaper list
+	// and yields execution for the last time.
+
+	current@ PsiThreadGoByeBye
+end
+
+fn PsiThreadGoByeBye { current -- }
+	// Add ourselves to the reaper thread list and signal the reaper event.
+	// IPL has to be >=IPLDPC the entire time (i.e. the dispatcher lock must
+	// be held), otherwise the reaper thread may try to delete us while we're
+	// still executing. This scales to SMP because the current plan is to hold
+	// the dispatcher lock across context switching anyway, with the release
+	// being done by the guy who we switch to; this is a sensical thing to do
+	// because a spinlock is held by a processor and not by a thread. Of
+	// course, this means that we must protect the reaper list with the
+	// dispatcher lock later.
+
 	IPLDPC KeIPLRaise drop
 
 	if (DEBUGCHECKS)
@@ -303,14 +340,6 @@ fn PsiThreadExit { -- }
 			current@ "PsiThreadExit: thread %x had pending APCs\n" KeCrash
 		end
 	end
-
-	// signal our termination event
-
-	0 // priboost
-	current@ PsThread_TerminationEvent + // event
-	KeEventSignal
-
-	// add ourselves to the reaper thread list and signal its event.
 
 	PsReaperThreadListHead@ current@ KeThread_QueueNext + !
 	current@ PsReaperThreadListHead!

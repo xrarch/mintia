@@ -549,11 +549,32 @@ OSOpenRelative:
 	mov  t2, a1
 	mov  t3, a2
 	mov  t4, a3
+	mov  r31, sp
+	add  r31, 8
+	mov  t6, [r31]
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
 
 	mov  t0, 35
 	int  0x30
 
 	mov  a1, t2
+	mov  a0, t1
+
+	pop  fp
+	ret
+
+OSClose:
+.global OSClose
+	push fp
+	mov  fp, sp
+
+	mov  t1, a0
+
+	mov  t0, 36
+	int  0x30
+
 	mov  a0, t1
 
 	pop  fp
@@ -566,21 +587,6 @@ OSQuery:
 
 	mov  t1, a0
 	mov  t2, a1
-
-	mov  t0, 36
-	int  0x30
-
-	mov  a0, t1
-
-	pop  fp
-	ret
-
-OSClose:
-.global OSClose
-	push fp
-	mov  fp, sp
-
-	mov  t1, a0
 
 	mov  t0, 37
 	int  0x30
@@ -748,6 +754,31 @@ OSSetSecurity:
 	pop  fp
 	ret
 
+SysCreateRelative:
+.global SysCreateRelative
+	push fp
+	mov  fp, sp
+
+	mov  t1, a0
+	mov  t2, a1
+	mov  t3, a2
+	mov  t4, a3
+	mov  r31, sp
+	add  r31, 8
+	mov  t6, [r31]
+	add  r31, 4
+	mov  t5, [r31]
+	add  r31, 4
+
+	mov  t0, 47
+	int  0x30
+
+	mov  a1, t2
+	mov  a0, t1
+
+	pop  fp
+	ret
+
 OSFileQuery:
 .global OSFileQuery
 	push fp
@@ -756,7 +787,7 @@ OSFileQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 47
+	mov  t0, 48
 	int  0x30
 
 	mov  a0, t1
@@ -773,7 +804,7 @@ OSFileTruncate:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 48
+	mov  t0, 49
 	int  0x30
 
 	mov  a1, t2
@@ -791,7 +822,7 @@ OSFileSeek:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 49
+	mov  t0, 50
 	int  0x30
 
 	mov  a1, t2
@@ -814,7 +845,7 @@ OSFileRead:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 50
+	mov  t0, 51
 	int  0x30
 
 	mov  a1, t2
@@ -833,7 +864,7 @@ OSFileWrite:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 51
+	mov  t0, 52
 	int  0x30
 
 	mov  a1, t2
@@ -850,7 +881,7 @@ OSFileFlush:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 52
+	mov  t0, 53
 	int  0x30
 
 	mov  a0, t1
@@ -866,7 +897,7 @@ OSFileSetInformation:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 53
+	mov  t0, 54
 	int  0x30
 
 	mov  a0, t1
@@ -890,7 +921,7 @@ OSFileReadAsync:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 54
+	mov  t0, 55
 	int  0x30
 
 	mov  a0, t1
@@ -914,7 +945,7 @@ OSFileWriteAsync:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 55
+	mov  t0, 56
 	int  0x30
 
 	mov  a0, t1
@@ -930,7 +961,7 @@ OSFileCancelIO:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 56
+	mov  t0, 57
 	int  0x30
 
 	mov  a0, t1
@@ -948,7 +979,7 @@ OSDirectoryRename:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 57
+	mov  t0, 58
 	int  0x30
 
 	mov  a0, t1
@@ -964,7 +995,7 @@ OSDirectoryUnlink:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 58
+	mov  t0, 59
 	int  0x30
 
 	mov  a0, t1
@@ -981,7 +1012,7 @@ OSDirectoryRead:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 59
+	mov  t0, 60
 	int  0x30
 
 	mov  a1, t2
@@ -1004,7 +1035,7 @@ OSPageFileCreateRelative:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 60
+	mov  t0, 61
 	int  0x30
 
 	mov  a0, t1
@@ -1020,7 +1051,7 @@ OSPageFileQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 61
+	mov  t0, 62
 	int  0x30
 
 	mov  a0, t1
@@ -1037,7 +1068,7 @@ OSIOControl:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 62
+	mov  t0, 63
 	int  0x30
 
 	mov  a1, t2
@@ -1053,7 +1084,7 @@ OSGetBootDevicePath:
 
 	mov  t1, a0
 
-	mov  t0, 63
+	mov  t0, 64
 	int  0x30
 
 	mov  a0, t1
@@ -1070,7 +1101,7 @@ OSFilesystemMount:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 64
+	mov  t0, 65
 	int  0x30
 
 	mov  a0, t1
@@ -1085,7 +1116,7 @@ OSFilesystemUnmount:
 
 	mov  t1, a0
 
-	mov  t0, 65
+	mov  t0, 66
 	int  0x30
 
 	mov  a0, t1
@@ -1101,7 +1132,7 @@ OSMountQueryAll:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 66
+	mov  t0, 67
 	int  0x30
 
 	mov  a1, t2
@@ -1116,7 +1147,7 @@ OSMountCountQuery:
 	mov  fp, sp
 
 
-	mov  t0, 67
+	mov  t0, 68
 	int  0x30
 
 	mov  a1, t2
@@ -1133,7 +1164,7 @@ OSMountUpdateFlags:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 68
+	mov  t0, 69
 	int  0x30
 
 	mov  a0, t1
@@ -1149,7 +1180,7 @@ OSMountGetFilesystemName:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 69
+	mov  t0, 70
 	int  0x30
 
 	mov  a0, t1
@@ -1165,7 +1196,7 @@ OSMountSet:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 70
+	mov  t0, 71
 	int  0x30
 
 	mov  a0, t1
@@ -1179,7 +1210,7 @@ OSFlushModifiedPages:
 	mov  fp, sp
 
 
-	mov  t0, 71
+	mov  t0, 72
 	int  0x30
 
 	mov  a0, t1
@@ -1197,7 +1228,7 @@ OSSectionCreate:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 72
+	mov  t0, 73
 	int  0x30
 
 	mov  a1, t2
@@ -1224,7 +1255,7 @@ OSMapView:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 73
+	mov  t0, 74
 	int  0x30
 
 	mov  a1, t2
@@ -1242,7 +1273,7 @@ OSUnmapView:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 74
+	mov  t0, 75
 	int  0x30
 
 	mov  a0, t1
@@ -1260,7 +1291,7 @@ OSRemapView:
 	mov  t3, a2
 	mov  t4, a3
 
-	mov  t0, 75
+	mov  t0, 76
 	int  0x30
 
 	mov  a0, t1
@@ -1277,7 +1308,7 @@ OSFlushView:
 	mov  t2, a1
 	mov  t3, a2
 
-	mov  t0, 76
+	mov  t0, 77
 	int  0x30
 
 	mov  a0, t1
@@ -1299,7 +1330,7 @@ OSAllocate:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 77
+	mov  t0, 78
 	int  0x30
 
 	mov  a1, t2
@@ -1315,7 +1346,7 @@ OSMemoryQuery:
 
 	mov  t1, a0
 
-	mov  t0, 78
+	mov  t0, 79
 	int  0x30
 
 	mov  a0, t1
@@ -1329,7 +1360,7 @@ OSWorkingSetPurge:
 	mov  fp, sp
 
 
-	mov  t0, 79
+	mov  t0, 80
 	int  0x30
 
 	mov  a0, t1
@@ -1343,7 +1374,7 @@ OSSynchronizeIcache:
 	mov  fp, sp
 
 
-	mov  t0, 80
+	mov  t0, 81
 	int  0x30
 
 
@@ -1364,7 +1395,7 @@ OSProcessCreate:
 	mov  t5, [r31]
 	add  r31, 4
 
-	mov  t0, 81
+	mov  t0, 82
 	int  0x30
 
 	mov  a1, t2
@@ -1381,7 +1412,7 @@ OSProcessSignal:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 82
+	mov  t0, 83
 	int  0x30
 
 	mov  a0, t1
@@ -1397,7 +1428,7 @@ OSProcessOpenByPID:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 83
+	mov  t0, 84
 	int  0x30
 
 	mov  a1, t2
@@ -1414,7 +1445,7 @@ OSProcessQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 84
+	mov  t0, 85
 	int  0x30
 
 	mov  a0, t1
@@ -1430,7 +1461,7 @@ OSProcessQueryByPID:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 85
+	mov  t0, 86
 	int  0x30
 
 	mov  a0, t1
@@ -1445,7 +1476,7 @@ OSProcessReadStatus:
 
 	mov  t1, a0
 
-	mov  t0, 86
+	mov  t0, 87
 	int  0x30
 
 	mov  a1, t2
@@ -1462,7 +1493,7 @@ OSProcessSetConsoleGroup:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 87
+	mov  t0, 88
 	int  0x30
 
 	mov  a0, t1
@@ -1478,7 +1509,7 @@ OSProcessBasePrioritySet:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 88
+	mov  t0, 89
 	int  0x30
 
 	mov  a0, t1
@@ -1493,7 +1524,7 @@ OSProcessSignalActivation:
 
 	mov  t1, a0
 
-	mov  t0, 89
+	mov  t0, 90
 	int  0x30
 
 	mov  a0, t1
@@ -1509,7 +1540,7 @@ OSProcessWaitForActivation:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 90
+	mov  t0, 91
 	int  0x30
 
 	mov  a1, t2
@@ -1525,7 +1556,7 @@ OSProcessExit:
 
 	mov  t1, a0
 
-	mov  t0, 91
+	mov  t0, 92
 	int  0x30
 
 
@@ -1538,7 +1569,7 @@ OSProcessCountQuery:
 	mov  fp, sp
 
 
-	mov  t0, 92
+	mov  t0, 93
 	int  0x30
 
 	mov  a1, t2
@@ -1555,7 +1586,7 @@ OSProcessQueryAll:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 93
+	mov  t0, 94
 	int  0x30
 
 	mov  a1, t2
@@ -1572,7 +1603,7 @@ OSSetQuota:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 94
+	mov  t0, 95
 	int  0x30
 
 	mov  a0, t1
@@ -1588,21 +1619,6 @@ OSQuotaQuery:
 	mov  t1, a0
 	mov  t2, a1
 
-	mov  t0, 95
-	int  0x30
-
-	mov  a0, t1
-
-	pop  fp
-	ret
-
-OSThreadSetFilePermissions:
-.global OSThreadSetFilePermissions
-	push fp
-	mov  fp, sp
-
-	mov  t1, a0
-
 	mov  t0, 96
 	int  0x30
 
@@ -1611,8 +1627,8 @@ OSThreadSetFilePermissions:
 	pop  fp
 	ret
 
-OSThreadGetFilePermissions:
-.global OSThreadGetFilePermissions
+OSThreadGetExceptionStatus:
+.global OSThreadGetExceptionStatus
 	push fp
 	mov  fp, sp
 
@@ -1620,7 +1636,6 @@ OSThreadGetFilePermissions:
 	mov  t0, 97
 	int  0x30
 
-	mov  a1, t2
 	mov  a0, t1
 
 	pop  fp

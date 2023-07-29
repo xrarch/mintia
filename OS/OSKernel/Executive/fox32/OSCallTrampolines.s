@@ -37,8 +37,8 @@
 .extern OSIsComputerOn
 .extern OSIsComputerOnFire
 .extern OSOpenRelative
-.extern OSQuery
 .extern OSClose
+.extern OSQuery
 .extern OSWaitForMultipleObjects
 .extern OSWaitForObject
 .extern OSHandleDuplicate
@@ -48,6 +48,7 @@
 .extern OSObjectDirectoryInsert
 .extern OSObjectDirectoryRemove
 .extern OSSetSecurity
+.extern SysCreateRelative
 .extern OSFileQuery
 .extern OSFileTruncate
 .extern OSFileSeek
@@ -97,8 +98,7 @@
 .extern OSProcessQueryAll
 .extern OSSetQuota
 .extern OSQuotaQuery
-.extern OSThreadSetFilePermissions
-.extern OSThreadGetFilePermissions
+.extern OSThreadGetExceptionStatus
 .extern OSThreadSleep
 .extern OSThreadSleepEx
 .extern OSThreadCreate
@@ -169,8 +169,8 @@ OSCallTable:
 	.dl OSTOSIsComputerOn                                ;33
 	.dl OSTOSIsComputerOnFire                            ;34
 	.dl OSTOSOpenRelative                                ;35
-	.dl OSTOSQuery                                       ;36
-	.dl OSTOSClose                                       ;37
+	.dl OSTOSClose                                       ;36
+	.dl OSTOSQuery                                       ;37
 	.dl OSTOSWaitForMultipleObjects                      ;38
 	.dl OSTOSWaitForObject                               ;39
 	.dl OSTOSHandleDuplicate                             ;40
@@ -180,57 +180,57 @@ OSCallTable:
 	.dl OSTOSObjectDirectoryInsert                       ;44
 	.dl OSTOSObjectDirectoryRemove                       ;45
 	.dl OSTOSSetSecurity                                 ;46
-	.dl OSTOSFileQuery                                   ;47
-	.dl OSTOSFileTruncate                                ;48
-	.dl OSTOSFileSeek                                    ;49
-	.dl OSTOSFileRead                                    ;50
-	.dl OSTOSFileWrite                                   ;51
-	.dl OSTOSFileFlush                                   ;52
-	.dl OSTOSFileSetInformation                          ;53
-	.dl OSTOSFileReadAsync                               ;54
-	.dl OSTOSFileWriteAsync                              ;55
-	.dl OSTOSFileCancelIO                                ;56
-	.dl OSTOSDirectoryRename                             ;57
-	.dl OSTOSDirectoryUnlink                             ;58
-	.dl OSTOSDirectoryRead                               ;59
-	.dl OSTOSPageFileCreateRelative                      ;60
-	.dl OSTOSPageFileQuery                               ;61
-	.dl OSTOSIOControl                                   ;62
-	.dl OSTOSGetBootDevicePath                           ;63
-	.dl OSTOSFilesystemMount                             ;64
-	.dl OSTOSFilesystemUnmount                           ;65
-	.dl OSTOSMountQueryAll                               ;66
-	.dl OSTOSMountCountQuery                             ;67
-	.dl OSTOSMountUpdateFlags                            ;68
-	.dl OSTOSMountGetFilesystemName                      ;69
-	.dl OSTOSMountSet                                    ;70
-	.dl OSTOSFlushModifiedPages                          ;71
-	.dl OSTOSSectionCreate                               ;72
-	.dl OSTOSMapView                                     ;73
-	.dl OSTOSUnmapView                                   ;74
-	.dl OSTOSRemapView                                   ;75
-	.dl OSTOSFlushView                                   ;76
-	.dl OSTOSAllocate                                    ;77
-	.dl OSTOSMemoryQuery                                 ;78
-	.dl OSTOSWorkingSetPurge                             ;79
-	.dl OSTOSSynchronizeIcache                           ;80
-	.dl OSTOSProcessCreate                               ;81
-	.dl OSTOSProcessSignal                               ;82
-	.dl OSTOSProcessOpenByPID                            ;83
-	.dl OSTOSProcessQuery                                ;84
-	.dl OSTOSProcessQueryByPID                           ;85
-	.dl OSTOSProcessReadStatus                           ;86
-	.dl OSTOSProcessSetConsoleGroup                      ;87
-	.dl OSTOSProcessBasePrioritySet                      ;88
-	.dl OSTOSProcessSignalActivation                     ;89
-	.dl OSTOSProcessWaitForActivation                    ;90
-	.dl OSTOSProcessExit                                 ;91
-	.dl OSTOSProcessCountQuery                           ;92
-	.dl OSTOSProcessQueryAll                             ;93
-	.dl OSTOSSetQuota                                    ;94
-	.dl OSTOSQuotaQuery                                  ;95
-	.dl OSTOSThreadSetFilePermissions                    ;96
-	.dl OSTOSThreadGetFilePermissions                    ;97
+	.dl OSTSysCreateRelative                             ;47
+	.dl OSTOSFileQuery                                   ;48
+	.dl OSTOSFileTruncate                                ;49
+	.dl OSTOSFileSeek                                    ;50
+	.dl OSTOSFileRead                                    ;51
+	.dl OSTOSFileWrite                                   ;52
+	.dl OSTOSFileFlush                                   ;53
+	.dl OSTOSFileSetInformation                          ;54
+	.dl OSTOSFileReadAsync                               ;55
+	.dl OSTOSFileWriteAsync                              ;56
+	.dl OSTOSFileCancelIO                                ;57
+	.dl OSTOSDirectoryRename                             ;58
+	.dl OSTOSDirectoryUnlink                             ;59
+	.dl OSTOSDirectoryRead                               ;60
+	.dl OSTOSPageFileCreateRelative                      ;61
+	.dl OSTOSPageFileQuery                               ;62
+	.dl OSTOSIOControl                                   ;63
+	.dl OSTOSGetBootDevicePath                           ;64
+	.dl OSTOSFilesystemMount                             ;65
+	.dl OSTOSFilesystemUnmount                           ;66
+	.dl OSTOSMountQueryAll                               ;67
+	.dl OSTOSMountCountQuery                             ;68
+	.dl OSTOSMountUpdateFlags                            ;69
+	.dl OSTOSMountGetFilesystemName                      ;70
+	.dl OSTOSMountSet                                    ;71
+	.dl OSTOSFlushModifiedPages                          ;72
+	.dl OSTOSSectionCreate                               ;73
+	.dl OSTOSMapView                                     ;74
+	.dl OSTOSUnmapView                                   ;75
+	.dl OSTOSRemapView                                   ;76
+	.dl OSTOSFlushView                                   ;77
+	.dl OSTOSAllocate                                    ;78
+	.dl OSTOSMemoryQuery                                 ;79
+	.dl OSTOSWorkingSetPurge                             ;80
+	.dl OSTOSSynchronizeIcache                           ;81
+	.dl OSTOSProcessCreate                               ;82
+	.dl OSTOSProcessSignal                               ;83
+	.dl OSTOSProcessOpenByPID                            ;84
+	.dl OSTOSProcessQuery                                ;85
+	.dl OSTOSProcessQueryByPID                           ;86
+	.dl OSTOSProcessReadStatus                           ;87
+	.dl OSTOSProcessSetConsoleGroup                      ;88
+	.dl OSTOSProcessBasePrioritySet                      ;89
+	.dl OSTOSProcessSignalActivation                     ;90
+	.dl OSTOSProcessWaitForActivation                    ;91
+	.dl OSTOSProcessExit                                 ;92
+	.dl OSTOSProcessCountQuery                           ;93
+	.dl OSTOSProcessQueryAll                             ;94
+	.dl OSTOSSetQuota                                    ;95
+	.dl OSTOSQuotaQuery                                  ;96
+	.dl OSTOSThreadGetExceptionStatus                    ;97
 	.dl OSTOSThreadSleep                                 ;98
 	.dl OSTOSThreadSleepEx                               ;99
 	.dl OSTOSThreadCreate                                ;100
@@ -1004,6 +1004,14 @@ OSTOSOpenRelative:
 	add  t0, 16 ;t4
 	mov  a3, [t0]
 
+	mov  t0, s17
+	add  t0, 20 ;t5
+	push [t0]
+
+	mov  t0, s17
+	add  t0, 24 ;t6
+	push [t0]
+
 	call OSOpenRelative
 
 
@@ -1014,6 +1022,25 @@ OSTOSOpenRelative:
 	mov  t0, s17
 	add  t0, 8 ;t2
 	mov  [t0], a1
+
+	add  sp, 8
+	pop  fp
+	ret
+
+OSTOSClose:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	call OSClose
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
 
 	pop  fp
 	ret
@@ -1031,24 +1058,6 @@ OSTOSQuery:
 	mov  a1, [t0]
 
 	call OSQuery
-
-
-	mov  t0, s17
-	add  t0, 4 ;t1
-	mov  [t0], a0
-
-	pop  fp
-	ret
-
-OSTOSClose:
-	push fp
-	mov  fp, sp
-
-	mov  t0, s17
-	add  t0, 4 ;t1
-	mov  a0, [t0]
-
-	call OSClose
 
 
 	mov  t0, s17
@@ -1298,6 +1307,49 @@ OSTOSSetSecurity:
 	add  t0, 4 ;t1
 	mov  [t0], a0
 
+	pop  fp
+	ret
+
+OSTSysCreateRelative:
+	push fp
+	mov  fp, sp
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  a0, [t0]
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  a1, [t0]
+
+	mov  t0, s17
+	add  t0, 12 ;t3
+	mov  a2, [t0]
+
+	mov  t0, s17
+	add  t0, 16 ;t4
+	mov  a3, [t0]
+
+	mov  t0, s17
+	add  t0, 20 ;t5
+	push [t0]
+
+	mov  t0, s17
+	add  t0, 24 ;t6
+	push [t0]
+
+	call SysCreateRelative
+
+
+	mov  t0, s17
+	add  t0, 4 ;t1
+	mov  [t0], a0
+
+	mov  t0, s17
+	add  t0, 8 ;t2
+	mov  [t0], a1
+
+	add  sp, 8
 	pop  fp
 	ret
 
@@ -2542,38 +2594,16 @@ OSTOSQuotaQuery:
 	pop  fp
 	ret
 
-OSTOSThreadSetFilePermissions:
+OSTOSThreadGetExceptionStatus:
 	push fp
 	mov  fp, sp
 
-	mov  t0, s17
-	add  t0, 4 ;t1
-	mov  a0, [t0]
-
-	call OSThreadSetFilePermissions
+	call OSThreadGetExceptionStatus
 
 
 	mov  t0, s17
 	add  t0, 4 ;t1
 	mov  [t0], a0
-
-	pop  fp
-	ret
-
-OSTOSThreadGetFilePermissions:
-	push fp
-	mov  fp, sp
-
-	call OSThreadGetFilePermissions
-
-
-	mov  t0, s17
-	add  t0, 4 ;t1
-	mov  [t0], a0
-
-	mov  t0, s17
-	add  t0, 8 ;t2
-	mov  [t0], a1
 
 	pop  fp
 	ret

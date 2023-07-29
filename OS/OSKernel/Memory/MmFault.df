@@ -707,7 +707,6 @@ fn MiNormalFault { vaddr process -- signal }
 	auto offset
 	auto object
 	auto vad
-	auto ok
 	auto flags
 	auto pteaddr
 	auto wsli
@@ -745,16 +744,16 @@ fn MiNormalFault { vaddr process -- signal }
 		vaddr@ vad@ VcBuffer_WindowAddress + @ - vad@ VcBuffer_FileOffset + @ + offset!
 		MMVADFLAG_FILE flags!
 
-		0 ok!
+		0 signal!
 	end else
 		// This address doesn't lie within the viewcache space, so it must be
 		// mapped by a VAD. Look that up now.
 
 		vaddr@ // vaddr
 		process@ // process
-		MiFaultParameters ok! vad! object! offset!
+		MiFaultParameters signal! vad! object! offset!
 
-		if (ok@)
+		if (signal@)
 			// No VAD found, cause a segfault.
 
 			OSSIGNAL_SEGV signal!
@@ -784,11 +783,7 @@ fn MiNormalFault { vaddr process -- signal }
 				object@ // fileobject
 				offset@ // offset
 				vad@ // vad
-				MiSatisfyCharFault ok!
-
-				if (ok@)
-					ok@ signal!
-				end
+				MiSatisfyCharFault signal!
 
 				return
 			end
@@ -799,9 +794,9 @@ fn MiNormalFault { vaddr process -- signal }
 		// This is a user mapping, so increment the PTE count on the page
 		// table (and maybe create it if it doesn't exist).
 
-		vaddr@ MiPTECreate ok! pteaddr!
+		vaddr@ MiPTECreate signal! pteaddr!
 
-		if (ok@)
+		if (signal@)
 			OSSIGNAL_KILL signal!
 
 			return
@@ -850,9 +845,9 @@ fn MiNormalFault { vaddr process -- signal }
 
 	// Allocate a working set entry to track this virtual page.
 
-	process@ MiWorkingSetEntryReserve ok! wsleptr! wsli!
+	process@ MiWorkingSetEntryReserve signal! wsleptr! wsli!
 
-	if (ok@)
+	if (signal@)
 		// Failed to acquire a working set entry. Back out of the
 		// page fault with an OSSIGNAL_KILL.
 
@@ -876,7 +871,7 @@ fn MiNormalFault { vaddr process -- signal }
 		process@ // process
 		vaddr@ // vaddr
 		pteaddr@ // pteaddr
-		MiSatisfyPrivatePageFault ok!
+		MiSatisfyPrivatePageFault signal!
 	end elseif (flags@ MMVADFLAG_FILE &)
 		// There's a file object, so this is a shared file page fault.
 
@@ -884,7 +879,7 @@ fn MiNormalFault { vaddr process -- signal }
 		capturedfcb@ // fcb
 		offset@ // offset
 		pteaddr@ // pteaddr
-		MiSatisfyFileFault ok!
+		MiSatisfyFileFault signal!
 	end else
 		// There's a section object, so this is a shared anon page fault.
 
@@ -893,10 +888,10 @@ fn MiNormalFault { vaddr process -- signal }
 		object@ // section
 		offset@ // offset
 		pteaddr@ // pteaddr
-		MiSatisfyAnonFault ok!
+		MiSatisfyAnonFault signal!
 	end
 
-	if (ok@)
+	if (signal@)
 		// There was an abnormal status of some kind (such as a
 		// STATUS_REFAULT), so free the working set entry.
 
@@ -916,7 +911,7 @@ fn MiNormalFault { vaddr process -- signal }
 
 	ipl@ KeIPLLower
 
-	if (ok@)
+	if (signal@)
 		// Something abnormal happened so delete the PTE we just created.
 		// (aka, decrement the PTE count on the page table).
 
@@ -924,12 +919,6 @@ fn MiNormalFault { vaddr process -- signal }
 			1 // deref
 			pteaddr@ // pteaddr
 			MiPTEDelete
-		end
-
-		if (ok@ STATUS_REFAULT ==)
-			STATUS_REFAULT signal!
-		end else
-			ok@ signal!
 		end
 
 		return

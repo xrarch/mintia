@@ -112,24 +112,9 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 
 		STATUS_REFAULT signal!
 
-		// We only need to lock the VAD list mutex right now if this is a user
-		// fault. We still lock the system VAD list if necessary, but only
-		// later. Why? Well, it's because the user page tables are paged, but
-		// system ones arent. To synchronize the user page tables correctly,
-		// we need to hold this mutex across MiPTEPin and MiPTEUnpin calls,
-		// but these are never called for system faults, since the system page
-		// tables are static, so we don't need to lock this mutex yet.
-		//
-		// Incidentally, it's also actually incorrect and leads to deadlock if
-		// we lock the system VAD list unconditionally here (due to reasons
-		// that pertain to paging kernel code and heap), so we couldn't lock
-		// it even if we wanted to.
-
-		if (kernelmapping@ ~~)
-			0 // alertable
-			process@ // processobject
-			MmVADListLock drop
-		end
+		0 // alertable
+		process@ // processobject
+		MmVADListLock drop
 
 		while (signal@ STATUS_REFAULT ==)
 			if (process@ PsSystemProcess@ ==
@@ -146,9 +131,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 					// that of the working set trimmer) in situations of prolonged
 					// extreme memory pressure.
 
-					if (kernelmapping@ ~~)
-						process@ MmVADListUnlock
-					end
+					process@ MmVADListUnlock
 
 					ipl@ KeIPLLower
 
@@ -159,11 +142,9 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 
 					IPLAPC KeIPLRaise ipl!
 
-					if (kernelmapping@ ~~)
-						0 // alertable
-						process@ // processobject
-						MmVADListLock drop
-					end
+					0 // alertable
+					process@ // processobject
+					MmVADListLock drop
 				end
 			end
 
@@ -202,9 +183,7 @@ fn MmPageFault { writing badaddr trapframe -- handled }
 			MiSatisfyFault signal!
 		end
 
-		if (kernelmapping@ ~~)
-			process@ MmVADListUnlock
-		end
+		process@ MmVADListUnlock
 
 		ipl@ KeIPLLower
 	end
@@ -491,20 +470,13 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 				// shared or private pages (if another thread in this process
 				// is the first in the system to read that shared page).
 
-				auto waited
-
 				// Wait for a page to be available to avoid starving the
 				// system.
 
-				if (kernelmapping@)
-					0 // process
-					CANBLOCK // priority
-					MmPageWait drop waited!
-				end else
-					process@ // process
-					CANBLOCK // priority
-					MmPageWait drop waited!
-				end
+				auto waited
+				process@ // process
+				CANBLOCK // priority
+				MmPageWait drop waited!
 
 				if (waited@)
 					// MmPageWait dropped IPL and waited, so back out of the
@@ -557,7 +529,7 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 					SYSTEMSPACE // pri
 					vaddr@ // vaddr
 					pteaddr@ // pteaddr
-					0 // localpteaddr
+					-1 // localpteaddr
 					MiAnonymousPageReferenceByPTE ok! pfdbe!
 				end else
 					-1 // dzpte
@@ -624,30 +596,6 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 
 			return
 		end
-
-		// NOW we have to lock the kernel VAD list mutex.
-
-		0 // alertable
-		process@ // processobject
-		MmVADListLock drop
-
-		// Double check that the PTE is still zero and that nobody else has
-		// faulted it in while we didn't have the lock held and IPL was
-		// dropped.
-
-		if (pteaddr@@ MiPTEIsZero ~~)
-			// It's not zero, so REFAULT.
-
-			if (ptpfdbe@)
-				vaddr@ ptpfdbe@ MiPTEUnpin
-			end
-
-			process@ MmVADListUnlock
-
-			STATUS_REFAULT signal!
-
-			return
-		end
 	end
 
 	// We've determined that the PTE is either zero or doesn't exist, so go
@@ -660,10 +608,6 @@ fn MiSatisfyFault { kernelmapping writing vaddr -- signal }
 
 	if (ptpfdbe@)
 		vaddr@ ptpfdbe@ MiPTEUnpin
-	end
-
-	if (kernelmapping@)
-		process@ MmVADListUnlock
 	end
 
 	if (signal@ ~~)
@@ -1157,15 +1101,6 @@ fn MiWriteFault { pteaddr vaddr process -- signal }
 
 	ipl@ KeIPLLower
 
-	if (process@ PsSystemProcess@ ==)
-		// Lock the system VAD list now since, unlike the user VAD list lock,
-		// it doesn't get grabbed earlier.
-
-		0 // alertable
-		process@ // processobject
-		MmVADListLock drop
-	end
-
 	// We have to look up the VAD at lower IPL since they're allocated from
 	// paged pool.
 
@@ -1197,17 +1132,9 @@ fn MiWriteFault { pteaddr vaddr process -- signal }
 		process@ // process
 		MiCopyOnWriteFault signal!
 
-		if (process@ PsSystemProcess@ ==)
-			process@ MmVADListUnlock
-		end
-
 		return
 	end elseif (pageprot@ PAGEACCESS_WRITE & ~~)
 		// access violation
-
-		if (process@ PsSystemProcess@ ==)
-			process@ MmVADListUnlock
-		end
 
 		OSSIGNAL_SEGV signal!
 
@@ -1218,10 +1145,6 @@ fn MiWriteFault { pteaddr vaddr process -- signal }
 		0 // checked
 		pteaddr@ // pteaddr
 		MiDirtyFault signal!
-
-		if (process@ PsSystemProcess@ ==)
-			process@ MmVADListUnlock
-		end
 
 		return
 	end

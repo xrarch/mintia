@@ -90,6 +90,8 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 	if (msg@ IPCiKernelMessage_Header + OSMessageHeader_LengthI + gi
 		portobject@ IPCiPort_MaximumMessageBody + @ >)
 
+		// The message is too long for the recipient.
+
 		STATUS_MESSAGE_TOO_LONG ok!
 
 		msg@ // ptr
@@ -124,11 +126,13 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 	msg@ IPCiKernelMessage_Header + OSMessageHeader_ClientID + @ clientid!
 
 	if (msg@ IPCiKernelMessage_Header + OSMessageHeader_Handle + @ OSNONE ~=)
-		if (portobject@ IPCiPort_UFlags + @ OSPORT_FLAG_NO_HANDLES &)
-			0 allowhandle!
-		end
+		if (allowhandle@ ~~
+			portobject@ IPCiPort_UFlags + @ OSPORT_FLAG_NO_HANDLES & ||)
 
-		if (allowhandle@ ~~)
+			// The caller isn't permitting us to pass a handle in this
+			// message, or the recipient has specified that he doesn't want to
+			// receive handles ever.
+
 			msg@ // ptr
 			portobject@ IPCiPort_ZoneHeader + // zoneheader
 			MmZoneFree
@@ -154,6 +158,9 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 		end
 
 		if (access@ ACCESS_NOINHERIT &)
+			// The handle has NOINHERIT specified in its access bits, which
+			// indicates that it must never be passed out of this process.
+
 			msg@ // ptr
 			portobject@ IPCiPort_ZoneHeader + // zoneheader
 			MmZoneFree
@@ -168,7 +175,8 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 		ACCESS_ALL access &=
 
 		if (access@ msg@ IPCiKernelMessage_Header + OSMessageHeader_Access + @ | access@ ~=)
-			// not a subset
+			// The permissions that we're trying to pass the handle with
+			// aren't a subset of the permissions that we own the handle with.
 
 			msg@ // ptr
 			portobject@ IPCiPort_ZoneHeader + // zoneheader
@@ -183,11 +191,13 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 
 		passedobject@ msg@ IPCiKernelMessage_Object + !
 
-		// no other message type allowed when passing a handle.
+		// No other message type than REQUEST is allowed when passing a
+		// handle, so make sure that's our type.
+
 		OSPORT_MESSAGE_REQUEST msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + sb
 	end
 
-	// fill in the kernel-controlled parts of the message header.
+	// Fill in the kernel-controlled parts of the message header.
 
 	portobject@ IPCiPort_ClientID + @ msg@ IPCiKernelMessage_Header + OSMessageHeader_ClientID + !
 	portobject@ IPCiPort_ServerContextForClient + @ msg@ IPCiKernelMessage_Header + OSMessageHeader_Context + !
@@ -195,7 +205,7 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 	if (msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + gb OSPORT_MESSAGE_REPLY ==)
 		msg@ IPCiKernelMessage_Header + OSMessageHeader_ConversationID + @ conid!
 	end else
-		// don't let clients prank the server into thinking there was a
+		// Don't let clients prank the server into thinking there was a
 		// connection or disconnection when there wasn't.
 
 		OSPORT_MESSAGE_REQUEST msg@ IPCiKernelMessage_Header + OSMessageHeader_TypeB + sb
@@ -206,8 +216,10 @@ fn IPCiMessageAllocate { allowhandle umsg mode conid portobject -- clientid msg 
 
 		conid@ msg@ IPCiKernelMessage_Header + OSMessageHeader_ConversationID + !
 
+		// Make sure to overflow to the first dynamic conversation ID
+		// correctly.
+
 		if (conid@ -1 ==)
-			// overflow correctly
 			OSPORT_CONID_FIRSTDYNAMIC portobject@ IPCiPort_NextConversationID + !
 		end else
 			conid@ 1 + portobject@ IPCiPort_NextConversationID + !

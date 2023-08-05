@@ -32,6 +32,9 @@
 fn (ObTypeOpenFunction) IPCiPortObjectOpen { access object process -- ok }
 	fnsection "PAGE$text"
 
+	// Don't allow opening the port object if it's not the owning process
+	// trying to open it.
+
 	0 ok!
 
 	if (process@ object@ IPCiPort_OwningProcess + @ ~=)
@@ -43,13 +46,16 @@ fn (ObTypeDeleteFunction) IPCiPortObjectDelete { object -- }
 	fnsection "PAGE$text"
 
 	auto ok
-
 	auto clienttable
 
 	auto ipl
 	0 IPCiGlobalLock drop ipl!
 
-	// rundown all of my messages still out there in a queue
+	// It's time to delete this port object.
+	// Rundown all of its messages still out there in someone's queue.
+	// XXX we wouldn't have to do this if we allocated messages from a global
+	// zone, which would also allow us to simplify (i.e. speed up) the code
+	// elsewhere. This is in the TODO list for after the rewrite in TOWER.
 
 	auto msg
 
@@ -75,6 +81,9 @@ fn (ObTypeDeleteFunction) IPCiPortObjectDelete { object -- }
 		// it's a client, check if there's a server port still.
 
 		if (object@ IPCiPort_ServerPort + @)
+			// Send the disconnection message to the server port, but not if
+			// the connection was never completed to begin with.
+
 			if (object@ IPCiPort_Flags + @ IPCPORTFLAG_UNFINISHED_CONNECTION & ~~)
 				auto kdms
 				object@ IPCiPort_DisconnectionMessage + @ kdms!
@@ -88,7 +97,7 @@ fn (ObTypeDeleteFunction) IPCiPortObjectDelete { object -- }
 				IPCiPortSendMessage drop
 			end
 
-			// remove client ID from server's table
+			// Remove our client ID from the server's client ID table.
 
 			object@ IPCiPort_ServerPort + @ IPCiPort_ClientTableHeader + @ clienttable!
 
@@ -312,9 +321,14 @@ fn IPCPortCreateObject { flags maxlen serverport owningprocess permissions name 
 		clienttable@ portobject@ IPCiPort_ClientTableHeader + !
 	end
 
-	owningprocess@ ObObjectReferenceByPointer drop
-
 	maxlen@ portobject@ IPCiPort_MaximumMessageBody + !
+
+	// Reference our own process to avoid strange cases in referencing
+	// processes by client ID. This is fine since all of our handles are
+	// closed at termination time, not process object deletion time, so this
+	// reference is guaranteed to be removed when the port object is run down.
+
+	owningprocess@ ObObjectReferenceByPointer drop
 end
 
 fn IPCPortCreate { flags maxlen permissions name -- porthandle ok }

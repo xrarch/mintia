@@ -494,74 +494,17 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 	-1 mdlpos@!
 
-	auto ptpfdbe
-	0 ptpfdbe!
-
 	auto pinnedvaddr
 
-	auto ipl
+	auto pteaddr
+	vaddr@ MmVirtualtoPTEAddressUser pteaddr!
 
-	// don't raise IPL here -- it will get raised following the pinning of the
-	// first PTE. this is a little faster. watch out for strange relationships
-	// between control flow and IPL here, this can be bug-prone.
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
 
 	while (pages@)
-		auto pte
-
 		while (1)
-			if (vaddr@ PERPAGETABLEOFFSETMASK & ~~ ptpfdbe@ ~~ ||)
-				if (ptpfdbe@)
-					// only lower IPL if this isn't the pinning of the first
-					// PTE, since if it is, we haven't raised it yet.
-
-					ipl@ KeIPLLower
-				end
-
-				// pin the page table so we can check the PTE with raised IPL
-				// fearlessly.
-
-				0 // alertable
-				process@ // processobject
-				MmVADListLock drop
-
-				if (ptpfdbe@)
-					pinnedvaddr@ // vaddr
-					ptpfdbe@ // ptpfdbe
-					MiPTEUnpin
-				end
-
-				vaddr@ MiPTEPin pte! ptpfdbe!
-
-				process@ MmVADListUnlock
-
-				if (ptpfdbe@ ~~)
-					// the page table doesn't exist, try to create the PTE by
-					// faulting on the page.
-
-					vaddr@ KeSafeGetByte ok! drop
-
-					if (ok@)
-						IPLDPC KeIPLRaise ipl!
-
-						break
-					end
-
-					// don't raise IPL since ptpfdbe being null will cause it
-					// to not be lowered.
-
-					continue
-				end
-
-				vaddr@ pinnedvaddr!
-
-				IPLDPC KeIPLRaise ipl!
-			end
-
-			auto pfdbe
-			pte@ // pteaddr
-			MiPTEInterpret ok! drop pfdbe!
-
-			if (ok@)
+			if (vaddr@ MmVirtualAddressIsValid ~~)
 				// not resident. (re-)probe and try again.
 
 				ipl@ KeIPLLower
@@ -576,6 +519,9 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 
 				continue
 			end
+
+			auto pfdbe
+			pteaddr@ MiPTEInterpret drop drop pfdbe!
 
 			pfdbe@ PAGESHIFT >> MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
@@ -596,24 +542,12 @@ fn MmMDLPin { lockforwrite mdl -- ok }
 		4 mdlpos +=
 		1 pages -=
 		PAGESIZE vaddr +=
-		PTESIZE pte +=
+		PTESIZE pteaddr +=
 	end
 
 	ipl@ KeIPLLower
 
 	process@ MiMapUnlock
-
-	if (ptpfdbe@)
-		0 // alertable
-		process@ // processobject
-		MmVADListLock drop
-
-		pinnedvaddr@ // vaddr
-		ptpfdbe@ // ptpfdbe
-		MiPTEUnpin
-
-		process@ MmVADListUnlock
-	end
 
 	if (ok@)
 		mdl@ MmMDLUnpin

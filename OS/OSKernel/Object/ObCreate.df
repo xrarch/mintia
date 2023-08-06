@@ -80,10 +80,17 @@ end
 fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type -- object ok }
 	fnsection "PAGE$text"
 
-	0 ok!
-
-	auto tag
 	auto paged
+	auto tag
+	auto pheader
+	auto npheader
+	auto cheader
+	auto obname
+	auto npcharge
+	auto pcharge
+	auto namelen
+
+	0 ok!
 
 	if (type@)
 		type@ ObiType_Tag + @ tag!
@@ -92,16 +99,6 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 		'Objt' tag!
 		0 paged!
 	end
-
-	auto pheader
-	auto npheader
-	auto cheader
-	auto obname
-
-	auto npcharge
-	auto pcharge
-
-	auto namelen
 
 	if (name@)
 		name@ strlen namelen!
@@ -116,20 +113,58 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 		0 namelen!
 	end
 
-	// see Object.h for an explanation on these structures.
+	// Calculate the sizes of the paged and nonpaged part of the object.
+	// See Object.h for an explanation of these structures.
 
 	if (ObFullyNonpagedObjects@)
 		ObiNonpagedHeader_SIZEOF
 		ObiPagedHeader_SIZEOF +
 		namelen@ +
 		ObiCommonHeader_SIZEOF +
-		bodysize@ + // bytes
+		bodysize@ + npcharge!
 
+		0 pcharge!
+	end elseif (paged@)
+		ObiNonpagedHeader_SIZEOF npcharge!
+
+		ObiPagedHeader_SIZEOF
+		namelen@ +
+		ObiCommonHeader_SIZEOF +
+		bodysize@ + pcharge!
+	end else
+		ObiNonpagedHeader_SIZEOF
+		ObiCommonHeader_SIZEOF +
+		bodysize@ + npcharge!
+
+		ObiPagedHeader_SIZEOF
+		namelen@ + pcharge!
+	end
+
+	// Charge quota to the current process before we do any allocations.
+
+	pcharge@ // pagedpart
+	npcharge@ // nonpagedpart
+	pquotabias@ // pagedbias
+	npquotabias@ // nonpagedbias
+	ObiChargeForObject ok!
+
+	if (ok@)
+		return
+	end
+
+	if (ObFullyNonpagedObjects@)
+		npcharge@ // bytes
 		tag@ // tag
 		CANBLOCK // flags
 		MmAllocWithTag ok! npheader!
 
 		if (ok@)
+			pcharge@ // pagedpart
+			npcharge@ // nonpagedpart
+			pquotabias@ // pagedbias
+			npquotabias@ // nonpagedbias
+			ObiUnchargeForObject
+
 			return
 		end
 
@@ -139,19 +174,20 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 		cheader@ ObiCommonHeader_SIZEOF + object!
 
 		npheader@ MmBlockChargeGet npcharge!
-
 		0 pcharge!
 	end elseif (paged@)
-		ObiPagedHeader_SIZEOF
-		namelen@ +
-		ObiCommonHeader_SIZEOF +
-		bodysize@ + // bytes
-
+		pcharge@ // bytes
 		tag@ // tag
 		PAGED // flags
 		MmAllocWithTag ok! pheader!
 
 		if (ok@)
+			pcharge@ // pagedpart
+			npcharge@ // nonpagedpart
+			pquotabias@ // pagedbias
+			npquotabias@ // nonpagedbias
+			ObiUnchargeForObject
+
 			return
 		end
 
@@ -159,7 +195,7 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 		obname@ namelen@ + cheader!
 		cheader@ ObiCommonHeader_SIZEOF + object!
 
-		ObiNonpagedHeader_SIZEOF // bytes
+		npcharge@ // bytes
 		'ObNH' // tag
 		CANBLOCK // flags
 		MmAllocWithTag ok! npheader!
@@ -167,36 +203,49 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 		if (ok@)
 			pheader@ MmFree
 
+			pcharge@ // pagedpart
+			npcharge@ // nonpagedpart
+			pquotabias@ // pagedbias
+			npquotabias@ // nonpagedbias
+			ObiUnchargeForObject
+
 			return
 		end
 
 		npheader@ MmBlockChargeGet npcharge!
 		pheader@ MmBlockChargeGet pcharge!
 	end else
-		ObiNonpagedHeader_SIZEOF
-		ObiCommonHeader_SIZEOF +
-		bodysize@ + // bytes
-
+		npcharge@ // bytes
 		tag@ // tag
 		CANBLOCK // flags
 		MmAllocWithTag ok! npheader!
 
 		if (ok@)
+			pcharge@ // pagedpart
+			npcharge@ // nonpagedpart
+			pquotabias@ // pagedbias
+			npquotabias@ // nonpagedbias
+			ObiUnchargeForObject
+
 			return
 		end
 
 		npheader@ ObiNonpagedHeader_SIZEOF + cheader!
 		cheader@ ObiCommonHeader_SIZEOF + object!
 
-		ObiPagedHeader_SIZEOF
-		namelen@ + // bytes
-
+		pcharge@ // bytes
 		'ObPH' // tag
 		PAGED // flags
 		MmAllocWithTag ok! pheader!
 
 		if (ok@)
 			npheader@ MmFree
+
+			pcharge@ // pagedpart
+			npcharge@ // nonpagedpart
+			pquotabias@ // pagedbias
+			npquotabias@ // nonpagedbias
+			ObiUnchargeForObject
 
 			return
 		end
@@ -225,7 +274,6 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 	type@ npheader@ ObiNonpagedHeader_TypeObject + !
 	0 npheader@ ObiNonpagedHeader_HandleCount + !
 	1 npheader@ ObiNonpagedHeader_PointerCount + !
-	0 npheader@ ObiNonpagedHeader_QuotaBlock + !
 
 	0 pheader@ ObiPagedHeader_TypeListNext + !
 	0 pheader@ ObiPagedHeader_TypeListPrev + !
@@ -236,13 +284,14 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 
 	flags@ pheader@ ObiPagedHeader_Flags + !
 
-	KeProcessCurrent flags!
-
-	flags@ PsProcess_PagedArea + @ flags!
+	KeProcessCurrent PsProcess_PagedArea + @ flags!
 
 	flags@ PsProcessPaged_UID + @ pheader@ ObiPagedHeader_UID + !
 	flags@ PsProcessPaged_GID + @ pheader@ ObiPagedHeader_GID + !
 	permissions@ ACCESS_ALL_ALL & pheader@ ObiPagedHeader_Permissions + !
+
+	flags@ PsProcessPaged_QuotaBlock + @ MmQuotaBlockReference
+	flags@ PsProcessPaged_QuotaBlock + @ npheader@ ObiNonpagedHeader_QuotaBlock + !
 
 	pcharge@ pheader@ ObiPagedHeader_PagedQuotaCharge + !
 	npcharge@ pheader@ ObiPagedHeader_NonpagedQuotaCharge + !
@@ -261,6 +310,60 @@ fn ObObjectCreate { name flags permissions npquotabias pquotabias bodysize type 
 
 		type@ ObiTypeUnlock
 	end
+end
+
+fn ObiChargeForObject { pagedpart nonpagedpart pagedbias nonpagedbias -- ok }
+	fnsection "PAGE$text"
+
+	// This is only a separate function due to limitations in the dragonfruit
+	// compiler.
+
+	auto quotablock
+	KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
+
+	pagedpart@ MmChargeBytesGet pagedpart!
+	nonpagedpart@ MmChargeBytesGet nonpagedpart!
+
+	pagedpart@ pagedbias@ + // charge
+	quotablock@ // quotablock
+	MmQuotaBlockChargePaged ok!
+
+	if (ok@)
+		return
+	end
+
+	nonpagedpart@ nonpagedbias@ + // charge
+	quotablock@ // quotablock
+	MmQuotaBlockCharge ok!
+
+	if (ok@)
+		pagedpart@ pagedbias@ + // charge
+		quotablock@ // quotablock
+		MmQuotaBlockUnchargePaged
+
+		return
+	end
+end
+
+fn ObiUnchargeForObject { pagedpart nonpagedpart pagedbias nonpagedbias -- }
+	fnsection "PAGE$text"
+
+	// This is only a separate function due to limitations in the dragonfruit
+	// compiler.
+
+	auto quotablock
+	KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
+
+	pagedpart@ MmChargeBytesGet pagedpart!
+	nonpagedpart@ MmChargeBytesGet nonpagedpart!
+
+	pagedpart@ pagedbias@ + // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUnchargePaged
+
+	nonpagedpart@ nonpagedbias@ + // charge
+	quotablock@ // quotablock
+	MmQuotaBlockUncharge
 end
 
 fn ObObjectFree { object -- ok }

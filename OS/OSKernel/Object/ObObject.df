@@ -116,37 +116,6 @@ fn ObObjectCloseProcess { handle process -- ok }
 	object@ ObObjectDereferenceByPointer drop
 end
 
-fn ObObjectUncharge { object -- }
-	fnsection "PAGE$text"
-
-	auto npheader
-	object@ ObObjectNonpagedHeader npheader!
-
-	auto quotablock
-	npheader@ ObiNonpagedHeader_QuotaBlock + @ quotablock!
-
-	if (DEBUGCHECKS)
-		if (quotablock@ ~~)
-			"ObObjectUncharge: no quotablock\n" KeCrash
-		end
-	end
-
-	0 npheader@ ObiNonpagedHeader_QuotaBlock + !
-
-	auto pheader
-	object@ ObObjectPagedHeader pheader!
-
-	pheader@ ObiPagedHeader_PagedQuotaCharge + @ // charge
-	quotablock@ // quotablock
-	MmQuotaBlockUnchargePaged
-
-	pheader@ ObiPagedHeader_NonpagedQuotaCharge + @ // charge
-	quotablock@ // quotablock
-	MmQuotaBlockUncharge
-
-	quotablock@ MmQuotaBlockDereference
-end
-
 fn ObObjectOpen { nocheck access object -- handle ok }
 	fnsection "PAGE$text"
 
@@ -158,6 +127,8 @@ fn ObObjectOpen { nocheck access object -- handle ok }
 end
 
 fn ObObjectOpenProcess { nocheck access object process -- handle ok }
+	fnsection "PAGE$text"
+
 	auto handletable
 	process@ PsProcess_PagedArea + @ PsProcessPaged_HandleTable + @ handletable!
 
@@ -183,72 +154,11 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	auto flags
 	pheader@ ObiPagedHeader_Flags + @ flags!
 
-	auto quotablock
-	process@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ quotablock!
-
-	auto pcharge
-	auto npcharge
-
-	if (npheader@ ObiNonpagedHeader_QuotaBlock + @ ~~)
-		pheader@ ObiPagedHeader_PagedQuotaCharge + @ pcharge!
-		pheader@ ObiPagedHeader_NonpagedQuotaCharge + @ npcharge!
-
-		auto ipl
-		IPLDPC KeIPLRaise ipl!
-
-		if (npheader@ ObiNonpagedHeader_QuotaBlock + @ ~~)
-			if (flags@ OBFLAGS_PERMANENT & ~~)
-				// no quotablock and object isnt permanent; claim quota for
-				// current process
-
-				pcharge@ // charge
-				quotablock@ // quotablock
-				MmQuotaBlockChargePaged ok!
-
-				if (ok@)
-					ipl@ KeIPLLower
-
-					return
-				end
-
-				npcharge@ // charge
-				quotablock@ // quotablock
-				MmQuotaBlockCharge ok!
-
-				if (ok@)
-					pcharge@ // charge
-					quotablock@ // quotablock
-					MmQuotaBlockUnchargePaged
-
-					ipl@ KeIPLLower
-
-					return
-				end
-
-				quotablock@ MmQuotaBlockReference
-
-				quotablock@ npheader@ ObiNonpagedHeader_QuotaBlock + !
-			end else
-				0 quotablock!
-			end
-		end else
-			0 quotablock!
-		end
-
-		ipl@ KeIPLLower
-	end else
-		0 quotablock!
-	end
-
 	1 // alertable
 	handletable@ // handletable
 	ExHandleTableLock ok!
 
 	if (ok@)
-		if (quotablock@)
-			object@ ObObjectUncharge
-		end
-
 		return
 	end
 
@@ -259,10 +169,6 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 		SeCheckAccessObjectUserX ok!
 
 		if (ok@)
-			if (quotablock@)
-				object@ ObObjectUncharge
-			end
-
 			handletable@ ExHandleTableUnlock
 
 			return
@@ -270,17 +176,12 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 	end
 
 	auto entryptr
-
 	object@ // entryvalue
 	handletable@ // handletable
 	1 // locked
 	ExHandleCreate ok! entryptr! handle!
 
 	if (ok@)
-		if (quotablock@)
-			object@ ObObjectUncharge
-		end
-
 		handletable@ ExHandleTableUnlock
 
 		return
@@ -299,10 +200,6 @@ fn ObObjectOpenProcess { nocheck access object process -- handle ok }
 			openfunc@ ObTypeOpenFunction ok!
 
 			if (ok@)
-				if (quotablock@)
-					object@ ObObjectUncharge
-				end
-
 				handle@ // handle
 				handletable@ // handletable
 				1 // locked
@@ -363,9 +260,9 @@ fn ObObjectReferenceByHandle { type handle -- access object ok }
 		return
 	end
 
-	type@
-	handle@
-	KeProcessCurrent
+	type@ // type
+	handle@ // handle
+	KeProcessCurrent // process
 	ObObjectReferenceByHandleProcess ok! object! access!
 end
 

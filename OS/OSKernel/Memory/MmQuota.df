@@ -27,6 +27,8 @@
 var MiQuotaBlockListHead 0
 
 fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
+	fnsection "PAGE$text"
+
 	KERNELMODE // waitmode
 	1 // alertable
 	OSWAIT_TIMEOUTINFINITE // timeout
@@ -37,16 +39,13 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 		return
 	end
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	// Find the quotablock for the given UID.
 
 	MiQuotaBlockListHead@ quotablock!
 
 	while (quotablock@)
 		if (quotablock@ MiQuotaBlock_UID + @ uid@ ==)
 			quotablock@ MmQuotaBlockReference
-
-			ipl@ KeIPLLower
 
 			0 MmQuotaListMutex KeMutexRelease drop
 
@@ -56,25 +55,15 @@ fn MmQuotaBlockGetByUID { uid forkquotablock -- quotablock ok }
 		quotablock@ MiQuotaBlock_Next + @ quotablock!
 	end
 
-	ipl@ KeIPLLower
-
 	// not found, fork the forkquotablock to create one for this UID
 
 	if (forkquotablock@ ~~)
 		0 MmQuotaListMutex KeMutexRelease drop
+
 		-1 ok!
+
 		return
 	end
-
-	uid@ // uid
-	forkquotablock@ // quotablock
-	MmQuotaBlockFork ok! quotablock!
-
-	0 MmQuotaListMutex KeMutexRelease drop
-end
-
-fn MmQuotaBlockCreate { uid wsmax pghpmax vmmax heapmax -- quotablock ok }
-	fnsection "PAGE$text"
 
 	MiQuotaBlock_SIZEOF // bytes
 	'Quot' // tag
@@ -82,34 +71,29 @@ fn MmQuotaBlockCreate { uid wsmax pghpmax vmmax heapmax -- quotablock ok }
 	MmAllocWithTag ok! quotablock!
 
 	if (ok@)
-		return
-	end
+		0 MmQuotaListMutex KeMutexRelease drop
 
-	uid@ wsmax@ pghpmax@ vmmax@ heapmax@ quotablock@ MmQuotaBlockInitialize ok!
-end
-
-fn MmQuotaBlockFork { uid quotablock -- newquotablock ok }
-	fnsection "PAGE$text"
-
-	MiQuotaBlock_SIZEOF // bytes
-	'Quot' // tag
-	CANBLOCK // flags
-	MmAllocWithTag ok! newquotablock!
-
-	if (ok@)
 		return
 	end
 
 	uid@ // uid
-	quotablock@ MiQuotaBlock_WorkingSetMax + @ // wsmax
-	quotablock@ MiQuotaBlock_PagedPoolMax + @ // pghpmax
-	quotablock@ MiQuotaBlock_VMMax + @ // vmmax
-	quotablock@ MiQuotaBlock_PoolMax + @ // heapmax
-	newquotablock@ // quotablock
+	forkquotablock@ MiQuotaBlock_WorkingSetMax + @ // wsmax
+	forkquotablock@ MiQuotaBlock_PagedPoolMax + @ // pghpmax
+	forkquotablock@ MiQuotaBlock_VMMax + @ // vmmax
+	forkquotablock@ MiQuotaBlock_PoolMax + @ // heapmax
+	quotablock@ // quotablock
 	MmQuotaBlockInitialize ok!
+
+	0 MmQuotaListMutex KeMutexRelease drop
 end
 
 fn MmQuotaBlockInitialize { uid wsmax pghpmax vmmax heapmax quotablock -- ok }
+	fnsection "PAGE$text"
+
+	// Assumes that the quota list mutex is held.
+	// Also called from system initialization without that mutex held, but
+	// that's fine since the entire system is single-threaded at that point.
+
 	0 ok!
 
 	1 quotablock@ MiQuotaBlock_References + !
@@ -129,9 +113,6 @@ fn MmQuotaBlockInitialize { uid wsmax pghpmax vmmax heapmax quotablock -- ok }
 
 	0 quotablock@ MiQuotaBlock_Prev + !
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
 	auto h
 	MiQuotaBlockListHead@ h!
 
@@ -142,39 +123,50 @@ fn MmQuotaBlockInitialize { uid wsmax pghpmax vmmax heapmax quotablock -- ok }
 	end
 
 	quotablock@ MiQuotaBlockListHead!
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn MmQuotaBlockReference { quotablock -- }
-	auto rs
-	HALCPUInterruptDisable rs!
+	fnsection "PAGE$text"
+
+	// Assumes there's no way the quotablock can be dereferenced to zero
+	// during this operation. This should be guaranteed anyway by virtue of
+	// the caller having a pointer to the quotablock, since otherwise that
+	// pointer could become meaningless at any moment.
 
 	if (DEBUGCHECKS)
 		if (quotablock@ MiQuotaBlock_References + @ 0xFFFFFFFF ==)
 			"MmQuotaBlockReference: overflow!\n" KeCrash
 		end
-	end
 
-	1 quotablock@ MiQuotaBlock_References + +=
+		if (quotablock@ MiQuotaBlock_References + @ ~~)
+			"MmQuotaBlockReference: no refs\n" KeCrash
+		end
 
-	rs@ HALCPUInterruptRestore
-end
-
-fn MmQuotaBlockDereference { quotablock -- }
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto oldcount
-	quotablock@ MiQuotaBlock_References + @ oldcount!
-
-	if (DEBUGCHECKS)
-		if (oldcount@ 0 ==)
-			"MmQuotaBlockDereference: references<0\n" KeCrash
+		if (KeIPLCurrentGet IPLDPC >=)
+			"MmQuotaBlockReference: ipl >= IPLDPC\n" KeCrash
 		end
 	end
 
-	oldcount@ 1 - quotablock@ MiQuotaBlock_References + !
+	1 quotablock@ MiQuotaBlock_References + KeInterlockedIncrement drop
+end
+
+fn MmQuotaBlockDereference { quotablock -- }
+	fnsection "PAGE$text"
+
+	if (DEBUGCHECKS)
+		if (KeIPLCurrentGet IPLDPC >=)
+			"MmQuotaBlockDereference: ipl >= IPLDPC\n" KeCrash
+		end
+	end
+
+	KERNELMODE // waitmode
+	0 // alertable
+	OSWAIT_TIMEOUTINFINITE // timeout
+	MmQuotaListMutex // object
+	KeThreadWaitForObject drop
+
+	auto oldcount
+	-1 quotablock@ MiQuotaBlock_References + KeInterlockedIncrement oldcount!
 
 	if (oldcount@ 1 ==)
 		// got dereferenced to 0, delete
@@ -195,15 +187,17 @@ fn MmQuotaBlockDereference { quotablock -- }
 			ls@ ns@ MiQuotaBlock_Prev + !
 		end
 
-		rs@ HALCPUInterruptRestore
+		0 MmQuotaListMutex KeMutexRelease drop
 
 		quotablock@ MmFree
 	end else
-		rs@ HALCPUInterruptRestore
+		0 MmQuotaListMutex KeMutexRelease drop
 	end
 end
 
 fn MmQuotaChargeBuffer { buffersize -- ok }
+	fnsection "PAGE$text"
+
 	// helper function for charging heap quota for query syscalls
 
 	buffersize@ MmChargeBytesGet // charge
@@ -212,48 +206,37 @@ fn MmQuotaChargeBuffer { buffersize -- ok }
 end
 
 fn MmQuotaUnchargeBuffer { buffersize -- }
+	fnsection "PAGE$text"
+
 	buffersize@ MmChargeBytesGet // charge
 	KeProcessCurrent PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + @ // quotablock
 	MmQuotaBlockUncharge
 end
 
 fn MmQuotaBlockCharge { charge quotablock -- ok }
-	if (charge@ z<)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
+	fnsection "PAGE$text"
 
 	0 ok!
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto heapmax
-	quotablock@ MiQuotaBlock_PoolMax + @ heapmax!
-
 	auto oldcharge
-	quotablock@ MiQuotaBlock_PoolUsed + @ oldcharge!
+	charge@ quotablock@ MiQuotaBlock_PoolUsed + KeInterlockedIncrement oldcharge!
 
-	if (oldcharge@ charge@ + heapmax@ >)
-		rs@ HALCPUInterruptRestore
+	if (oldcharge@ charge@ + quotablock@ MiQuotaBlock_PoolMax + @ >)
+		0 charge@ - quotablock@ MiQuotaBlock_PoolUsed + KeInterlockedIncrement drop
 
 		STATUS_QUOTA_EXCEEDED ok!
 
 		return
 	end
-
-	oldcharge@ charge@ + quotablock@ MiQuotaBlock_PoolUsed + !
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn MmQuotaBlockUncharge { charge quotablock -- }
-	auto rs
-	HALCPUInterruptDisable rs!
+//	fnsection "PAGE$text"
+	// Can't be in paged section -- called from DPC context during IO
+	// completion to uncharge quota previously charged for the IOP and MDL.
 
 	auto oldcharge
-	quotablock@ MiQuotaBlock_PoolUsed + @ oldcharge!
+	0 charge@ - quotablock@ MiQuotaBlock_PoolUsed + KeInterlockedIncrement oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
@@ -262,43 +245,23 @@ fn MmQuotaBlockUncharge { charge quotablock -- }
 			"MmQuotaBlockUncharge: attempt to uncharge more than was charged (oldcharge=%d charge=%d)\n" KeCrash
 		end
 	end
-
-	oldcharge@ charge@ - quotablock@ MiQuotaBlock_PoolUsed + !
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn MmQuotaBlockChargeWS { charge quotablock -- ok }
-	if (charge@ z<)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
-
-	0 ok!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto wsmax
-	quotablock@ MiQuotaBlock_WorkingSetMax + @ wsmax!
+	fnsection "PAGE$text"
 
 	auto oldcharge
-	quotablock@ MiQuotaBlock_WorkingSetUsed + @ oldcharge!
+	charge@ quotablock@ MiQuotaBlock_WorkingSetUsed + KeInterlockedIncrement oldcharge!
 
-	if (oldcharge@ charge@ + wsmax@ >)
-		rs@ HALCPUInterruptRestore
+	if (oldcharge@ charge@ + quotablock@ MiQuotaBlock_WorkingSetMax + @ >)
+		0 charge@ - quotablock@ MiQuotaBlock_WorkingSetUsed + KeInterlockedIncrement drop
 
 		STATUS_WS_QUOTA_EXCEEDED ok!
 
 		return
 	end
 
-	oldcharge@ charge@ + quotablock@ MiQuotaBlock_WorkingSetUsed + !
-
-	charge@ MiPhysicalUsage +=
-
-	rs@ HALCPUInterruptRestore
+	charge@ MiPhysicalUsage KeInterlockedIncrement drop
 
 	CANBLOCK // pri
 	charge@ // pages
@@ -307,24 +270,19 @@ fn MmQuotaBlockChargeWS { charge quotablock -- ok }
 	if (ok@)
 		// uncharge quota
 
-		HALCPUInterruptDisable rs!
+		0 charge@ - quotablock@ MiQuotaBlock_WorkingSetUsed + KeInterlockedIncrement drop
 
-		charge@ quotablock@ MiQuotaBlock_WorkingSetUsed + -=
-
-		charge@ MiPhysicalUsage -=
-
-		rs@ HALCPUInterruptRestore
+		0 charge@ - MiPhysicalUsage KeInterlockedIncrement drop
 
 		return
 	end
 end
 
 fn MmQuotaBlockUnchargeWS { charge quotablock -- }
-	auto rs
-	HALCPUInterruptDisable rs!
+	fnsection "PAGE$text"
 
 	auto oldcharge
-	quotablock@ MiQuotaBlock_WorkingSetUsed + @ oldcharge!
+	0 charge@ - quotablock@ MiQuotaBlock_WorkingSetUsed + KeInterlockedIncrement oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
@@ -334,82 +292,55 @@ fn MmQuotaBlockUnchargeWS { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MiQuotaBlock_WorkingSetUsed + !
-
-	charge@ MiPhysicalUsage -=
-
-	rs@ HALCPUInterruptRestore
+	0 charge@ - MiPhysicalUsage KeInterlockedIncrement drop
 
 	charge@ MmUnchargeCommit
 end
 
 fn MmQuotaBlockChargeVM { charge quotablock -- ok }
+	fnsection "PAGE$text"
+
 	if (DEBUGCHECKS)
 		if (charge@ PAGEOFFSETMASK &)
 			"MmQuotaBlockChargeVM: charge isn't aligned to page size\n" KeCrash
 		end
 	end
 
-	if (charge@ z<)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
-
-	PAGESHIFT charge >>=
-
-	0 ok!
-
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto vmmax
-	quotablock@ MiQuotaBlock_VMMax + @ vmmax!
-
 	auto oldcharge
-	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
+	charge@ quotablock@ MiQuotaBlock_VMUsed + KeInterlockedIncrement oldcharge!
 
-	if (oldcharge@ charge@ PAGESHIFT << + vmmax@ >)
-		rs@ HALCPUInterruptRestore
+	if (oldcharge@ charge@ + quotablock@ MiQuotaBlock_VMMax + @ >)
+		0 charge@ - quotablock@ MiQuotaBlock_VMUsed + KeInterlockedIncrement drop
 
 		STATUS_VM_QUOTA_EXCEEDED ok!
 
 		return
 	end
 
-	oldcharge@ charge@ PAGESHIFT << + quotablock@ MiQuotaBlock_VMUsed + !
-
-	rs@ HALCPUInterruptRestore
-
 	CANBLOCK // pri
-	charge@ // pages
+	charge@ PAGESHIFT >> // pages
 	MmChargeCommit ok!
 
 	if (ok@)
 		// uncharge quota
 
-		HALCPUInterruptDisable rs!
-
-		charge@ PAGESHIFT << quotablock@ MiQuotaBlock_VMUsed + -=
-
-		rs@ HALCPUInterruptRestore
+		0 charge@ - quotablock@ MiQuotaBlock_VMUsed + KeInterlockedIncrement drop
 
 		return
 	end
 end
 
 fn MmQuotaBlockUnchargeVM { charge quotablock -- }
+	fnsection "PAGE$text"
+
 	if (DEBUGCHECKS)
 		if (charge@ PAGEOFFSETMASK &)
 			"MmQuotaBlockUnchargeVM: charge isn't aligned to page size\n" KeCrash
 		end
 	end
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
 	auto oldcharge
-	quotablock@ MiQuotaBlock_VMUsed + @ oldcharge!
+	0 charge@ - quotablock@ MiQuotaBlock_VMUsed + KeInterlockedIncrement oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
@@ -417,60 +348,39 @@ fn MmQuotaBlockUnchargeVM { charge quotablock -- }
 		end
 	end
 
-	oldcharge@ charge@ - quotablock@ MiQuotaBlock_VMUsed + !
-
-	rs@ HALCPUInterruptRestore
-
 	charge@ PAGESHIFT >> MmUnchargeCommit
 end
 
 fn MmQuotaBlockChargePaged { charge quotablock -- ok }
-	if (charge@ z<)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
-	end
+	fnsection "PAGE$text"
 
 	0 ok!
 
-	auto rs
-	HALCPUInterruptDisable rs!
-
-	auto phmax
-	quotablock@ MiQuotaBlock_PagedPoolMax + @ phmax!
-
 	auto oldcharge
-	quotablock@ MiQuotaBlock_PagedPoolUsed + @ oldcharge!
+	charge@ quotablock@ MiQuotaBlock_PagedPoolUsed + KeInterlockedIncrement oldcharge!
 
-	if (oldcharge@ charge@ + phmax@ >)
-		rs@ HALCPUInterruptRestore
+	if (oldcharge@ charge@ + quotablock@ MiQuotaBlock_PagedPoolMax + @ >)
+		0 charge@ - quotablock@ MiQuotaBlock_PagedPoolUsed + KeInterlockedIncrement drop
 
 		STATUS_PAGED_QUOTA_EXCEEDED ok!
 
 		return
 	end
-
-	oldcharge@ charge@ + quotablock@ MiQuotaBlock_PagedPoolUsed + !
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn MmQuotaBlockUnchargePaged { charge quotablock -- }
-	auto rs
-	HALCPUInterruptDisable rs!
+	fnsection "PAGE$text"
 
 	auto oldcharge
-	quotablock@ MiQuotaBlock_PagedPoolUsed + @ oldcharge!
+	0 charge@ - quotablock@ MiQuotaBlock_PagedPoolUsed + KeInterlockedIncrement oldcharge!
 
 	if (DEBUGCHECKS)
 		if (charge@ oldcharge@ >)
-			"MmQuotaBlockUnchargePaged: attempt to uncharge more than was charged\n" KeCrash
+			charge@
+			oldcharge@
+			"MmQuotaBlockUnchargePaged: attempt to uncharge more than was charged (oldcharge=%d charge=%d)\n" KeCrash
 		end
 	end
-
-	oldcharge@ charge@ - quotablock@ MiQuotaBlock_PagedPoolUsed + !
-
-	rs@ HALCPUInterruptRestore
 end
 
 fn MmSetQuota { quota quotablock -- }

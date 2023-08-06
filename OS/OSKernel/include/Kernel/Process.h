@@ -161,7 +161,6 @@ extern KeProcessQuerySignalThread { query process -- }
 
 extern KeProcessCurrent { -- current }
 extern KeProcessInitialize { name parentprocess process -- }
-extern KeProcessUninitialize { process -- }
 extern KeProcessSignal { signal process -- ok }
 extern KeProcessBasePrioritySet { priority process -- }
 

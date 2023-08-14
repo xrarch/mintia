@@ -33,6 +33,8 @@ extern KiThreadWaitBlocksDequeue { satisfy thread -- }
 
 extern KiThreadYieldQuantum { -- }
 
+extern KiDispatchSoftwareInterrupts { -- }
+
 fnptr KiSoftwareInterruptHandlerF { -- }
 
 externptr KiIdleThread

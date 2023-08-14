@@ -33,16 +33,6 @@ public KiClockTicks
 fn KeIPLRaise { newipl -- oldipl }
 	KeIPLCurrent@ oldipl!
 	newipl@ KeIPLCurrent!
-
-	if (DEBUGCHECKS)
-		if (newipl@ oldipl@ <)
-			[newipl@]HALIPLNames@ [oldipl@]HALIPLNames@ "IPL not greater or equal (old=%s new=%s)\n" KeCrash
-		end
-
-		if (newipl@ IPLDPC >)
-			newipl@ "KeIPLRaise: hardware newipl %d\n" KeCrash
-		end
-	end
 end
 
 fn KeIPLLower { newipl -- }
@@ -50,33 +40,44 @@ fn KeIPLLower { newipl -- }
 		return
 	end
 
-	if (DEBUGCHECKS)
-		if (newipl@ KeIPLCurrent@ >)
-			[newipl@]HALIPLNames@ [KeIPLCurrent@]HALIPLNames@ "IPL not less or equal (old=%s new=%s)\n" KeCrash
-		end
+	newipl@ KeIPLCurrent!
 
-		if (KeIPLCurrent@ IPLDPC >)
-			KeIPLCurrent@ "KeIPLLower: hardware oldipl %d\n" KeCrash
-		end
+	// Since we already ruled out the newipl==oldipl case, this must be a
+	// lowering of the IPL. Since this routine is only used for software IPLs,
+	// we must be below IPLDPC, and can therefore take software interrupts.
+	// We don't need interrupts disabled during the window between setting the
+	// IPL and checking/dispatching software interrupts, since any interrupt
+	// taken in the meantime will harmlessly dispatch the software interrupts
+	// for us.
+
+	if (KiPendingSoftwareInterrupts@)
+		KiDispatchSoftwareInterrupts
 	end
+end
+
+fn KiDispatchSoftwareInterrupts { -- }
+	auto ipl
+	KeIPLCurrent@ ipl!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
 	auto p
-	KiPendingSoftwareInterrupts@ p!
+	KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 
-	if (p@)
-		p@ [newipl@]KiPendingSoftwareInterruptMask@ & p!
+	while (p@)
+		[p@]KiPendingSoftwareInterruptFirst@ KiSoftwareInterruptHandlerF
 
-		while (p@)
-			[p@]KiPendingSoftwareInterruptFirst@ KiSoftwareInterruptHandlerF
-
-			KiPendingSoftwareInterrupts@ [newipl@]KiPendingSoftwareInterruptMask@ & p!
-		end
+		KiPendingSoftwareInterrupts@ [ipl@]KiPendingSoftwareInterruptMask@ & p!
 	end
 
-	newipl@ KeIPLCurrent!
+	// The software interrupt handlers don't restore the IPL, so we could be
+	// anywhere between the old IPL and the IPL of the highest priority
+	// software interrupt we took. We have to restore the correct IPL with
+	// interrupts disabled, or else we could miss software interrupts due to
+	// our temporarily elevated IPL being lowered without proper dispatch.
+
+	ipl@ KeIPLCurrent!
 
 	rs@ HALCPUInterruptRestore
 end

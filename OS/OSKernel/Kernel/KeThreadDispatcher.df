@@ -197,6 +197,8 @@ fn KiThreadReady { thread -- }
 		return
 	end
 
+	0 thread@ KeThread_InSwapListB + sb
+
 	KiThreadNext@ anotherthread!
 
 	if (anotherthread@)
@@ -204,7 +206,9 @@ fn KiThreadReady { thread -- }
 			// there's already a next thread and we have a higher priority, so
 			// preempt it.
 
-			1 KeStatistics OSStatistics_Preemptions + +=
+			if (anotherthread@ KeThread_PriorityB + gb PRIORITY_IDLE ~=)
+				1 KeStatistics OSStatistics_Preemptions + +=
+			end
 
 			thread@ KiThreadNext!
 			THREADSTATUS_STANDBY thread@ KeThread_StatusB + sb
@@ -224,7 +228,9 @@ fn KiThreadReady { thread -- }
 
 			IPLDPC KiSoftwareInterruptRequest
 
-			1 KeStatistics OSStatistics_Preemptions + +=
+			if (anotherthread@ KeThread_PriorityB + gb PRIORITY_IDLE ~=)
+				1 KeStatistics OSStatistics_Preemptions + +=
+			end
 
 			thread@ KiThreadNext!
 			THREADSTATUS_STANDBY thread@ KeThread_StatusB + sb
@@ -239,7 +245,7 @@ fn KiThreadReady { thread -- }
 
 	auto t
 
-	if (waspreempted@ thread@ KeThread_PriorityB + gb PRIORITY_LOWREALTIME >= &&)
+	if (waspreempted@)
 		// place at head of ready queue
 
 		[thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueHeads@ t!
@@ -714,26 +720,26 @@ fn KiThreadWakeup { waitstatus priboost thread -- }
 		end
 	end
 
-	// remove from global wait list
+	if (thread@ KeThread_WaitModeB + gb USERMODE ==)
+		if (thread@ KeThread_KernelStackResidentB + gb)
+			// remove from global wait list
 
-	auto n
-	thread@ KeThread_QueueNext + @ n!
+			auto n
+			thread@ KeThread_QueueNext + @ n!
 
-	if (n@)
-		thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+			if (n@)
+				thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+			end
+
+			thread@ KeThread_QueuePrev + @ n!
+
+			if (n@)
+				thread@ KeThread_QueueNext + @ n@ KeThread_QueueNext + !
+			end else // no prev means we were the head
+				thread@ KeThread_QueueNext + @ KeThreadWaitListHead!
+			end
+		end
 	end
-
-	auto p
-	thread@ KeThread_QueuePrev + @ p!
-
-	if (p@)
-		thread@ KeThread_QueueNext + @ p@ KeThread_QueueNext + !
-	end else // no prev means we were the head
-		thread@ KeThread_QueueNext + @ KeThreadWaitListHead!
-	end
-
-	0 thread@ KeThread_QueueNext + !
-	0 thread@ KeThread_QueuePrev + !
 
 	// wake up thread
 
@@ -837,20 +843,22 @@ fn KiThreadWait { waitipl waitmode alertable explicitstatus -- ok }
 		return
 	end
 
-	// insert in global wait list
+	if (waitmode@ USERMODE ==)
+		// insert in global wait list
 
-	auto h
-	KeThreadWaitListHead@ h!
+		auto h
+		KeThreadWaitListHead@ h!
 
-	0 current@ KeThread_QueuePrev + !
+		0 current@ KeThread_QueuePrev + !
 
-	if (h@)
-		current@ h@ KeThread_QueuePrev + !
+		if (h@)
+			current@ h@ KeThread_QueuePrev + !
+		end
+
+		h@ current@ KeThread_QueueNext + !
+
+		current@ KeThreadWaitListHead!
 	end
-
-	h@ current@ KeThread_QueueNext + !
-
-	current@ KeThreadWaitListHead!
 
 	// go to sleep
 

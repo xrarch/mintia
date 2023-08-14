@@ -227,54 +227,71 @@ fn MiSwapWorker { context1 context2 -- }
 
 	while (1)
 		auto ok
-		auto waitok
+		auto listitem
 
 		KERNELMODE // waitmode
 		0 // alertable
 		OSWAIT_TIMEOUTINFINITE // timeout
 		MmSwapEvent // object
-		KeThreadWaitForObject waitok!
+		KeThreadWaitForObject ok!
 
 		if (DEBUGCHECKS)
-			if (waitok@ z<)
-				waitok@ "MiSwapWorker: failed to wait on swap event (%i)\n" KeCrash
+			if (ok@ z<)
+				ok@ "MiSwapWorker: failed to wait on swap event (%i)\n" KeCrash
 			end
 		end
 
-		while (1)
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
+		// Check for a request to outswap stacks.
 
-			if (MiSwapOutStacksPlease@)
-				0 MiSwapOutStacksPlease!
-				MiSwapOutStacks
+		auto rs
+		HALCPUInterruptDisable rs!
 
-				ipl@ KeIPLLower
+		MiSwapOutStacksPlease@ listitem!
+		0 MiSwapOutStacksPlease!
 
-				continue
-			end elseif (MmProcessSwapOutListHead@)
-				MiSwapOutProcesses
+		rs@ HALCPUInterruptRestore
 
-				ipl@ KeIPLLower
+		if (listitem@)
+			MiSwapOutStacks
+		end
 
-				continue
-			end elseif (KeProcessSwapInListHead@)
-				MiSwapInProcesses
+		// Check for a request to outswap a process.
 
-				ipl@ KeIPLLower
+		HALCPUInterruptDisable rs!
 
-				continue
-			end elseif (KeThreadSwapInListHead@)
-				MiSwapInStacks
+		MmProcessSwapOutListHead@ listitem!
+		0 MmProcessSwapOutListHead!
 
-				ipl@ KeIPLLower
+		rs@ HALCPUInterruptRestore
 
-				continue
-			end
+		if (listitem@)
+			listitem@ MiSwapOutProcesses
+		end
 
-			ipl@ KeIPLLower
+		// Check for a request to inswap a process.
 
-			break
+		HALCPUInterruptDisable rs!
+
+		KeProcessSwapInListHead@ listitem!
+		0 KeProcessSwapInListHead!
+
+		rs@ HALCPUInterruptRestore
+
+		if (listitem@)
+			listitem@ MiSwapInProcesses
+		end
+
+		// Check for a request to inswap a stack.
+
+		HALCPUInterruptDisable rs!
+
+		KeThreadSwapInListHead@ listitem!
+		0 KeThreadSwapInListHead!
+
+		rs@ HALCPUInterruptRestore
+
+		if (listitem@)
+			listitem@ MiSwapInStacks
 		end
 	end
 end
@@ -282,8 +299,6 @@ end
 fn MiSwapOutStacks { -- }
 	// scans the list of blocked threads and makes the kernel stacks of those
 	// that have been blocked longer than MMSTACKAGE seconds non-resident.
-
-	// called at IPLDPC.
 
 	auto uptime
 	KeTime_SIZEOF alloc uptime!
@@ -293,68 +308,103 @@ fn MiSwapOutStacks { -- }
 	auto uptimesec
 	uptime@ KeTime_SecPart + @ uptimesec!
 
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
 	auto thread
 	KeThreadWaitListHead@ thread!
 
 	while (thread@)
-		if (thread@ KeThread_KernelStackResidentB + gb)
-			if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MmStackAge@ >=)
-				if (thread@ KeThread_WaitModeB + gb USERMODE ==)
-					if (thread@ KeThread_KernelStackCanBeSwappedB + gb)
-						0 thread@ KeThread_KernelStackResidentB + sb
+		auto nthread
+		thread@ KeThread_QueueNext + @ nthread!
 
-						// yeet it.
-						thread@ MiKernelStackSwapOut
+		1 scancount +=
 
-						auto process
-						thread@ KeThread_Process + @ process!
+		if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MmStackAge@ >=
+			thread@ KeThread_KernelStackCanBeSwappedB + gb &&)
 
-						process@ KeProcess_ResidentStackCountI + gi 1 -
-						process@ KeProcess_ResidentStackCountI + si
+			// This thread is a good candidate for kernel stack outswap.
+			// Outswap the stack and remove it from the wait list.
 
-						if (DEBUGCHECKS)
-							if (process@ KeProcess_ResidentStackCountI + gi z<)
-								"MiSwapOutStacks: underflow\n" KeCrash
-							end
-						end
+			if (DEBUGCHECKS)
+				if (thread@ KeThread_KernelStackResidentB + gb ~~)
+					"MiSwapOutStacks: kernel stack non-resident\n" KeCrash
+				end
+			end
 
-						if (process@ KeProcess_ResidentStackCountI + gi ~~)
-							if (DEBUGCHECKS)
-								if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
-									process@ KeProcess_MemoryStateB + gb
-									"MiSwapOutStacks: unexpected process state %d\n" Printf
-								end
-							end
+			0 thread@ KeThread_KernelStackResidentB + sb
 
-							PROCESSSTATE_TRANSITION process@ KeProcess_MemoryStateB + sb
+			thread@ MiKernelStackSwapOut
 
-							MmProcessSwapOutListHead@ process@ KeProcess_SwapListNext + !
-							process@ MmProcessSwapOutListHead!
-						end
+			auto process
+			thread@ KeThread_Process + @ process!
+
+			process@ KeProcess_ResidentStackCountI + gi 1 -
+			process@ KeProcess_ResidentStackCountI + si
+
+			if (DEBUGCHECKS)
+				if (process@ KeProcess_ResidentStackCountI + gi z<)
+					"MiSwapOutStacks: underflow\n" KeCrash
+				end
+			end
+
+			if (process@ KeProcess_ResidentStackCountI + gi ~~)
+				if (DEBUGCHECKS)
+					if (process@ KeProcess_MemoryStateB + gb PROCESSSTATE_RESIDENT ~=)
+						process@ KeProcess_MemoryStateB + gb
+						"MiSwapOutStacks: unexpected state %d\n" Printf
 					end
 				end
+
+				// This process no longer has any resident kernel stacks! It
+				// is now a candidate for outswap.
+
+				PROCESSSTATE_TRANSITION process@ KeProcess_MemoryStateB + sb
+
+				MmProcessSwapOutListHead@ process@ KeProcess_SwapListNext + !
+				process@ MmProcessSwapOutListHead!
+
+				// Signal the event to make sure we get around to that.
+
+				0 // priboost
+				MmSwapEvent // event
+				KeEventSignal
+			end
+
+			// Remove from global wait list.
+
+			auto n
+			thread@ KeThread_QueueNext + @ n!
+
+			if (n@)
+				thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+			end
+
+			thread@ KeThread_QueuePrev + @ n!
+
+			if (n@)
+				thread@ KeThread_QueueNext + @ n@ KeThread_QueueNext + !
+			end else // no prev means we were the head
+				thread@ KeThread_QueueNext + @ KeThreadWaitListHead!
 			end
 		end
 
-		thread@ KeThread_QueueNext + @ thread!
+		nthread@ thread!
 	end
+
+	ipl@ KeIPLLower
 end
 
-fn MiSwapInStacks { -- }
-	// called at IPLDPC
+fn MiSwapInStacks { thread -- }
+	// Swap in all the stacks of threads on the list provided.
 
-	while (1)
-		auto thread
-		KeThreadSwapInListHead@ thread!
-
-		if (thread@ ~~)
-			break
-		end
-
-		thread@ KeThread_SwapListNext + @ KeThreadSwapInListHead!
-		0 thread@ KeThread_SwapListNext + !
+	while (thread@)
+		auto nthread
+		thread@ KeThread_SwapListNext + @ nthread!
 
 		if (DEBUGCHECKS)
+			0 thread@ KeThread_SwapListNext + !
+
 			auto process
 			thread@ KeThread_Process + @ process!
 
@@ -363,90 +413,82 @@ fn MiSwapInStacks { -- }
 			end
 		end
 
-		IPLLOW KeIPLLower
-
 		thread@ MiKernelStackSwapIn
 
-		IPLDPC KeIPLRaise drop
-
 		1 thread@ KeThread_KernelStackResidentB + sb
-		0 thread@ KeThread_InSwapListB + sb
 
 		thread@ KeThreadReady
+
+		nthread@ thread!
 	end
 end
 
-fn MiSwapInProcesses { -- }
-	// called at IPLDPC
+fn MiSwapInProcesses { process -- }
+	// Swap in all of the processes on the list provided.
 
-	while (1)
-		auto process
-		KeProcessSwapInListHead@ process!
-
-		if (process@ ~~)
-			break
-		end
-
-		process@ KeProcess_SwapListNext + @ KeProcessSwapInListHead!
-		0 process@ KeProcess_SwapListNext + !
-
-		IPLLOW KeIPLLower
+	while (process@)
+		auto nprocess
+		process@ KeProcess_SwapListNext + @ nprocess!
 
 		process@ MiProcessSwapIn
 
-		IPLDPC KeIPLRaise drop
-
 		process@ MiSwapReadyDeferred
+
+		nprocess@ process!
 	end
 end
 
-fn MiSwapOutProcesses { -- }
-	// called at IPLDPC
+fn MiSwapOutProcesses { process -- }
+	// Swap out all of the processes on the list provided.
 
-	while (1)
-		auto process
-		MmProcessSwapOutListHead@ process!
+	while (process@)
+		auto nprocess
+		process@ KeProcess_SwapListNext + @ nprocess!
 
-		if (process@ ~~)
-			break
-		end
-
-		process@ KeProcess_SwapListNext + @ MmProcessSwapOutListHead!
-		0 process@ KeProcess_SwapListNext + !
+		auto rs
+		HALCPUInterruptDisable rs!
 
 		if (process@ KeProcess_DeferredThreadListHead + @)
 			// threads were added to the deferred list while the process
 			// was pending swapout. don't swap it out.
 
+			rs@ HALCPUInterruptRestore
+
 			process@ MiSwapReadyDeferred
 		end else
 			PROCESSSTATE_OUTSWAPPED process@ KeProcess_MemoryStateB + sb
 
-			IPLLOW KeIPLLower
+			rs@ HALCPUInterruptRestore
 
 			process@ MiProcessSwapOut
-
-			IPLDPC KeIPLRaise drop
 		end
+
+		nprocess@ process!
 	end
 end
 
 fn MiSwapReadyDeferred { process -- }
+	auto rs
+	HALCPUInterruptDisable rs!
+
 	PROCESSSTATE_RESIDENT process@ KeProcess_MemoryStateB + sb
 
-	while (1)
-		auto thread
-		process@ KeProcess_DeferredThreadListHead + @ thread!
+	auto thread
+	process@ KeProcess_DeferredThreadListHead + @ thread!
+	0 process@ KeProcess_DeferredThreadListHead + !
 
-		if (thread@ ~~)
-			break
+	rs@ HALCPUInterruptRestore
+
+	while (thread@)
+		auto nthread
+		thread@ KeThread_SwapListNext + @ nthread!
+
+		if (DEBUGCHECKS)
+			0 thread@ KeThread_SwapListNext + !
 		end
 
-		thread@ KeThread_SwapListNext + @ process@ KeProcess_DeferredThreadListHead + !
-		0 thread@ KeThread_SwapListNext + !
-
-		0 thread@ KeThread_InSwapListB + sb
-
 		thread@ KeThreadReady
+
+		nthread@ thread!
 	end
 end

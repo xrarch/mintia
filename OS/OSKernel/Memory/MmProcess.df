@@ -324,18 +324,32 @@ end
 fn MmProcessUninitialize { process -- }
 	fnsection "PAGE$text"
 
-	// destroy all VADs, free page tables, etc
+	// Unmap all of the process's mappings. After this, the process is still
+	// attachable and has a fully consistent virtual memory state; its
+	// address space and other user-controlled things are just emptied. This
+	// is done as a separate step from deletion, where the rest of its virtual
+	// memory state is destroyed, so that the memory for this process is freed
+	// as early as possible upon its death; a hanging handle for the process
+	// object won't keep its entire address space alive. New mappings can't be
+	// created after this because we are holding the createdelete lock, and
+	// the process was previously marked terminated (with that lock held),
+	// which will cause all future remote mappings to fail.
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
 
 	auto ipl
 	0 // try
 	process@ // process
 	KeProcessAttach drop ipl!
 
-	KeThreadCurrent@ KeThreadIgnoreKill drop
+	// Lock the VAD list to synchronize against remote unmapping.
 
 	0 // alertable
 	process@ // processobject
 	MmVADListLock drop
+
+	// Unmap all of the VADs. This is done by unmapping the root of the VAD
+	// tree until the tree is empty (i.e. the root becomes null).
 
 	auto vad
 	process@ PsProcess_PagedArea + @ PsProcessPaged_VADTreeRoot + @ vad!
@@ -356,57 +370,73 @@ fn MmProcessUninitialize { process -- }
 		end
 	end
 
-	process@ MmVADListUnlock
-
-	// lock the working set to avoid a race condition with the process swapper
-	// process@ MiWorkingSetLock drop
-	process@ MiWorkingSetListFree
-	// process@ MiWorkingSetUnlock
+	// We don't have to worry about synchronization with the working set
+	// trimmer here since our working set is now guaranteed to contain no
+	// pages. Thus, it doesn't need to grab any locks other than that guarding
+	// the working set itself.
 
 	process@ MmProcessPTECountDestroy
+
 	process@ MiProcessUnchargePageTables
 
-	KeThreadCurrent@ KeThreadAcceptKill drop
+	process@ MiWorkingSetListFree
+
+	process@ MmVADListUnlock
 
 	ipl@ KeProcessDetach
+
+	KeThreadCurrent@ KeThreadAcceptKill drop
 end
 
 fn MmProcessDelete { process -- }
 	fnsection "PAGE$text"
+
+	// Destroy the rest of the process's virtual memory state.
 
 	process@ MiPageDirectoryDestroy
 	process@ MiProcessHeaderDestroy
 end
 
 fn MiProcessSwapOut { process -- }
-	// invalidate and free the process's working set structures.
-	// lock the VAD list to synchronize against remote unmapping.
+	// Completely purge the process's working set.
+
+	// NOTE:
+	// The process is guaranteed not to be undergoing deletion right now,
+	// since in order to get here it must have at least one thread that is
+	// alive and in a USERMODE wait, i.e. not deleting the process. If it
+	// awakes while we're doing this, we've already set the process's memory
+	// state to OUTSWAPPED, so it will be enqueued instead of being readied
+	// immediately.
+
+	// Lock the VAD list to synchronize against remote unmapping.
 
 	0 // alertable
 	process@ // processobject
 	MmVADListLock drop
 
+	// We use KeAddressSpaceSwitch instead of KeProcessAttach because we don't
+	// want to be blocked and enqueued waiting for inswap, since we ARE the
+	// guy who does the process swapping. By getting here, we know the page
+	// directory and such are still resident. The only reason we set the
+	// process field in our thread struct is so that the correct ASID is used
+	// to flush these pages in the architecture-specific layers.
+
+	process@ KeThreadCurrent@ KeThread_Process + !
+	process@ KeAddressSpaceSwitch
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
-	process@ KeAddressSpaceSwitch
-
-	process@ KeThreadCurrent@ KeThread_Process + !
-
-	auto workingsetmin
-	process@ PsProcess_MmHeader + @ MiProcessHeader_WorkingSetMinimum + @ workingsetmin!
-
 	process@ MiWorkingSetSwapOut
-
-	PsSystemProcess@ KeThreadCurrent@ KeThread_Process + !
-
-	PsSystemProcess@ KeAddressSpaceSwitch
 
 	ipl@ KeIPLLower
 
+	PsSystemProcess@ KeThreadCurrent@ KeThread_Process + !
+	PsSystemProcess@ KeAddressSpaceSwitch
+
 	process@ MmVADListUnlock
 
-	// dereference the page directory so it can get swapped out.
+	// Dereference the page directory so it can get swapped out.
 
 	process@ MiProcessHeaderDereference
 	process@ MiPageDirectoryDereference

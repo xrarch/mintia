@@ -21,5 +21,5 @@ extern PsiIdTableUnlock { -- }
 extern PsiIdCreate { object -- id ok }
 extern PsiIdDelete { id -- }
 
-const PSI_ID_INDEX_MASK     0x00FFFFFF
-const PSI_ID_SEQUENCE_SHIFT 24
+const PSI_ID_INDEX_SHIFT   8
+const PSI_ID_SEQUENCE_MASK 0xFF

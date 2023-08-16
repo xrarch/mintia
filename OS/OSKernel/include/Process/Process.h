@@ -159,6 +159,8 @@ extern PsProcessListUnlockForTrim { -- }
 extern PsInitPhase0 { -- }
 extern PsInitPhase1 { -- }
 
+extern PsFinishSystemProcess { -- ok }
+
 extern PsThreadUserEntry { context1 context2 -- }
 
 extern PsThreadGetFilePermissions { threadobject -- filepermissions }

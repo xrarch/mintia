@@ -330,6 +330,16 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			return
 		end
 
+		if (logsize@ 2 >)
+			// There are extra per-handle fields, like maybe a sequence
+			// number, so initialize the table to zeroes.
+
+			tab@ // ptr
+			tabsize@ // sz
+			0 // word
+			memset
+		end
+
 		tab@ handletable@ ExiHandleTableHeader_Table + !
 
 		EXTENDBYENTRIES entries!
@@ -395,10 +405,22 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 			return
 		end
 
-		newtab@
-		tab@
-		entries@ EXTENDBYENTRIES - logsize@ <<
+		// Copy the contents of the old table into the new one.
+
+		newtab@ // dest
+		tab@ // src
+		handle@ logsize@ << // sz
 		memcpy
+
+		if (logsize@ 2 >)
+			// There are extra per-handle fields, like maybe a sequence
+			// number, so initialize the new area of the table to zeroes.
+
+			newtab@ handle@ logsize@ << + // ptr
+			EXTENDBYENTRIES logsize@ << // sz
+			0 // word
+			memset
+		end
 
 		tab@ MmFree
 
@@ -425,13 +447,21 @@ fn ExHandleCreate { entryvalue handletable locked -- handle entryptr ok }
 	auto count
 	EXTENDBYENTRIES 1 - count!
 
-	// initialize the free list
+	// initialize the free list for the new region of handle table, and also
+	// zero out any extra fields.
 
 	while (count@)
 		entrysize@ entryptr -=
 		1 ihandle -=
 
 		last@ 1 << 1 | entryptr@!
+
+		if (logsize@)
+			entryptr@ 4 + // ptr
+			1 logsize@ << 4 - // sz
+			0 // word
+			memset
+		end
 
 		ihandle@ last!
 		1 count -=

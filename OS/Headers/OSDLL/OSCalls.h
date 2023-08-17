@@ -115,7 +115,7 @@ extern OSFlushModifiedPages { -- ok }
 
 // Mm
 
-extern OSSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
+extern OSSectionCreate { anonsize permissions name -- sectionhandle ok }
 extern OSMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }
 extern OSUnmapView { length vaddr processhandle -- ok }
 extern OSRemapView { pageprotection length vaddr processhandle -- ok }

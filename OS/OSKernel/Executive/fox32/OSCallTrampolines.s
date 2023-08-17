@@ -2023,10 +2023,6 @@ OSTOSSectionCreate:
 	add  t0, 12 ;t3
 	mov  a2, [t0]
 
-	mov  t0, s17
-	add  t0, 16 ;t4
-	mov  a3, [t0]
-
 	call OSSectionCreate
 
 

@@ -1,5 +1,5 @@
-extern MmSectionCreateObject { pageprotection anonsize permissions name -- sectionobject ok }
-extern MmSectionCreate { pageprotection anonsize permissions name -- sectionhandle ok }
+extern MmSectionCreateObject { anonsize permissions name -- sectionobject ok }
+extern MmSectionCreate { anonsize permissions name -- sectionhandle ok }
 
 extern MmMapViewProcessObject { length startva sectionoffset mappedobject processobject pageprotection flags -- realva ok }
 extern MmMapView { length startva sectionoffset mappedhandle processhandle pageprotection flags -- realva ok }

@@ -1226,7 +1226,6 @@ OSSectionCreate:
 	mov  t1, a0
 	mov  t2, a1
 	mov  t3, a2
-	mov  t4, a3
 
 	mov  t0, 73
 	int  0x30

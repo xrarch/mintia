@@ -99,7 +99,6 @@ struct KeThread
 	KeTimer_SIZEOF Timer
 
 	4 SafeAccessAbort
-	4 SafeSystemAccessAbort
 	4 SafeAccessSP
 
 	4 Signals

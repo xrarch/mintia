@@ -53,30 +53,22 @@ AisixFSBoot:
 
 ;save the FAT start block number
 
-	mov  t0, s1
-	add  t0, Superblock_FATStart
-	mov  s5, [t0]
+	mov  s5, [s1 + Superblock_FATStart]
 
 ;load the first block of the inode table
 
-	mov  a0, s1
-	add  a0, Superblock_IStart
-	mov  a0, [a0]
+	mov  a0, [s1 + Superblock_IStart]
 	mov  a1, s1
 	call ReadBlock
 
 ;check the type number of inode 2 (should be nonzero)
 
-	mov  t0, s1
-	add  t0, INode_type
-	mov  t0, [t0]
+	mov  t0, [s1 + INode_type]
 	ifz jmp .notfound
 
 ;get the first block number in the FAT chain
 
-	mov  s2, s1
-	add  s2, INode_startblock
-	mov  s2, [s2]
+	mov  s2, [s1 + INode_startblock]
 
 ;iterate the FAT chain until we see a 0xFFFFFFFF (-1) and load OSLoader.a3x
 ;starting at 0x1000.

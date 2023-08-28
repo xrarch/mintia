@@ -190,6 +190,17 @@ fn MiSectionPageGet { localpteaddr pri sectionoffset sectionobject -- pfdbe ok }
 
 	sectionoffset@ PAGESHIFT >> PTESIZE * ppt +=
 
+	// MiAnonymousPageReferenceByPTE drops the VAD list lock, which means the
+	// section object might be deleted if it is unmapped during page-in. This
+	// is not good because the prototype page table will go with it. The
+	// simplest way to avoid this is just to hold an object manager reference
+	// to the section object across this call. File cache pages have a special
+	// way to avoid this case, which is described in detail in the routine
+	// IOCacheInfoBlockTruncate, but anonymous section pages don't. This is a
+	// duct tape solution and isn't very nice.
+
+	sectionobject@ ObObjectReferenceByPointer drop
+
 	0 // dzpte
 	0 // evictflag
 	0 // refpfdbe
@@ -199,4 +210,10 @@ fn MiSectionPageGet { localpteaddr pri sectionoffset sectionobject -- pfdbe ok }
 	ppt@ // pteaddr
 	localpteaddr@ // localpteaddr
 	MiAnonymousPageReferenceByPTE ok! pfdbe!
+
+	// If we dereference the section object to zero here, it will simply be
+	// enqueued to a worker thread since we're currently above IPLLOW, so this
+	// is safe against weird race conditions.
+
+	sectionobject@ ObObjectDereferenceByPointer drop
 end

@@ -1,6 +1,26 @@
 # MINTIA Boot Process
 
-The boot process starts when the [XR/station BIOS](https://github.com/xrarch/a3x) grabs block 1 of the selected boot partition and jumps to it. This small boot program will load [OSLoader](https://github.com/xrarch/mintia/tree/main/OS/OSLoader). True to its name, OSLoader will locate and load essential MINTIA components.
+The boot process starts slightly differently on the various supported platforms, and then proceeds in a common way.
+
+## XR/station
+
+The [XR/station BIOS](https://github.com/xrarch/a3x) loads block 0 of the selected boot partition.
+This contains a "boot descriptor" which is identified by the magic string 'ANTE' at byte offset 0.
+The boot descriptor indicates the offset and length in blocks of the primary bootloader.
+The primary bootloader for MINTIA on AisixFS is currently located at block 3 and is one block (512 bytes) in length.
+It contains a tiny program written in assembly language which loads the secondary bootloader, `/OSLoader.a3x`
+(which is assumed to reside in inode #1), and joins the common boot path.
+
+## fox32
+
+The fox32 ROM loads block 0 of the zeroth disk and jumps to it. Since this contains the APT partition table,
+there is a small program which simply jumps around the partition table, and loads the real primary bootloader,
+which is located at block 3 just like on XR/station. Block 3 contains a tiny program written in assembly language
+which loads the secondary bootloader (which is assumed to reside in inode #1), and joins the common boot path.
+
+## Common
+
+`/OSLoader.a3x`, the secondary bootloader, locates and load essential MINTIA components.
 
 | Component                   | Typical Path                   | Description                                                                                                                            |
 |-----------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|

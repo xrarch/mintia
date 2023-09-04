@@ -5,7 +5,7 @@ The boot process starts slightly differently on the various supported platforms,
 ## XR/station
 
 The [XR/station BIOS](https://github.com/xrarch/a3x) loads block 0 of the selected boot partition.
-This contains a "boot descriptor" which is identified by the magic string 'ANTE' at byte offset 0.
+This contains a "boot descriptor" which is identified by the magic string 'ANTE' (big endian) at byte offset 0.
 The boot descriptor indicates the offset and length in blocks of the primary bootloader.
 The primary bootloader for MINTIA on AisixFS is currently located at block 3 and is one block (512 bytes) in length.
 It contains a tiny program written in assembly language which loads the secondary bootloader, `/OSLoader.a3x`
@@ -13,10 +13,11 @@ It contains a tiny program written in assembly language which loads the secondar
 
 ## fox32
 
-The fox32 ROM loads block 0 of the zeroth disk and jumps to it. Since this contains the APT partition table,
+The fox32 ROM loads block 0 of the zeroth disk and jumps to it, if it contains the magic string 'L3\<R' (big endian)
+at byte offset 508 (the final four bytes of the block). Since this contains the APT partition table,
 there is a small program which simply jumps around the partition table, and loads the real primary bootloader,
-which is located at block 3 just like on XR/station. Block 3 contains a tiny program written in assembly language
-which loads the secondary bootloader (which is assumed to reside in inode #1), and joins the common boot path.
+which is located at block 3, which contains a tiny program written in assembly language that loads the secondary
+bootloader (which is assumed to reside in inode #1), and joins the common boot path.
 
 ## Common
 

@@ -1,11 +1,9 @@
 # Port Objects Design Summary
 
-!!! DRAFT: to be filled in with details as implementation proceeds
-
 MINTIA requires an IPC mechanism; the selected solution to this is a form of "port object". The requirements for port objects are as follows:
 
 1. Message passing, with variable length messages.
-2. Messages can be enqueued by system code at up to IPLDPC, provided the port's continued existence is guaranteed for that time by a pointer reference. This is needed for async I/O completion, since that occurs at IPLDPC, and perhaps for harderrors, since that may not want to call through normal APIs.
+2. Messages can be enqueued by system code at up to IPLAPC. This is needed for async I/O completion, since that occurs at IPLAPC.
 3. Speedy synchronous message passing.
 4. Asynchronous message passing is available.
 5. Highly multithreadable. Requests tagged with "conversation IDs" to facilitate back-and-forths between client threads and server threads without needing multiple client ports to a single process (or multiple server ports).

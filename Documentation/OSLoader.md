@@ -29,20 +29,20 @@ bootloader (which is assumed to reside in inode #1), and joins the common boot p
 | MINTIA Kernel               | /mintia/OSKernel.exe | The main body of kernel code, the center of the operating system.                                                                      |
 | Hardware Abstraction Layer  | /mintia/HAL[platform].dll  | Anything and everything platform-specific in the kernel is put in the HAL, which forms the very lowest layer of the operating system.  |
 | Dragonfruit Runtime Library | /mintia/Dragonfruit.dll     | The kernel mode dragonfruit library.                                                                    |
-| Drivers                     | /mintia/BootDrivers/        | Any drivers that Loader determines are necessary to operate the machine.                                                               |
+| Drivers                     | /mintia/BootDrivers/        | Any drivers that OSLoader determines are necessary to operate the machine.                                                               |
 | Binary Resources            | /mintia/BootResources/      | Large reclaimable resources like fonts and logos.                                                                                      |
 | Kernel Debugger             | /mintia/KDebug.dll          | Optionally loadable kernel debugger.                                                                                                   |
 
 ## OSLoader
 Source code: `/OS/OSLoader/`
 
-OSLoader starts by loading the kernel, OSKernel.exe, from the system directory. It will also load any dependencies of the kernel. This process will typically drag in the Hardware Abstraction Layer (HAL) and the dragonfruit library. It will try to fit these things into the natural addresses they're linked to, but if it can't, it will relocate them. This is much slower, and therefore bad, and should be avoided.
+OSLoader starts by loading the kernel, OSKernel.exe, from the system directory. It will also load any dependencies of the kernel. This process will typically drag in the Hardware Abstraction Layer (HAL) and the dragonfruit library. It will try to fit these things into the natural addresses they're linked to, but if it can't, it will relocate them. This is much slower, and therefore bad, and should be avoided. OSLoader then loads drivers from the `/mintia/BootDrivers` directory.
 
 On fox32, OSLoader loads the kernel module `fox.sys` as the sole system driver.
 
-On XR/station, matters are slightly more complicated, so OSLoader will iterate through the firmware device tree and load the drivers for any unique device models it finds. It will try to load them as "[model],[revision].sys".
+On XR/station, matters are slightly more complicated since it has a variable hardware configuration. Therefore, OSLoader will iterate through the firmware device tree and load the drivers for any unique device models it finds. It will try to load them as `[model],[revision].sys`.
 
-On either platform, OSLoader will also read the `BootDrivers.txt` file, and load any modules it finds there, assuming they are not already loaded.
+On either platform, OSLoader will also read the `BootDrivers.txt` file, and load any modules that are listed there, assuming they are not already loaded.
 
 It will then read the `BootResources.txt` file to locate resources that are needed by the kernel, such as the HAL font or the boot logo.
 

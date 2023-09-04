@@ -9,7 +9,7 @@ This contains a "boot descriptor" which is identified by the magic string 'ANTE'
 The boot descriptor indicates the offset and length in blocks of the primary bootloader.
 The primary bootloader for MINTIA on AisixFS is currently located at block 3 and is one block (512 bytes) in length.
 It contains a tiny program written in assembly language which loads the secondary bootloader, `/OSLoader.a3x`
-(which is assumed to reside in inode #1), and joins the common boot path.
+(which is assumed to reside in inode #2), and joins the common boot path.
 
 ## fox32
 
@@ -17,7 +17,7 @@ The fox32 ROM loads block 0 of the zeroth disk and jumps to it, if it contains t
 at byte offset 508 (the final four bytes of the block). Since this contains the APT partition table,
 there is a small program which simply jumps around the partition table, and loads the real primary bootloader,
 which is located at block 3, which contains a tiny program written in assembly language that loads the secondary
-bootloader (which is assumed to reside in inode #1), and joins the common boot path.
+bootloader (which is assumed to reside in inode #2), and joins the common boot path.
 
 ## Common
 

@@ -9,7 +9,7 @@ fnptr IODispatchPokeFunction { poketype object -- }
 fnptr IODispatchSetSecurityFunction { uid gid permissions object -- ok }
 fnptr IODispatchRenameFunction { srcname srcfcb destname destfcb -- ok }
 fnptr IODispatchTruncateFunction { newsize zero flags fcb -- ok }
-fnptr IODispatchReadDirectoryFunction { count seek dirent fcb -- nextseek readcount ok }
+fnptr IODispatchReadDirectoryFunction { count seek dirent fcb lastmode -- nextseek readcount ok }
 fnptr IODispatchGetPageAddressFunction { offset fcb -- phyaddr ok }
 fnptr IODispatchDeleteDeviceObjectFunction { object -- }
 fnptr IODispatchCancelFunction { iop -- ok }

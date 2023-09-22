@@ -27,7 +27,7 @@
 
 #include "Fat.h"
 
-fn (IODispatchReadDirectoryFunction) FatReadDirectory { count seek dirent fcb -- nextseek readcount ok }
+fn (IODispatchReadDirectoryFunction) FatReadDirectory { count seek dirent fcb lastmode -- nextseek readcount ok }
 	fnsection "PAGE$text"
 
 	0 readcount!
@@ -38,6 +38,14 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { count seek dirent fcb --
 		if (ok@)
 			return
 		end
+	end
+
+	auto tmpdirent
+
+	if (lastmode@ USERMODE ==)
+		OSDirectoryEntry_SIZEOF alloc tmpdirent!
+	end else
+		dirent@ tmpdirent!
 	end
 
 	auto bcb
@@ -56,7 +64,7 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { count seek dirent fcb --
 	while (count@)
 		1 // includelong
 		nextseek@ // seek
-		dirent@ // dirent
+		tmpdirent@ // dirent
 		fcb@ // fcb
 		bcb@ // lastbcb
 		FatDirectoryGetEntry ok! nextseek! drop bcb! drop
@@ -73,7 +81,21 @@ fn (IODispatchReadDirectoryFunction) FatReadDirectory { count seek dirent fcb --
 
 		1 count -=
 		1 readcount +=
-		OSDirectoryEntry_SIZEOF dirent +=
+
+		if (lastmode@ KERNELMODE ==)
+			OSDirectoryEntry_SIZEOF tmpdirent +=
+		end else
+			dirent@ // dest
+			tmpdirent@ // src
+			OSDirectoryEntry_SIZEOF // sz
+			KeSafeCopyOut ok!
+
+			if (ok@)
+				break
+			end
+
+			OSDirectoryEntry_SIZEOF dirent +=
+		end
 	end
 
 	if (bcb@)

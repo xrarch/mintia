@@ -43,53 +43,66 @@ fn (IODispatchOpenFunction) AFSOpen { access fileobject -- ok }
 	auto afsdata
 	mount@ IOMount_Extension + @ afsdata!
 
-	if (access@ ACCESS_WRITE &)
-		if (fileobject@ IOFile_Context + @ AFSFILECONTEXT_WRITABLE & ~~)
-			// the access is write, and the file object hasn't been opened
-			// writable before, so we need to count it as a writable file,
-			// to prevent the mount from being downgraded to read-only until
-			// it is closed. we have to acquire the volume FCB shared to lock
-			// out mount flag changes, check the readonly flag to see if it's
-			// already readonly (and fail if so). then we lock the FCB itself,
-			// double check if it still hasn't been marked writable, and then
-			// count it and set the flag.
+	if (access@ ACCESS_WRITE & ~~)
+		// We don't care to do anything here if the requested access isn't
+		// writable.
 
-			0 // alertable
-			mount@ IOMount_UnderlyingDeviceObject + @ // device
-			IODeviceLockShared drop
-
-			if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
-				mount@ IOMount_UnderlyingDeviceObject + @ IODeviceUnlock
-
-				STATUS_READONLY_FILESYSTEM ok!
-
-				return
-			end
-
-			1 // alertable
-			fcb@ // fcb
-			IOFileControlBlockLock ok!
-
-			if (ok@)
-				mount@ IOMount_UnderlyingDeviceObject + @ IODeviceUnlock
-
-				return
-			end
-
-			if (fileobject@ IOFile_Context + @ AFSFILECONTEXT_WRITABLE & ~~)
-				1 afsdata@ AFSData_WritableFiles + KeInterlockedIncrement drop
-
-				AFSFILECONTEXT_WRITABLE fileobject@ IOFile_Context + |=
-			end
-
-			fcb@ IOFileControlBlockUnlock
-			mount@ IOMount_UnderlyingDeviceObject + @ IODeviceUnlock
-		end
+		return
 	end
+
+	if (fileobject@ IOFile_Context + @ AFSFILECONTEXT_WRITABLE &)
+		// The writable file count for this mount has already been incremented
+		// to account for this file object. It will be decremented when the
+		// file object is deleted.
+
+		return
+	end
+
+	// The access is write, and the file object hasn't been opened writable
+	// before, so we need to count it as a writable file, to prevent the mount
+	// from being downgraded to read-only until it is closed. We have to
+	// acquire the volume FCB shared to lock out mount flag changes, check the
+	// readonly flag to see if it's already readonly (and fail if so), and
+	// then we lock the FCB itself, double check if it still hasn't been
+	// marked writable, and then count it and set the flag.
+
+	0 // alertable
+	mount@ IOMount_UnderlyingDeviceObject + @ // device
+	IODeviceLockShared drop
+
+	if (mount@ IOMount_Flags + @ OSMOUNT_READONLY &)
+		mount@ IOMount_UnderlyingDeviceObject + @ IODeviceUnlock
+
+		STATUS_READONLY_FILESYSTEM ok!
+
+		return
+	end
+
+	1 // alertable
+	fcb@ // fcb
+	IOFileControlBlockLock ok!
+
+	if (ok@)
+		mount@ IOMount_UnderlyingDeviceObject + @ IODeviceUnlock
+
+		return
+	end
+
+	if (fileobject@ IOFile_Context + @ AFSFILECONTEXT_WRITABLE & ~~)
+		1 afsdata@ AFSData_WritableFiles + KeInterlockedIncrement drop
+
+		AFSFILECONTEXT_WRITABLE fileobject@ IOFile_Context + |=
+	end
+
+	fcb@ IOFileControlBlockUnlock
+	mount@ IOMount_UnderlyingDeviceObject + @ IODeviceUnlock
 end
 
 fn (IODispatchCloseFunction) AFSClose { lasthandlecount access fileobject -- ok }
 	fnsection "PAGE$text"
+
+	// Nothing to do here. Let the writable file count be decremented when the
+	// file object is deleted.
 
 	0 ok!
 end

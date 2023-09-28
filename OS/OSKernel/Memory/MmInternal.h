@@ -111,9 +111,9 @@ externptr MiPageZeroListHead
 externptr MiZeroThreadPoolPage
 
 externptr MiInited
-externptr MiEventPageAvailable
-externptr MiEventMSPageAvailable
-externptr MiEventLowMemory
+externptr MiPageAvailableEvent
+externptr MiMustSucceedEvent
+externptr MiLowMemoryEvent
 
 externptr MiModifiedPageListHead
 externptr MiModifiedPageListTail
@@ -125,6 +125,10 @@ externptr MiQuickPage
 externptr MiZeroingPage
 
 externptr MiPhysicalUsage
+
+externptr MiFreeListCount
+externptr MiEvictableListCount
+externptr MiZeroListCount
 
 extern MiModifiedPageWriter { context1 context2 -- }
 

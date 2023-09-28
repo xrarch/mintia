@@ -31,12 +31,28 @@ var MiOkToUnwire 0
 public MiOkToUnwire
 
 fn MmZeroPageWorker { -- }
-	// the fate of the idle thread is to endlessly spin and check for page
-	// frames in the free list. if it finds any, it zeroes them out and places
-	// them on the zero list. if it doesn't, it halts the processor until next
+	// The fate of the idle thread is to endlessly spin and check for page
+	// frames in the free list. If it finds any, it zeroes them out and places
+	// them on the zero list. If it doesn't, it halts the processor until next
 	// interrupt.
 
 	1 MiOkToUnwire!
+
+	while (1)
+		if (MiFreeListCount@ 100 >=)
+			// More than 100 pages have accumulated on the free list.
+			// Zero them out and place them on the zeroed list.
+
+			MiZeroFreePages
+		end
+
+		HALCPUHalt
+	end
+end
+
+fn MiZeroFreePages { -- }
+	auto zerocount
+	MiFreeListCount@ zerocount!
 
 	auto pooladdr
 	MiZeroingPage@ pooladdr!
@@ -44,73 +60,65 @@ fn MmZeroPageWorker { -- }
 	auto pteaddr
 	pooladdr@ MmVirtualtoPTEAddress pteaddr!
 
-	while (1)
+	while (zerocount@)
+		auto ipl
+		IPLDPC KeIPLRaise ipl!
+
 		auto pfdbe
 		MiPageFreeListHead@ pfdbe!
 
-		if (pfdbe@)
-			// there's a page, zero it
-
-			auto ipl
-			IPLDPC KeIPLRaise ipl!
-
-			MiPageFreeListHead@ pfdbe!
-
-			// make sure the free list didnt become empty in that brief timespan
-
-			if (pfdbe@ ~~)
-				ipl@ KeIPLLower
-
-				continue
-			end
-
-			// yoink off the list
-
-			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
-			0 pfdbe@ MiPageFrameEntryFree_Next + !
-
-			1 MmPageFreeCount -=
-
+		if (pfdbe@ ~~)
 			ipl@ KeIPLLower
 
-			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << // phyaddr
-			PTE_V PTE_W | // flags
-			pteaddr@ // pteaddr
-			MiPTEUpdate drop drop
-
-			// zero out this page frame
-
-			pooladdr@ // ptr
-			PAGESIZE // size
-			0 // word
-			memset
-
-			IPLDPC KeIPLRaise ipl!
-
-			// place on zero list
-
-			MiPageZeroListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
-			pfdbe@ MiPageZeroListHead!
-
-			1 MmPageFreeCount +=
-
-			// make sure that the events are signalled correctly.
-
-			if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH ==)
-				0 // priboost
-				MiEventPageAvailable // event
-				KeEventSignal
-			end elseif (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
-				0 // priboost
-				MiEventMSPageAvailable // event
-				KeEventSignal
-			end
-
-			ipl@ KeIPLLower
-		end else
-			// there are no free list pages for now, halt
-
-			HALCPUHalt
+			break
 		end
+
+		// yoink off the list
+
+		pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
+		0 pfdbe@ MiPageFrameEntryFree_Next + !
+
+		1 MmAvailablePageCount -=
+		1 MiFreeListCount -=
+
+		ipl@ KeIPLLower
+
+		pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << // phyaddr
+		PTE_V PTE_W | // flags
+		pteaddr@ // pteaddr
+		MiPTEUpdate drop drop
+
+		// zero out this page frame
+
+		pooladdr@ // ptr
+		PAGESIZE // size
+		0 // word
+		memset
+
+		IPLDPC KeIPLRaise ipl!
+
+		// place on zero list
+
+		MiPageZeroListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
+		pfdbe@ MiPageZeroListHead!
+
+		1 MmAvailablePageCount +=
+		1 MiZeroListCount +=
+
+		// make sure that the events are signalled correctly.
+
+		if (MmAvailablePageCount@ MMNORMALTHRESH ==)
+			0 // priboost
+			MiPageAvailableEvent // event
+			KeEventSignal
+		end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
+			0 // priboost
+			MiMustSucceedEvent // event
+			KeEventSignal
+		end
+
+		ipl@ KeIPLLower
+
+		1 zerocount -=
 	end
 end

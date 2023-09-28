@@ -26,5 +26,5 @@ extern MmUnchargeCommit { pages -- }
 extern MmSetQuota { quota quotablock -- }
 extern MmQuotaQuery { query quotablock -- }
 
-externptr MmQuotaSystem
+externptr MmSystemQuota
 externptr MmQuotaListMutex

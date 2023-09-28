@@ -51,10 +51,10 @@ externptr MmModifiedPageEvent
 
 externptr MmConstantZeroPage
 
-externptr MmPageTotal
-externptr MmPageFreeCount
-externptr MmPageFreeCountLow
-externptr MmPageFreeCountSufficient
+externptr MmFluidPageCount
+externptr MmAvailablePageCount
+externptr MmLowAvailablePageCount
+externptr MmSufficientAvailablePageCount
 externptr MmSectionObjectType
 externptr MmBalanceSetManagerThread
 externptr MmModifiedPageWriterThread

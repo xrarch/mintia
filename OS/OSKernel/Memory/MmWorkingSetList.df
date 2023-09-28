@@ -542,7 +542,7 @@ fn MiWorkingSetEntryReserve { process -- wsli wsleptr ok }
 	//   3. if the process is at its working set quota, it can't.
 	//   4. if the size >= maximum, it can if it has had more than 100 page faults
 	//      since the last time it was trimmed, and the system has at least
-	//      MmPageFreeCountSufficient free pages.
+	//      MmSufficientAvailablePageCount free pages.
 	//
 	// if it can, we yoink the first free entry, mark it reserved, and return
 	// the index in wsli.
@@ -574,9 +574,9 @@ fn MiWorkingSetEntryReserve { process -- wsli wsleptr ok }
 		// between minimum and maximum
 
 		if (process@ PsProcess_PageFaultCount + @ phdr@ MiProcessHeader_WorkingSetTrimFaultCount + @ - 100 >)
-			MmPageFreeCountLow@ minpages!
+			MmLowAvailablePageCount@ minpages!
 		end else
-			MmPageFreeCountSufficient@ minpages!
+			MmSufficientAvailablePageCount@ minpages!
 		end
 	end elseif (wssize@ phdr@ MiProcessHeader_WorkingSetQuota + @ >=)
 		// above quota, there's never room
@@ -586,17 +586,13 @@ fn MiWorkingSetEntryReserve { process -- wsli wsleptr ok }
 		// above maximum
 
 		if (process@ PsProcess_PageFaultCount + @ phdr@ MiProcessHeader_WorkingSetTrimFaultCount + @ - 200 >)
-			MmPageFreeCountSufficient@ minpages!
+			MmSufficientAvailablePageCount@ minpages!
 		end else
-			MmPageFreeCountSufficient@ 20 + minpages!
+			MmSufficientAvailablePageCount@ 20 + minpages!
 		end
 	end
 
-	if (MmEvictablePageCount@ MmPageFreeCount@ + minpages@ <)
-		0 room!
-	end else
-		1 room!
-	end
+	MmAvailablePageCount@ minpages@ >= room!
 
 	1 process@ PsProcess_PageFaultCount + +=
 
@@ -1092,8 +1088,8 @@ fn MiManageWorkingSets { -- success }
 		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		if (MmPageFreeCount@ MmEvictablePageCount@ + MmPageFreeCountSufficient@ >=)
-			MiEventLowMemory // event
+		if (MmAvailablePageCount@ MmSufficientAvailablePageCount@ >=)
+			MiLowMemoryEvent // event
 			KeEventReset drop
 
 			ipl@ KeIPLLower
@@ -1103,8 +1099,8 @@ fn MiManageWorkingSets { -- success }
 			return
 		end
 
-		MmPageFreeCountSufficient@ MmPageFreeCount@ MmEvictablePageCount@ + - pagecount!
-		MmPageFreeCount@ MmEvictablePageCount@ + MMDIREPAGES < dire!
+		MmSufficientAvailablePageCount@ MmAvailablePageCount@ - pagecount!
+		MmAvailablePageCount@ MMDIREPAGES < dire!
 
 		ipl@ KeIPLLower
 

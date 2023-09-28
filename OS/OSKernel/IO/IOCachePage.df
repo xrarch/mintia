@@ -520,110 +520,112 @@ fn IOCachePageRead { localpteaddr flags kflags offset fcb -- pfdbe ok }
 		return
 	end
 
+	if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_VALID &)
+		// This cache page is already valid.
+
+		1 MmSoftPageFaultCount +=
+
+		return
+	end
+
 	auto ipl
 
-	if (pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_VALID & ~~)
-		// this cache page is invalid and needs to be read in
+	auto readfunc
+	fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_IOPRead + @ readfunc!
 
-		auto readfunc
-		fcb@ IOFileControlBlock_DispatchTable + @ IODispatchTable_IOPRead + @ readfunc!
-
-		if (DEBUGCHECKS)
-			if (readfunc@ ~~)
-				"IOCachePageRead: no read function\n" KeCrash
-			end
+	if (DEBUGCHECKS)
+		if (readfunc@ ~~)
+			"IOCachePageRead: no read function\n" KeCrash
 		end
+	end
 
-		1 MmHardPageFaultCount +=
-		1 MmPageInCount +=
+	1 MmHardPageFaultCount +=
+	1 MmPageInCount +=
 
-		auto capturedpte
-		auto transitionpte
+	auto capturedpte
+	auto transitionpte
 
-		localpteaddr@@ capturedpte!
+	localpteaddr@@ capturedpte!
 
-		auto phyaddr
-		pfdbe@ MmPFDBEToPhysicalAddress phyaddr!
+	auto phyaddr
+	pfdbe@ MmPFDBEToPhysicalAddress phyaddr!
 
-		if (kflags@ IOKFLAG_SYSSPC &)
-			// this is a kernel mapping
-			phyaddr@ PTE_TRANSITION | PTE_TLBHACK | transitionpte!
-		end else
-			phyaddr@ PTE_TRANSITION | transitionpte!
-		end
-
-		transitionpte@ localpteaddr@!
-
-		IPLAPC KeIPLLower
-
-		process@ MmVADListUnlock
-
-		// perform the read operation
-
-		auto mdl
-		MmMDLHeader_SIZEOF IOREADCLUSTERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
-
-		auto pagecount
-		pfdbe@ // firstpfdbe
-		fcb@ // fcb
-		mdl@ // mdl
-		IOiCachePageReadCluster pagecount!
-
-		pagecount@ PAGESHIFT << // length
-		0 // vaddr
-		kflags@ IOKFLAG_PAGEIN | // kflags
-		mdl@ // mdl
-		MmMDLInitialize
-
-		MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
-
-		0 // iop
-		0 // completionroutine
-		IODISPATCH_READ // functioncode
-		flags@ // flags
-		kflags@ IOKFLAG_PAGEIN | // kflags
-		mdl@ // mdl
-		mdl@ MmMDLHeader_SIZEOF + @ IOiPageFrameEntryCache_OffsetInFile + @ // offset
-		fcb@ // fcb
-		IOMDLTransfer ok! drop
-
-		0 // alertable
-		process@ // processobject
-		MmVADListLock drop
-
-		IPLDPC KeIPLRaise ipl!
-
-		if (pagecount@ 1 >)
-			ok@ // status
-			pfdbe@ // firstpfdbe
-			mdl@ // mdl
-			IOiCachePageReadClusterComplete
-		end
-
-		pfdbe@ MmEvictablePageSatisfy
-
-		if (ok@ ~~)
-			// read succeeded, page is now valid
-
-			pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_VALID |
-			pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + sb
-
-			if (localpteaddr@@ transitionpte@ ~=)
-				// PTE was deleted.
-
-				STATUS_REFAULT ok!
-			end
-		end
-
-		if (ok@)
-			if (localpteaddr@@ transitionpte@ ==)
-				capturedpte@ localpteaddr@!
-			end
-
-			pfdbe@ MmEvictablePageDereference drop
-		end
+	if (kflags@ IOKFLAG_SYSSPC &)
+		// this is a kernel mapping
+		phyaddr@ PTE_TRANSITION | PTE_TLBHACK | transitionpte!
 	end else
-		1 MmSoftPageFaultCount +=
+		phyaddr@ PTE_TRANSITION | transitionpte!
+	end
+
+	transitionpte@ localpteaddr@!
+
+	IPLAPC KeIPLLower
+
+	process@ MmVADListUnlock
+
+	// perform the read operation
+
+	auto mdl
+	MmMDLHeader_SIZEOF IOREADCLUSTERMAX PAGESHIFT >> 1 + 4 * + alloc mdl!
+
+	auto pagecount
+	pfdbe@ // firstpfdbe
+	fcb@ // fcb
+	mdl@ // mdl
+	IOiCachePageReadCluster pagecount!
+
+	pagecount@ PAGESHIFT << // length
+	0 // vaddr
+	kflags@ IOKFLAG_PAGEIN | // kflags
+	mdl@ // mdl
+	MmMDLInitialize
+
+	MMMDL_DONTUNPIN MMMDL_PINNED | mdl@ MmMDLHeader_Flags + |=
+
+	0 // iop
+	0 // completionroutine
+	IODISPATCH_READ // functioncode
+	flags@ // flags
+	kflags@ IOKFLAG_PAGEIN | // kflags
+	mdl@ // mdl
+	mdl@ MmMDLHeader_SIZEOF + @ IOiPageFrameEntryCache_OffsetInFile + @ // offset
+	fcb@ // fcb
+	IOMDLTransfer ok! drop
+
+	0 // alertable
+	process@ // processobject
+	MmVADListLock drop
+
+	IPLDPC KeIPLRaise ipl!
+
+	if (pagecount@ 1 >)
+		ok@ // status
+		pfdbe@ // firstpfdbe
+		mdl@ // mdl
+		IOiCachePageReadClusterComplete
+	end
+
+	pfdbe@ MmEvictablePageSatisfy
+
+	if (ok@ ~~)
+		// read succeeded, page is now valid
+
+		pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + gb MMEVICTFLAG_VALID |
+		pfdbe@ IOiPageFrameEntryCache_EvictionFlagsB + sb
+
+		if (localpteaddr@@ transitionpte@ ~=)
+			// PTE was deleted.
+
+			STATUS_REFAULT ok!
+		end
+	end
+
+	if (ok@)
+		if (localpteaddr@@ transitionpte@ ==)
+			capturedpte@ localpteaddr@!
+		end
+
+		pfdbe@ MmEvictablePageDereference drop
 	end
 end
 
@@ -775,8 +777,8 @@ fn IOiCachePageReadCluster { firstpfdbe fcb mdl -- pagecount }
 	// check for a sufficient amount of memory to create a full cluster here,
 	// since everything will break if we block in MmPageWait.
 
-	if (MmEvictablePageCount@ MmPageFreeCount@ +
-		MmPageFreeCountSufficient@ IOREADCLUSTERMAX PAGESHIFT >> + <)
+	if (MmAvailablePageCount@
+		MmSufficientAvailablePageCount@ IOREADCLUSTERMAX PAGESHIFT >> + <)
 		ipl@ KeIPLLower
 
 		1 pagecount!

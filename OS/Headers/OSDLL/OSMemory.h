@@ -1,8 +1,8 @@
 struct OSMemoryInformation
-	4 PageTotalCount
-	4 PageTotalNonWiredCount
+	4 RealPageCount
+	4 FluidPageCount
 
-	4 PageFreeCount
+	4 AvailablePageCount
 
 	4 FileCachePageCount
 	4 AnonymousPageCount
@@ -25,6 +25,8 @@ struct OSMemoryInformation
 	4 PagedPoolBytesUsedPeak
 
 	4 EvictablePageCount
+	4 FreePageCount
+	4 ZeroPageCount
 
 	4 ModifiedPageCount
 	4 ModifiedPageMaximum

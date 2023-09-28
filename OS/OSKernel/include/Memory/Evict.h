@@ -26,7 +26,5 @@ extern MmEvictablePageStartIO { pfdbe -- }
 externptr MmModifiedPageCount
 externptr MmModifiedFilePageCount
 
-externptr MmEvictablePageCount
-
 externptr MmModifiedPageMaximum
 externptr MmModifiedPageMinimum

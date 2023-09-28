@@ -62,9 +62,8 @@ fn MmPageGet { priority -- pfdbe ok }
 
 		if (pfdbe@)
 			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
-			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
-			1 MmPageFreeCount -=
+			1 MiFreeListCount -=
 		end else
 			// resort to a zero page
 
@@ -72,9 +71,8 @@ fn MmPageGet { priority -- pfdbe ok }
 
 			if (pfdbe@)
 				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
-				0 pfdbe@ MiPageFrameEntryFree_Next + !
 
-				1 MmPageFreeCount -=
+				1 MiZeroListCount -=
 			end
 		end
 	end elseif (priority@ 0xFF & ZEROMUST ==)
@@ -85,9 +83,8 @@ fn MmPageGet { priority -- pfdbe ok }
 
 		if (pfdbe@)
 			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
-			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
-			1 MmPageFreeCount -=
+			1 MiZeroListCount -=
 		end else
 			// resort to a free page
 
@@ -95,9 +92,8 @@ fn MmPageGet { priority -- pfdbe ok }
 
 			if (pfdbe@)
 				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
-				0 pfdbe@ MiPageFrameEntryFree_Next + !
 
-				1 MmPageFreeCount -=
+				1 MiFreeListCount -=
 
 				// zero the free page out
 
@@ -124,11 +120,13 @@ fn MmPageGet { priority -- pfdbe ok }
 				MmPageFrameZero
 			end
 		end
+	end else
+		1 MmAvailablePageCount -=
 	end
 
-	if (MmEvictablePageCount@ MmPageFreeCount@ + MmPageFreeCountLow@ <)
+	if (MmAvailablePageCount@ MmLowAvailablePageCount@ <)
 		0 // priboost
-		MiEventLowMemory // event
+		MiLowMemoryEvent // event
 		KeEventSignal
 	end
 end
@@ -145,7 +143,7 @@ fn MmPageWait { process priority -- waited ok }
 
 	0 waited!
 
-	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH >=)
+	if (MmAvailablePageCount@ MMNORMALTHRESH >=)
 		0 ok!
 
 		return
@@ -178,7 +176,7 @@ fn MmPageWait { process priority -- waited ok }
 		// check this now instead of doing it every iteration in the while
 		// loop
 
-		if (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
+		if (MmAvailablePageCount@ blockon@ <)
 			STATUS_NO_MEMORY ok!
 
 			return
@@ -191,12 +189,12 @@ fn MmPageWait { process priority -- waited ok }
 	auto event
 
 	if (blockon@ MMNORMALTHRESH >=)
-		MiEventPageAvailable event!
+		MiPageAvailableEvent event!
 	end else
-		MiEventMSPageAvailable event!
+		MiMustSucceedEvent event!
 	end
 
-	while (MmPageFreeCount@ MmEvictablePageCount@ + blockon@ <)
+	while (MmAvailablePageCount@ blockon@ <)
 		event@ KeEventReset drop
 
 		IPLAPC KeIPLLower
@@ -224,10 +222,11 @@ fn MmPageWait { process priority -- waited ok }
 		if (ok@)
 			if (ok@ STATUS_WAIT_TIMEOUT ==)
 				if (timeouts@ ~~)
+					MmAvailablePageCount@
 					MmModifiedPageCount@
-					MmPageFreeCount@
-					MmEvictablePageCount@
-					"Many timeouts, MPW is likely deadlocked (evic=%d,free=%d,mod=%d)\n" KeCrash
+					MiFreeListCount@
+					MiEvictableListCount@
+					"Many timeouts, MPW is likely deadlocked (evic=%d,free=%d,mod=%d,avail=%d)\n" KeCrash
 				end
 
 				1 timeouts -=
@@ -236,7 +235,7 @@ fn MmPageWait { process priority -- waited ok }
 
 				if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
 					MMMUSTSUCCEEDTHRESH blockon!
-					MiEventMSPageAvailable event!
+					MiMustSucceedEvent event!
 				end
 			end else
 				return
@@ -258,15 +257,16 @@ fn MiPageFreeByEntry { pfdbe -- }
 	MiPageFreeListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
 	pfdbe@ MiPageFreeListHead!
 
-	1 MmPageFreeCount +=
+	1 MmAvailablePageCount +=
+	1 MiFreeListCount +=
 
-	if (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH ==)
+	if (MmAvailablePageCount@ MMNORMALTHRESH ==)
 		0 // priboost
-		MiEventPageAvailable // event
+		MiPageAvailableEvent // event
 		KeEventSignal
-	end elseif (MmPageFreeCount@ MmEvictablePageCount@ + MMNORMALTHRESH <)
+	end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
 		0 // priboost
-		MiEventMSPageAvailable // event
+		MiMustSucceedEvent // event
 		KeEventSignal
 	end
 

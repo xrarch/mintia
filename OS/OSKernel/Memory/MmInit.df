@@ -49,14 +49,20 @@ public MiPageFreeListHead
 var MiPageZeroListHead 0
 public MiPageZeroListHead
 
-var MmPageTotal 0
-public MmPageTotal
+var MmFluidPageCount 0
+public MmFluidPageCount
 
-var MmPageTotalTotal 0
-public MmPageTotalTotal
+var MmRealPageCount 0
+public MmRealPageCount
 
-var MmPageFreeCount 0
-public MmPageFreeCount
+var MiFreeListCount 0
+public MiFreeListCount
+
+var MiZeroListCount 0
+public MiZeroListCount
+
+var MmAvailablePageCount 0 // zeroed + freed + evictable
+public MmAvailablePageCount
 
 var MmConstantZeroPage 0
 public MmConstantZeroPage
@@ -115,20 +121,20 @@ const MMUNWIRE_PAGE 2
 var MiInited 0
 public MiInited
 
-buffer MmQuotaSystem MiQuotaBlock_SIZEOF
-public MmQuotaSystem
+buffer MmSystemQuota MiQuotaBlock_SIZEOF
+public MmSystemQuota
 
-buffer MiEventLowMemory KeEvent_SIZEOF
-public MiEventLowMemory
+buffer MiLowMemoryEvent KeEvent_SIZEOF
+public MiLowMemoryEvent
 
 buffer MmModifiedPageEvent KeEvent_SIZEOF
 public MmModifiedPageEvent
 
-var MmPageFreeCountLow 0
-public MmPageFreeCountLow
+var MmLowAvailablePageCount 0
+public MmLowAvailablePageCount
 
-var MmPageFreeCountSufficient 0
-public MmPageFreeCountSufficient
+var MmSufficientAvailablePageCount 0
+public MmSufficientAvailablePageCount
 
 var MmModifiedPageMaximum 0
 public MmModifiedPageMaximum
@@ -143,14 +149,15 @@ var MmCommitUsage 0
 public MmCommitUsage
 
 var MmPhysicalLimit 0
+
 var MiPhysicalUsage 0
 public MiPhysicalUsage
 
-buffer MiEventPageAvailable KeEvent_SIZEOF
-public MiEventPageAvailable
+buffer MiPageAvailableEvent KeEvent_SIZEOF
+public MiPageAvailableEvent
 
-buffer MiEventMSPageAvailable KeEvent_SIZEOF
-public MiEventMSPageAvailable
+buffer MiMustSucceedEvent KeEvent_SIZEOF
+public MiMustSucceedEvent
 
 var MmModifiedPageWriterThread 0
 public MmModifiedPageWriterThread
@@ -162,7 +169,7 @@ fn MmInitPhase0 { -- }
 
 	HALLoaderPFDB@ MiPageFrameDatabase!
 
-	HALLoaderTotalRAM@ PAGESHIFT >> MmPageTotalTotal!
+	HALLoaderTotalRAM@ PAGESHIFT >> MmRealPageCount!
 
 	// initialize the page DB by walking the memory descriptor list given to
 	// us by OSLoader and adding the pages of all the regions marked free to
@@ -179,8 +186,9 @@ fn MmInitPhase0 { -- }
 			auto pfdbe
 			desc@ LdrMemoryDescriptor_StartPFN + @ MiPageFrameEntry_SIZEOF * MiPageFrameDatabase@ + pfdbe!
 
-			pages@ MmPageFreeCount +=
-			pages@ MmPageTotal +=
+			pages@ MiFreeListCount +=
+			pages@ MmAvailablePageCount +=
+			pages@ MmFluidPageCount +=
 
 			while (pages@)
 				MiPageFreeListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
@@ -205,7 +213,7 @@ fn MmInitPhase0 { -- }
 	MMQUOTAINFINITE // pghpmax
 	MMQUOTAINFINITE // vmmax
 	MMQUOTAINFINITE // heapmax
-	MmQuotaSystem // quota
+	MmSystemQuota // quota
 	MmQuotaBlockInitialize ok!
 
 	if (ok@)
@@ -214,28 +222,28 @@ fn MmInitPhase0 { -- }
 
 	// bias the reference by one to make sure the system never attempts to
 	// free this
-	MmQuotaSystem MmQuotaBlockReference
+	MmSystemQuota MmQuotaBlockReference
 
-	MmQuotaSystem idleproc@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + !
+	MmSystemQuota idleproc@ PsProcess_PagedArea + @ PsProcessPaged_QuotaBlock + !
 
 rosection "text"
 
 	0 // signaled
 	OSEVENT_NOTIF // type
-	"MiEventLowMemory" // name
-	MiEventLowMemory // event
+	"MiLowMemoryEvent" // name
+	MiLowMemoryEvent // event
 	KeEventInitialize
 
 	1 // signaled
 	OSEVENT_NOTIF // type
-	"MiEventPageAvailable" // name
-	MiEventPageAvailable // event
+	"MiPageAvailableEvent" // name
+	MiPageAvailableEvent // event
 	KeEventInitialize
 
 	1 // signaled
 	OSEVENT_NOTIF // type
-	"MiEventMSPageAvailable" // name
-	MiEventMSPageAvailable // event
+	"MiMustSucceedEvent" // name
+	MiMustSucceedEvent // event
 	KeEventInitialize
 
 	0 // signaled
@@ -262,7 +270,7 @@ rosection "INIT$text"
 	// initialize the commit limit to the free page count plus 100 pages.
 	// will get set to the size of the pagefile later.
 
-	MmPageFreeCount@ 100 + MmCommitLimit!
+	MmAvailablePageCount@ 100 + MmCommitLimit!
 	MmCommitLimit@ MmTheoreticalCommitLimit!
 	MmCommitLimit@ MmPhysicalLimit!
 
@@ -350,10 +358,10 @@ fn MmInitPhase1 { -- }
 	// initialize eviction/swap
 
 	auto membytes
-	MmPageTotalTotal@ PAGESHIFT << membytes!
+	MmRealPageCount@ PAGESHIFT << membytes!
 
-	MMNORMALTHRESH 8 + MmPageFreeCountLow!
-	MMNORMALTHRESH 50 + MmPageFreeCountSufficient!
+	MMNORMALTHRESH 8 + MmLowAvailablePageCount!
+	MMNORMALTHRESH 50 + MmSufficientAvailablePageCount!
 
 	100 MmModifiedPageMaximum!
 
@@ -413,8 +421,8 @@ fn MmInitPhase1 { -- }
 		MmChargeCommit drop
 	end
 
-	MmPageFreeCountSufficient@
-	MmPageFreeCountLow@
+	MmSufficientAvailablePageCount@
+	MmLowAvailablePageCount@
 	"free page targets: %d pages -> %d pages\n" "MmInitPhase1" HALLog
 
 	MmModifiedPageMaximum@ PAGESHIFT <<
@@ -639,8 +647,9 @@ fn MmReclaimMemory { -- }
 
 		if (reclaim@)
 			pages@ MiFreedBootPageCount +=
-			pages@ MmPageFreeCount +=
-			pages@ MmPageTotal +=
+			pages@ MmAvailablePageCount +=
+			pages@ MiFreeListCount +=
+			pages@ MmFluidPageCount +=
 
 			auto pfn
 			desc@ LdrMemoryDescriptor_StartPFN + @ pfn!
@@ -694,7 +703,7 @@ fn MmResourceJettison { -- }
 				pfdbe@ MiPageFreeByEntry
 
 				// the page is now un-wired
-				1 MmPageTotal KeInterlockedIncrement drop
+				1 MmFluidPageCount KeInterlockedIncrement drop
 
 				MiPageFrameEntry_SIZEOF pfdbe +=
 				1 sz -=
@@ -734,7 +743,7 @@ fn MmInitPhysicalCommit { -- }
 	fnsection "PAGE$text"
 
 	auto limit
-	MmPageTotal@ limit!
+	MmFluidPageCount@ limit!
 
 	// subtract an arbitrary 12 pages for system usage
 
@@ -750,8 +759,8 @@ fn MmInitPhysicalCommit { -- }
 
 	// limit to total number of pages
 
-	if (limit@ MmPageTotal@ >)
-		MmPageTotal@ limit!
+	if (limit@ MmFluidPageCount@ >)
+		MmFluidPageCount@ limit!
 	end
 
 	auto change
@@ -831,7 +840,7 @@ fn MiUnwireKernel { -- }
 
 				pfdbe@ MiPageFreeByEntry
 
-				1 MmPageTotal KeInterlockedIncrement drop
+				1 MmFluidPageCount KeInterlockedIncrement drop
 			end elseif (unwr@ MmUnwireRecord_Type + @ MMUNWIRE_PAGE ==)
 				// convert the page to a modified private anonymous page, and
 				// set the PTE to transition.
@@ -853,7 +862,7 @@ fn MiUnwireKernel { -- }
 				pteaddr@ // pteaddr
 				MiSysPTEDereferenceAndSet
 
-				1 MmPageTotal KeInterlockedIncrement drop
+				1 MmFluidPageCount KeInterlockedIncrement drop
 				1 MmAnonymousPageCount KeInterlockedIncrement drop
 			end
 
@@ -879,10 +888,13 @@ fn MmQuery { query -- ok }
 	0 // word
 	memset
 
-	MmPageTotalTotal@ query@ OSMemoryInformation_PageTotalCount + !
-	MmPageTotal@ query@ OSMemoryInformation_PageTotalNonWiredCount + !
+	MmRealPageCount@ query@ OSMemoryInformation_RealPageCount + !
+	MmFluidPageCount@ query@ OSMemoryInformation_FluidPageCount + !
 	
-	MmPageFreeCount@ query@ OSMemoryInformation_PageFreeCount + !
+	MmAvailablePageCount@ query@ OSMemoryInformation_AvailablePageCount + !
+	MiEvictableListCount@ query@ OSMemoryInformation_EvictablePageCount + !
+	MiZeroListCount@ query@ OSMemoryInformation_ZeroPageCount + !
+	MiFreeListCount@ query@ OSMemoryInformation_FreePageCount + !
 
 	IOCachePagesUsed@ query@ OSMemoryInformation_FileCachePageCount + !
 	MmAnonymousPageCount@ query@ OSMemoryInformation_AnonymousPageCount + !
@@ -913,8 +925,6 @@ fn MmQuery { query -- ok }
 
 	MmPagedHeapBytesUsedPeak@ MmPagedPoolBytesPeak@ +
 	query@ OSMemoryInformation_PagedPoolBytesUsedPeak + !
-
-	MmEvictablePageCount@ query@ OSMemoryInformation_EvictablePageCount + !
 
 	MmModifiedPageCount@ query@ OSMemoryInformation_ModifiedPageCount + !
 	MmModifiedPageMaximum@ query@ OSMemoryInformation_ModifiedPageMaximum + !

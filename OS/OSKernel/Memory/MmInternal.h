@@ -88,13 +88,13 @@ struct MiPageFrameEntryHeap
 	4 PoolListPrev
 endstruct
 
-extern MiEvictSinglePage { -- pfdbe ok }
-
 struct MiEvictablePageEvent
 	KeEvent_SIZEOF Event
 	4 References
 	4 WasMemoryPrivileged
 endstruct
+
+extern MiEvictablePageRemove { pfdbe -- }
 
 extern MiPageFreeByEntry { pfdbe -- }
 
@@ -131,6 +131,7 @@ externptr MiEvictableListCount
 externptr MiZeroListCount
 
 externptr MiZeroingThreshold
+externptr MiEvictableFunctionsTable
 
 extern MiModifiedPageWriter { context1 context2 -- }
 

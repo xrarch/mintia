@@ -157,12 +157,10 @@ fn MmAllocWithTag { bytes tag flags -- ptr ok }
 		if (KeIPLCurrentGet IPLDPC >)
 			"MmAllocWithTag: ipl > IPLDPC\n" KeCrash
 		end
-	end
 
-	if (bytes@ ~~)
-		STATUS_INVALID_ARGUMENT ok!
-
-		return
+		if (bytes@ ~~)
+			"MmAllocWithTag: request of 0 bytes\n" KeCrash
+		end
 	end
 
 	if (flags@ 0 ==)
@@ -314,6 +312,17 @@ fn MiPoolSpaceReserve { pri pagesneeded -- vaddr pteaddr ok }
 	if (pteaddr@ ~~)
 		ipl@ KeIPLLower
 
+#ifdef DEBUGCHECKS
+			"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" Printf
+			"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" Printf
+
+			PrintPoolPTEList
+
+			pagesneeded@
+			MiPoolSpaceUsed@
+			"!!! MiPoolSpaceReserve 1 !!! used=%d rq=%d\n" KeCrash
+#endif
+
 		STATUS_NO_MEMORY ok!
 
 		return
@@ -394,6 +403,17 @@ fn MiPoolSpaceReserve { pri pagesneeded -- vaddr pteaddr ok }
 		if (next@ ~~)
 			ipl@ KeIPLLower
 
+#ifdef DEBUGCHECKS
+				"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" Printf
+				"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" Printf
+
+				PrintPoolPTEList
+
+				pagesneeded@
+				MiPoolSpaceUsed@
+				"!!! MiPoolSpaceReserve 2 !!! used=%d rq=%d\n" KeCrash
+#endif
+
 			STATUS_NO_MEMORY ok!
 
 			return
@@ -451,65 +471,67 @@ fn MiPoolSpaceRelease { pages pteaddr -- }
 		auto next
 		freepte@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
 
-		if (offset@ next@ < next@ ~~ ||)
-			// insert after the chunk currently pointed at by freepte.
-			// if freepte turns out to be physically contiguous with us,
-			// we can merge left. then we can check if we wanna merge right.
+		if (offset@ next@ < next@ &&)
+			next@ MiPoolPTEFirst@ + freepte!
 
-			auto ptecount
-
-			if (freepte@@ PTE_POOL_SINGLETON &)
-				1 ptecount!
-			end else
-				freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
-			end
-
-			if (freepte@ ptecount@ PTESIZE * + pteaddr@ ==)
-				// we can merge left, it turns out.
-
-				freepte@ pteaddr!
-				ptecount@ pages +=
-			end else
-				// make him point to our new chunk.
-
-				freepte@@ PTE_POOL_INFO_MASK PTE_POOL_INFO_SHIFT << ~ &
-				offset@ PTE_POOL_INFO_SHIFT << | freepte@!
-			end
-
-			if (next@)
-				next@ MiPoolPTEFirst@ + freepte!
-
-				if (pteaddr@ pages@ PTESIZE * + freepte@ ==)
-					// we can merge right, it turns out.
-
-					if (freepte@@ PTE_POOL_SINGLETON &)
-						1 ptecount!
-					end else
-						freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
-					end
-
-					ptecount@ pages +=
-
-					freepte@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
-				end
-			end
-
-			// encode the size, next link, etc in our new freed chunk.
-
-			next@ PTE_POOL_INFO_SHIFT << pteaddr@!
-
-			if (pages@ 1 ==)
-				PTE_POOL_SINGLETON pteaddr@ |=
-			end else
-				pages@ PTE_POOL_INFO_SHIFT << pteaddr@ MiPoolPTEBlock_Size + !
-			end
-
-			ipl@ KeIPLLower
-
-			return
+			continue
 		end
 
-		next@ MiPoolPTEFirst@ + freepte!
+		// insert after the chunk currently pointed at by freepte.
+		// if freepte turns out to be physically contiguous with us,
+		// we can merge left. then we can check if we wanna merge right.
+
+		auto ptecount
+
+		if (freepte@@ PTE_POOL_SINGLETON &)
+			1 ptecount!
+		end else
+			freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
+		end
+
+		if (freepte@ ptecount@ PTESIZE * + pteaddr@ ==)
+			// we can merge left, it turns out.
+
+			freepte@ pteaddr!
+			ptecount@ pages +=
+		end else
+			// make him point to our new chunk.
+
+			freepte@@ PTE_POOL_INFO_MASK PTE_POOL_INFO_SHIFT << ~ &
+			offset@ PTE_POOL_INFO_SHIFT << | freepte@!
+		end
+
+		if (next@)
+			next@ MiPoolPTEFirst@ + freepte!
+
+			if (pteaddr@ pages@ PTESIZE * + freepte@ ==)
+				// we can merge right, it turns out.
+
+				if (freepte@@ PTE_POOL_SINGLETON &)
+					1 ptecount!
+				end else
+					freepte@ MiPoolPTEBlock_Size + @ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & ptecount!
+				end
+
+				ptecount@ pages +=
+
+				freepte@@ PTE_POOL_INFO_SHIFT >> PTE_POOL_INFO_MASK & next!
+			end
+		end
+
+		// encode the size, next link, etc in our new freed chunk.
+
+		next@ PTE_POOL_INFO_SHIFT << pteaddr@!
+
+		if (pages@ 1 ==)
+			PTE_POOL_SINGLETON pteaddr@ |=
+		end else
+			pages@ PTE_POOL_INFO_SHIFT << pteaddr@ MiPoolPTEBlock_Size + !
+		end
+
+		ipl@ KeIPLLower
+
+		return
 	end
 end
 

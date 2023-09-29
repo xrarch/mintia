@@ -63,6 +63,7 @@ table MiEvictableFunctionsTable
 	// anon
 	pointerof MiAnonymousEvictionFunction
 endtable
+public MiEvictableFunctionsTable
 
 fn MmEvictablePageInitialize { flags evictabletype pfdbe -- }
 	1 pfdbe@ MiPageFrameEntryEvictable_ReferencesI + si
@@ -175,6 +176,9 @@ fn MiEvictablePageInsert { pfdbe -- }
 end
 
 fn MmEvictablePageDereference { pfdbe -- oldcount }
+	auto flags
+	pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb flags!
+
 	auto rs
 	HALCPUInterruptDisable rs!
 
@@ -189,7 +193,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 	oldcount@ 1 - pfdbe@ MiPageFrameEntryEvictable_ReferencesI + si
 
 	if (oldcount@ 1 ==)
-		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
+		if (flags@ MMEVICTFLAG_DELETED &)
 			1 MmTotalWorkingSetSize -=
 
 			rs@ HALCPUInterruptRestore
@@ -207,47 +211,30 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 		pfdbe@ MiEvictablePageInsert
 	end
 
-	if (oldcount@ 1 ~=)
-		rs@ HALCPUInterruptRestore
+	rs@ HALCPUInterruptRestore
 
+	if (oldcount@ 1 ~=)
 		return
 	end
 
-	auto ipl
-
-	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+	if (flags@ MMEVICTFLAG_MODIFIED &)
 		if (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
-			IPLDPC KeIPLRaise ipl!
-			rs@ HALCPUInterruptRestore
-
-			0 // priboost
-			MmModifiedPageEvent // event
-			KeEventSignal
-
-			ipl@ KeIPLLower
-		end else
-			rs@ HALCPUInterruptRestore
+			if (MmModifiedPageEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+				0 // priboost
+				MmModifiedPageEvent // event
+				KeEventSignal
+			end
 		end
-	end elseif (MmAvailablePageCount@ MMNORMALTHRESH ==)
-		IPLDPC KeIPLRaise ipl!
-		rs@ HALCPUInterruptRestore
-
-		0 // priboost
-		MiPageAvailableEvent // event
-		KeEventSignal
-
-		ipl@ KeIPLLower
-	end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
-		IPLDPC KeIPLRaise ipl!
-		rs@ HALCPUInterruptRestore
-
+	end elseif (MmAvailablePageCount@ MMNORMALTHRESH >=)
+		if (MiPageAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			0 // priboost
+			MiPageAvailableEvent // event
+			KeEventSignal
+		end
+	end elseif (MiMustSucceedEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 		0 // priboost
 		MiMustSucceedEvent // event
 		KeEventSignal
-
-		ipl@ KeIPLLower
-	end else
-		rs@ HALCPUInterruptRestore
 	end
 end
 
@@ -392,38 +379,6 @@ fn MmEvictablePageModify { pfdbe process -- }
 	end elseif (DEBUGCHECKS)
 		"MmEvictablePageModify: modified a page type that doesn't like to be modified\n" KeCrash
 	end
-end
-
-fn MiEvictSinglePage { -- pfdbe ok }
-	// assumes IPLDPC
-
-	MiEvictablePageListHead@ pfdbe!
-
-	if (pfdbe@ ~~)
-		STATUS_NO_MEMORY ok!
-
-		return
-	end
-
-	// call the appropriate eviction function for the page type.
-
-	pfdbe@ // pfdbe
-	[pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb]MiEvictableFunctionsTable@ MmEvictionFunction
-
-	if (DEBUGCHECKS)
-		if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi 0 ~=)
-			pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi
-			"MmEvictSingleFastPage: attempt to evict a page with %d references\n" KeCrash
-		end
-	end
-
-	// remove the page from the evictable list.
-
-	pfdbe@ MiEvictablePageRemove
-
-	1 MmTotalWorkingSetSize -=
-
-	0 ok!
 end
 
 fn MmEvictablePageWait { process pri pfdbe -- ok }

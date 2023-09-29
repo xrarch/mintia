@@ -62,9 +62,53 @@ fn MmPageGet { priority -- pfdbe ok }
 
 	0 ok!
 
-	if (priority@ FREEFIRST &)
-		// attempt to get a page from the free list first.
-		// if its empty, try to get one from the zero list.
+	if (MiPageZeroListHead@ MiPageFreeListHead@ | ~~)
+		// None in free or zero list. Evict one.
+
+		MiEvictablePageListHead@ pfdbe!
+
+		if (pfdbe@ ~~)
+			STATUS_NO_MEMORY ok!
+
+			return
+		end
+
+		// Call the appropriate eviction function for the page type.
+
+		pfdbe@ // pfdbe
+		[pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + gb]MiEvictableFunctionsTable@
+		MmEvictionFunction
+
+		if (DEBUGCHECKS)
+			if (pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi 0 ~=)
+				pfdbe@ MiPageFrameEntryEvictable_ReferencesI + gi
+				"MmPageGet: attempt to evict a page with %d references\n" KeCrash
+			end
+		end
+
+		// Remove the page from the evictable list.
+
+		pfdbe@ MiEvictablePageRemove
+
+		// MiEvictablePageRemove incremented the system working set counter,
+		// so fix it, since this page is not necessarily destined for that.
+
+		1 MmTotalWorkingSetSize -=
+
+		if (priority@ ZEROMUST &)
+			// Zero out this page.
+
+			0 // offset
+			pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
+			MmPageFrameZero
+		end
+	end elseif (priority@ FREEFIRST &)
+		1 MmAvailablePageCount -=
+
+		// Attempt to get a page from the free list first.
+		// If its empty, try to get one from the zero list.
+		// We already determined that there's at least one page on one of
+		// those lists.
 
 		MiPageFreeListHead@ pfdbe!
 
@@ -73,19 +117,20 @@ fn MmPageGet { priority -- pfdbe ok }
 
 			1 MiFreeListCount -=
 		end else
-			// resort to a zero page
+			// Resort to a zero page.
 
 			MiPageZeroListHead@ pfdbe!
+			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
 
-			if (pfdbe@)
-				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageZeroListHead!
-
-				1 MiZeroListCount -=
-			end
+			1 MiZeroListCount -=
 		end
 	end else
-		// attempt to get one from the zero list first.
-		// if its empty, get one from the free list, and zero it out.
+		1 MmAvailablePageCount -=
+
+		// Attempt to get a page from the zero list first.
+		// If its empty, try to get one from the free list.
+		// We already determined that there's at least one page on one of
+		// those lists.
 
 		MiPageZeroListHead@ pfdbe!
 
@@ -94,40 +139,17 @@ fn MmPageGet { priority -- pfdbe ok }
 
 			1 MiZeroListCount -=
 		end else
-			// resort to a free page
-
 			MiPageFreeListHead@ pfdbe!
+			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
 
-			if (pfdbe@)
-				pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
+			1 MiFreeListCount -=
 
-				1 MiFreeListCount -=
+			// Zero the free page out.
 
-				// zero the free page out
-
-				0 // offset
-				pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
-				MmPageFrameZero
-			end
+			0 // offset
+			pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
+			MmPageFrameZero
 		end
-	end
-
-	if (pfdbe@ ~~)
-		// none in free or zero list, get one from standby list
-
-		MiEvictSinglePage ok! pfdbe!
-
-		if (ok@ ~~)
-			if (priority@ ZEROMUST &)
-				// zero out the standby page
-
-				0 // offset
-				pfdbe@ MmPFDBEToPhysicalAddress // phyaddr
-				MmPageFrameZero
-			end
-		end
-	end else
-		1 MmAvailablePageCount -=
 	end
 
 	if (MmAvailablePageCount@ MmLowAvailablePageCount@ <)
@@ -225,29 +247,32 @@ fn MmPageWait { process priority -- waited ok }
 
 		IPLDPC KeIPLRaise drop
 
-		if (ok@)
-			if (ok@ STATUS_WAIT_TIMEOUT ==)
-				if (timeouts@ ~~)
-					MmAvailablePageCount@
-					MmModifiedPageCount@
-					MiFreeListCount@
-					MiEvictableListCount@
-					"Many timeouts, MPW is likely deadlocked (evic=%d,free=%d,mod=%d,avail=%d)\n" KeCrash
-				end
-
-				1 timeouts -=
-
-				// recheck this since it may have changed
-
-				if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
-					MMMUSTSUCCEEDTHRESH blockon!
-					MiMustSucceedEvent event!
-				end
-			end else
-				return
-			end
-		end else
+		if (ok@ ~~)
 			600 timeouts!
+
+			continue
+		end
+
+		if (ok@ STATUS_WAIT_TIMEOUT ~=)
+			return
+		end
+
+		if (timeouts@ ~~)
+			MmAvailablePageCount@
+			MmModifiedPageCount@
+			MiZeroListCount@
+			MiFreeListCount@
+			MiEvictableListCount@
+			"MM likely deadlocked EVI=%d FRE=%d ZRO=%d MOD=%d AVL=%d\n" KeCrash
+		end
+
+		1 timeouts -=
+
+		// recheck this since it may have changed
+
+		if (KeThreadCurrent@ PsThread_MemoryPrivilegedCount + @)
+			MMMUSTSUCCEEDTHRESH blockon!
+			MiMustSucceedEvent event!
 		end
 	end
 
@@ -257,8 +282,8 @@ end
 fn MiPageFreeByEntry { pfdbe -- }
 	// insert a page frame into the free list
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	auto rs
+	HALCPUInterruptDisable rs!
 
 	MiPageFreeListHead@ pfdbe@ MiPageFrameEntryFree_Next + !
 	pfdbe@ MiPageFreeListHead!
@@ -266,17 +291,19 @@ fn MiPageFreeByEntry { pfdbe -- }
 	1 MmAvailablePageCount +=
 	1 MiFreeListCount +=
 
-	if (MmAvailablePageCount@ MMNORMALTHRESH ==)
-		0 // priboost
-		MiPageAvailableEvent // event
-		KeEventSignal
-	end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
+	rs@ HALCPUInterruptRestore
+
+	if (MmAvailablePageCount@ MMNORMALTHRESH >=)
+		if (MiPageAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			0 // priboost
+			MiPageAvailableEvent // event
+			KeEventSignal
+		end
+	end elseif (MiMustSucceedEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 		0 // priboost
 		MiMustSucceedEvent // event
 		KeEventSignal
 	end
-
-	ipl@ KeIPLLower
 end
 
 fn MmPageFrameZero { offset phyaddr -- }

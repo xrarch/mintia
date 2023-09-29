@@ -69,15 +69,15 @@ fn MiZeroFreePages { -- }
 	auto rs
 	HALCPUInterruptDisable rs!
 
-	if (MmAvailablePageCount@ MmSufficientAvailablePageCount@ <)
+	MiFreeListCount@ count!
+
+	if (count@ MiZeroingThreshold@ <)
 		rs@ HALCPUInterruptRestore
 
 		return
 	end
 
-	MiFreeListCount@ count!
-
-	if (count@ MiZeroingThreshold@ <)
+	if (MmAvailablePageCount@ count@ - MMNORMALTHRESH 16 + <)
 		rs@ HALCPUInterruptRestore
 
 		return
@@ -132,8 +132,7 @@ fn MiZeroFreePages { -- }
 	// Place all the pages on the zeroed list at once and update the events
 	// appropriately.
 
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
+	HALCPUInterruptDisable rs!
 
 	MiPageZeroListHead@ listtail@ MiPageFrameEntryFree_Next + !
 	listhead@ MiPageZeroListHead!
@@ -141,17 +140,19 @@ fn MiZeroFreePages { -- }
 	count@ MmAvailablePageCount +=
 	count@ MiZeroListCount +=
 
+	rs@ HALCPUInterruptRestore
+
 	// Make sure that the page available events are signalled correctly.
 
 	if (MmAvailablePageCount@ MMNORMALTHRESH >=)
-		0 // priboost
-		MiPageAvailableEvent // event
-		KeEventSignal
-	end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
+		if (MiPageAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+			0 // priboost
+			MiPageAvailableEvent // event
+			KeEventSignal
+		end
+	end elseif (MiMustSucceedEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 		0 // priboost
 		MiMustSucceedEvent // event
 		KeEventSignal
 	end
-
-	ipl@ KeIPLLower
 end

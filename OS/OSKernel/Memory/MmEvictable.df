@@ -73,20 +73,18 @@ fn MmEvictablePageInitialize { flags evictabletype pfdbe -- }
 	flags@ pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + sb
 	evictabletype@ pfdbe@ MiPageFrameEntryEvictable_EvictionTypeB + sb
 
-	if (flags@ MMEVICTFLAG_WORKINGSET &)
-		auto rs
-		HALCPUInterruptDisable rs!
+	auto rs
+	HALCPUInterruptDisable rs!
 
-		// allocation of evictable page implies addition to a working set.
+	// allocation of evictable page implies addition to a working set.
 
-		1 MmTotalWorkingSetSize +=
+	1 MmTotalWorkingSetSize +=
 
-		if (MmTotalWorkingSetSize@ MmPeakWorkingSetSize@ >)
-			MmTotalWorkingSetSize@ MmPeakWorkingSetSize!
-		end
-
-		rs@ HALCPUInterruptRestore
+	if (MmTotalWorkingSetSize@ MmPeakWorkingSetSize@ >)
+		MmTotalWorkingSetSize@ MmPeakWorkingSetSize!
 	end
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn MmEvictablePageGet { flags evictabletype priority -- pfdbe ok }
@@ -126,10 +124,9 @@ end
 fn MiEvictablePageInsert { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
-	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
-		// insertion to evictable list implies removal from a working set.
-		1 MmTotalWorkingSetSize -=
-	end
+	// insertion to evictable list implies removal from a working set.
+
+	1 MmTotalWorkingSetSize -=
 
 	auto t
 
@@ -193,9 +190,7 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 
 	if (oldcount@ 1 ==)
 		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_DELETED &)
-			if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
-				1 MmTotalWorkingSetSize -=
-			end
+			1 MmTotalWorkingSetSize -=
 
 			rs@ HALCPUInterruptRestore
 
@@ -212,43 +207,45 @@ fn MmEvictablePageDereference { pfdbe -- oldcount }
 		pfdbe@ MiEvictablePageInsert
 	end
 
+	if (oldcount@ 1 ~=)
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
 	auto ipl
 
-	if (oldcount@ 1 ==)
-		if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
-			if (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
-				IPLDPC KeIPLRaise ipl!
-				rs@ HALCPUInterruptRestore
-
-				0 // priboost
-				MmModifiedPageEvent // event
-				KeEventSignal
-
-				ipl@ KeIPLLower
-			end else
-				rs@ HALCPUInterruptRestore
-			end
-		end elseif (MmAvailablePageCount@ MMNORMALTHRESH ==)
+	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
+		if (MmModifiedPageCount@ MmModifiedPageMaximum@ >=)
 			IPLDPC KeIPLRaise ipl!
 			rs@ HALCPUInterruptRestore
 
 			0 // priboost
-			MiPageAvailableEvent // event
-			KeEventSignal
-
-			ipl@ KeIPLLower
-		end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
-			IPLDPC KeIPLRaise ipl!
-			rs@ HALCPUInterruptRestore
-
-			0 // priboost
-			MiMustSucceedEvent // event
+			MmModifiedPageEvent // event
 			KeEventSignal
 
 			ipl@ KeIPLLower
 		end else
 			rs@ HALCPUInterruptRestore
 		end
+	end elseif (MmAvailablePageCount@ MMNORMALTHRESH ==)
+		IPLDPC KeIPLRaise ipl!
+		rs@ HALCPUInterruptRestore
+
+		0 // priboost
+		MiPageAvailableEvent // event
+		KeEventSignal
+
+		ipl@ KeIPLLower
+	end elseif (MmAvailablePageCount@ MMNORMALTHRESH <)
+		IPLDPC KeIPLRaise ipl!
+		rs@ HALCPUInterruptRestore
+
+		0 // priboost
+		MiMustSucceedEvent // event
+		KeEventSignal
+
+		ipl@ KeIPLLower
 	end else
 		rs@ HALCPUInterruptRestore
 	end
@@ -257,13 +254,12 @@ end
 fn MiEvictablePageRemove { pfdbe -- }
 	// assumes IPLDPC or equivalent
 
-	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
-		// removal from evictable list implies addition to a working set.
-		1 MmTotalWorkingSetSize +=
+	// removal from evictable list implies addition to a working set.
 
-		if (MmTotalWorkingSetSize@ MmPeakWorkingSetSize@ >)
-			MmTotalWorkingSetSize@ MmPeakWorkingSetSize!
-		end
+	1 MmTotalWorkingSetSize +=
+
+	if (MmTotalWorkingSetSize@ MmPeakWorkingSetSize@ >)
+		MmTotalWorkingSetSize@ MmPeakWorkingSetSize!
 	end
 
 	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_MODIFIED &)
@@ -315,11 +311,15 @@ fn MmEvictablePageReference { pfdbe -- oldcount }
 
 	oldcount@ 1 + pfdbe@ MiPageFrameEntryEvictable_ReferencesI + si
 
-	if (oldcount@ 0 ==)
-		// ref'd, remove from evictable page list
+	if (oldcount@)
+		rs@ HALCPUInterruptRestore
 
-		pfdbe@ MiEvictablePageRemove
+		return
 	end
+
+	// ref'd, remove from evictable page list
+
+	pfdbe@ MiEvictablePageRemove
 
 	rs@ HALCPUInterruptRestore
 end
@@ -421,9 +421,7 @@ fn MiEvictSinglePage { -- pfdbe ok }
 
 	pfdbe@ MiEvictablePageRemove
 
-	if (pfdbe@ MiPageFrameEntryEvictable_EvictionFlagsB + gb MMEVICTFLAG_WORKINGSET &)
-		1 MmTotalWorkingSetSize -=
-	end
+	1 MmTotalWorkingSetSize -=
 
 	0 ok!
 end

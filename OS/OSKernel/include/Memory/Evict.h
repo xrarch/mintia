@@ -3,8 +3,6 @@ fnptr MmEvictionFunction { pfdbe -- }
 const MMEVICTFLAG_MODIFIED   1
 const MMEVICTFLAG_DELETED    2
 const MMEVICTFLAG_PRIVATE    16
-const MMEVICTFLAG_WORKINGSET 32 // indicates that a page is considered for
-                                // working set accounting.
 const MMEVICTFLAG_VALID      64 // file cache
 const MMEVICTFLAG_IOINPROGRESS 128
 

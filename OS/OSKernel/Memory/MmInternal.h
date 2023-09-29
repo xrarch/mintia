@@ -130,6 +130,8 @@ externptr MiFreeListCount
 externptr MiEvictableListCount
 externptr MiZeroListCount
 
+externptr MiZeroingThreshold
+
 extern MiModifiedPageWriter { context1 context2 -- }
 
 // free page count threshold that counts as "dire", meaning the working set

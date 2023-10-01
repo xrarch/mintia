@@ -1,0 +1,177 @@
+//
+// Implements the balance manager thread.
+//
+
+#include "<df>/dragonfruit.h"
+
+#include "<inc>/HALLog.h"
+#include "<inc>/HALCPU.h"
+#include "<inc>/HALMap.h"
+#include "<inc>/HALDebug.h"
+#include "<inc>/HALRTC.h"
+
+#include "<inc>/Kernel.h"
+
+#include "<inc>/Executive.h"
+
+#include "<inc>/Security.h"
+
+#include "<inc>/Memory.h"
+
+#include "<inc>/Object.h"
+
+#include "<inc>/Process.h"
+
+#include "<inc>/IO.h"
+
+#include "<ll>/OSDLL/OS.h"
+
+#include "ExInternal.h"
+
+var ExiBalanceManagerThread 0
+public ExiBalanceManagerThread
+
+var ExOkToPageKernel 0
+public ExOkToPageKernel
+
+buffer ExBalanceManagerTimer KeTimer_SIZEOF
+
+const EXBALANCESETINTERVAL 1000
+
+externptr ExFinishShutdown
+
+fn ExBalanceManager { -- }
+	PRIORITY_LOWREALTIME 1 + // priority
+	KeThreadCurrent@ // thread
+	KeThreadPrioritySet
+
+	1 KeThreadCurrent@ PsThread_MemoryPrivilegedCount + !
+
+	KeThreadCurrent@ KeThreadIgnoreKill drop
+
+	// Responsible for:
+	// o Kernel thread stack swapping.
+	// o Process swapping.
+	// o Random thread priority boosting.
+	// o Working set trimming.
+	//
+	// This little idiot is the only reason we will fit snugly in 4MB RAM.
+
+	"ExBalanceManagerTimer" // name
+	0 // dpc
+	ExBalanceManagerTimer // timer
+	KeTimerInitialize
+
+	auto objecttable
+	8 alloc objecttable!
+
+	ExBalanceManagerTimer objecttable@!
+	MmLowMemoryEvent objecttable@ 4 + !
+
+	auto stackperiod
+	0 stackperiod!
+
+	0 // context1
+	0 // context2
+	EXBALANCESETINTERVAL // interval
+	ExBalanceManagerTimer // timer
+	KeTimerEnqueue drop
+
+	while (1)
+		auto ok
+		auto reason
+
+		KERNELMODE // waitmode
+		0 // alertable
+		OSWAITANY // waittype
+		OSWAIT_TIMEOUTINFINITE // timeout
+		2 // objectcount
+		objecttable@ // objecttable
+		0 // waitblocktable
+		KeThreadWaitForMultipleObjects reason!
+
+		if (DEBUGCHECKS)
+			if (reason@ z<)
+				if (reason@ STATUS_WAIT_TIMEOUT ~=)
+					reason@ "ExBalanceManager: failed to wait on low memory event (%i)\n" KeCrash
+				end
+			end
+		end
+
+		if (reason@ 0 ==)
+			// The timer expired. We have some periodic work to do.
+
+			if (ExShuttingDown@ ~~)
+				if (PsSystemInitProcess@ KeProcess_TerminatedB + gb)
+					// We're not shutting down, but SystemInit died... this is
+					// fatal to the system, so reboot.
+
+					PsSystemInitProcess@ KeProcess_KilledStatus + @
+					"SystemInit died (%i)\n" Printf
+
+					OSSHUTDOWN_REBOOT ExShutdownSystem
+					ExShutdownSystemFinish
+				end
+
+				if (ExOkToPageKernel@)
+					// It's okay to page the kernel now.
+
+					MmPageTheKernel
+
+					0 ExOkToPageKernel!
+				end
+			end elseif (ExFinishShutdown@)
+				// We've been asked to finish shutting down the system in the
+				// context of the balance manager, so do that now.
+
+				ExShutdownSystemFinish
+			end
+
+			if (stackperiod@ 5 >=)
+				// It's time to ask the swap worker to scan the kernel stacks.
+
+				MmRequestStackScan
+
+				0 stackperiod!
+			end
+
+			1 stackperiod +=
+
+			MmManageWorkingSets
+
+			KeBoostReadyThreads
+
+			ExBalanceManagerTimer KeTimerReset drop
+
+			0 // context1
+			0 // context2
+			EXBALANCESETINTERVAL // interval
+			ExBalanceManagerTimer // timer
+			KeTimerEnqueue drop
+
+			continue
+		end
+
+		// The low memory event was signaled. We need to restore memory
+		// balance.
+
+		// Trim working sets.
+
+		MmManageWorkingSets
+
+		// Ask the modified page writer to dump modified pages to their
+		// backing stores.
+
+		0 // priboost
+		MmModifiedPageEvent // event
+		KeEventSignal
+
+		// Wait 80ms before trying again to give other worker threads a
+		// chance to do stuff.
+
+		80 // interval
+		KERNELMODE // waitmode
+		0 // alertable
+		KeThreadSleep drop
+	end
+end

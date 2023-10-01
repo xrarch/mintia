@@ -1,5 +1,6 @@
 //
-// Implements the balance set manager thread.
+// Implements the swap worker thread.
+// 
 //
 
 #include "<df>/dragonfruit.h"
@@ -31,19 +32,10 @@
 buffer MmSwapEvent KeEvent_SIZEOF
 public MmSwapEvent
 
-buffer MmBalanceSetManagerTimer KeTimer_SIZEOF
-
-const MMBALANCESETINTERVAL 1000
-
-var MmStackAge 0
+const MMSTACKAGE 10
 
 var MiSwapOutStacksPlease 0
 public MiSwapOutStacksPlease
-
-externptr MiOkToUnwire
-externptr ExFinishShutdown
-
-extern MiUnwireKernel { -- }
 
 fn MmSwapWorkerInit { -- }
 	fnsection "INIT$text"
@@ -55,7 +47,6 @@ fn MmSwapWorkerInit { -- }
 	KeEventInitialize
 
 	auto ok
-
 	0 // context1
 	0 // context2
 	pointerof MiSwapWorker // startfunc
@@ -67,148 +58,28 @@ fn MmSwapWorkerInit { -- }
 
 rosection "INIT$text"
 	if (ok@)
-		ok@ "MmBalanceSetManager: couldn't create 'SwapWorker' thread (%i)\n" KeCrash
+		ok@ "Couldn't create 'SwapWorker' thread (%i)\n" KeCrash
 	end
 rosection "text"
 end
 
-// extern PrintPoolPTEList { -- }
+fn MmRequestStackScan { -- }
+	auto rs
+	HALCPUInterruptDisable rs!
 
-fn MmBalanceSetManager { -- }
-	PRIORITY_LOWREALTIME 1 + // priority
-	KeThreadCurrent@ // thread
-	KeThreadPrioritySet
+	if (MiSwapOutStacksPlease@)
+		rs@ HALCPUInterruptRestore
 
-	1 KeThreadCurrent@ PsThread_MemoryPrivilegedCount + !
-
-	KeThreadCurrent@ KeThreadIgnoreKill drop
-
-	// responsible for:
-	// - kernel thread stack swapping
-	// - process swapping (page table swapping & working set purging)
-	// - random thread priority boosting
-	// - working set trimming
-
-	// this little idiot is the only reason we will fit snugly in 4MB RAM.
-
-	"MmBalanceSetManagerTimer" // name
-	0 // dpc
-	MmBalanceSetManagerTimer // timer
-	KeTimerInitialize
-
-	auto objecttable
-	8 alloc objecttable!
-
-	MmBalanceSetManagerTimer objecttable@!
-	MiLowMemoryEvent objecttable@ 4 + !
-
-	auto stackperiod
-	0 stackperiod!
-
-	0 // context1
-	0 // context2
-	MMBALANCESETINTERVAL // interval
-	MmBalanceSetManagerTimer // timer
-	KeTimerEnqueue drop
-
-	while (1)
-		auto ok
-		auto reason
-
-		KERNELMODE // waitmode
-		0 // alertable
-		OSWAITANY // waittype
-		OSWAIT_TIMEOUTINFINITE // timeout
-		2 // objectcount
-		objecttable@ // objecttable
-		0 // waitblocktable
-		KeThreadWaitForMultipleObjects reason!
-
-		if (DEBUGCHECKS)
-			if (reason@ z<)
-				if (reason@ STATUS_WAIT_TIMEOUT ~=)
-					reason@ "MmBalanceSetManager: failed to wait on low memory event (%i)\n" KeCrash
-				end
-			end
-		end
-
-		auto needed
-		auto dire
-		auto rs
-
-		if (reason@ 0 ==)
-			// timer expired
-
-			if (ExShuttingDown@ ~~)
-				if (PsSystemInitProcess@ KeProcess_TerminatedB + gb)
-					PsSystemInitProcess@ KeProcess_KilledStatus + @
-					"SystemInit died (%i)\n" Printf
-
-					OSSHUTDOWN_REBOOT ExShutdownSystem
-					ExShutdownSystemFinish
-				end
-
-				if (MiOkToUnwire@)
-					MiUnwireKernel
-					0 MiOkToUnwire!
-				end
-			end elseif (ExFinishShutdown@)
-				ExShutdownSystemFinish
-			end
-
-			MiManageWorkingSets drop
-
-			auto stackscanperiod
-			5 stackscanperiod!
-			10 MmStackAge!
-
-			if (stackperiod@ stackscanperiod@ >=)
-				// PrintPoolPTEList
-
-				HALCPUInterruptDisable rs!
-
-				if (MiSwapOutStacksPlease@ ~~)
-					1 MiSwapOutStacksPlease!
-					rs@ HALCPUInterruptRestore
-
-					0 // priboost
-					MmSwapEvent // event
-					KeEventSignal
-				end else
-					rs@ HALCPUInterruptRestore
-				end
-
-				0 stackperiod!
-			end else
-				1 stackperiod +=
-			end
-
-			KeBoostReadyThreads
-
-			MmBalanceSetManagerTimer KeTimerReset drop
-
-			0 // context1
-			0 // context2
-			MMBALANCESETINTERVAL // interval
-			MmBalanceSetManagerTimer // timer
-			KeTimerEnqueue drop
-		end elseif (reason@ 1 ==)
-			// low memory event
-
-			MiManageWorkingSets drop
-
-			0 // priboost
-			MmModifiedPageEvent // event
-			KeEventSignal
-
-			// wait 80ms before trying again
-
-			80 // interval
-			KERNELMODE // waitmode
-			0 // alertable
-			KeThreadSleep drop
-		end
+		return
 	end
+
+	1 MiSwapOutStacksPlease!
+
+	rs@ HALCPUInterruptRestore
+
+	0 // priboost
+	MmSwapEvent // event
+	KeEventSignal
 end
 
 var MmProcessSwapOutListHead 0
@@ -318,7 +189,7 @@ fn MiSwapOutStacks { -- }
 		auto nthread
 		thread@ KeThread_QueueNext + @ nthread!
 
-		if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MmStackAge@ >=
+		if (uptimesec@ thread@ KeThread_WaitOrReadyTimeSec + @ - MMSTACKAGE >=
 			thread@ KeThread_KernelStackCanBeSwappedB + gb &&)
 
 			// This thread is a good candidate for kernel stack outswap.

@@ -27,7 +27,6 @@ extern MmKernelStackAlloc { -- kstack ok }
 extern MmKernelStackFree { kstack -- }
 
 extern MmModifiedPageWriter { context1 context2 -- }
-extern MmBalanceSetManager { -- }
 extern MmZeroPageWorker { -- }
 
 extern MmMPWAnonTransferInitialize { pagefile transfer -- }
@@ -47,7 +46,13 @@ extern MmPageFrameZero { offset phyaddr -- }
 
 extern MmPFDBEToPhysicalAddress { pfdbe -- phyaddr }
 
+extern MmRequestStackScan { -- }
+extern MmPageTheKernel { -- }
+
+extern MmManageWorkingSets { -- }
+
 externptr MmModifiedPageEvent
+externptr MmLowMemoryEvent
 
 externptr MmConstantZeroPage
 
@@ -56,7 +61,6 @@ externptr MmAvailablePageCount
 externptr MmLowAvailablePageCount
 externptr MmSufficientAvailablePageCount
 externptr MmSectionObjectType
-externptr MmBalanceSetManagerThread
 externptr MmModifiedPageWriterThread
 
 externptr MmPageFaultCount

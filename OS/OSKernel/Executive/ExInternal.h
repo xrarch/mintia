@@ -4,6 +4,14 @@ extern ExiMutexInit { -- }
 extern ExiTimerInit { -- }
 
 
+// balance manager stuff
+
+
+extern ExBalanceManager { -- }
+
+externptr ExiBalanceManagerThread
+
+
 // handle table stuff
 
 

@@ -76,9 +76,6 @@ public MmHardPageFaultCount
 var MmPageInCount 0
 public MmPageInCount
 
-var MmBalanceSetManagerThread 0
-public MmBalanceSetManagerThread
-
 var MiWorkingSetDefaultMinimum 8
 public MiWorkingSetDefaultMinimum
 
@@ -127,8 +124,8 @@ public MiInited
 buffer MmSystemQuota MiQuotaBlock_SIZEOF
 public MmSystemQuota
 
-buffer MiLowMemoryEvent KeEvent_SIZEOF
-public MiLowMemoryEvent
+buffer MmLowMemoryEvent KeEvent_SIZEOF
+public MmLowMemoryEvent
 
 buffer MmModifiedPageEvent KeEvent_SIZEOF
 public MmModifiedPageEvent
@@ -233,8 +230,8 @@ rosection "text"
 
 	0 // signaled
 	OSEVENT_NOTIF // type
-	"MiLowMemoryEvent" // name
-	MiLowMemoryEvent // event
+	"MmLowMemoryEvent" // name
+	MmLowMemoryEvent // event
 	KeEventInitialize
 
 	1 // signaled
@@ -782,7 +779,15 @@ fn MmInitPhysicalCommit { -- }
 	MmIncrementCommitLimit
 end
 
-fn MiSysPTEDereferenceAndSet { pfdbe pte pteaddr -- }
+fn MiSysPteDereferenceAndSet { pfdbe pte pteaddr -- }
+	// Nonpaged helper routine for MmPageTheKernel.
+	// Atomically dereferences the kernel page to place it on the evictable
+	// list, and sets the PTE to transition. This has to be atomic because
+	// arbitrary other activity could be going on in the kernel while its
+	// being made pageable, and poor timing of a fault here could otherwise
+	// cause catastrophe. On MP, this can be guarded with the PFN lock (or
+	// whatever lock ends up guarding PTE state).
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -795,7 +800,7 @@ fn MiSysPTEDereferenceAndSet { pfdbe pte pteaddr -- }
 	ipl@ KeIPLLower
 end
 
-fn MiUnwireKernel { -- }
+fn MmPageTheKernel { -- }
 	fnsection "PAGE$text"
 
 	auto unwr
@@ -830,7 +835,7 @@ fn MiUnwireKernel { -- }
 
 			if (DEBUGCHECKS)
 				if (ok@)
-					ok@ "MiUnwireKernel: failed to interpret PTE (%i)\n" KeCrash
+					ok@ "MmPageTheKernel: failed to interpret PTE (%i)\n" KeCrash
 				end
 			end
 
@@ -869,7 +874,7 @@ fn MiUnwireKernel { -- }
 				pfdbe@ // pfdbe
 				phyaddr@ PTE_TRANSITION | PTE_TLBHACK | // pte
 				pteaddr@ // pteaddr
-				MiSysPTEDereferenceAndSet
+				MiSysPteDereferenceAndSet
 
 				1 MmFluidPageCount KeInterlockedIncrement drop
 				1 MmAnonymousPageCount KeInterlockedIncrement drop

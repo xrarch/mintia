@@ -113,7 +113,6 @@ externptr MiZeroThreadPoolPage
 externptr MiInited
 externptr MiPageAvailableEvent
 externptr MiMustSucceedEvent
-externptr MiLowMemoryEvent
 
 externptr MiModifiedPageListHead
 externptr MiModifiedPageListTail
@@ -396,8 +395,6 @@ extern MiWorkingSetEntryFindByVirtualAddress { vaddr process -- wsli wsleptr ok 
 extern MiWorkingSetEntryFree { wsli wsleptr process -- }
 
 extern MiWorkingSetEntryForceOut { vaddr pfdbe -- }
-
-extern MiManageWorkingSets { -- success }
 
 
 // MDL stuff

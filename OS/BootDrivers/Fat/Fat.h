@@ -226,7 +226,7 @@ endstruct
 struct FatDCBData
 	FatFCBData_SIZEOF Common
 
-	4 SplayTreeRoot
+	ExAvlTree_SIZEOF FcbTree
 
 	ComBitmapHeader_SIZEOF DirentBitmapHeader
 	4 DirentHint
@@ -325,8 +325,8 @@ extern FatUnixToDate { timestamp -- date }
 extern FatUnixToTime { timestamp -- time }
 
 const NAME_EQUAL   0
-const NAME_LESS    1
-const NAME_GREATER 2
+const NAME_LESS    -1
+const NAME_GREATER 1
 
 extern FatVerifyName { name -- ok }
 extern FatNameCompare { name1 name2 -- cmp }

@@ -160,7 +160,7 @@ fn (IODispatchUnlinkFunction) FatUnlink { name dirfcb -- ok }
 		// return an appropriate error status if this is a directory with
 		// cached children.
 
-		if (fcbdata@ FatDCBData_SplayTreeRoot + @)
+		if (fcbdata@ FatDCBData_FcbTree + ExAvlTree_Root + ExAvlTreeNode_RightChild + @)
 			fcb@ FatFCBDereference
 
 			mount@ FatTreeUnlock
@@ -1362,34 +1362,23 @@ end
 fn FatDirectoryGetCachedChild { name fcb mount -- childfcb ok }
 	fnsection "PAGE$text"
 
+	0 ok!
+
 	auto fcbdata
 	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ fcbdata!
 
-	// copypasted from ExSplayTreeFindNodeByValue and adapted for string
-	// comparisons
-
-	0 ok!
-
 	auto childfcbdata
-	fcbdata@ FatDCBData_SplayTreeRoot + @ childfcbdata!
+	fcbdata@ FatDCBData_FcbTree + ExAvlTree_Root + ExAvlTreeNode_RightChild + @ childfcbdata!
 
-	while (1)
-		if (childfcbdata@ ~~)
-			break
-		end
-
+	while (childfcbdata@)
 		auto cmp
-		name@ childfcbdata@ ExSplayTreeNode_Value + @ FatNameCompare cmp!
+		name@ childfcbdata@ ExAvlTreeNode_Value + @ FatNameCompare cmp!
 
 		if (cmp@ NAME_LESS ==)
-			childfcbdata@ ExSplayTreeNode_LeftChild + @ childfcbdata!
+			childfcbdata@ ExAvlTreeNode_LeftChild + @ childfcbdata!
 		end elseif (cmp@ NAME_GREATER ==)
-			childfcbdata@ ExSplayTreeNode_RightChild + @ childfcbdata!
+			childfcbdata@ ExAvlTreeNode_RightChild + @ childfcbdata!
 		end else
-			childfcbdata@ // node
-			fcbdata@ FatDCBData_SplayTreeRoot + // rootptr
-			ExSplayTreeSplay
-
 			break
 		end
 	end
@@ -1407,17 +1396,11 @@ end
 fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 	fnsection "PAGE$text"
 
-	auto rootptr
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ FatDCBData_SplayTreeRoot + rootptr!
-
 	auto childfcbdata
 	childfcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ childfcbdata!
 
-	0 childfcbdata@ ExSplayTreeNode_LeftChild + !
-	0 childfcbdata@ ExSplayTreeNode_RightChild + !
-
 	auto name
-	childfcbdata@ ExSplayTreeNode_Value + @ name!
+	childfcbdata@ ExAvlTreeNode_Value + @ name!
 
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
@@ -1441,42 +1424,20 @@ fn FatDirectoryInsertCachedChild { childfcb fcb mount -- }
 	fcb@ childfcbdata@ FatFCBData_ParentDirDCB + !
 	fcb@ FatFCBReference
 
-	// insert the childfcbdata in the directory's splay tree.
+	// insert the childfcbdata in the directory's AVL tree.
 
-	auto parent
-	rootptr@@ parent!
+	pointerof FatAvlCompare // func
+	childfcbdata@ // node
+	fcb@ IOFileControlBlock_Paged + @
+	IOFileControlBlockPaged_Extension + @
+	FatDCBData_FcbTree + // tree
+	ExAvlTreeInsertWithComparisonFunction
+end
 
-	if (parent@ ~~)
-		childfcbdata@ rootptr@!
-		0 childfcbdata@ ExSplayTreeNode_Parent + !
-
-		return
-	end
-
-	while (1)
-		auto cmp
-		name@ parent@ ExSplayTreeNode_Value + @ FatNameCompare cmp!
-
-		if (cmp@ NAME_LESS ==)
-			if (parent@ ExSplayTreeNode_LeftChild + @)
-				parent@ ExSplayTreeNode_LeftChild + @ parent!
-			end else
-				childfcbdata@ parent@ ExSplayTreeNode_LeftChild + !
-				parent@ childfcbdata@ ExSplayTreeNode_Parent + !
-				break
-			end
-		end else
-			if (parent@ ExSplayTreeNode_RightChild + @)
-				parent@ ExSplayTreeNode_RightChild + @ parent!
-			end else
-				childfcbdata@ parent@ ExSplayTreeNode_RightChild + !
-				parent@ childfcbdata@ ExSplayTreeNode_Parent + !
-				break
-			end
-		end
-	end
-
-	childfcbdata@ rootptr@ ExSplayTreeSplay
+fn (ExAvlTreeComparisonF) FatAvlCompare { node1 node2 -- result }
+	node1@ ExAvlTreeNode_Value + @ // name1
+	node2@ ExAvlTreeNode_Value + @ // name2
+	FatNameCompare result!	
 end
 
 fn FatDirectoryRemoveCachedChild { childfcb mount -- }
@@ -1487,9 +1448,6 @@ fn FatDirectoryRemoveCachedChild { childfcb mount -- }
 
 	auto fcb
 	childfcbdata@ FatFCBData_ParentDirDCB + @ fcb!
-
-	auto rootptr
-	fcb@ IOFileControlBlock_Paged + @ IOFileControlBlockPaged_Extension + @ FatDCBData_SplayTreeRoot + rootptr!
 
 	auto fatdata
 	mount@ IOMount_Extension + @ fatdata!
@@ -1512,11 +1470,13 @@ fn FatDirectoryRemoveCachedChild { childfcb mount -- }
 		n@ fatdata@ FatData_FCBDataListHead + !
 	end
 
-	// remove the childfcbdata from the directory's splay tree.
+	// remove the childfcbdata from the directory's avl tree.
 
 	childfcbdata@ // node
-	rootptr@ // rootptr
-	ExSplayTreeRemove
+	fcb@ IOFileControlBlock_Paged + @
+	IOFileControlBlockPaged_Extension + @
+	FatDCBData_FcbTree + // tree
+	ExAvlTreeRemove
 
 	fcb@ FatFCBDereference
 end
@@ -1538,7 +1498,7 @@ fn FatUpdateDirent { fcb -- }
 	end
 
 	// it's okay to fiddle with the dirent here, since the FCB is already part
-	// of the parent directory's splay tree, which means nobody is going to be
+	// of the parent directory's AVL tree, which means nobody is going to be
 	// looking at this dirent directly.
 
 	auto bcb
@@ -1727,7 +1687,7 @@ end
 fn FatDirectoryGetChildByName { flags name dirfcb mount -- fcb ok }
 	fnsection "PAGE$text"
 
-	// search the splay tree for the current DCB for the name.
+	// search the AVL tree for the current DCB for the name.
 
 	name@ // name
 	dirfcb@ // fcb

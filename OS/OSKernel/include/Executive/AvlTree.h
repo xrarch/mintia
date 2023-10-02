@@ -20,6 +20,7 @@ endstruct
 
 extern ExAvlTreeInitialize { tree -- }
 
+extern ExAvlTreeInsertWithComparisonFunction { func node tree -- }
 extern ExAvlTreeInsert { node tree -- }
 extern ExAvlTreeRemove { node tree -- }
 
@@ -34,6 +35,8 @@ extern ExAvlTreeFindNodeByValueRange { value tree -- node }
 extern ExAvlTreeFindFirstContainingNode { value endvalue tree -- node }
 
 extern ExAvlTreeFindEmptyRange { size tree -- value }
+
+fnptr ExAvlTreeComparisonF { node1 node2 -- result }
 
 #ifdef DEBUGCHECKS
 

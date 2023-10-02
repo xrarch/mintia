@@ -51,8 +51,8 @@ struct IOiCacheInfoBlock
 	4 MapCount
 	4 Flags
 
-	4 SplayTreeRoot
-	4 BCBTreeRoot
+	ExAvlTree_SIZEOF PageTree
+	ExAvlTree_SIZEOF BcbTree
 
 	KeEvent_SIZEOF BCBTreeEvent
 endstruct

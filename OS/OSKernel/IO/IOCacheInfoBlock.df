@@ -103,14 +103,11 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 	0 cacheblock@ IOiCacheInfoBlock_LastModifiedPage + !
 
 	first@ // value
-	cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr
-	ExSplayTreeFindNodeByValue pfdbe! first!
+	cacheblock@ IOiCacheInfoBlock_PageTree + // tree
+	ExAvlTreeFindNodeByValue pfdbe!
 
 	if (pfdbe@ ~~)
-		// something happened to our first modified page since that hint was
-		// set, so use the next closest node.
-
-		first@ pfdbe!
+		cacheblock@ IOiCacheInfoBlock_PageTree + ExAvlTreeNodeFirst pfdbe!
 	end
 
 	while (pfdbe@)
@@ -140,7 +137,7 @@ fn IOCacheInfoBlockFlush { cacheblock -- ok }
 		pfdbe@ MmEvictablePageDereference drop
 
 		pfdbe@ IOiPageFrameEntryCache_Parent + // node
-		ExSplayTreeNodeNext pfdbe!
+		ExAvlTreeNodeNext pfdbe!
 	end
 
 	1 IOCacheInfoBlockDirtyCount -=
@@ -210,7 +207,6 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	0 ok!
 
 	auto pfdbe
-	auto lpfdbe
 
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
@@ -227,7 +223,7 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 	IOCACHEBLOCKFLAG_TRUNCATING cacheblock@ IOiCacheInfoBlock_Flags + |=
 
-	if (cacheblock@ IOiCacheInfoBlock_BCBTreeRoot + @)
+	if (cacheblock@ IOiCacheInfoBlock_BcbTree + ExAvlTree_Root + ExAvlTreeNode_RightChild + @)
 		ipl@ KeIPLLower
 
 		newsize@ // newsize
@@ -238,11 +234,11 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 	end
 
 	maxpage@ // value
-	cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr
-	ExSplayTreeFindNodeByValue pfdbe! lpfdbe!
+	cacheblock@ IOiCacheInfoBlock_PageTree + // tree
+	ExAvlTreeFindNodeByValue pfdbe!
 
 	if (pfdbe@ ~~)
-		lpfdbe@ pfdbe!
+		cacheblock@ IOiCacheInfoBlock_PageTree + ExAvlTreeNodeFirst pfdbe!
 	end
 
 	while (pfdbe@)
@@ -291,11 +287,11 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 
 			auto npfdbe
 			pfdbe@ IOiPageFrameEntryCache_Parent + // node
-			ExSplayTreeNodeNext npfdbe!
+			ExAvlTreeNodeNext npfdbe!
 
 			pfdbe@ IOiPageFrameEntryCache_Parent + // node
-			cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + // rootptr
-			ExSplayTreeRemove
+			cacheblock@ IOiCacheInfoBlock_PageTree + // tree
+			ExAvlTreeRemove
 
 			pfdbe@ MmEvictablePageDelete
 
@@ -322,14 +318,14 @@ fn IOCacheInfoBlockTruncate { newsize writeout cacheblock -- ok }
 			pfdbe@ MmEvictablePageDereference drop
 
 			pfdbe@ IOiPageFrameEntryCache_Parent + // node
-			ExSplayTreeNodeNext pfdbe!
+			ExAvlTreeNodeNext npfdbe!
 		end else
 			IPLDPC KeIPLRaise ipl!
 
 			pfdbe@ MmEvictablePageDereference drop
 
 			pfdbe@ IOiPageFrameEntryCache_Parent + // node
-			ExSplayTreeNodeNext pfdbe!
+			ExAvlTreeNodeNext npfdbe!
 		end
 	end
 
@@ -365,8 +361,8 @@ fn IOiCacheInfoBlockCreate { -- cacheblock ok }
 	0 cacheblock@ IOiCacheInfoBlock_MapCount + !
 	0 cacheblock@ IOiCacheInfoBlock_Flags + !
 	
-	0 cacheblock@ IOiCacheInfoBlock_SplayTreeRoot + !
-	0 cacheblock@ IOiCacheInfoBlock_BCBTreeRoot + !
+	cacheblock@ IOiCacheInfoBlock_PageTree + ExAvlTreeInitialize
+	cacheblock@ IOiCacheInfoBlock_BcbTree + ExAvlTreeInitialize
 
 	1 // signaled
 	OSEVENT_SYNCH // type

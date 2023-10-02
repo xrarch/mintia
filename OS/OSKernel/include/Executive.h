@@ -8,6 +8,7 @@
 #include "<inc>/Executive/Mutex.h"
 #include "<inc>/Executive/Shutdown.h"
 #include "<inc>/Executive/SplayTree.h"
+#include "<inc>/Executive/AvlTree.h"
 #include "<inc>/Executive/Timer.h"
 
 extern ExInitPhase0 { -- }

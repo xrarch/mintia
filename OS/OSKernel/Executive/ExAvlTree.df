@@ -29,3 +29,578 @@ var ExAvlTreeDepthCount 0
 public ExAvlTreeDepthCount
 
 #endif
+
+const BALANCE_MINUS_ONE 3
+
+table ExiNegateBalance
+	0 // 0
+	3 // 1
+	2 // 2
+	1 // 3
+endtable
+
+fn ExAvlTreeInitialize { tree -- }
+	// Set the root's parent to point to itself, and the children to be null.
+
+	auto root
+	tree@ ExAvlTree_Root + root!
+
+	root@ root@ ExAvlTreeNode_Parent + !
+	0 root@ ExAvlTreeNode_LeftChild + !
+	0 root@ ExAvlTreeNode_RightChild + !
+end
+
+fn ExAvlTreeInsert { node tree -- }
+	0 node@ ExAvlTreeNode_LeftChild + !
+	0 node@ ExAvlTreeNode_RightChild + !
+
+	auto findnode
+	tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + @ findnode!
+
+	if (findnode@ ~~)
+		// The tree is empty. Insert the node directly.
+
+		node@ tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + !
+		tree@ ExAvlTree_Root + node@ ExAvlTreeNode_Parent + !
+
+		return
+	end
+
+	auto value
+	node@ ExAvlTreeNode_Value + @ value!
+
+	auto parent
+
+	// parentbalance is initially used to track whether we need to insert under
+	// the left or the right child.
+
+	auto parentbalance
+
+	while (findnode@)
+		if (DEBUGCHECKS)
+			1 ExAvlTreeDepthCount KeInterlockedIncrement drop
+		end
+
+		findnode@ parent!
+
+		if (value@ findnode@ ExAvlTreeNode_Value + @ <)
+			findnode@ ExAvlTreeNode_LeftChild + @ findnode!
+			1 parentbalance!
+		end elseif (value@ findnode@ ExAvlTreeNode_Value + @ >)
+			findnode@ ExAvlTreeNode_RightChild + @ findnode!
+			0 parentbalance!
+		end elseif (DEBUGCHECKS)
+			"ExAvlTreeInsert: node already existed\n" KeCrash
+		end
+	end
+
+	if (parentbalance@)
+		node@ parent@ ExAvlTreeNode_LeftChild + !
+	end else
+		node@ parent@ ExAvlTreeNode_RightChild + !
+	end
+
+	parent@ node@ ExAvlTreeNode_Parent + !
+
+	// Set the root's balance to -1.
+
+	tree@ ExAvlTree_Root + ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & BALANCE_MINUS_ONE |
+	tree@ ExAvlTree_Root + ExAvlTreeNode_Parent + !
+
+	// Loop until we've balanced stuff.
+
+	while (1)
+		auto balance
+		1 balance!
+
+		if (node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			ExAvlTreeNode_LeftChild + @ node@ ==)
+
+			BALANCE_MINUS_ONE balance!
+		end
+
+		parent@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & parentbalance!
+
+		if (parentbalance@ ~~)
+			parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & balance@ |
+			parent@ ExAvlTreeNode_Parent + !
+
+			parent@ node!
+			parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+		end elseif (parentbalance@ balance@ ~=)
+			parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			parent@ ExAvlTreeNode_Parent + !
+
+			break
+		end else
+			parent@ ExiAvlTreeRebalance drop
+
+			break
+		end
+	end
+end
+
+fn ExAvlTreeRemove { node tree -- }
+	auto subnode
+	auto parent
+	auto child
+
+	if (node@ ExAvlTreeNode_LeftChild + @ ~~)
+		node@ subnode!
+	end elseif (node@ ExAvlTreeNode_RightChild + @ ~~)
+		node@ subnode!
+	end elseif (node@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & BALANCE_MINUS_ONE ==)
+		node@ ExAvlTreeNode_LeftChild + @ subnode!
+
+		while (subnode@ ExAvlTreeNode_RightChild + @)
+			subnode@ ExAvlTreeNode_RightChild + @ subnode!
+		end
+	end else
+		node@ ExAvlTreeNode_RightChild + @ subnode!
+
+		while (subnode@ ExAvlTreeNode_LeftChild + @)
+			subnode@ ExAvlTreeNode_LeftChild + @ subnode!
+		end
+	end
+
+	auto balance
+	BALANCE_MINUS_ONE balance!
+
+	subnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+
+	if (subnode@ ExAvlTreeNode_LeftChild + @ ~~)
+		subnode@ ExAvlTreeNode_RightChild + @ child!
+
+		if (parent@ ExAvlTreeNode_LeftChild + @ subnode@ ==)
+			child@ parent@ ExAvlTreeNode_LeftChild + !
+		end else
+			1 balance!
+
+			child@ parent@ ExAvlTreeNode_RightChild + !
+		end
+
+		if (child@)
+			child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & parent@ |
+			child@ ExAvlTreeNode_Parent + !
+		end
+	end else
+		subnode@ ExAvlTreeNode_LeftChild + @ child!
+
+		if (parent@ ExAvlTreeNode_LeftChild + @ subnode@ ==)
+			child@ parent@ ExAvlTreeNode_LeftChild + !
+		end else
+			1 balance!
+
+			child@ parent@ ExAvlTreeNode_RightChild + !
+		end
+
+		child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & parent@ |
+		child@ ExAvlTreeNode_Parent + !
+	end
+
+	// Set the root's balance to zero by resetting its parent link to point to
+	// itself again.
+
+	tree@ ExAvlTree_Root +
+	tree@ ExAvlTree_Root + ExAvlTreeNode_Parent + !
+
+	// Balance the tree.
+
+	auto parentbalance
+
+	while (1)
+		parent@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & parentbalance!
+
+		if (parentbalance@ balance@ ==)
+			// Zero out the parent's balance.
+
+			parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			parent@ ExAvlTreeNode_Parent + !
+		end elseif (parentbalance@ ~~)
+			// Set the parent's balance to the negated balance.
+
+			parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & [balance@]ExiNegateBalance@ |
+			parent@ ExAvlTreeNode_Parent + !
+
+			break
+		end elseif (parent@ ExiAvlTreeRebalance)
+			break
+		end else
+			parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+		end
+
+		BALANCE_MINUS_ONE balance!
+
+		if (parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			ExAvlTreeNode_RightChild + @ parent@ ==)
+
+			1 balance!
+		end
+
+		parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+	end
+
+	if (node@ subnode@ ~=)
+		node@ ExAvlTreeNode_Parent + @ subnode@ ExAvlTreeNode_Parent + !
+		node@ ExAvlTreeNode_LeftChild + @ subnode@ ExAvlTreeNode_LeftChild + !
+		node@ ExAvlTreeNode_RightChild + @ subnode@ ExAvlTreeNode_RightChild + !
+
+		subnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+
+		if (node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			ExAvlTreeNode_LeftChild + @ node@ ==)
+
+			subnode@ parent@ ExAvlTreeNode_LeftChild + !
+		end else
+			subnode@ parent@ ExAvlTreeNode_RightChild + !
+		end
+
+		subnode@ ExAvlTreeNode_LeftChild + @ child!
+
+		if (child@)
+			child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & subnode@ |
+			child@ ExAvlTreeNode_Parent + !
+		end
+
+		subnode@ ExAvlTreeNode_RightChild + @ child!
+
+		if (child@)
+			child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & subnode@ |
+			child@ ExAvlTreeNode_Parent + !
+		end
+	end
+end
+
+fn ExiAvlTreeRebalance { node -- case }
+	0 case!
+
+	auto balance
+	node@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & balance!
+
+	auto unbalanced
+
+	if (balance@ 1 ==)
+		node@ ExAvlTreeNode_RightChild + @ unbalanced!
+	end else
+		node@ ExAvlTreeNode_LeftChild + @ unbalanced!
+	end
+
+	auto childbalance
+	unbalanced@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & childbalance!
+
+	if (childbalance@ balance@ ==)
+		unbalanced@ ExiAvlTreePromote
+
+		// Set balance to zero
+
+		node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+		node@ ExAvlTreeNode_Parent + !
+
+		unbalanced@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+		unbalanced@ ExAvlTreeNode_Parent + !
+
+		return
+	end
+
+	if (childbalance@ [balance@]ExiNegateBalance@ ==)
+		auto child
+
+		if (balance@ 1 ==)
+			unbalanced@ ExAvlTreeNode_LeftChild + @ child!
+		end else
+			unbalanced@ ExAvlTreeNode_RightChild + @ child!
+		end
+
+		child@ ExiAvlTreePromote
+		child@ ExiAvlTreePromote
+
+		child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & childbalance!
+
+		child@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+		child@ ExAvlTreeNode_Parent + !
+
+		if (childbalance@ balance@ ==)
+			// Set node's balance to the inverse. Set unbalanced's balance to
+			// zero.
+
+			node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & [balance@]ExiNegateBalance@ |
+			node@ ExAvlTreeNode_Parent + !
+
+			unbalanced@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			unbalanced@ ExAvlTreeNode_Parent + !
+		end elseif (childbalance@ [balance@]ExiNegateBalance@ ==)
+			// Set unbalanced's balance to the balance. Set node's balance to
+			// zero.
+
+			unbalanced@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & balance@ |
+			unbalanced@ ExAvlTreeNode_Parent + !
+
+			node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			node@ ExAvlTreeNode_Parent + !
+		end else
+			// Zero out both balances.
+
+			node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			node@ ExAvlTreeNode_Parent + !
+
+			unbalanced@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+			unbalanced@ ExAvlTreeNode_Parent + !
+		end
+
+		return
+	end
+
+	unbalanced@ ExiAvlTreePromote
+
+	unbalanced@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & [balance@]ExiNegateBalance@ |
+	unbalanced@ ExAvlTreeNode_Parent + !
+
+	1 case!
+end
+
+fn ExiAvlTreePromote { node -- }
+	auto parent
+	auto grandparent
+	auto child
+
+	node@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+
+	parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & grandparent!
+
+	if (parent@ ExAvlTreeNode_LeftChild + @ node@ ==)
+		node@ ExAvlTreeNode_RightChild + @ child!
+
+		child@ parent@ ExAvlTreeNode_LeftChild + !
+
+		if (child@)
+			// Update parent but preserve balance value.
+			// Thank god for 32-bit alignment.
+
+			parent@
+			child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & |
+			child@ ExAvlTreeNode_Parent + !
+		end
+
+		parent@ node@ ExAvlTreeNode_RightChild + !
+	end else
+		node@ ExAvlTreeNode_LeftChild + @ child!
+
+		child@ parent@ ExAvlTreeNode_RightChild + !
+
+		if (child@)
+			// Update parent but preserve balance value.
+			// Thank god for 32-bit alignment.
+
+			parent@
+			child@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & |
+			child@ ExAvlTreeNode_Parent + !
+		end
+
+		parent@ node@ ExAvlTreeNode_LeftChild + !
+	end
+
+	node@
+	parent@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & |
+	parent@ ExAvlTreeNode_Parent + !
+
+	if (grandparent@ ExAvlTreeNode_LeftChild + @ parent@ ==)
+		node@ grandparent@ ExAvlTreeNode_LeftChild + !
+	end else
+		node@ grandparent@ ExAvlTreeNode_RightChild + !
+	end
+
+	grandparent@
+	node@ ExAvlTreeNode_Parent + @ EXAVLBALANCEMASK & |
+	node@ ExAvlTreeNode_Parent + !
+end
+
+fn ExAvlTreeNodeNext { node -- nextnode }
+	node@ ExAvlTreeNode_RightChild + @ nextnode!
+
+	if (nextnode@)
+		while (nextnode@ ExAvlTreeNode_LeftChild + @)
+			nextnode@ ExAvlTreeNode_LeftChild + @ nextnode!
+		end
+
+		return
+	end
+
+	node@ nextnode!
+
+	while (nextnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+		ExAvlTreeNode_RightChild + @ nextnode@ ==)
+
+		nextnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & nextnode!
+	end
+
+	if (nextnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+		ExAvlTreeNode_LeftChild + @ nextnode@ ==)
+
+		nextnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & nextnode!
+
+		return
+	end
+
+	0 nextnode!
+end
+
+fn ExAvlTreeNodePrevious { node -- prevnode }
+	node@ ExAvlTreeNode_LeftChild + @ prevnode!
+
+	if (prevnode@)
+		while (prevnode@ ExAvlTreeNode_RightChild + @)
+			prevnode@ ExAvlTreeNode_RightChild + @ prevnode!
+		end
+
+		return
+	end
+
+	node@ prevnode!
+
+	while (prevnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK &
+		ExAvlTreeNode_LeftChild + @ prevnode@ ==)
+
+		prevnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & prevnode!
+	end
+
+	auto parent
+	prevnode@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & parent!
+
+	if (parent@ ExAvlTreeNode_RightChild + @ prevnode@ ==)
+		if (parent@ parent@ ExAvlTreeNode_Parent + @ EXAVLPARENTMASK & ~=)
+			parent@ prevnode!
+
+			return
+		end
+	end
+
+	0 prevnode!
+end
+
+fn ExAvlTreeNodeFirst { tree -- first }
+	tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + @ first!
+
+	if (first@ ~~)
+		return
+	end
+
+	while (first@ ExAvlTreeNode_LeftChild + @)
+		first@ ExAvlTreeNode_LeftChild + @ first!
+	end
+end
+
+fn ExAvlTreeFindNodeByValue { value tree -- node }
+	// use when nodes represent points
+
+	if (DEBUGCHECKS)
+		1 ExAvlTreeLookupCount KeInterlockedIncrement drop
+	end
+
+	tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + @ node!
+
+	while (node@)
+		if (DEBUGCHECKS)
+			1 ExAvlTreeDepthCount KeInterlockedIncrement drop
+		end
+
+		if (value@ node@ ExAvlTreeNode_Value + @ <)
+			node@ ExAvlTreeNode_LeftChild + @ node!
+		end elseif (value@ node@ ExAvlTreeNode_Value + @ >)
+			node@ ExAvlTreeNode_RightChild + @ node!
+		end else
+			return
+		end
+	end
+end
+
+fn ExAvlTreeFindNodeByValueRange { value tree -- node }
+	// use when nodes represent ranges
+
+	if (DEBUGCHECKS)
+		1 ExAvlTreeLookupCount KeInterlockedIncrement drop
+	end
+
+	tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + @ node!
+
+	while (node@)
+		if (DEBUGCHECKS)
+			1 ExAvlTreeDepthCount KeInterlockedIncrement drop
+		end
+
+		if (value@ node@ ExAvlTreeNode_Value + @ <)
+			node@ ExAvlTreeNode_LeftChild + @ node!
+		end elseif (value@ node@ ExAvlTreeNode_EndValue + @ >=)
+			node@ ExAvlTreeNode_RightChild + @ node!
+		end else
+			return
+		end
+	end
+end
+
+fn ExAvlTreeFindFirstContainingNode { value endvalue tree -- node }
+	tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + @ node!
+
+	while (node@)
+		if (value@ node@ ExAvlTreeNode_EndValue + @ >=)
+			node@ ExAvlTreeNode_RightChild + @ node!
+		end elseif (endvalue@ node@ ExAvlTreeNode_Value + @ <=)
+			node@ ExAvlTreeNode_LeftChild + @ node!
+		end else
+			return
+		end
+	end
+end
+
+fn ExAvlTreeFindEmptyRange { size tree -- value }
+	// Returns 0 in value if no range found. This function is intended for use
+	// by memory mapping, so it uses PAGESIZE as a minimum and
+	// MMHIGHESTUSERADDRESS as a maximum.
+
+	if (MMHIGHESTUSERADDRESS 1 + PAGESIZE - size@ <)
+		0 value!
+
+		return
+	end
+
+	auto node
+	tree@ ExAvlTree_Root + ExAvlTreeNode_RightChild + @ node!
+
+	if (node@ ~~)
+		PAGESIZE value!
+
+		return
+	end
+
+	while (node@ ExAvlTreeNode_LeftChild + @)
+		node@ ExAvlTreeNode_LeftChild + @ node!
+	end
+
+	if (node@ ExAvlTreeNode_Value + @ PAGESIZE - size@ >=)
+		PAGESIZE value!
+
+		return
+	end
+
+	while (1)
+		auto nextnode
+		node@ ExAvlTreeNodeNext nextnode!
+
+		if (nextnode@)
+			if (nextnode@ ExAvlTreeNode_Value + @ node@ ExAvlTreeNode_EndValue + @ - size@ >=)
+				node@ ExAvlTreeNode_EndValue + @ value!
+
+				return
+			end
+		end elseif (MMHIGHESTUSERADDRESS 1 + node@ ExAvlTreeNode_EndValue + @ - size@ >=)
+			node@ ExAvlTreeNode_EndValue + @ value!
+
+			return
+		end else
+			0 value!
+
+			return
+		end
+
+		nextnode@ node!
+	end
+end

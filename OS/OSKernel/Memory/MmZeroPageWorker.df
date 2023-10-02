@@ -51,10 +51,19 @@ fn MmZeroPageWorker { -- }
 	end
 end
 
+const ZEROCLUSTERMAX 8
+
 fn MiZeroFreePages { -- }
+	// Collect clusters of up to 8 free pages to zero at a time until our
+	// goals are met.
+
 	auto listhead
 	auto listtail
 	auto count
+	auto pfdbe
+	auto rs
+
+	MiFreeListCount@ count!
 
 	auto pooladdr
 	MiZeroingPage@ pooladdr!
@@ -62,98 +71,109 @@ fn MiZeroFreePages { -- }
 	auto pteaddr
 	pooladdr@ MmVirtualtoPTEAddress pteaddr!
 
-	// We grab the entire free list, zero it out, then insert it at once onto
-	// the zeroed list. This has a small risk of starving people for free
-	// pages, but they will just block, and when they've all blocked, we will
-	// get a chance to finish, so that situation is self-limiting.
+	while (count@)
+		auto clustermax
+		count@ ZEROCLUSTERMAX min clustermax!
 
-	auto rs
-	HALCPUInterruptDisable rs!
+		auto clustersize
+		0 clustersize!
 
-	MiFreeListCount@ count!
+		0 listhead!
 
-	if (count@ MiZeroingThreshold@ <)
-		rs@ HALCPUInterruptRestore
+		while (clustersize@ clustermax@ <)
+			HALCPUInterruptDisable rs!
 
-		return
-	end
+			MiPageFreeListHead@ pfdbe!
 
-	if (MmAvailablePageCount@ count@ - MMNORMALTHRESH 16 + <)
-		rs@ HALCPUInterruptRestore
+			if (pfdbe@ ~~)
+				rs@ HALCPUInterruptRestore
 
-		return
-	end
+				break
+			end
 
-	MiPageFreeListHead@ listhead!
-	0 MiPageFreeListHead!
+			pfdbe@ MiPageFrameEntryFree_Next + @ MiPageFreeListHead!
 
-	0 MiFreeListCount!
-	count@ MmAvailablePageCount -=
+			1 MiFreeListCount -=
+			1 MmAvailablePageCount -=
 
-	rs@ HALCPUInterruptRestore
+			rs@ HALCPUInterruptRestore
 
-	if (count@ ~~)
-		return
-	end
+			0 pfdbe@ MiPageFrameEntryFree_Next + !
 
-	auto pfdbe
-	listhead@ pfdbe!
+			if (listhead@ ~~)
+				pfdbe@ listhead!
+			end else
+				pfdbe@ listtail@ MiPageFrameEntryFree_Next + !
+			end
 
-	while (pfdbe@)
-		// Map the page.
+			pfdbe@ listtail!
 
-		pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << // phyaddr
-		PTE_V PTE_W | PTE_NC | // flags
-		pteaddr@ // pteaddr
-		MiPTEUpdate drop drop
+			1 clustersize +=
+			1 count -=
+		end
 
-		// Zero it out.
+		if (listhead@ ~~)
+			break
+		end
 
-		pooladdr@ // ptr
-		PAGESIZE // size
-		0 // word
-		memset
+		// Zero out the list of pages.
 
-		// Get a new one and loop.
+		listhead@ pfdbe!
 
-		pfdbe@ listtail!
-		pfdbe@ MiPageFrameEntryFree_Next + @ pfdbe!
-	end
+		while (pfdbe@)
+			// Map the page.
+
+			pfdbe@ MiPageFrameDatabase@ - MiPageFrameEntry_SIZEOF / PAGESHIFT << // phyaddr
+			PTE_V PTE_W | PTE_NC | // flags
+			pteaddr@ // pteaddr
+			MiPTEUpdate drop drop
+
+			// Zero it out.
+
+			pooladdr@ // ptr
+			PAGESIZE // size
+			0 // word
+			memset
+
+			// Get a new one and loop.
+
+			pfdbe@ MiPageFrameEntryFree_Next + @ pfdbe!
+		end
 
 #ifdef XRSTATION
-	// We mapped the pages noncached, so we have to flush the data cache.
-	// We do this once instead of continuously trashing the cache the whole
-	// time we zero out pages. The value of doing it this way should be
-	// carefully re-assessed when moving to MP systems, where this may do an
-	// IPI and/or kill multiple levels of cache.
+		// We mapped the pages noncached, so we have to flush the data cache.
+		// We do this once instead of continuously trashing the cache the whole
+		// time we zero out pages. The value of doing it this way should be
+		// carefully re-assessed when moving to MP systems, where this may do an
+		// IPI and/or kill multiple levels of cache.
 
-	HALDcacheExpunge
+		HALDcacheExpunge
 #endif
 
-	// Place all the pages on the zeroed list at once and update the events
-	// appropriately.
+		// Place all the pages on the zeroed list at once.
 
-	HALCPUInterruptDisable rs!
+		HALCPUInterruptDisable rs!
 
-	MiPageZeroListHead@ listtail@ MiPageFrameEntryFree_Next + !
-	listhead@ MiPageZeroListHead!
+		MiPageZeroListHead@ listtail@ MiPageFrameEntryFree_Next + !
+		listhead@ MiPageZeroListHead!
 
-	count@ MmAvailablePageCount +=
-	count@ MiZeroListCount +=
+		clustersize@ MmAvailablePageCount +=
+		clustersize@ MiZeroListCount +=
 
-	rs@ HALCPUInterruptRestore
+		rs@ HALCPUInterruptRestore
 
-	// Make sure that the page available events are signalled correctly.
+		// Make sure that the page available events are signalled correctly.
 
-	if (MmAvailablePageCount@ MMNORMALTHRESH >=)
-		if (MiPageAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+		if (MmAvailablePageCount@ MMNORMALTHRESH >=)
+			if (MiPageAvailableEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
+				0 // priboost
+				MiPageAvailableEvent // event
+				KeEventSignal
+			end
+		end elseif (MiMustSucceedEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
 			0 // priboost
-			MiPageAvailableEvent // event
+			MiMustSucceedEvent // event
 			KeEventSignal
 		end
-	end elseif (MiMustSucceedEvent KeEvent_DispatchHeader + KeDispatchHeader_Signaled + @ ~~)
-		0 // priboost
-		MiMustSucceedEvent // event
-		KeEventSignal
 	end
 end

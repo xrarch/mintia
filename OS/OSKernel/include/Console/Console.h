@@ -1,15 +1,6 @@
-struct CoConsoleHeader
-	4 ProcessListHead
-	4 Mode
-
-	4 Echoed
-endstruct
-
 extern CoConsoleByFileHandle { requiredaccess filehandle -- consoleobject ok }
 
 extern CoConsoleInitialize { header -- }
-
-extern CoConsoleSignal { signal console -- ok }
 
 extern CoConsoleRemoveProcess { process -- ok }
 extern CoConsoleInsertProcess { process consoleobject -- ok }

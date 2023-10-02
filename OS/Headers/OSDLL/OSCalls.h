@@ -6,8 +6,6 @@
 extern OSConsolePutCharacter { c -- ok }
 extern OSSystemAbort { num1 num2 msg -- ok }
 
-extern OSGetSystemConsoleName { namebuf -- ok }
-
 extern OSGetBootFlags { -- bootflags ok }
 
 extern OSContinue { alertable signum context -- ok }

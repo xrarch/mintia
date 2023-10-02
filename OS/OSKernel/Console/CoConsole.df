@@ -31,42 +31,7 @@
 
 #include "<ll>/OSDLL/OSConsoleControl.h"
 
-fn CoConsoleInitialize { header -- }
-	fnsection "PAGE$text"
-
-	0 header@ CoConsoleHeader_ProcessListHead + !
-	OSCONSOLEMODE_RAW header@ CoConsoleHeader_Mode + !
-
-	0 header@ CoConsoleHeader_Echoed + !
-end
-
-fn CoConsoleSignal { signal console -- ok }
-	0 ok!
-
-	// this is why the console's process list is guarded with IPL synch, since
-	// we want to be able to do ctrl-C processing (sending OSSIGNAL_INT) from
-	// DPC context.
-
-	auto ipl
-	IPLDPC KeIPLRaise ipl!
-
-	auto process
-	console@ CoConsoleHeader_ProcessListHead + @ process!
-
-	while (process@)
-		signal@ // signal
-		process@ // process
-		KeProcessSignal ok!
-
-		if (ok@)
-			break
-		end
-
-		process@ PsProcess_ConsoleListNext + @ process!
-	end
-
-	ipl@ KeIPLLower
-end
+#include "CoDuplex.h"
 
 fn CoConsoleRemoveProcess { process -- ok }
 	// process createdelete lock must be held.
@@ -81,8 +46,8 @@ fn CoConsoleRemoveProcess { process -- ok }
 		return
 	end
 
-	auto console
-	consoleobject@ IODevice_ConsoleHeader + @ console!
+	auto duplex
+	consoleobject@ IODevice_Extension + @ duplex!
 
 	0 ok!
 
@@ -98,7 +63,7 @@ fn CoConsoleRemoveProcess { process -- ok }
 	if (ls@)
 		ns@ ls@ PsProcess_ConsoleListNext + !
 	end else
-		ns@ console@ CoConsoleHeader_ProcessListHead + !
+		ns@ duplex@ CoDuplex_ProcessListHead + !
 	end
 
 	if (ns@)
@@ -124,26 +89,26 @@ fn CoConsoleInsertProcess { process consoleobject -- ok }
 
 	consoleobject@ process@ PsProcess_ConsoleObject + !
 
-	auto console
-	consoleobject@ IODevice_ConsoleHeader + @ console!
+	auto duplex
+	consoleobject@ IODevice_Extension + @ duplex!
 
 	auto rs
 	HALCPUInterruptDisable rs!
 
 	auto h
-	console@ CoConsoleHeader_ProcessListHead + @ h!
+	duplex@ CoDuplex_ProcessListHead + @ h!
 
 	if (h@ ~~)
 		0 process@ PsProcess_ConsoleListNext + !
 		0 process@ PsProcess_ConsoleListPrev + !
 
-		process@ console@ CoConsoleHeader_ProcessListHead + !
+		process@ duplex@ CoDuplex_ProcessListHead + !
 	end else
 		0 process@ PsProcess_ConsoleListPrev + !
 
 		h@ process@ PsProcess_ConsoleListNext + !
 		process@ h@ PsProcess_ConsoleListPrev + !
-		process@ console@ CoConsoleHeader_ProcessListHead + !
+		process@ duplex@ CoDuplex_ProcessListHead + !
 	end
 
 	rs@ HALCPUInterruptRestore

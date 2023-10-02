@@ -11,7 +11,10 @@ struct CoDuplexBuffer
 endstruct
 
 struct CoDuplex
-	CoConsoleHeader_SIZEOF ConsoleHeader
+	4 ProcessListHead
+	4 Mode
+
+	4 Echoed
 
 	// the buffers are named for their perspective to the client in a PTY
 	// set-up.
@@ -64,6 +67,8 @@ const REQFLAG_RETURNANY 4
 
 const DUPLEXFLAG_PENDING_LF 0x80000000
 const DUPLEXFLAG_STOPPED    0x40000000
+
+extern CoDuplexSignal { signal duplex -- ok }
 
 extern CoDuplexRead { iopl -- done ok }
 extern CoDuplexWrite { iopl -- done ok }

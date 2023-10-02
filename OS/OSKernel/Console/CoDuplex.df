@@ -253,13 +253,17 @@ fn CoDuplexObjectCreate { context txfunc flushfunc flags pri quotablock permanen
 	0 duplex@ CoDuplex_ClientWriteListTail + !
 
 	if (flags@ OSDUPLEXFLAG_CONSOLE &)
-		duplex@ CoDuplex_ConsoleHeader + CoConsoleInitialize
-		duplex@ CoDuplex_ConsoleHeader + duplexobject@ IODevice_ConsoleHeader + !
+		0 duplex@ CoDuplex_ProcessListHead + !
+		OSCONSOLEMODE_RAW duplex@ CoDuplex_Mode + !
+
+		0 duplex@ CoDuplex_Echoed + !
+
+		1 duplexobject@ IODevice_ConsoleHeader + !
 
 		IOBOOSTCONHOST duplex@ CoDuplex_ServerBoost + !
 		IOBOOSTCONSOLE duplex@ CoDuplex_ClientBoost + !
 	end else
-		OSCONSOLEMODE_RAW OSCONSOLEMODE_NOECHO | duplex@ CoDuplex_ConsoleHeader + CoConsoleHeader_Mode + !
+		OSCONSOLEMODE_RAW OSCONSOLEMODE_NOECHO | duplex@ CoDuplex_Mode + !
 
 		if (pri@ PAGED &)
 			IOBOOSTPIPE duplex@ CoDuplex_ClientBoost + !
@@ -498,8 +502,8 @@ fn (IODispatchDeleteObjectFunction) CoDuplexDeleteFileObject { object -- ok }
 
 		if (deviceobject@ IODevice_ConsoleHeader + @)
 			OSSIGNAL_HUP // signal
-			deviceobject@ IODevice_ConsoleHeader + @ // console
-			CoConsoleSignal drop
+			deviceobject@ IODevice_Extension + @ // duplex
+			CoDuplexSignal drop
 		end
 	end elseif (deviceobject@ ObObjectReferences 2 <=)
 		if (duplex@ CoDuplex_Flags + @ OSDUPLEXFLAG_SIMPLEX &)
@@ -566,6 +570,34 @@ fn (IODispatchDeleteDeviceObjectFunction) CoDuplexDeleteObject { object -- }
 	end
 
 	duplex@ CoDuplex_QuotaBlock + @ MmQuotaBlockDereference
+end
+
+fn CoDuplexSignal { signal duplex -- ok }
+	0 ok!
+
+	// This is why the duplex's process list is guarded with IPL synch, since
+	// we want to be able to do ctrl-C processing (sending OSSIGNAL_INT) from
+	// DPC context.
+
+	auto ipl
+	IPLDPC KeIPLRaise ipl!
+
+	auto process
+	duplex@ CoDuplex_ProcessListHead + @ process!
+
+	while (process@)
+		signal@ // signal
+		process@ // process
+		KeProcessSignal ok!
+
+		if (ok@)
+			break
+		end
+
+		process@ PsProcess_ConsoleListNext + @ process!
+	end
+
+	ipl@ KeIPLLower
 end
 
 fn CoDuplexGetContext { duplex -- context }

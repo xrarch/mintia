@@ -14,8 +14,6 @@
 
 #include "KeInternal.h"
 
-// initializes a KeMutex
-
 fn KeMutexInitialize { name mode mutex -- }
 	name@ DISPATCHOBJECT_MUTEX mutex@ KiDispatchInitialize
 
@@ -31,8 +29,8 @@ end
 fn KeMutexRelease { abandon mutex -- ok }
 	0 ok!
 
-	// if kernelmode mutex, there is NO possible return value except for 0.
-	// so, when unlocking a kernelmode mutex, its safe to drop the return value.
+	// Note that if this is a KERNELMODE mutex, there is no possible error
+	// condition, so, when unlocking, it's safe to drop the return value.
 
 	auto current
 	KeThreadCurrent@ current!
@@ -102,60 +100,64 @@ fn KeMutexRelease { abandon mutex -- ok }
 
 	1 count +=
 
-	if (count@ z>)
-		// just unlocked it, remove it from the thread's owned mutex list
+	if (count@ z> ~~)
+		count@ mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 
-		auto ls
-		mutex@ KeMutex_Prev + @ ls!
+		ipl@ KeIPLLower
 
-		auto ns
-		mutex@ KeMutex_Next + @ ns!
+		return
+	end
 
-		if (ls@)
-			ns@ ls@ KeMutex_Next + !
-		end else
-			ns@ current@ KeThread_MutexListHead + !
-		end
+	// just unlocked it, remove it from the thread's owned mutex list
 
-		if (ns@)
-			ls@ ns@ KeMutex_Prev + !
-		end
+	auto ls
+	mutex@ KeMutex_Prev + @ ls!
 
-		0 mutex@ KeMutex_Prev + !
-		0 mutex@ KeMutex_Next + !
+	auto ns
+	mutex@ KeMutex_Next + @ ns!
 
-		// try to wake up a waiter.
+	if (ls@)
+		ns@ ls@ KeMutex_Next + !
+	end else
+		ns@ current@ KeThread_MutexListHead + !
+	end
 
-		auto wokenthread
-		0 // waitstatus
-		1 // priboost
-		mutex@ // object
-		1 // signal
-		KiDispatchSatisfyFirst wokenthread!
+	if (ns@)
+		ls@ ns@ KeMutex_Prev + !
+	end
 
-		if (wokenthread@)
-			// we woke up a thread who was waiting. make them the owner of the
-			// mutex
+	0 mutex@ KeMutex_Prev + !
+	0 mutex@ KeMutex_Next + !
 
-			wokenthread@ // thread
-			mutex@ // mutex
-			KiMutexOwnerSet
-		end else
-			// just unown the mutex
-			0 mutex@ KeMutex_OwningThread + !
-		end
+	// try to wake up a waiter.
 
-		if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
-			1 current@ KeThread_APCDisableCount + -=
+	auto wokenthread
+	0 // waitstatus
+	1 // priboost
+	mutex@ // object
+	1 // signal
+	KiDispatchSatisfyFirst wokenthread!
 
-			if (current@ KeThread_APCDisableCount + @ ~~)
-				if (current@ KeThread_APCListHead + @)
-					IPLAPC KiSoftwareInterruptRequest
-				end
+	if (wokenthread@)
+		// we woke up a thread who was waiting. make them the owner of the
+		// mutex
+
+		wokenthread@ // thread
+		mutex@ // mutex
+		KiMutexOwnerSet
+	end else
+		// just unown the mutex
+		0 mutex@ KeMutex_OwningThread + !
+	end
+
+	if (mutex@ KeMutex_Mode + @ KERNELMODE ==)
+		1 current@ KeThread_APCDisableCount + -=
+
+		if (current@ KeThread_APCDisableCount + @ ~~)
+			if (current@ KeThread_APCListHead + @)
+				IPLAPC KiSoftwareInterruptRequest
 			end
 		end
-	end else
-		count@ mutex@ KeMutex_DispatchHeader + KeDispatchHeader_Signaled + !
 	end
 
 	ipl@ KeIPLLower

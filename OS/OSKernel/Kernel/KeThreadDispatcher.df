@@ -263,25 +263,27 @@ fn KiThreadReady { thread -- }
 		end
 
 		thread@ [thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueHeads!
-	end else
-		// place at tail of ready queue
 
-		[thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueTails@ t!
-
-		if (t@ ~~)
-			thread@ [thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueHeads!
-
-			0 thread@ KeThread_QueueNext + !
-			0 thread@ KeThread_QueuePrev + !
-		end else
-			thread@ t@ KeThread_QueueNext + !
-			t@ thread@ KeThread_QueuePrev + !
-
-			0 thread@ KeThread_QueueNext + !
-		end
-
-		thread@ [thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueTails!
+		return
 	end
+
+	// place at tail of ready queue
+
+	[thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueTails@ t!
+
+	if (t@ ~~)
+		thread@ [thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueHeads!
+
+		0 thread@ KeThread_QueueNext + !
+		0 thread@ KeThread_QueuePrev + !
+	end else
+		thread@ t@ KeThread_QueueNext + !
+		t@ thread@ KeThread_QueuePrev + !
+
+		0 thread@ KeThread_QueueNext + !
+	end
+
+	thread@ [thread@ KeThread_PriorityB + gb]KiThreadPriorityQueueTails!
 end
 
 fn KiThreadSelect { thread -- nextthread }
@@ -308,44 +310,46 @@ fn KiThreadFind { low high -- thread }
 	while (high@ low@ >=)
 		[high@]KiThreadPriorityQueueHeads@ thread!
 
-		if (thread@)
-			// remove the thread from the queue and return it
+		if (thread@ ~~)
+			if (DEBUGCHECKS)
+				if (high@ ~~)
+					// shouldn't be able to happen unless the idle thread vanished on us
 
-			auto pri
-			thread@ KeThread_PriorityB + gb pri!
-
-			auto n
-			thread@ KeThread_QueueNext + @ n!
-
-			if (n@)
-				thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
-			end else // no next means we were the tail
-				thread@ KeThread_QueuePrev + @ [pri@]KiThreadPriorityQueueTails!
+					"KiThreadFind: no idle thread\n" KeCrash
+				end
 			end
 
-			thread@ KeThread_QueuePrev + @ n!
+			1 high -=
 
-			if (n@)
-				thread@ KeThread_QueueNext + @ n@ KeThread_QueueNext + !
-			end else // no prev means we were the head
-				thread@ KeThread_QueueNext + @ [pri@]KiThreadPriorityQueueHeads!
-			end
-
-			0 thread@ KeThread_QueueNext + !
-			0 thread@ KeThread_QueuePrev + !
-
-			return
+			continue
 		end
 
-		if (DEBUGCHECKS)
-			if (high@ ~~)
-				// shouldn't be able to happen unless the idle thread vanished on us
+		// remove the thread from the queue and return it
 
-				"KiThreadFind: no idle thread\n" KeCrash
-			end
+		auto pri
+		thread@ KeThread_PriorityB + gb pri!
+
+		auto n
+		thread@ KeThread_QueueNext + @ n!
+
+		if (n@)
+			thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+		end else // no next means we were the tail
+			thread@ KeThread_QueuePrev + @ [pri@]KiThreadPriorityQueueTails!
 		end
 
-		1 high -=
+		thread@ KeThread_QueuePrev + @ n!
+
+		if (n@)
+			thread@ KeThread_QueueNext + @ n@ KeThread_QueueNext + !
+		end else // no prev means we were the head
+			thread@ KeThread_QueueNext + @ [pri@]KiThreadPriorityQueueHeads!
+		end
+
+		0 thread@ KeThread_QueueNext + !
+		0 thread@ KeThread_QueuePrev + !
+
+		return
 	end
 end
 
@@ -358,6 +362,7 @@ fn KiThreadYieldQuantum { -- }
 
 	if (KiThreadNext@)
 		// we already got preempted at some point.
+
 		return
 	end
 
@@ -371,6 +376,7 @@ fn KiThreadYieldQuantum { -- }
 
 	if (next@ ~~)
 		// there's nobody else on our priority queue to give the CPU to.
+
 		return
 	end
 
@@ -471,6 +477,7 @@ fn KiThreadQuantumEnd { -- }
 
 	if (pri@ PRIORITY_IDLE ==)
 		-1 current@ KeThread_QuantumB + sb
+
 		return
 	end
 
@@ -505,6 +512,7 @@ fn KiThreadQuantumEnd { -- }
 	// decrement the thread's priority in order to decay boosting.
 
 	auto newpri
+	pri@ newpri!
 
 	if (pri@ PRIORITY_LOWREALTIME <)
 		if (current@ KeThread_InstantDecayB + gb)
@@ -517,8 +525,6 @@ fn KiThreadQuantumEnd { -- }
 				current@ KeThread_BasePriorityB + gb newpri!
 			end
 		end
-	end else
-		pri@ newpri!
 	end
 
 	if (pri@ newpri@ ~=)
@@ -575,23 +581,31 @@ fn KiThreadPriorityBoost { boost thread -- }
 	auto pri
 	thread@ KeThread_PriorityB + gb pri!
 
-	if (pri@ PRIORITY_LOWREALTIME <)
-		if (thread@ KeThread_InstantDecayB + gb ~~)
-			auto newpri
-			thread@ KeThread_BasePriorityB + gb boost@ + newpri!
+	if (pri@ PRIORITY_LOWREALTIME >=)
+		// we don't boost realtime threads.
 
-			if (newpri@ PRIORITY_HIGHUSER >)
-				PRIORITY_HIGHUSER newpri!
-			end
+		return
+	end
 
-			if (newpri@ pri@ >)
-				thread@ KeThread_Process + @ KeProcess_BaseQuantumB + gb thread@ KeThread_QuantumB + sb
+	if (thread@ KeThread_InstantDecayB + gb)
+		// the thread has an "instant decay" boost already.
 
-				newpri@ // priority
-				thread@ // thread
-				KiThreadPrioritySet
-			end
-		end
+		return
+	end
+
+	auto newpri
+	thread@ KeThread_BasePriorityB + gb boost@ + newpri!
+
+	if (newpri@ PRIORITY_HIGHUSER >)
+		PRIORITY_HIGHUSER newpri!
+	end
+
+	if (newpri@ pri@ >)
+		thread@ KeThread_Process + @ KeProcess_BaseQuantumB + gb thread@ KeThread_QuantumB + sb
+
+		newpri@ // priority
+		thread@ // thread
+		KiThreadPrioritySet
 	end
 end
 
@@ -645,65 +659,104 @@ fn KiThreadPrioritySet { priority thread -- }
 	thread@ KeThread_PriorityB + gb pri!
 
 	if (pri@ priority@ ==)
+		// priority didn't change, nothing to do.
+
 		return
 	end
-
-	auto next
 
 	priority@ thread@ KeThread_PriorityB + sb
 
 	if (thread@ KeThread_StatusB + gb THREADSTATUS_READY ==)
-		if (thread@ KeThread_InSwapListB + gb ~~)
-			// remove from ready queue and then re-ready
+		if (thread@ KeThread_InSwapListB + gb)
+			// the thread is in the in-swap list, so we don't have to place it
+			// in a new queue.
 
-			auto n
-			thread@ KeThread_QueueNext + @ n!
-
-			if (n@)
-				thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
-			end else // no next means we were the tail
-				thread@ KeThread_QueuePrev + @ [pri@]KiThreadPriorityQueueTails!
-			end
-
-			thread@ KeThread_QueuePrev + @ n!
-
-			if (n@)
-				thread@ KeThread_QueueNext + @ n@ KeThread_QueueNext + !
-			end else // no prev means we were the head
-				thread@ KeThread_QueueNext + @ [pri@]KiThreadPriorityQueueHeads!
-			end
-
-			0 thread@ KeThread_QueueNext + !
-			0 thread@ KeThread_QueuePrev + !
-
-			thread@ KiThreadReady
+			return
 		end
-	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_STANDBY ==)
-		if (priority@ pri@ <)
-			priority@ 1 + // low
-			pri@ // high
-			KiThreadFind next!
 
-			if (next@)
-				THREADSTATUS_STANDBY next@ KeThread_StatusB + sb
-				next@ KiThreadNext!
-				thread@ KiThreadReady
-			end
-		end
-	end elseif (thread@ KeThread_StatusB + gb THREADSTATUS_RUNNING ==)
-		if (KiThreadNext@ ~~)
-			if (priority@ pri@ <)
-				priority@ 1 + // low
-				pri@ // high
-				KiThreadFind next!
+		// we changed the priority level, so the thread is now on the wrong
+		// ready queue. manually unlink it from the queue, and then re-ready
+		// it to place it on the correct one.
 
-				if (next@)
-					THREADSTATUS_STANDBY next@ KeThread_StatusB + sb
-					next@ KiThreadNext!
-					IPLDPC KiSoftwareInterruptRequest
-				end
-			end
+		auto n
+		thread@ KeThread_QueueNext + @ n!
+
+		if (n@)
+			thread@ KeThread_QueuePrev + @ n@ KeThread_QueuePrev + !
+		end else // no next means we were the tail
+			thread@ KeThread_QueuePrev + @ [pri@]KiThreadPriorityQueueTails!
 		end
+
+		thread@ KeThread_QueuePrev + @ n!
+
+		if (n@)
+			thread@ KeThread_QueueNext + @ n@ KeThread_QueueNext + !
+		end else // no prev means we were the head
+			thread@ KeThread_QueueNext + @ [pri@]KiThreadPriorityQueueHeads!
+		end
+
+		0 thread@ KeThread_QueueNext + !
+		0 thread@ KeThread_QueuePrev + !
+
+		thread@ KiThreadReady
+
+		return
+	end
+
+	if (priority@ pri@ >=)
+		// raising priority, nothing else to do.
+
+		return
+	end
+
+	// we dropped the priority of this thread.
+
+	auto next
+
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_STANDBY ==)
+		// this is the next thread, so check if we have a higher priority
+		// thread we should switch to instead, now that we have dropped its
+		// priority.
+
+		priority@ 1 + // low
+		pri@ // high
+		KiThreadFind next!
+
+		if (next@ ~~)
+			return
+		end
+
+		THREADSTATUS_STANDBY next@ KeThread_StatusB + sb
+		next@ KiThreadNext!
+
+		// re-ready our thread to place it on the normal ready queue.
+
+		thread@ KiThreadReady
+
+		return
+	end
+
+	if (thread@ KeThread_StatusB + gb THREADSTATUS_RUNNING ==)
+		// this is the running thread, so we should see if there's now a
+		// higher priority thread that should preempt it.
+
+		if (KiThreadNext@)
+			// a next thread was already selected.
+
+			return
+		end
+
+		priority@ 1 + // low
+		pri@ // high
+		KiThreadFind next!
+
+		if (next@ ~~)
+			return
+		end
+
+		THREADSTATUS_STANDBY next@ KeThread_StatusB + sb
+		next@ KiThreadNext!
+		IPLDPC KiSoftwareInterruptRequest
 	end
 end
 

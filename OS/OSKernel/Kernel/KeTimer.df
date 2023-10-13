@@ -18,11 +18,11 @@
 table KiTimerTable[(TIMERTABLESIZE 2 *)]
 public KiTimerTable
 
-var KiTimerExpirationTicks 0
-public KiTimerExpirationTicks
-
 var KiTimeZoneOffset 0
 public KiTimeZoneOffset
+
+buffer KiTimerExpirationDPC KeDPC_SIZEOF
+public KiTimerExpirationDPC
 
 fn KeRealTimeToLocalTime { desttime srctime -- }
 	fnsection "PAGE$text"
@@ -229,11 +229,7 @@ fn KeTimerReset { timer -- signaled }
 	rs@ HALCPUInterruptRestore
 end
 
-fn KiTimerExpiration { -- }
-	auto earliest
-	KiTimerExpirationTicks@ earliest!
-	0 KiTimerExpirationTicks!
-
+fn (KeDPCFunction) KiTimerExpiration { context1 context2 dpc -- }
 	auto ticksatexpiry
 	KiClockTicks@ ticksatexpiry!
 
@@ -241,12 +237,9 @@ fn KiTimerExpiration { -- }
 	0 dpclisthead!
 
 	auto diff
-	ticksatexpiry@ earliest@ - 1 + diff!
+	ticksatexpiry@ context1@ - 1 + diff!
 
 	if (diff@ TIMERTABLESIZE >)
-		// deals with both underflow and excessively large expiration latency,
-		// which could otherwise cause excessive scanning of the timer table.
-
 		TIMERTABLESIZE diff!
 	end
 
@@ -254,7 +247,7 @@ fn KiTimerExpiration { -- }
 	// tick and now. process any timer in the entry queue which has expired.
 
 	auto i
-	earliest@ TIMERTABLESIZE 1 - & i!
+	context1@ TIMERTABLESIZE 1 - & i!
 
 	while (diff@)
 		auto lh
@@ -290,9 +283,9 @@ fn KiTimerExpiration { -- }
 					break
 				end
 
-				timer@ KeTimer_ExpiryTicks + @ earliest!
+				timer@ KeTimer_ExpiryTicks + @ context1!
 
-				if (earliest@ ticksatexpiry@ >)
+				if (context1@ ticksatexpiry@ >)
 					break
 				end
 			end
@@ -337,4 +330,8 @@ fn KiTimerInit { -- }
 
 		1 i +=
 	end
+
+	pointerof KiTimerExpiration // function
+	KiTimerExpirationDPC // dpc
+	KeDPCInitialize
 end

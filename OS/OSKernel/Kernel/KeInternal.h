@@ -20,7 +20,6 @@ extern KiThreadPriorityBoost { boost thread -- }
 
 extern KiInterruptUsermode { context userfunc dispatchfunc trapframe -- }
 
-extern KiTimerExpiration { -- }
 extern KiThreadQuantumEnd { -- }
 extern KiThreadNextSwitch { -- }
 
@@ -46,11 +45,11 @@ externptr KiPendingSoftwareInterruptFirst
 externptr KiDPCListHead
 externptr KiDPCListTail
 
+externptr KiTimerExpirationDPC
+
 externptr KiThreadNext
 
 externptr KiOldIPL
-
-externptr KiTimerExpirationEarliest
 
 externptr KiDispatchEvents
 
@@ -59,12 +58,10 @@ externptr KiQuantumUnitsDefault
 externptr KiClockTicks
 
 externptr KiTimerTable
-externptr KiTimerExpirationTicks
 
 // must be a power of two
 
 const TIMERTABLESIZE 128
 
-const KIDISPATCHIRQ_TIMER      1
 const KIDISPATCHIRQ_QUANTUMEND 2
 const KIDISPATCHIRQ_DPC        4

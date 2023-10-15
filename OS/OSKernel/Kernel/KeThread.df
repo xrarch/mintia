@@ -81,6 +81,7 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 
 	if (process@ KeProcess_SignalThread + @ ~~)
 		// this is synchronized by the CreateDeleteMutex
+
 		thread@ process@ KeProcess_SignalThread + !
 	end
 
@@ -124,6 +125,8 @@ fn KeThreadInitialize { context1 context2 startfunc process kstack name thread -
 	0 thread@ KeThread_QuantumEndCountB + sb
 
 	0 thread@ KeThread_UserAPCTriggeredB + sb
+
+	0 thread@ KeThread_UserInterruptB + sb
 end
 
 fn KeThreadUninitialize { thread -- }
@@ -260,12 +263,24 @@ fn KeThreadTerminate { status thread -- }
 end
 
 fn KeThreadSuspend { thread -- }
-	fnsection "PAGE$text"
+	auto rs
+	HALCPUInterruptDisable rs!
 
-	// XXX this would not work at all in SMP. IPI needed here.
+	if (thread@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+		// Never suspend a killed thread.
+
+		rs@ HALCPUInterruptRestore
+
+		return
+	end
+
+	// XXX This would not work at all in MP. IPI needed here.
 	// and also in like 50 other places, like TLB shootdown, etc etc
 
 	1 thread@ KeThread_SuspendedB + sb
+	1 thread@ KeThread_UserInterruptB + sb
+
+	rs@ HALCPUInterruptRestore
 end
 
 fn KeThreadResume { thread -- }
@@ -301,13 +316,24 @@ fn KeThreadDeliverOnWaitSignal { signal thread -- ok }
 		// un deliver on wait the signal
 
 		HALCPUInterruptDisable rs!
+
 		1 sigabs@ << ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
+
+		if (thread@ KeThread_SignalAcceptMask + @
+			thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
+			thread@ KeThread_Signals + @ &)
+
+			1 thread@ KeThread_UserInterruptB + sb
+		end
+
 		rs@ HALCPUInterruptRestore
 	end else
 		// deliver on wait the signal
 
 		HALCPUInterruptDisable rs!
+
 		1 sigabs@ << thread@ KeThread_SignalDeliverOnWaitMask + |=
+
 		rs@ HALCPUInterruptRestore
 	end
 end
@@ -318,11 +344,13 @@ fn KeThreadMaskSignal { signal thread -- ok }
 
 	if (sigabs@ ~~)
 		STATUS_INVALID_ARGUMENT ok!
+
 		return
 	end
 
 	if (sigabs@ 32 >=)
 		STATUS_INVALID_ARGUMENT ok!
+
 		return
 	end
 
@@ -411,104 +439,6 @@ fn KeThreadRundown { thread -- }
 	end
 end
 
-fn KeThreadIsKilled { ipl mode alertable waiting thread -- ok }
-	// gives the status code that should be returned for the thread's signal
-	// state. this only determines what should interrupt a syscall and be
-	// passed to OSDLL; actual signal dispatch and certain actions like core
-	// dumping are to be performed in usermode OSDLL code.
-
-	0 ok!
-
-	if (ipl@ IPLAPC >=)
-		// all events are masked off by >=IPLAPC.
-
-		return
-	end
-
-	if (thread@ KeThread_IgnoreKill + @)
-		// all events are being hard-ignored by the system for this thread.
-
-		return
-	end
-
-	if (alertable@ ~~)
-		if (mode@ KERNELMODE ==)
-			// kernel mode unalertable can block all events.
-
-			return
-		end
-	end
-
-	auto sig
-	thread@ KeThread_Signals + @ sig!
-
-	if (sig@ 1 OSSIGNAL_KILL << &)
-		// OSSIGNAL_KILL is unmaskable by usermode unalertable waits, and
-		// should also be respected by kernelmode alertable waits.
-
-		0 thread@ KeThread_SuspendedB + sb
-
-		STATUS_KILLED ok!
-
-		return
-	end
-
-	if (mode@ KERNELMODE ==)
-		// none of the remaining events are relevant to kernelmode waits.
-
-		return
-	end
-
-	if (alertable@ ~~)
-		// usermode unalertable can block all signals and APCs.
-
-		return
-	end
-
-	if (waiting@)
-		// we were called by someone about to block the thread.
-
-		if (thread@ KeThread_SignalAcceptMask + @ sig@ &)
-			// there are pending unmasked signals. clear them from the deliver
-			// -on-wait mask and go do them instead.
-
-			sig@ ~ thread@ KeThread_SignalDeliverOnWaitMask + &=
-
-			0 thread@ KeThread_SuspendedB + sb
-
-			STATUS_SIGNALLED ok!
-
-			return
-		end
-
-		if (thread@ KeThread_UserAPCListHead + @)
-			// there is a pending user APC, go do that instead.
-
-			1 thread@ KeThread_UserAPCTriggeredB + sb
-
-			0 thread@ KeThread_SuspendedB + sb
-
-			STATUS_USER_APC ok!
-		end
-
-		return
-	end
-
-	if (thread@ KeThread_SignalAcceptMask + @
-		thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
-		sig@ &)
-
-		// the signal is accepted and not specified in the deliver-on-wait
-		// mask, so deliver it.
-
-		0 thread@ KeThread_SuspendedB + sb
-
-		STATUS_SIGNALLED ok!
-
-		return
-	end
-end
-
 fn KeThreadSignal { signal thread -- ok }
 	if (signal@ ~~)
 		STATUS_INVALID_ARGUMENT ok!
@@ -526,6 +456,10 @@ fn KeThreadSignal { signal thread -- ok }
 	IPLDPC KeIPLRaise ipl!
 
 	1 signal@ << thread@ KeThread_Signals + |=
+
+	if (signal@ OSSIGNAL_KILL ==)
+		0 thread@ KeThread_SuspendedB + sb
+	end
 
 	thread@ KiThreadWakeForSignal
 
@@ -628,6 +562,8 @@ fn KiThreadWakeForSignal { thread -- }
 			"KiThreadWakeForSignal: ipl != IPLDPC\n" KeCrash
 		end
 	end
+
+	1 thread@ KeThread_UserInterruptB + sb
 
 	if (thread@ KeThread_IgnoreKill + @)
 		// the system is ignoring all events for this thread.

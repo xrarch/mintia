@@ -28,12 +28,14 @@
 #include "PsInternal.h"
 
 fn PsThreadUserEntry { context1 context2 -- }
-	// this is the start function for every usermode thread ever.
+	fnsection "PAGE$text"
 
-	// copy TEB to userspace
+	// This is the start function for every usermode thread.
 
 	auto thread
 	KeThreadCurrent@ thread!
+
+	// Build the TEB.
 
 	auto kteb
 	OSThreadEnvironmentBlock_SIZEOF alloc kteb!
@@ -48,10 +50,14 @@ fn PsThreadUserEntry { context1 context2 -- }
 	thread@ PsThread_StackBottom + @ kteb@ OSThreadEnvironmentBlock_StackBottom + !
 	thread@ PsThread_TID + @ kteb@ OSThreadEnvironmentBlock_ThreadID + !
 
+	// Copy the TEB to userspace.
+
 	thread@ PsThread_UTEB + @ // dest
 	kteb@ // src
 	OSThreadEnvironmentBlock_SIZEOF // size
 	KeSafeCopyOut drop
+
+	// Enter usermode for the first time, in some architecture-dependent way.
 
 	thread@ PsThread_UTEB + @ // teb
 	PsOSDLLInformation PsOSDLLInfo_ExitFunction + @ // exitfunc
@@ -60,39 +66,41 @@ fn PsThreadUserEntry { context1 context2 -- }
 	context1@ // entryfunc
 	KeEnterUserMode
 
-	// KeEnterUserMode should not return
+	// KeEnterUserMode should not return.
 
 	if (DEBUGCHECKS)
 		"PsThreadUserEntry\n" KeCrash
 	end
 end
 
-fn PsPrepareUsermode { trapframe -- }
-	// called before the exception handler returns to usermode.
-	// handles thread termination and signal dispatch.
-
-	// called with all interrupts disabled, which is unique for code running
-	// outside of Ke...
+fn PsDispatchUsermodeInterrupts { trapframe -- }
+	// Called before the exception handler returns to usermode.
+	// Handles usermode interrupt dispatch, such as thread termination,
+	// suspension, and signal dispatch.
 	//
-	// the important thing here is that IPIs are blocked out so that this core
-	// responds to thread events appropriately when we move to SMP.
-
-	auto process
-	KeProcessCurrent process!
+	// N.B. This routine is architected to be called with all interrupts
+	// disabled. Just being at IPLDPC is not sufficient, because it creates a
+	// race condition on exit to usermode. This problem is worsened on MP
+	// systems, where we have to be sure that all IPIs are blocked while we
+	// check these things.
 
 	auto thread
 	KeThreadCurrent@ thread!
 
-	while (1)
-		// loop until there are no more events.
+	// Loop until there are no more usermode interrupts to dispatch.
+
+	while (thread@ KeThread_UserInterruptB + gb)
+		0 thread@ KeThread_UserInterruptB + sb
+
+		HALCPUInterruptEnable
 
 		if (thread@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
-			HALCPUInterruptEnable
+			// Exit the thread.
 
 			PsiThreadExit
 
 			if (DEBUGCHECKS)
-				"PsPrepareUsermode\n" KeCrash
+				"PsDispatchUsermodeInterrupts\n" KeCrash
 			end
 		end
 
@@ -100,47 +108,35 @@ fn PsPrepareUsermode { trapframe -- }
 			thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
 			thread@ KeThread_Signals + @ &)
 
-			HALCPUInterruptEnable
+			// Dispatch the pending signal.
 
 			PsOSDLLInformation PsOSDLLInfo_SignalDispatchFunction + @ // dispatchfunc
 			trapframe@ // trapframe
 			KeThreadDispatchSignal
-
-			HALCPUInterruptDisable drop
-
-			continue
 		end
 
 		if (thread@ KeThread_SuspendedB + gb)
-			// suspend!
-
-			HALCPUInterruptEnable
+			// Suspend the thread.
 
 			KeThreadWaitSuspended
-
-			HALCPUInterruptDisable drop
-
-			continue
 		end
 
 		if (thread@ KeThread_UserAPCTriggeredB + gb)
-			// a user APC was previously triggered, deliver it.
-
 			0 thread@ KeThread_UserAPCTriggeredB + sb
 
-			if (thread@ KeThread_UserAPCListHead + @)
-				HALCPUInterruptEnable
+			// A user APC was previously triggered; deliver it now.
+			// It's safe to clear thread^.UserApcTriggered here because we
+			// only set it from the context of our own thread, anyway; except
+			// when a user APC is enqueued to us, but then only if we're
+			// waiting, which we clearly aren't doing right now.
 
+			if (thread@ KeThread_UserAPCListHead + @)
 				PsOSDLLInformation PsOSDLLInfo_APCDispatchFunction + @ // dispatchfunc
 				trapframe@ // trapframe
 				KeAPCDispatchQueueUser
-
-				HALCPUInterruptDisable drop
-
-				continue
 			end
 		end
 
-		return
+		HALCPUInterruptDisable drop
 	end
 end

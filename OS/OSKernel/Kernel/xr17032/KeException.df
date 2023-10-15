@@ -340,7 +340,7 @@ table ExceptionNames
 	"EXC15"
 endtable
 
-extern PsPrepareUsermode { trapframe -- }
+extern PsDispatchUsermodeInterrupts { trapframe -- }
 
 fn KiStackOverflow { sp rs -- }
 	auto current
@@ -447,6 +447,13 @@ fn KeThreadContinue { alertable signum context thread -- ok }
 		// atomically unmask the signal.
 
 		1 signum@ << thread@ KeThread_SignalAcceptMask + |=
+
+		if (thread@ KeThread_SignalAcceptMask + @
+			thread@ KeThread_SignalDeliverOnWaitMask + @ ~ &
+			thread@ KeThread_Signals + @ &)
+
+			1 thread@ KeThread_UserInterruptB + sb
+		end
 	end
 
 	if (alertable@)
@@ -455,14 +462,17 @@ fn KeThreadContinue { alertable signum context thread -- ok }
 
 		if (thread@ KeThread_UserAPCListHead + @)
 			1 thread@ KeThread_UserAPCTriggeredB + sb
+			1 thread@ KeThread_UserInterruptB + sb
 		end
 	end
 
-	// perform a direct return to avoid corrupting the newly-built trapframe
+	// Perform a direct return to avoid corrupting the newly-built trapframe
 	// on our way out from the syscall handler, and to make sure we can't
 	// miss any user APCs that get enqueued after we return.
 
-	tf@ PsPrepareUsermode
+	if (thread@ KeThread_UserInterruptB + gb)
+		tf@ PsDispatchUsermodeInterrupts
+	end
 
 	tf@ KiContinue
 end
@@ -576,7 +586,9 @@ fn KiXr17032Exception { badaddr ecause tf -- }
 	end
 
 	if (tf@ OSContext_ers + @ XR17032_ERS_USER &)
-		tf@ PsPrepareUsermode
+		if (KeThreadCurrent@ KeThread_UserInterruptB + gb)
+			tf@ PsDispatchUsermodeInterrupts
+		end
 	end
 end
 
@@ -604,7 +616,9 @@ fn KeEnterUserMode { teb exitfunc context ustack entryfunc -- }
 
 	HALCPUInterruptDisable drop
 
-	tf@ PsPrepareUsermode
+	if (KeThreadCurrent@ KeThread_UserInterruptB + gb)
+		tf@ PsDispatchUsermodeInterrupts
+	end
 
 	tf@ KiContinue
 end

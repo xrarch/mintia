@@ -58,13 +58,11 @@ const THREADSTATUS_TERMINATED         7 // thread yielded for the final time
 const THREADSTATUS_TRANSITION         8 // thread is in the global swap list
 const THREADSTATUS_STANDBY            9 // thread is currently the KiThreadNext
 
-const KETHREADNAMELEN   16
+const KETHREADNAMELEN   15
 const KETHREADSTACKSIZE 4096
 
 struct KeThread
 	4 KernelStackTop
-
-	KETHREADNAMELEN Name
 
 	4 Context
 
@@ -139,6 +137,12 @@ struct KeThread
 	1 WasPreemptedB
 	1 QuantumEndCountB // since last voluntary block
 	1 UserAPCTriggeredB
+
+	// KETHREADNAMELEN is 15, which gives us 1 byte to use for the next field.
+
+	KETHREADNAMELEN Name
+
+	1 UserInterruptB
 endstruct
 
 extern KeSafeCopyIn { dest src size -- ok }

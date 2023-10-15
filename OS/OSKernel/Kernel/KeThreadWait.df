@@ -43,6 +43,34 @@ fn KeDispatchWaitBlockTableInitialize { thread count waitblocktable -- }
 	end
 end
 
+fn KiCheckWaitInterruptingEvents { current -- ok }
+	// Check for any events that would interrupt the wait.
+	// Usermode alertable waits accept all events.
+
+	0 ok!
+
+	if (current@ KeThread_UserAPCListHead + @)
+		// There are pending user APCs.
+
+		1 current@ KeThread_UserAPCTriggeredB + sb
+		1 current@ KeThread_UserInterruptB + sb
+
+		STATUS_USER_APC ok!
+	end elseif (current@ KeThread_Signals + @
+				current@ KeThread_SignalAcceptMask + @ &
+				current@ KeThread_SignalDeliverOnWaitMask + @ &)
+
+		// There are pending signals.
+
+		current@ KeThread_Signals + @ ~
+		current@ KeThread_SignalDeliverOnWaitMask + @ &=
+
+		1 current@ KeThread_UserInterruptB + sb
+
+		STATUS_SIGNALLED ok!
+	end
+end
+
 fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectcount objecttable waitblocktable -- ok }
 	0 ok!
 
@@ -86,40 +114,47 @@ fn KeThreadWaitForMultipleObjects { waitmode alertable waittype timeout objectco
 		auto waitipl
 		IPLDPC KeIPLRaise waitipl!
 
-		// inlined check for USERMODE && IPLLOW && pending user event so that
-		// we don't have to call the heavy-duty KeThreadIsKilled in the non-
-		// contended case. we don't check for ALL events here, just the ones
-		// that only occur on any attempt to wait. others such as having been
-		// terminated will be caught on return to usermode anyway.
+		// Check for any events that would interrupt the wait.
+		// This code is mostly duplicated so that we only go to the trouble of
+		// calling a function in the alertable usermode case, which is
+		// the least common case, and the most complex to handle.
 
-		if (waitmode@ USERMODE ==)
-			if (waitipl@ IPLLOW ==)
-				if (alertable@)
-					if (current@ KeThread_UserAPCListHead + @)
-						// there are pending user APCs.
+		if (waitipl@ IPLLOW ==)
+			// >=IPLAPC masks out all events.
 
-						1 current@ KeThread_UserAPCTriggeredB + sb
-
-						waitipl@ KeIPLLower
-
-						STATUS_USER_APC ok!
-
-						return
-					end elseif (current@ KeThread_Signals + @
-								current@ KeThread_SignalAcceptMask + @ &
-								current@ KeThread_SignalDeliverOnWaitMask + @ &)
-
-						// there are pending deliver-on-wait signals.
-
-						current@ KeThread_Signals + @ ~
-						current@ KeThread_SignalDeliverOnWaitMask + @ &=
+			if (alertable@ ~~)
+				if (waitmode@ USERMODE ==)
+					if (current@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+						// Unalertable usermode waits are only interrupted by
+						// termination.
 
 						waitipl@ KeIPLLower
 
-						STATUS_SIGNALLED ok!
+						STATUS_KILLED ok!
 
 						return
 					end
+				end
+			end elseif (waitmode@ KERNELMODE ==)
+				if (current@ KeThread_IgnoreKill + @ ~~)
+					if (current@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+						// Alertable kernel mode waits are only interrupted by
+						// termination.
+
+						waitipl@ KeIPLLower
+
+						STATUS_KILLED ok!
+
+						return
+					end
+				end
+			end else
+				current@ KiCheckWaitInterruptingEvents ok!
+
+				if (ok@)
+					waitipl@ KeIPLLower
+
+					return
 				end
 			end
 		end
@@ -294,40 +329,47 @@ fn KeThreadWaitForObject { waitmode alertable timeout object -- ok }
 		auto waitipl
 		IPLDPC KeIPLRaise waitipl!
 
-		// inlined check for USERMODE && IPLLOW && pending user event so that
-		// we don't have to call the heavy-duty KeThreadIsKilled in the non-
-		// contended case. we don't check for ALL events here, just the ones
-		// that only occur on any attempt to wait. others such as having been
-		// terminated will be caught on return to usermode anyway.
+		// Check for any events that would interrupt the wait.
+		// This code is mostly duplicated so that we only go to the trouble of
+		// calling a function in the alertable usermode case, which is
+		// the least common case, and the most complex to handle.
 
-		if (waitmode@ USERMODE ==)
-			if (waitipl@ IPLLOW ==)
-				if (alertable@)
-					if (current@ KeThread_UserAPCListHead + @)
-						// there are pending user APCs.
+		if (waitipl@ IPLLOW ==)
+			// >=IPLAPC masks out all events.
 
-						1 current@ KeThread_UserAPCTriggeredB + sb
-
-						waitipl@ KeIPLLower
-
-						STATUS_USER_APC ok!
-
-						return
-					end elseif (current@ KeThread_Signals + @
-								current@ KeThread_SignalAcceptMask + @ &
-								current@ KeThread_SignalDeliverOnWaitMask + @ &)
-
-						// there are pending deliver-on-wait signals.
-
-						current@ KeThread_Signals + @ ~
-						current@ KeThread_SignalDeliverOnWaitMask + @ &=
+			if (alertable@ ~~)
+				if (waitmode@ USERMODE ==)
+					if (current@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+						// Unalertable usermode waits are only interrupted by
+						// termination.
 
 						waitipl@ KeIPLLower
 
-						STATUS_SIGNALLED ok!
+						STATUS_KILLED ok!
 
 						return
 					end
+				end
+			end elseif (waitmode@ KERNELMODE ==)
+				if (current@ KeThread_IgnoreKill + @ ~~)
+					if (current@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+						// Alertable kernel mode waits are only interrupted by
+						// termination.
+
+						waitipl@ KeIPLLower
+
+						STATUS_KILLED ok!
+
+						return
+					end
+				end
+			end else
+				current@ KiCheckWaitInterruptingEvents ok!
+
+				if (ok@)
+					waitipl@ KeIPLLower
+
+					return
 				end
 			end
 		end
@@ -447,36 +489,64 @@ fn KeThreadSleep { ms waitmode alertable -- ok }
 	auto current
 	KeThreadCurrent@ current!
 
-	auto ipl
-
-	if (ms@ 0 ==)
-		// if wait is alertable, then we are just checking to see if there is
-		// a pending APC. otherwise, we want to yield our quantum.
-
+	while (1)
+		auto ipl
 		IPLDPC KeIPLRaise ipl!
 
-		if (alertable@)
-			// just checking for a pending APC.
+		// Check for any events that would interrupt the wait.
+		// This code is mostly duplicated so that we only go to the trouble of
+		// calling a function in the alertable usermode case, which is
+		// the least common case, and the most complex to handle.
 
-			ipl@ // ipl
-			waitmode@ // mode
-			1 // alertable
-			1 // waiting
-			current@ // thread
-			KeThreadIsKilled ok!
-		end else
-			// yield quantum.
+		if (ipl@ IPLLOW ==)
+			// >=IPLAPC masks out all events.
 
-			KiThreadYieldQuantum
+			if (alertable@ ~~)
+				if (waitmode@ USERMODE ==)
+					if (current@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+						// Unalertable usermode waits are only interrupted by
+						// termination.
+
+						ipl@ KeIPLLower
+
+						STATUS_KILLED ok!
+
+						return
+					end
+				end
+			end elseif (waitmode@ KERNELMODE ==)
+				if (current@ KeThread_IgnoreKill + @ ~~)
+					if (current@ KeThread_Signals + @ 1 OSSIGNAL_KILL << &)
+						// Alertable kernel mode waits are only interrupted by
+						// termination.
+
+						ipl@ KeIPLLower
+
+						STATUS_KILLED ok!
+
+						return
+					end
+				end
+			end else
+				current@ KiCheckWaitInterruptingEvents ok!
+
+				if (ok@)
+					ipl@ KeIPLLower
+
+					return
+				end
+			end
 		end
 
-		ipl@ KeIPLLower
+		if (ms@ ~~)
+			if (alertable@ ~~)
+				KiThreadYieldQuantum
+			end
 
-		return
-	end
+			ipl@ KeIPLLower
 
-	while (1)
-		IPLDPC KeIPLRaise ipl!
+			return
+		end
 
 		0 current@ KeThread_WaitBlockCountB + sb
 		0 current@ KeThread_WaitBlockTable + !
@@ -520,6 +590,23 @@ end
 
 fn KeThreadWaitSuspended { -- }
 	IPLDPC KeIPLRaise drop
+
+	if (KeThreadCurrent@ KeThread_SuspendedB + gb ~~)
+		// Got unsuspended during that brief time window of low IPL.
+
+		return
+	end
+
+	auto ok
+	KeThreadCurrent@ KiCheckWaitInterruptingEvents ok!
+
+	if (ok@)
+		0 KeThreadCurrent@ KeThread_SuspendedB + sb
+
+		IPLLOW KeIPLLower
+
+		return
+	end
 
 	IPLLOW // waitipl
 	USERMODE // waitmode

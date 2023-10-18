@@ -220,8 +220,8 @@ extern PsProcessGetGID { process -- gid }
 extern PsProcessRemoveForTrim { locked process -- }
 extern PsProcessInsertForTrim { locked process -- }
 
-extern PsProcessRemove { locked process -- }
-extern PsProcessInsert { locked process -- }
+extern PsProcessRemove { process -- }
+extern PsProcessInsert { process -- }
 
 extern PsSignalAllProcesses { onlysystem signal -- }
 

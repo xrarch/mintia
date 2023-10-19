@@ -25,8 +25,6 @@ extern IOiWritebehindWorker { context1 context2 -- }
 
 extern IOiFilesystemSyncAll { shutdown -- ok }
 
-externptr IOiFileControlBlockThrottleCount
-
 externptr IOiCacheInfoBlockDirtyListHead
 externptr IOiCacheInfoBlockDirtyListTail
 

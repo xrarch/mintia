@@ -5,7 +5,7 @@ part of a half-decade personal project to create a fully from-scratch RISC
 workstation computer called [XR/station](https://github.com/xrarch/xremu).
 
 Its kernel design pays homage to the Windows NT operating system. In particular
-its virtual memory manager has been written to similar standards, with the
+the virtual memory manager has been written with similar goals, with the
 capability to swap to disk not only user pages but also kernel stacks, page
 tables, and even ~50% of its own kernel code and heap.
 

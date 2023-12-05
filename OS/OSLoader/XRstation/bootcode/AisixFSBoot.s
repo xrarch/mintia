@@ -14,14 +14,12 @@
 VarArea:
 	.dl 0 ;Args
 	.dl 0 ;DeviceNode
-	.dl 0 ;API
 	.dl 0 ;BlockBuffer
 	.dl 0 ;FATStart
 
 .struct Vars
 	4 Args
 	4 DeviceNode
-	4 API
 	4 BlockBuffer
 	4 FATStart
 .end-struct
@@ -59,36 +57,33 @@ VarArea:
 .end-struct
 
 .define _a3xCIC_Putc 0
-.define _a3xCIC_Getc 1
-.define _a3xCIC_Gets 2
-.define _a3xCIC_Puts 3
-.define _a3xCIC_DevTree 4
-.define _a3xCIC_Malloc 5
-.define _a3xCIC_Calloc 6
-.define _a3xCIC_Free 7
-
-.define _a3xCIC_DevTreeWalk 8
-.define _a3xCIC_DeviceParent 9
-.define _a3xCIC_DeviceSelectNode 10
-.define _a3xCIC_DeviceSelect 11
-.define _a3xCIC_DeviceDGetProperty 12
-.define _a3xCIC_DeviceDGetMethod 13
-.define _a3xCIC_DeviceDCallMethod 14
-.define _a3xCIC_DeviceExit 15
-.define _a3xCIC_DeviceDSetProperty 16
-.define _a3xCIC_DeviceDCallMethodPtr 17
-.define _a3xCIC_DevIteratorInit 18
-.define _a3xCIC_DevIterate 19
-.define _a3xCIC_DeviceDGetName 20
-
-.define _a3xCIC_ConsoleUserOut 21
-
-.define _a3xCIC_DGetCurrent 22
+.define _a3xCIC_Getc 4
+.define _a3xCIC_Gets 8
+.define _a3xCIC_Puts 12
+.define _a3xCIC_DevTree 16
+.define _a3xCIC_Malloc 20
+.define _a3xCIC_Calloc 24
+.define _a3xCIC_Free 28
+.define _a3xCIC_DevTreeWalk 32
+.define _a3xCIC_DeviceParent 36
+.define _a3xCIC_DeviceSelectNode 40
+.define _a3xCIC_DeviceSelect 44
+.define _a3xCIC_DeviceDGetProperty 48
+.define _a3xCIC_DeviceDGetMethod 52
+.define _a3xCIC_DeviceDCallMethod 56
+.define _a3xCIC_DeviceExit 60
+.define _a3xCIC_DeviceDSetProperty 64
+.define _a3xCIC_DeviceDCallMethodPtr 68
+.define _a3xCIC_DevIteratorInit 72
+.define _a3xCIC_DevIterate 76
+.define _a3xCIC_DeviceDGetName 80
+.define _a3xCIC_ConsoleUserOut 84
+.define _a3xCIC_DGetCurrent 88
 
 ;arguments: api devnode args
 ;registers:  a2      a1   a0
 AisixFSBoot:
-	subi sp, sp, 32
+	subi sp, sp, 36
 	mov  long [sp], lr
 	mov  long [sp + 4], s0
 	mov  long [sp + 8], s1
@@ -97,19 +92,20 @@ AisixFSBoot:
 	mov  long [sp + 20], s4
 	mov  long [sp + 24], s5
 	mov  long [sp + 28], s6
+	mov  long [sp + 32], s7
 
 ;save the stuff a3x passed in
 
 	la   s0, VarArea
 	mov  long [s0 + Vars_Args], a0
 	mov  long [s0 + Vars_DeviceNode], a1
-	mov  long [s0 + Vars_API], a2
+	mov  s7, a2
 
 ;select the boot device node
 
 	mov  a0, a1
-	li   t0, _a3xCIC_DeviceSelectNode
-	fwc  0
+	mov  t0, long [s7 + _a3xCIC_DeviceSelectNode]
+	jalr lr, t0, 0
 
 ;get the address of our temporary disk block buffer, which should be right
 ;after the end of this program in memory.
@@ -185,7 +181,7 @@ AisixFSBoot:
 
 	mov  a0, long [s0 + Vars_Args]
 	mov  a1, long [s0 + Vars_DeviceNode]
-	mov  a2, long [s0 + Vars_API]
+	mov  a2, s7
 
 ;check for the a3x program signature
 
@@ -211,23 +207,23 @@ AisixFSBoot:
 
 .invalid:
 	la   a0, loadername
-	li   t0, _a3xCIC_Puts
-	fwc  0
+	mov  t0, long [s7 + _a3xCIC_Puts]
+	jalr lr, t0, 0
 
 	la   a0, invalidmessage
-	li   t0, _a3xCIC_Puts
-	fwc  0
+	mov  t0, long [s7 + _a3xCIC_Puts]
+	jalr lr, t0, 0
 
 	b    .errout
 
 .notfound:
 	la   a0, loadername
-	li   t0, _a3xCIC_Puts
-	fwc  0
+	mov  t0, long [s7 + _a3xCIC_Puts]
+	jalr lr, t0, 0
 
 	la   a0, notfoundmessage
-	li   t0, _a3xCIC_Puts
-	fwc  0
+	mov  t0, long [s7 + _a3xCIC_Puts]
+	jalr lr, t0, 0
 
 .errout:
 	subi a0, zero, 1
@@ -242,7 +238,8 @@ AisixFSBoot:
 	mov  s4, long [sp + 20]
 	mov  s5, long [sp + 24]
 	mov  s6, long [sp + 28]
-	addi sp, sp, 32
+	mov  s7, long [sp + 32]
+	addi sp, sp, 36
 	ret
 
 ;a0 - blockno
@@ -255,8 +252,9 @@ a3xReadBlock:
 
 	la   a1, readblockname
 	li   a0, 2
-	li   t0, _a3xCIC_DeviceDCallMethod
-	fwc  0
+
+	mov  t0, long [s7 + _a3xCIC_DeviceDCallMethod]
+	jalr lr, t0, 0
 
 	mov  lr, long [sp]
 	addi sp, sp, 12

@@ -9,7 +9,7 @@ HALXr17032SavedEV:
 HALCPUExit:
 .global HALCPUExit
 	mov  t0, long [HALXr17032SavedEV]
-	mtcr evec, t0
+	mtcr eb, t0
 
 	ret
 

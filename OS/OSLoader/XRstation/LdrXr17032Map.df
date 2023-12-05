@@ -12,7 +12,7 @@ public LdrPlatformKernelPageDirectory
 
 const TLBSIZE 64
 
-extern LdrXr17032MapEnablePaging { missroutine -- }
+extern LdrXr17032MapEnablePaging { -- }
 
 fn LdrXr17032MapInit { -- }
 	// create page directory
@@ -125,27 +125,40 @@ fn LdrXr17032MapInit { -- }
 
 	LdrPlatformKernelPageDirectory@ PAGESHIFT >> 5 << PTE_V | PTE_W | PTE_K | pdi@!
 
-	// allocate physical page for the TLB miss routine and copy it there
+	// allocate a page of kernel space to map the exception block
 
 	1 // pages
-	OSLOADERMEM_USED // type
-	LdrMemoryAllocatePhysicalRange ok! desc!
+	KERNELSTRUCTURES // prefva
+	0 // fixed
+	LdrKernelSpaceAllocate ok! addr!
 
 	if (ok@)
-		ok@ "LdrXr17032MapInit: failed to allocate TLBMISS page (%i)\n" LdrCrash
+		ok@ "LdrXr17032MapInit: failed to map exception block (%i)\n" LdrCrash
 	end
+
+	// map exception block
+
+	addr@ // vaddr
+	0x00001000 // phyaddr
+	0 // noncached
+	0 // reclaimablept
+	LdrPlatformMapPage
+
+	addr@ LdrInfoBlock LdrInfo_ExceptionBlockBase + !
+
+	// copy TLB miss routine to the exception block
 
 	auto missroutine
 	pointerof LdrXr17032MapTLBMissRoutine missroutine!
 
-	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << // dest
+	0x00001F00 // dest
 	missroutine@ // src
 	pointerof LdrXr17032MapTLBMissRoutineEnd missroutine@ - // sz
 	memcpy
 
 	// enable paging
 
-	desc@ LdrMemoryDescriptor_StartPFN + @ PAGESHIFT << LdrXr17032MapEnablePaging
+	LdrXr17032MapEnablePaging
 end
 
 const RS_MMU 4
@@ -193,7 +206,6 @@ LdrXr17032MapEnablePaging:
 	cachei 3 ;invalidate icache, writeback dcache
 
 	mtcr rs, zero
-	mtcr tbvec, a0
 
 	mtcr scratch0, lr ;lazy and stupid way to save link register since we're in kernel mode right now
 	jal  LdrXr17032MapFlushTLBAll

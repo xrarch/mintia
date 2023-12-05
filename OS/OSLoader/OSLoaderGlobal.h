@@ -45,6 +45,9 @@ struct LdrInfo
 	4 LSICBase
 	4 NVRAMBase
 #endif
+#ifdef XR17032
+	4 ExceptionBlockBase
+#endif
 endstruct
 
 struct LdrBootResource

@@ -21,6 +21,7 @@
 #include "<ll>/OSDLL/OS.h"
 
 #include "../KeInternal.h"
+#include "../../../OSLoader/OSLoaderGlobal.h"
 
 // if this seems janked up, its because it is, because this all used to be in
 // the HAL, and the process of moving it into the kernel was rough.
@@ -294,13 +295,12 @@ KiXr17032Syscall:
 
 .section INIT$text
 
-KiCPUInit:
-.global KiCPUInit
-	mfcr t1, evec
+KiXr17032Init:
+.global KiXr17032Init
+	mfcr t1, eb
 	mov  long [HALXr17032SavedEV], t1, tmp=t0
 
-	la   t0, KiXr17032ExceptionVector
-	mtcr evec, t0
+	mtcr eb, a0
 
 	mtcr ebadaddr, zero
 
@@ -314,6 +314,37 @@ KeIPLCurrentGet:
 	ret
 
 "
+
+externptr HALLoaderInfo
+
+extern KiXr17032Init { eb -- }
+
+fn KiCPUInit { -- }
+	auto ptr
+	HALLoaderInfo@ LdrInfo_ExceptionBlockBase + @ ptr!
+
+	// Construct a jump instruction that just jumps to our exception handler,
+	// and then copy it to the first instruction of each entry of the exception
+	// block, except for the TLB miss handler, which has already been set up by
+	// OSLoader.
+
+	auto jmpinstruction
+	6 jmpinstruction!
+
+	pointerof KiXr17032ExceptionVector 2 >> 3 << jmpinstruction |=
+
+	auto i
+	0 i!
+
+	while (i@ 15 <)
+		jmpinstruction@ ptr@!
+
+		1 i +=
+		256 ptr +=
+	end
+
+	HALLoaderInfo@ LdrInfo_ExceptionBlockBase + @ KiXr17032Init
+end
 
 extern KiThreadTrampoline { -- }
 

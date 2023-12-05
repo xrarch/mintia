@@ -12,7 +12,7 @@ HALCPUHalt:
 
 HALXr17032Reset:
 .global HALXr17032Reset
-	mtcr evec, zero
+	mtcr eb, zero
 	.dl  0 ;this is an invalid instruction
 .wait:
 	b    .wait

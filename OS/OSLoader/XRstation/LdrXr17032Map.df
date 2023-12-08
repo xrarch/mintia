@@ -10,9 +10,11 @@
 var LdrPlatformKernelPageDirectory 0
 public LdrPlatformKernelPageDirectory
 
-const TLBSIZE 64
+extern LdrXr17032MapEnablePaging { ebvirt -- }
 
-extern LdrXr17032MapEnablePaging { -- }
+var FirmwareEb 0
+
+const PGDBITS (PTE_V PTE_W | PTE_G | PTE_K |)
 
 fn LdrXr17032MapInit { -- }
 	// create page directory
@@ -149,70 +151,131 @@ fn LdrXr17032MapInit { -- }
 	// copy TLB miss routine to the exception block
 
 	auto missroutine
-	pointerof LdrXr17032MapTLBMissRoutine missroutine!
+	pointerof LdrXr17032MapITLBMissRoutine missroutine!
+
+	0x00001E00 // dest
+	missroutine@ // src
+	pointerof LdrXr17032MapITLBMissRoutineEnd missroutine@ - // sz
+	memcpy
+
+	pointerof LdrXr17032MapDTLBMissRoutine missroutine!
 
 	0x00001F00 // dest
 	missroutine@ // src
-	pointerof LdrXr17032MapTLBMissRoutineEnd missroutine@ - // sz
+	pointerof LdrXr17032MapDTLBMissRoutineEnd missroutine@ - // sz
 	memcpy
 
 	// enable paging
 
-	LdrXr17032MapEnablePaging
+	"borp\n" Printf
+
+	addr@ LdrXr17032MapEnablePaging
+
+	"shorp\n" Printf
 end
+
+
 
 const RS_MMU 4
 
 asm "
 
-LdrXr17032MapTLBMissRoutine:
-	mtcr scratch4, t0
-	mfcr t0, tbpde     ;load the helper address
-	mov  t0, long [t0] ;load the PDE
-	tbld t0, t0        ;conditionally load the PTE
-	mtcr tblo, t0
-	tbwr               ;write the TLB entry
-	mfcr t0, scratch4 ;restore t0 and return
+LdrXr17032MapDTLBMissRoutine:
+	mfcr zero, dtbaddr
+	mov  zero, long [zero]
+	mtcr dtbpte, zero
 	rfe
-LdrXr17032MapTLBMissRoutineEnd:
+LdrXr17032MapDTLBMissRoutineEnd:
 
+LdrXr17032MapITLBMissRoutine:
+	mfcr zero, itbaddr
+	mov  zero, long [zero]
+	mtcr itbpte, zero
+	rfe
+LdrXr17032MapITLBMissRoutineEnd:
 
 LdrXr17032MapFlushTLBAll:
 .global LdrXr17032MapFlushTLBAll
-	mfcr t1, tbhi
+	li   t0, 3
+	mtcr itbctrl, t0
+	mtcr dtbctrl, t0
 
-	mtcr tblo, zero
-	mtcr tbhi, zero
-
-	li   t2, TLBSIZE
-
-.loop:
-	subi t2, t2, 1	
-
-	mtcr tbindex, t2
-	tbwr
-
-	bne  t2, .loop
-
-	mtcr tbhi, t1
 	ret
 
 LdrXr17032MapExit:
 .global LdrXr17032MapExit
+	mov  t0, long [FirmwareEb]
+	mtcr eb, t0
 	mtcr rs, zero
 	ret
 
+;a0 - exception block virtual base
 LdrXr17032MapEnablePaging:
-	cachei 3 ;invalidate icache, writeback dcache
+	wmb
+
+	mfcr t0, eb
+	mov  long [FirmwareEb], t0, tmp=t1
+	mtcr eb, a0
+	
+	; flush icache
+
+	li   t0, 3
+	mtcr icachectrl, t0
+
+	; flush TLBs
+
+	li   t0, 3
+	mtcr itbctrl, t0
+	mtcr dtbctrl, t0
+
+	; zero out processor status
 
 	mtcr rs, zero
 
-	mtcr scratch0, lr ;lazy and stupid way to save link register since we're in kernel mode right now
-	jal  LdrXr17032MapFlushTLBAll
-	mfcr lr, scratch0
+	; set page table virtual base
+
+	la   t0, PAGETABLE
+	mtcr itbaddr, t0
+	mtcr dtbaddr, t0
+
+	; insert page directory and exception block into zeroth and first reserved
+	; TLB entries, respectively. this will keep them permanently mapped forever.
+
+	mtcr itbindex, zero
+	mtcr dtbindex, zero
+
+	la   t0, PAGEDIRECTORY
+	rshi t0, t0, 12
+	mtcr itbtag, t0
+	mtcr dtbtag, t0
 
 	mov  t0, long [LdrPlatformKernelPageDirectory]
-	mtcr tbpde, t0
+	rshi t0, t0, 12
+	lshi t0, t0, 5
+	ori  t0, t0, PGDBITS
+	mtcr itbpte, t0
+	mtcr dtbpte, t0
+
+	mov  t0, a0
+	rshi t0, t0, 12
+	mtcr itbtag, t0
+	mtcr dtbtag, t0
+
+	li   t0, 0x1000
+	rshi t0, t0, 12
+	lshi t0, t0, 5
+	ori  t0, t0, PGDBITS
+	mtcr itbpte, t0
+	mtcr dtbpte, t0
+
+	; initialize replacement index to 4
+
+	li   t0, 4
+	mtcr itbindex, t0
+	mtcr dtbindex, t0
+
+	; set map enable bit in RS
+
 	li   t0, RS_MMU
 	mtcr rs, t0
 	ret
@@ -245,7 +308,10 @@ LdrXr17032StartSystem:
 	la   a3, LdrInfoBlock
 	mov  long [a3 + LdrInfo_ReturnSP], t2
 
-	cachei 3 ;invalidate icache, writeback dcache
+	; flush icache
+
+	li   t1, 3
+	mtcr icachectrl, t1
 
 	jalr lr, t0, 0
 

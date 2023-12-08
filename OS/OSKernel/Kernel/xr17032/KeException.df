@@ -313,6 +313,48 @@ KeIPLCurrentGet:
 	mov  a0, long [KeIPLCurrent]
 	ret
 
+; don't let HALXr17032MapSwitch cross a page boundary or bad things might
+; happen if there's a TLB miss in the middle
+
+.align 128
+
+; MUST BE CALLED WITH INTERRUPTS DISABLED
+; asid pgtb --
+HALXr17032MapSwitch:
+.global HALXr17032MapSwitch
+	; set the new page directory in TLB entry 0
+
+	mfcr t1, itbindex
+	mfcr t2, dtbindex
+
+	mtcr itbindex, zero
+	mtcr dtbindex, zero
+
+	la   t0, PAGEDIRECTORY
+	rshi t0, t0, 12
+	mtcr itbtag, t0
+	mtcr dtbtag, t0
+
+	mov  t0, a0
+	rshi t0, t0, 12
+	lshi t0, t0, 5
+	ori  t0, t0, 0x17
+	mtcr itbpte, t0
+	mtcr dtbpte, t0
+
+	mtcr itbindex, t1
+	mtcr dtbindex, t2
+
+	; set the asid
+
+	lshi a1, a1, 20
+	mtcr itbtag, a1
+	mtcr dtbtag, a1
+
+	ret
+
+.section text
+
 "
 
 externptr HALLoaderInfo
@@ -336,7 +378,7 @@ fn KiCPUInit { -- }
 	auto i
 	0 i!
 
-	while (i@ 15 <)
+	while (i@ 14 <)
 		jmpinstruction@ ptr@!
 
 		1 i +=

@@ -192,9 +192,11 @@ AisixFSBoot:
 	sub  t1, t1, t2
 	bne  t1, .invalid
 
-;invalidate icache, writeback dcache
+;invalidate icache
 
-	cachei 3
+	wmb
+	li   t5, 3
+	mtcr icachectrl, t5
 
 ;jump to the entrypoint
 
@@ -264,13 +266,13 @@ readblockname:
 	.ds "readBlock\0"
 
 loadername:
-	.ds "OSLoader.bin\0"
+	.ds "OSLoader.bin: \0"
 
 invalidmessage:
-	.ds ": invalid boot program\n\0"
+	.ds "invalid program\n\0"
 
 notfoundmessage:
-	.ds ": not found\n\0"
+	.ds "not found\n\0"
 
 .align 512            ;fill rest of disk block with zeroes
 

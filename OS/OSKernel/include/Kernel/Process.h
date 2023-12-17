@@ -176,7 +176,7 @@ externptr KeProcessListHead
 externptr KeIdleProcess
 externptr KeProcessSwapInListHead
 
-extern KeThreadInitialize { context1 context2 startfunc process kstack name thread -- }
+extern KeThreadInitialize { context1 context2 startfunc process kstacksize kstack name thread -- }
 extern KeThreadUninitialize { thread -- }
 extern KeThreadIgnoreKill { thread -- oldcount }
 extern KeThreadAcceptKill { thread -- oldcount }

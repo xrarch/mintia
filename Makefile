@@ -79,11 +79,11 @@ export BMEBIN   := $(BUILDROOT)/$(WINROOT)/bme.dll.$(ARCHITECTURE).$(CHKFRE)
 
 ifndef SMALLDIST
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE).img
-	export DISTIMGSZ  := 112640 # 52MB
+	export DISTIMGSZ  := 109242 # 53MB
 	export DISKLABEL  := mintia-dist
 else
 	export DISTIMAGE  := $(REPO)/build/mintia-$(PLATFORM)-$(CHKFRE)-small.img
-	export DISTIMGSZ  := 20480 # 10MB
+	export DISTIMGSZ  := 20910 # 10MB
 	export DISKLABEL  := mintia-small
 	TEXTSUFFIX := .small
 endif

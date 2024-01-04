@@ -30,10 +30,6 @@ const DKS_REALDISK  1
 const DKS_PARTITION 2
 const DKS_REMOVED   3
 
-const DKSBUFFERPHYS 0xF8020000
-
-var DKSBuffer 0
-
 var DKSCompletedBitmap 0
 var DKSScan 0
 var DKSScanned 0
@@ -64,6 +60,8 @@ const DKSCMDINFO    0x4
 const DKSCMDPOLL    0x5
 const DKSCMDINTR    0x6
 const DKSCMDINTROFF 0x7
+const DKSCMDSETTRC  0x8
+const DKSCMDSETTRA  0x9
 
 const DKSINTERRUPT  0x3
 
@@ -238,15 +236,6 @@ end
 
 fn (FDriverInit) DriverInitDKS { stage -- ok }
 	if (stage@ STAGE_THREAD ==)
-		MMIO_NOCACHE // cached
-		512 8 * // length
-		DKSBUFFERPHYS // phyaddr
-		MmIORegionMap ok! DKSBuffer!
-
-		if (ok@)
-			"DKSDriverInit: failed to map buffer (%i)\n" KeCrash
-		end
-
 		pointerof DriverDKSDPCFunction // function
 		DKSDPC // dpc
 		KeDPCInitialize
@@ -404,28 +393,19 @@ fn DKSComplete { id -- }
 	auto iopl
 	iop@ IOPacketCurrentLocation iopl!
 
-	if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
-		iopl@ IOPacketLocationMappedBuffer iopl@ IOPacketLocation_Context + @ + // dest
-		DKSBuffer@ id@ DKSBLOCKSHIFT << + // src
-		DKSBLOCKSIZE // size
-		memcpy
-	end
-
-	DKSBLOCKSIZE iopl@ IOPacketLocation_Offset + +=
-	DKSBLOCKSIZE iopl@ IOPacketLocation_Context + +=
+	DKSBLOCKSIZE 8 * iopl@ IOPacketLocation_Offset + +=
+	DKSBLOCKSIZE 8 * iopl@ IOPacketLocation_Context + +=
 
 	if (iopl@ IOPacketLocation_Context + @
-		iopl@ IOPacketLocation_Length + @ ==)
+		iopl@ IOPacketLocation_Length + @ >=)
 		// complete, start next one
 
-		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
-			iopl@ IOPacketLocation_OffsetInMDL + @ // offset
-			iopl@ IOPacketLocation_Length + @ // length
-			0 // write
-			0 // dma
-			iop@ IOPacketHeader_MDL + @ // mdl
-			MmMDLFlush
-		end
+		iopl@ IOPacketLocation_OffsetInMDL + @ // offset
+		iopl@ IOPacketLocation_Length + @ // length
+		iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_WRITE == // write
+		1 // dma
+		iop@ IOPacketHeader_MDL + @ // mdl
+		MmMDLFlush
 
 		0 // status
 		IOBOOSTDISK // priboost
@@ -437,6 +417,7 @@ fn DKSComplete { id -- }
 
 		if (iop@ ~~)
 			// no pending requests, we are done.
+
 			return
 		end
 
@@ -452,39 +433,37 @@ fn DKSComplete { id -- }
 		iop@ IOPacketCurrentLocation iopl!
 	end
 
-	auto rs
+	// start next transfer
 
-	// start next block transfer
+	auto len
+	iopl@ IOPacketLocation_Length + @ DKSBLOCKSHIFT >> len!
+
+	if (len@ 8 >)
+		// Disk controller only supports transfers of up to 8 sectors at a time.
+
+		8 len!
+	end
+
+	auto phyaddr
+	iopl@ IOPacketLocation_Context + @ // offset
+	iopl@ // iopl
+	IOPacketLocationPhysical phyaddr!
+
+	id@ DKSPORTA HALXRstationCitronOutl
+	DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+	len@ DKSPORTA HALXRstationCitronOutl
+	DKSCMDSETTRC DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+	phyaddr@ DKSPORTA HALXRstationCitronOutl
+	DKSCMDSETTRA DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+	iopl@ IOPacketLocation_Offset + @ DKSBLOCKSHIFT >> DKSPORTA HALXRstationCitronOutl
 
 	if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_READ ==)
-		HALCPUInterruptDisable rs!
-
-		id@ DKSPORTA HALXRstationCitronOutl
-		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
-
-		iopl@ IOPacketLocation_Offset + @ DKSBLOCKSHIFT >> DKSPORTA HALXRstationCitronOutl
 		DKSCMDREAD DKSPORTCMD HALXRstationCitronCommandASyncIdle
-
-		rs@ HALCPUInterruptRestore
-
-		return
 	end else
-		DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-		iopl@ IOPacketLocationMappedBuffer iopl@ IOPacketLocation_Context + @ + // src
-		DKSBLOCKSIZE // size
-		memcpy
-
-		HALCPUInterruptDisable rs!
-
-		id@ DKSPORTA HALXRstationCitronOutl
-		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
-
-		iopl@ IOPacketLocation_Offset + @ DKSBLOCKSHIFT >> DKSPORTA HALXRstationCitronOutl
 		DKSCMDWRITE DKSPORTCMD HALXRstationCitronCommandASyncIdle
-
-		rs@ HALCPUInterruptRestore
-
-		return
 	end
 end
 
@@ -577,6 +556,15 @@ fn DKSBlockTransferCommand { disk iopl -- ok }
 	0 iop@ IOPacketHeader_DeviceQueueNext + !
 	0 iop@ IOPacketHeader_DeviceQueuePrev + !
 
+	auto len
+	iopl@ IOPacketLocation_Length + @ DKSBLOCKSHIFT >> len!
+
+	if (len@ 8 >)
+		// Disk controller only supports transfers of up to 8 sectors at a time.
+
+		8 len!
+	end
+
 	auto ipl
 	IPLDPC KeIPLRaise ipl!
 
@@ -595,12 +583,16 @@ fn DKSBlockTransferCommand { disk iopl -- ok }
 
 		iop@ realdisk@ Disk_CurrentRequest + !
 
-		if (iopl@ IOPacketLocation_FunctionCodeB + gb IODISPATCH_WRITE ==)
-			DKSBuffer@ id@ DKSBLOCKSHIFT << + // dest
-			iopl@ IOPacketLocationMappedBuffer // src
-			DKSBLOCKSIZE // len
-			memcpy
-		end
+		auto phyaddr
+		0 // offset
+		iopl@ // iopl
+		IOPacketLocationPhysical phyaddr!
+
+		len@ DKSPORTA HALXRstationCitronOutl
+		DKSCMDSETTRC DKSPORTCMD HALXRstationCitronCommandASyncIdle
+
+		phyaddr@ DKSPORTA HALXRstationCitronOutl
+		DKSCMDSETTRA DKSPORTCMD HALXRstationCitronCommandASyncIdle
 
 		id@ DKSPORTA HALXRstationCitronOutl
 		DKSCMDSELECT DKSPORTCMD HALXRstationCitronCommandASyncIdle
@@ -780,17 +772,6 @@ fn (IODispatchEnqueueIOPFunction) DriverDKSRead { iopl -- done ok }
 		return
 	end
 
-	mdl@ MmMDLMap ok!
-
-	if (ok@)
-		ok@ // status
-		0 // priboost
-		iop@ // iop
-		IOPacketCompleteLow
-
-		return
-	end
-
 	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 	length@ iopl@ IOPacketLocation_Length + !
 
@@ -904,24 +885,13 @@ fn (IODispatchEnqueueIOPFunction) DriverDKSWrite { iopl -- done ok }
 		return
 	end
 
-	mdl@ MmMDLMap ok!
-
-	if (ok@)
-		ok@ // status
-		0 // priboost
-		iop@ // iop
-		IOPacketCompleteLow
-
-		return
-	end
-
 	length@ iop@ IOPacketHeader_StatusBlock + OSStatusBlock_Length + !
 	length@ iopl@ IOPacketLocation_Length + !
 
 	iopl@ IOPacketLocation_OffsetInMDL + @ // offset
 	iopl@ IOPacketLocation_Length + @ // length
 	1 // write
-	0 // dma
+	1 // dma
 	mdl@ // mdl
 	MmMDLFlush
 

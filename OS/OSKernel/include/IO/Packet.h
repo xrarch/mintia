@@ -205,6 +205,7 @@ extern IOPacketLocationNext { iopl -- nextiopl }
 
 extern IOPacketLocationMappedBuffer { iopl -- vaddr }
 extern IOPacketLocationVirtualBuffer { iopl -- vaddr }
+extern IOPacketLocationPhysical { offset iopl -- phyaddr }
 
 extern IOPacketCurrentLocation { iop -- iopl }
 

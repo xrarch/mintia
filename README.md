@@ -1,3 +1,5 @@
+## Defunct as of March 2023; work has shifted to [MINTIA2](http://github.com/xrarch/mintia2) except for occasional bugfixes.
+
 # MINTIA
 
 MINTIA is a custom operating system written in a custom programming language, as

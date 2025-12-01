@@ -1,0 +1,895 @@
+//
+// Implements fox32 specific parts of the bootloader.
+//
+
+#INCLUDE "../Bl.hjk"
+
+#DEFINE MMP_PTE_V 1
+#DEFINE MMP_PTE_W 2
+
+#MACRO MmpPteAddress ( vaddr ) [
+    (CAST (PAGE_TABLE + (((vaddr) >> 12) << 2)) TO ^ULONG)
+]
+
+PUBLIC BlPlatformHalName := "HALfox32.dll"
+
+#ASM [
+
+.dl 0x676F646E
+
+entry:
+    icl
+    mov  sp, 0x2000
+    mov  fp, 0
+    jmp  BxEntry
+
+BxEnableVirtualAddressing:
+    tlb [BxPageDirectory]
+    mse
+    ret
+
+// a0 - vaddr
+BxFlushPage:
+    flp  a0
+    ret
+
+// a0 - port
+// a1 - value
+BxFox32Out:
+    out a0, a1
+    ret
+
+// a0 - port
+// outputs:
+// a3 - value
+BxFox32In:
+    in a3, a0
+    ret
+
+BxFox32Font:
+    .incbin "../../PC.8x8.hcf"
+
+BxHaltFox32:
+    halt
+    ret
+
+]
+
+EXTERN FN BxFox32Out (
+    IN port : UWORD,
+    IN value : UWORD,
+)
+
+EXTERN FN BxFox32In (
+    IN port : UWORD,
+) : UWORD
+
+EXTERN FN BxHaltFox32 ()
+
+EXTERN FN BxEnableVirtualAddressing ()
+
+EXTERN _bss : UBYTE
+EXTERN _bss_size : UBYTE
+EXTERN _bss_end : UBYTE
+
+STRUCT HcfHeader
+    Magic : ULONG,
+    Width : ULONG,
+    Height : ULONG,
+    Flags : ULONG,
+    FontName : UBYTE[16],
+    Reserved : UBYTE[16],
+END
+
+EXTERN BxFox32Font : HcfHeader
+
+#DEFINE FRAMEBUFFER_START 0x02000000
+#DEFINE FRAMEBUFFER_WIDTH  640
+#DEFINE FRAMEBUFFER_HEIGHT 480
+
+#DEFINE FRAMEBUFFER_SIZE [(FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * 4)]
+#DEFINE FRAMEBUFFER_END [(FRAMEBUFFER_START + FRAMEBUFFER_SIZE)]
+
+X := 0
+Y := 0
+
+FN KvBlitBitsFastBackwardsFg (
+    IN bmp : ^UBYTE,
+    IN dest : ^ULONG,
+    IN mod : ULONG,
+    IN w : ULONG,
+    IN h : ULONG,
+)
+
+    WHILE h DO
+        left := w >> 3
+
+        WHILE left DO
+            byte := bmp^
+
+            IF byte THEN
+                IF byte & 128 THEN
+                    dest[0] = -1
+                END
+
+                IF byte & 64 THEN
+                    dest[1] = -1
+                END
+
+                IF byte & 32 THEN
+                    dest[2] = -1
+                END
+
+                IF byte & 16 THEN
+                    dest[3] = -1
+                END
+
+                IF byte & 8 THEN
+                    dest[4] = -1
+                END
+
+                IF byte & 4 THEN
+                    dest[5] = -1
+                END
+
+                IF byte & 2 THEN
+                    dest[6] = -1
+                END
+
+                IF byte & 1 THEN
+                    dest[7] = -1
+                END
+            END
+
+            left -= 1
+            bmp += 1
+            dest += 32
+        END
+
+        dest += mod
+        h -= 1
+    END
+END
+
+FN KvDrawCharacter (
+    IN char : UBYTE,
+    IN x : ULONG,
+    IN y : ULONG,
+    IN font : ^HcfHeader,
+)
+
+    gw := FRAMEBUFFER_WIDTH
+    w := font^.Width
+    h := font^.Height
+    dest := ((y * gw) << 2) + (x << 2) + FRAMEBUFFER_START
+
+    mod := (gw - w) << 2
+
+    bmp := ((w + 7) >> 3) * h * char
+    bmp += font + SIZEOF HcfHeader
+
+    KvBlitBitsFastBackwardsFg (
+        CAST bmp TO ^UBYTE, // bmp
+        CAST dest TO ^ULONG, // dest
+        mod, // mod
+        w, // w
+        h, // h
+    )
+END
+
+FN (RtlPrintCallbackF) RtljPrintCallback (
+    IN byte : UBYTE,
+    IN context : ^VOID,
+)
+
+    IF byte == '\n' THEN
+        Y += 8
+        X = 0
+
+        LEAVE
+    END
+
+    IF X >= 640 THEN
+        X = 0
+        Y += 8
+    END
+
+    IF Y >= 480 THEN
+        RtlFillMemoryWithUlong (
+            CAST FRAMEBUFFER_START TO ^UBYTE, // ptr
+            FRAMEBUFFER_SIZE, // sz
+            0, // word
+        )
+
+        Y = 0
+    END
+
+    KvDrawCharacter (
+        byte, // char
+        X, // x
+        Y, // y
+        &BxFox32Font, // font
+    )
+
+    X += 8
+END
+
+FN RtljLockStream (
+    IN handle : ^VOID,
+) : UWORD
+
+    RETURN 0
+END
+
+FN RtljUnlockStream (
+    IN handle : ^VOID,
+    IN lockcontext : UWORD,
+)
+
+    NOTHING
+END
+
+EXTERN FN BxFlushPage (
+    IN vaddr : ^VOID,
+)
+
+#DEFINE FRAMEBUFFER_ADDR 0x02000000
+
+FN BxResetFox32 ()
+    
+    // Disable the overlays.
+
+    ovid := 0
+
+    WHILE ovid < 32 DO
+        BxFox32Out (
+            0x80000300 | ovid, // port
+            0, // value
+        )
+
+        ovid += 1
+    END
+
+    // Set the background of the framebuffer.
+
+    RtlFillMemoryWithUlong (
+        FRAMEBUFFER_ADDR, // ptr
+        640 * 480 * 4, // size
+        0xFF674764, // ulong
+    )
+END
+
+#DEFINE BX_ARG_TABLE_SIZE 256
+#DEFINE BX_ARG_MAX 32
+
+BxArgBuffer : UBYTE[BX_ARG_TABLE_SIZE]
+BxArgTable : ^UBYTE[BX_ARG_MAX]
+
+FN BxInitializeArgs (
+    IN argstring : ^UBYTE,
+)
+
+    // Initialize argument string into a table of null-terminated arguments.
+
+    BlInfoBlock.ArgTable = &BxArgTable[0]
+
+    // First copy the argument string into our private buffer.
+
+    RtlCopyString (
+        &BxArgBuffer[0], // dest
+        argstring, // src
+        BX_ARG_TABLE_SIZE, // bufsize
+    )
+
+    // Crawl along the arguments to fill in the table of argument pointers.
+
+    ptr := &BxArgBuffer[0]
+    i := 0
+
+    WHILE TRUE DO
+        WHILE ptr^ == ' ' DO
+            ptr += 1
+        END
+
+        IF ptr^ == 0 THEN
+            BREAK
+        END
+
+        argstart := ptr
+
+        WHILE TRUE DO
+            IF ptr^ == 0 OR ptr^ == ' ' THEN
+                // Found the end of this argument.
+
+                BxArgTable[i] = argstart
+
+                i += 1
+
+                IF ptr^ == 0 THEN
+                    BREAK
+                END
+
+                ptr^ = 0
+                ptr += 1
+
+                IF i == BX_ARG_MAX THEN
+                    BlInfoBlock.ArgCount = i
+
+                    LEAVE
+                END
+
+                BREAK
+            END
+
+            ptr += 1
+        END
+    END
+
+    BlInfoBlock.ArgCount = i
+
+    LEAVE
+END
+
+BxBootDiskId : ULONG
+BxRamSize : ULONG
+BxUsableRamSize : ULONG
+
+EXTERN FN BlMain () : UWORD
+
+FN BxEntry (
+    IN bootdiskid : UWORD,
+    IN ramsize : UWORD,
+    IN usableramsize : UWORD,
+)
+
+    // Clear the BSS section.
+
+    RtlFillMemoryWithUlong (
+        &_bss, // ptr
+        &_bss_size, // size
+        0, // ulong
+    )
+
+    // Store the stuff passed in by the ROM.
+
+    IF bootdiskid == 0x80002000 THEN
+        // The boot sector is the old one which trashed the boot disk ID passed
+        // in r0 by overwriting it with this specific value.
+
+        bootdiskid = 0
+        ramsize = 64 * 1024 * 1024
+        usableramsize = 64 * 1024 * 1024
+
+    ELSE
+        BxBootDiskId = bootdiskid
+        BxRamSize = ramsize
+        BxUsableRamSize = usableramsize
+    END
+
+    // Reset the fox32 hardware.
+
+    BxResetFox32 ()
+
+    // Initialize argument string into a table of null-terminated arguments, as
+    // expected by the loader's argument stuff.
+
+    BxInitializeArgs ( "-dbg -tests" )
+
+    // Call the generic bootloader entrypoint.
+
+    BlMain ()
+
+    WHILE TRUE DO END
+END
+
+BxPageDirectory : ^ULONG
+
+FN BxMapPage (
+    IN vaddr : ^VOID,
+    IN phyaddr : ^VOID,
+    IN pttype : BlMemoryDescriptorType,
+    IN noncached : UWORD,
+)
+
+    pdeptr := &BxPageDirectory[vaddr >> 22]
+
+    pagetable := CAST (pdeptr^ >> 12) << RTL_PAGE_SHIFT TO ^ULONG
+
+    IF NOT pagetable THEN
+        // Allocate a new page table.
+
+        desc := BlAllocatePhysicalRange (
+            1, // pages
+            pttype, // type
+        )
+
+        IF NOT desc THEN
+            BlCrash ( "Failed to allocate page table\n" )
+        END
+
+        pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+
+        newpde := (desc^.StartPfn << 12) | MMP_PTE_V | MMP_PTE_W
+
+        RtlFillMemoryWithUlong (
+            pagetable, // dest
+            RTL_PAGE_SIZE, // sz
+            0x00000000, // ulong
+        )
+
+        pdeptr^ = newpde
+    END
+
+    pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+
+#IF BLD_CHK
+    IF pteptr^ & MMP_PTE_V THEN
+        BlCrash ( "VPN %x already mapped\n", vaddr >> RTL_PAGE_SHIFT )
+    END
+#END
+
+    pteptr^ = CAST phyaddr | MMP_PTE_V | MMP_PTE_W TO ULONG
+END
+
+FN BxMapRange (
+    IN vaddr : ^VOID,
+    IN phyaddr : ^VOID,
+    IN pages : UWORD,
+    IN pttype : BlMemoryDescriptorType,
+    IN noncached : UWORD,
+)
+
+    WHILE pages DO
+        BxMapPage (
+            vaddr, // vaddr
+            phyaddr, // phyaddr
+            pttype, // pttype
+            noncached, // noncached
+        )
+
+        phyaddr += RTL_PAGE_SIZE
+        vaddr += RTL_PAGE_SIZE
+        pages -= 1
+    END
+END
+
+FN BxVirtualToPfn (
+    IN vaddr : ^VOID,
+) : UWORD
+
+    // Translate a virtual address to a physical address. Returns -1 if invalid.
+
+    pdeptr := &BxPageDirectory[vaddr >> 22]
+
+    pagetable := CAST (pdeptr^ >> 12) << RTL_PAGE_SHIFT TO ^ULONG
+
+    IF NOT pagetable THEN
+        RETURN -1
+    END
+
+    pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+
+    IF pte & MMP_PTE_V THEN
+        RETURN pte >> 12
+    END
+
+    RETURN -1
+END
+
+FN BxRemapCodePage (
+    IN vaddr : ^VOID,
+)
+
+    // Set a code page to read-only.
+
+    pdeptr := &BxPageDirectory[vaddr >> 22]
+
+    pagetable := CAST (pdeptr^ >> 12) << RTL_PAGE_SHIFT TO ^ULONG
+
+    IF NOT pagetable THEN
+        BlCrash ( "BxRemapCodePage\n" )
+    END
+
+    pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+    pte := pteaddr^
+
+    IF NOT (pte & MMP_PTE_V) THEN
+        BlCrash ( "BxRemapCodePage 2\n" )
+    END
+
+    pte &= ~(MMP_PTE_W)
+    pteaddr^ = pte
+
+    // Purge TB page.
+
+    BxFlushPage ( vaddr )
+END
+
+FN BxRemapCodeRange (
+    IN vaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    WHILE pages DO
+        BxRemapCodePage ( vaddr )
+
+        vaddr += RTL_PAGE_SIZE
+        pages -= 1
+    END
+END
+
+FN BxInitializeMemoryMapping ()
+
+    // Create the initial page tables and turn on memory mapping.
+
+    // Allocate the kernel page directory.
+
+    desc := BlAllocatePhysicalRange (
+        1, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        BlCrash ( "Failed to allocate page directory\n" )
+    END
+
+    BlInfoBlock.SystemPageDirectoryPfn = desc^.StartPfn
+
+    // Fill the bottom half of the page directory with zeroes and the upper half
+    // with invalid kernel PTEs.
+
+    BxPageDirectory = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+
+    RtlFillMemoryWithUlong (
+        BxPageDirectory, // ptr
+        4096, // size
+        0x00000000, // ulong
+    )
+
+    // Identity map the first 4MB of RAM so that we don't instantly puke when
+    // we turn on virtual addressing (since that's where we're running from
+    // right now).
+
+    BxMapRange (
+        0, // vaddr
+        0, // phyaddr
+        0x400000 >> RTL_PAGE_SHIFT, // pages
+        BL_MEMORY_RECLAIMABLE, // pttype
+        FALSE, // noncached
+    )
+
+    // Identity map the framebuffer too.
+
+    BxMapRange (
+        FRAMEBUFFER_START, // vaddr
+        FRAMEBUFFER_START, // phyaddr
+        FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT, // pages
+        BL_MEMORY_RECLAIMABLE, // pttype
+        FALSE, // noncached
+    )
+
+    // Create a virtually linear mapping of the page table by inserting the page
+    // directory into one of its own PDEs.
+
+    pdeptr := &BxPageDirectory[0xB0000000 >> 22]
+
+    pdeptr^ = ((BxPageDirectory >> 12) << 12) | MMP_PTE_V | MMP_PTE_W
+
+    // Identity-map the first page of the ROM so the fox32 HAL can jump there
+    // for resets.
+
+    BxMapPage (
+        0xF0000000, // vaddr
+        0xF0000000, // phyaddr
+        BL_MEMORY_USED, // pttype
+        FALSE, // noncached
+    )
+
+    // Now we can enable virtual addressing.
+
+    BxEnableVirtualAddressing ()
+END
+
+BxInitialDescriptors : BlMemoryDescriptor[8]
+
+FN BxInitializeMemory ()
+
+    // On fox32, this function has to populate the memory
+    // descriptor list, identity map memory, and then enable paging.
+
+    BlTotalPages = (64 * 1024 * 1024) / 4096
+
+    descidx := 0
+
+    desc := &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Figure out the top of the bootloader.
+
+    endreclaimable : UWORD = &_bss_end
+    endreclaimable += RTL_PAGE_SIZE - 1
+    endreclaimable >>= RTL_PAGE_SHIFT
+
+    // Create the descriptor for the IVT.
+
+    desc^.StartPfn = 0
+    desc^.PageCount = 1
+    desc^.Type = BL_MEMORY_USED
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.DescriptorListHead, // head
+        &desc^.Entry, // entry
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+    
+    // Create the descriptor for the block of memory containing the bootloader.
+
+    desc^.StartPfn = 1
+    desc^.PageCount = endreclaimable - 1
+    desc^.Type = BL_MEMORY_RECLAIMABLE
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.DescriptorListHead, // head
+        &desc^.Entry, // entry
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Create the descriptor for the first free range.
+
+    desc^.StartPfn = endreclaimable
+    desc^.PageCount = (FRAMEBUFFER_START >> RTL_PAGE_SHIFT) - endreclaimable
+    desc^.Type = BL_MEMORY_FREE
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.DescriptorListHead, // head
+        &desc^.Entry, // entry
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Create the descriptor for the fox32 framebuffer.
+
+    desc^.StartPfn = FRAMEBUFFER_START >> RTL_PAGE_SHIFT
+    desc^.PageCount = FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT
+    desc^.Type = BL_MEMORY_USED
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.DescriptorListHead, // head
+        &desc^.Entry, // entry
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Create the descriptor for the second free range.
+
+    desc^.StartPfn = FRAMEBUFFER_END >> RTL_PAGE_SHIFT
+    desc^.PageCount = (0x4000000 - FRAMEBUFFER_END) >> RTL_PAGE_SHIFT
+    desc^.Type = BL_MEMORY_FREE
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.DescriptorListHead, // head
+        &desc^.Entry, // entry
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Enable paging.
+
+    BxInitializeMemoryMapping ()
+END
+
+FN BxCreateVirtualSpace (
+    IN base : UWORD,
+    IN pages : UWORD,
+) : UWORD
+
+    // Create the page tables required to map the given range of virtual space.
+
+    // 1024 pages can be mapped by a page table.
+
+    pagetables := (pages + 1023) / 1024
+
+    // Calculate the real length of the region, rounded up to our page table
+    // size.
+
+    realpages := pagetables * 1024
+
+    // Allocate the page tables.
+
+    desc := BlAllocatePhysicalRange (
+        pagetables, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        BlCrash ( "Failed to create virtual space\n" )
+    END
+
+    pfn := desc^.StartPfn
+
+    // Insert them into the page directory.
+
+    pde := &BxPageDirectory[base >> 22]
+
+    WHILE pagetables DO
+        pde[0] = (pfn << 12) | MMP_PTE_V | MMP_PTE_W
+
+        pfn += 1
+        pde += 4
+        pagetables -= 1
+    END
+
+    // Zero them out through the recursive mapping.
+
+    ptebase := CAST MmpPteAddress ( base ) TO ^VOID
+
+    RtlFillMemoryWithUlong (
+        ptebase, // ptr
+        pagetables << RTL_PAGE_SHIFT, // sz
+        0x00000000, // ulong
+    )
+
+    RETURN realpages
+END
+
+FN (BlReadF) BxReadPartition (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+    IF offset % 512 THEN
+        BlCrash ( "BxReadPartition: Offset not sector-aligned\n" )
+    END
+
+    IF length % 512 THEN
+        BlCrash ( "BxReadPartition: Length not sector-aligned\n" )
+    END
+
+    IF length != 512 THEN
+        // This is because we don't bother to deal with transfers that cross a
+        // page boundary.
+
+        BlCrash ( "BxReadPartition: Length not 512\n" )
+    END
+
+    physbuf := CAST BxVirtualToPfn ( buf ) TO ^VOID
+
+    IF physbuf == -1 THEN
+        BlCrash ( "BxReadPartition: Invalid physical address\n" )
+    END
+
+    physbuf <<= RTL_PAGE_SHIFT
+    physbuf += buf & (RTL_PAGE_SIZE - 1)
+
+    // Perform the fox32 IO.
+
+    // Set the buffer address.
+
+    BxFox32Out (
+        0x80002000 | BxBootDiskId, // port
+        physbuf, // value
+    )
+
+    // Set the sector number.
+
+    BxFox32Out (
+        0x80003000 | BxBootDiskId, // port
+        (offset / 512) + 4, // value
+    )
+
+    RETURN length
+END
+
+FN BxInitializeIo (
+    IN bootdevname : ^UBYTE,
+)
+
+    RtlFormat (
+        &BlInfoBlock.BootDeviceName[0], // dest
+        BL_BOOT_NAME_MAX, // bufsize
+        "dks%ds0", // fmt
+        BxBootDiskId,
+    )
+
+    // Register the read function.
+
+    BlBootDevice.Read = &BxReadPartition
+
+    // Initialize size.
+
+    blocks := BxFox32In ( 0x80001000 | BxBootDiskId )
+
+    BlBootDevice.Size = blocks / 512
+
+    RtlPrint ( "Fox32 Disk%d: %u blocks\n", BxBootDiskId, blocks / 512 )
+
+    // Stash the parameters of the boot framebuffer.
+
+    fba := BlMapIoRegion (
+        FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT, // pages
+        FRAMEBUFFER_START, // phyaddr
+        FALSE, // noncached
+    )
+
+    BlInfoBlock.BootFbBase = fba
+    BlInfoBlock.BootFbWidth = 640
+    BlInfoBlock.BootFbHeight = 480
+
+    // Create a debug overlay large enough to contain 80x24 with a 6x12 font.
+    // This is 480x288 x 4 = 552960 bytes.
+
+    bytes := (BL_FOX_DBG_WIDTH * BL_FOX_DBG_HEIGHT * 4)
+
+    BlInfoBlock.U.Fox.DbgOverlayBase = NULLPTR
+
+    IF BlGetExistenceArg ( "-dbg" ) THEN
+        desc : ^BlMemoryDescriptor
+
+        BlInfoBlock.U.Fox.DbgOverlayBase = BlAllocateMappedRange (
+            (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // pages
+            BL_KERNEL_STRUCTURES, // prefva
+            FALSE, // fixed
+            BL_MEMORY_USED, // type
+            OUT desc, // desc
+        )
+
+        IF BlInfoBlock.U.Fox.DbgOverlayBase THEN
+            RtlFillMemoryWithUlong (
+                BlInfoBlock.U.Fox.DbgOverlayBase, // ptr
+                bytes, // sz
+                0xFFFFFFFF, // ulong
+            )
+
+            BlInfoBlock.U.Fox.DbgOverlayBasePhys =
+                CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
+        END
+    END
+END
+
+FN BxLoadDrivers ()
+
+    // Load whatever drivers are necessary to access the storage stack.
+
+END
+
+FNPTR SysEntry (
+    IN loaderblock : ^BlInfoRecord,
+)
+
+FN BxStartSystem (
+    IN entrypoint : ^VOID,
+    IN prbphysical : ^VOID,
+)
+
+    // Map the Prb at 0xFFFFC000.
+
+    BxMapPage (
+        0xFFFFC000, // vaddr
+        prbphysical, // phyaddr
+        BL_MEMORY_USED, // pttype
+        FALSE, // noncached
+    )
+
+    // Jump to the system entrypoint.
+
+    entry := CAST entrypoint TO SysEntry
+
+    entry ( &BlInfoBlock )
+END
+
+FN BxExit ()
+    RtlPrint ( "BxExit called\n" )
+
+    WHILE TRUE DO
+        BxHaltFox32 ()
+    END
+END

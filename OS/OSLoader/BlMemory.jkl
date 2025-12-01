@@ -1,0 +1,576 @@
+//
+// Memory management for the bootloader.
+//
+
+#INCLUDE "Bl.hjk"
+
+PUBLIC BlHeapTop : ^VOID
+PUBLIC BlHeapPointer : ^VOID
+
+PUBLIC BlTotalPages : UWORD
+
+BlKernelSpaceBitmap : RtlBitmapHeader
+BlKernelSpaceBitmapData : UBYTE[(BL_MANAGED_KERNEL_SPACE >> RTL_PAGE_SHIFT) / 8]
+
+BlKernelStructureBump : ^VOID = BL_KERNEL_STRUCTURES
+
+BlKernelSpaceHint := 0
+
+#IF BLD_CHK
+
+BlOkayToAllocate := FALSE
+
+#END
+
+#DEFINE BL_BUMP_EXTENSION_FLAG 0x80000000
+
+// BL_DESCRIPTOR_MAX must be set to a value high enough for memory management to
+// initialize itself without hitting the bump allocator before the address space
+// is set up.
+
+#DEFINE BL_DESCRIPTOR_MAX 16
+
+BlFirstBumpExtensionDescriptor : BlMemoryDescriptor
+BlBumpExtensionDescriptor := &BlFirstBumpExtensionDescriptor
+
+BlDescriptors : BlMemoryDescriptor[BL_DESCRIPTOR_MAX]
+PUBLIC BlDescriptorIndex := 0
+
+#IF BLD_CHK
+
+FN BlDumpDescriptors ()
+
+    listhead := &BlInfoBlock.DescriptorListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        RtlPrint (
+            "%p: start=%p end=%p type=%d\n", // fmt
+            desc,
+            desc^.StartPfn << RTL_PAGE_SHIFT,
+            ((desc^.StartPfn + desc^.PageCount) << RTL_PAGE_SHIFT) - 1,
+            desc^.Type,
+        )
+
+        listentry = listentry^.Next
+    END
+END
+
+#END
+
+FN BlAllocateMemory (
+    IN bytes : UWORD,
+) : ^VOID
+
+#IF BLD_CHK
+    IF NOT bytes THEN
+        BlCrash ( "BlAllocateMemory\n" )
+    END
+
+    IF NOT BlOkayToAllocate THEN
+        BlCrash ( "Not okay to allocate - increase BL_DESCRIPTOR_MAX\n" )
+    END
+#END
+
+    // First align bytes up to word size boundary.
+
+    bytes += (RTL_MACHINE_WORD_SIZE - 1)
+    bytes &= ~(RTL_MACHINE_WORD_SIZE - 1)
+
+    junk : ^BlMemoryDescriptor
+
+    IF bytes >= RTL_PAGE_SIZE THEN
+        // Allocate a mapped range.
+
+        RETURN BlAllocateMappedRange (
+            (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // bytes
+            BL_KERNEL_STRUCTURES, // preferredva
+            FALSE, // fixed
+            BL_MEMORY_RECLAIMABLE, // type
+            OUT junk, // desc
+        )
+    END
+
+    // Trivial bump allocator.
+
+    IF BlHeapPointer + bytes <= BlHeapTop THEN
+        ptr := BlHeapPointer
+
+        BlHeapPointer += bytes
+
+        RETURN ptr
+    END
+
+    // Extend the bump allocator.
+
+    pages := (BL_BUMP_EXTEND + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+
+    newptr := BlAllocateMappedRange (
+        pages, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_RECLAIMABLE | BL_BUMP_EXTENSION_FLAG, // type
+        OUT junk, // desc
+    )
+
+    IF NOT newptr THEN
+        BlCrash ( "Out of bump heap\n" )
+    END
+
+    // Use the start of the new block as the next bump extension descriptor.
+
+    BlBumpExtensionDescriptor = CAST BlHeapPointer TO ^BlMemoryDescriptor
+
+    BlHeapTop = newptr + (pages << RTL_PAGE_SHIFT)
+
+    newptr += SIZEOF BlMemoryDescriptor
+
+    newptr += (RTL_MACHINE_WORD_SIZE - 1)
+    newptr &= ~(RTL_MACHINE_WORD_SIZE - 1)
+
+    ptr := newptr
+
+    newptr += bytes
+
+    BlHeapPointer = newptr
+
+    RETURN ptr
+END
+
+FN BlAllocatePhysicalRange (
+    IN pages : UWORD,
+    IN type : BlMemoryDescriptorType,
+) : ^BlMemoryDescriptor
+
+    listhead := &BlInfoBlock.DescriptorListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        IF desc^.Type == BL_MEMORY_FREE AND
+            desc^.PageCount >= pages THEN
+
+            // Draw the range from the start of this descriptor.
+
+            newdesc : ^BlMemoryDescriptor
+
+            IF type & BL_BUMP_EXTENSION_FLAG THEN
+                type &= ~BL_BUMP_EXTENSION_FLAG
+                newdesc = BlBumpExtensionDescriptor
+
+            ELSEIF BlDescriptorIndex < BL_DESCRIPTOR_MAX THEN
+                newdesc = &BlDescriptors[BlDescriptorIndex]
+                BlDescriptorIndex += 1
+
+            ELSE
+                newdesc = CAST BlAllocateMemory (
+                    SIZEOF BlMemoryDescriptor, // bytes
+                ) TO ^BlMemoryDescriptor
+            END
+
+            newdesc^.PageCount = pages
+            newdesc^.StartPfn = desc^.StartPfn
+            newdesc^.Type = type
+
+            // Insert before the old descriptor.
+
+            RtlInsertAtTailList (
+                &desc^.Entry, // head
+                &newdesc^.Entry, // entry
+            )
+
+            // Trim old descriptor.
+
+            desc^.PageCount -= pages
+            desc^.StartPfn += pages
+
+            RETURN newdesc
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
+FN BlFreePhysicalRange (
+    IN desc : ^BlMemoryDescriptor
+)
+
+    desc^.Type = BL_MEMORY_FREE
+END
+
+FN BlAllocateKernelSpace (
+    IN pages : UWORD,
+    IN preferredva : ^VOID,
+    IN fixed : UWORD,
+) : ^VOID
+
+    IF preferredva < BL_KERNEL_SPACE THEN
+        IF fixed THEN
+            RETURN NULLPTR
+        END
+
+        preferredva = BL_KERNEL_SPACE
+    
+    ELSEIF preferredva == BL_KERNEL_STRUCTURES THEN
+        IF fixed THEN
+            RETURN NULLPTR
+        END
+
+        va := BlKernelStructureBump
+
+        // Add a guard page to the bump just to be safe.
+
+        BlKernelStructureBump += (pages + 1) << RTL_PAGE_SHIFT
+
+        RETURN va
+
+    ELSEIF preferredva >= BL_KERNEL_SPACE + BL_MANAGED_KERNEL_SPACE THEN
+        IF fixed THEN
+            RETURN NULLPTR
+        END
+
+        preferredva = BL_KERNEL_SPACE
+    END
+
+    IF RtlCheckClearBitsBitmap (
+        &BlKernelSpaceBitmap, // header
+        (preferredva - BL_KERNEL_SPACE) >> RTL_PAGE_SHIFT, // index
+        pages, // runlength
+    ) THEN
+
+        // Got the preferred range.
+
+        RtlSetBitsBitmap (
+            &BlKernelSpaceBitmap, // header
+            (preferredva - BL_KERNEL_SPACE) >> RTL_PAGE_SHIFT, // index
+            pages, // runlength
+        )
+
+        RETURN preferredva
+    END
+
+    IF fixed THEN
+        // No dice :(
+
+        RETURN NULLPTR
+    END
+
+    hint := BlKernelSpaceHint
+
+    IF preferredva != BL_KERNEL_SPACE THEN
+        hint = (preferredva - BL_KERNEL_SPACE) >> RTL_PAGE_SHIFT
+    END
+
+    // Find some other place.
+
+    index := RtlFindRunBitmap (
+        &BlKernelSpaceBitmap, // header
+        pages, // runlength
+        hint, // hint
+    )
+
+    IF index == -1 THEN
+        // Still no dice :((
+
+        RETURN NULLPTR
+    END
+
+    IF preferredva == BL_KERNEL_SPACE THEN
+        BlKernelSpaceHint = index
+    END
+
+    RtlSetBitsBitmap (
+        &BlKernelSpaceBitmap, // header
+        index, // index
+        pages, // runlength
+    )
+
+    RETURN CAST (index << RTL_PAGE_SHIFT) + BL_KERNEL_SPACE TO ^VOID
+END
+
+FN BlFreeKernelSpace (
+    IN vaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    IF vaddr >= BL_KERNEL_SPACE + BL_MANAGED_KERNEL_SPACE THEN
+        LEAVE
+    END
+
+    IF vaddr < BL_KERNEL_SPACE THEN
+        BlCrash ( "Virtual address below kernel space %x\n", vaddr )
+    END
+
+    RtlClearBitsBitmap (
+        &BlKernelSpaceBitmap, // header
+        (vaddr - BL_KERNEL_SPACE) >> RTL_PAGE_SHIFT, // index
+        pages, // runlength
+    )
+END
+
+FN BlMapIoRegion (
+    IN pages : UWORD,
+    IN phyaddr : ^VOID,
+    IN noncached : UWORD,
+) : ^VOID
+
+    vaddr := BlAllocateKernelSpace (
+        pages, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+    )
+
+    IF NOT vaddr THEN
+        RETURN NULLPTR
+    END
+
+    BxMapRange (
+        vaddr, // vaddr
+        phyaddr, // phyaddr
+        pages, // pages
+        BL_MEMORY_USED, // pttype
+        noncached, // noncached
+    )
+
+    RETURN vaddr
+END
+
+FN BlAllocateMappedRange (
+    IN pages : UWORD,
+    IN preferredva : ^VOID,
+    IN fixed : UWORD,
+    IN type : BlMemoryDescriptorType,
+    OUT desc : ^BlMemoryDescriptor,
+) : ^VOID
+
+    vaddr := BlAllocateKernelSpace (
+        pages, // pages
+        preferredva, // preferredva
+        fixed, // fixed
+    )
+
+    IF NOT vaddr THEN
+        RETURN NULLPTR
+    END
+
+    desc = BlAllocatePhysicalRange (
+        pages, // pages
+        type, // type
+    )
+
+    IF NOT desc THEN
+        BlFreeKernelSpace (
+            vaddr, // vaddr
+            pages, // pages
+        )
+
+        RETURN NULLPTR
+    END
+
+    BxMapRange (
+        vaddr, // vaddr
+        CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID, // phyaddr
+        pages, // pages
+        BL_MEMORY_USED, // pttype
+        0, // noncached
+    )
+
+    RETURN vaddr
+END
+
+FN BlMapRangeOfPfnDatabase (
+    IN startaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    pfdesc := BlAllocatePhysicalRange (
+        pages, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT pfdesc THEN
+        BlCrash ( "Failed to allocate PFN database\n" )
+    END
+
+    BxMapRange (
+        startaddr, // vaddr
+        CAST pfdesc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID, // phyaddr
+        pages, // pages
+        BL_MEMORY_USED, // pttype
+        0, // noncached
+    )
+
+    RtlFillMemoryWithUlong (
+        startaddr, // ptr
+        pages << RTL_PAGE_SHIFT, // size
+        0, // ulong
+    )
+END
+
+FN BlCreatePfnDatabase (
+    IN desc : ^BlMemoryDescriptor,
+)
+
+    // Allocate PFN database for the memory described by this descriptor.
+
+    // Calculate the offset into the PFN database of the first page frame of the
+    // region.
+
+    vaddr := BlInfoBlock.PfnDatabase + (desc^.StartPfn * BL_PFE_SIZE)
+
+    endaddr := vaddr + (desc^.PageCount * BL_PFE_SIZE)
+
+    // Round vaddr down.
+    
+    vaddr &= ~(RTL_PAGE_SIZE - 1)
+
+    // Round endaddr up.
+
+    endaddr += RTL_PAGE_SIZE - 1
+    endaddr &= ~(RTL_PAGE_SIZE - 1)
+
+    pages := 0
+
+    startaddr := vaddr
+
+    WHILE vaddr < endaddr DO
+        // Check if the virtual address is invalid.
+
+        pfn := BxVirtualToPfn ( vaddr )
+
+        IF pfn == -1 THEN
+            // Not valid.
+
+            IF NOT pages THEN
+                startaddr = vaddr
+            END
+
+            pages += 1
+        
+        ELSEIF pages THEN
+            // Valid, do stuff for the last range.
+
+            BlMapRangeOfPfnDatabase (
+                startaddr, // startaddr
+                pages, // pages
+            )
+
+            pages = 0
+        END
+
+        vaddr += RTL_PAGE_SIZE
+    END
+
+    IF pages THEN
+        BlMapRangeOfPfnDatabase (
+            startaddr, // startaddr
+            pages, // pages
+        )
+    END
+END
+
+FN BlInitializePfnDatabase ()
+
+    // Virtually allocate the page frame database in kernel space.
+
+    // We do this so fancily so that large sparse physical address spaces
+    // don't necessitate a massive PFDB array backed by real memory. We also
+    // might be able to avoid allocating PFDB pages for large areas that are
+    // permanently reserved by kernel code/data and firmware.
+
+    // First we need to determine how large of an area in kernel space we need
+    // to reserve for the pfdb. We do this by scanning the descriptor list and
+    // bumping up a maxpfn for each PFDB-able region.
+
+    maxpfn := 0
+
+    desc : ^BlMemoryDescriptor
+
+    listhead := &BlInfoBlock.DescriptorListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc = CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        IF desc^.Type == BL_MEMORY_FREE OR
+            desc^.Type == BL_MEMORY_RECLAIMABLE THEN
+
+            IF desc^.PageCount THEN
+                maxpfn = desc^.StartPfn + desc^.PageCount
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+
+    // Reserve the virtual PFN database region.
+
+    vaddr := BlAllocateKernelSpace (
+        ((maxpfn * BL_PFE_SIZE) + (RTL_PAGE_SIZE - 1))
+        >> RTL_PAGE_SHIFT, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+    )
+
+    IF NOT vaddr THEN
+        BlCrash ( "Failed to allocate enough kernel space for PFN database" )
+    END
+
+    BlInfoBlock.PfnDatabase = vaddr
+
+    // Allocate and initialize PFN database pages for each region.
+
+    listhead = &BlInfoBlock.DescriptorListHead
+    listentry = listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc = CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        IF desc^.Type == BL_MEMORY_FREE OR
+            desc^.Type == BL_MEMORY_RECLAIMABLE THEN
+
+            IF desc^.PageCount THEN
+                BlCreatePfnDatabase ( desc )
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+END
+
+BlTemporaryFakeNumaBitmapArray : ^UBYTE[1]
+
+FN BlInitializeMemory ()
+
+    // Initialize the descriptor list.
+
+    RtlInitializeList ( &BlInfoBlock.DescriptorListHead )
+
+    // Initialize the kernel space bitmap.
+
+    RtlInitializeBitmap (
+        &BlKernelSpaceBitmap, // header
+        BL_MANAGED_KERNEL_SPACE >> RTL_PAGE_SHIFT, // sizeinbits
+        &BlKernelSpaceBitmapData[0], // data
+    )
+
+    // Call the platform code to populate our memory descriptor list, enable
+    // paging, whatever it needs to do.
+
+    BxInitializeMemory ()
+
+#IF BLD_CHK
+    BlOkayToAllocate = TRUE
+#END
+
+    // Initialize the sparse PFN database.
+
+    BlInitializePfnDatabase ()
+
+    // ...
+END

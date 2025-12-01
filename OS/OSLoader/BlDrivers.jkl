@@ -1,0 +1,71 @@
+//
+// Boot driver management for the MINTIA Loader.
+//
+
+#INCLUDE "Bl.hjk"
+
+BlBootDriverPath : UBYTE[128]
+
+FN BlLoadDriver (
+    IN name : ^UBYTE,
+) : ^BlDll
+
+    RtlFormat (
+        &BlBootDriverPath[0], // dest
+        128, // bufsize
+        "BootDrivers/%s", // fmt
+        name,
+    )
+
+    dll := BlLoadDll ( &BlBootDriverPath[0] )
+
+    IF NOT dll THEN
+        RETURN NULLPTR
+    END
+
+    IF NOT BlLookupSymbol (
+        dll, // dll
+        "DriverInit", // name
+        OUT dll^.DriverEntrypoint, // value
+    ) THEN
+
+        dll^.DriverEntrypoint = NULLPTR
+
+        RtlPrint ( "WARNING: Driver '%s' had no entrypoint\n", name )
+    END
+
+    RETURN dll
+END
+
+FN (BlCallbackPerLineF) BlLoadDriverCallback (
+    IN buf : ^UBYTE,
+    IN context : ^VOID,
+    IN linenum : UWORD,
+)
+
+    // Load the driver.
+
+    BlLoadDriver ( buf )
+END
+
+FN BlLoadDrivers ()
+
+    // Load all of the boot drivers.
+
+    // Call platform code to load whatever other storage drivers are necessary
+    // for early boot.
+
+    BxLoadDrivers ()
+
+    // load whatever drivers are specified in BootDrivers.txt
+
+    IF NOT BlCallbackPerLineFile (
+        BlSystemDirectory, // device
+        "BootDrivers.txt", // path
+        &BlLoadDriverCallback, // callback
+        NULLPTR, // context
+    ) THEN
+
+        RtlPrint ( "WARNING: Couldn't open %s/BootDrivers.txt\n", BlSystemPath )
+    END
+END

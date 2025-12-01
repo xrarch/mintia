@@ -1,0 +1,176 @@
+//
+// Boot resource management for the MINTIA Loader.
+//
+
+#INCLUDE "Bl.hjk"
+
+BlResourceDirectory : ^BlFile
+
+FN BlLoadResource (
+    IN device : ^BlFile,
+    IN name : ^UBYTE,
+    IN path : ^UBYTE,
+) : ^BlResource
+
+    // Load a single resource. Returns NULLPTR on error.
+
+    file := BlOpenFile (
+        device, // device
+        path, // path
+        BL_FILETYPE_FILE, // type
+    )
+
+    IF NOT file THEN
+        RETURN NULLPTR
+    END
+
+    rsrc := CAST BlAllocateMemory (
+        SIZEOF BlResource, // bytes
+    ) TO ^BlResource
+
+    rsrc^.Jettison = TRUE
+
+    RtlCopyString (
+        &rsrc^.Name[0], // dest
+        name, // src
+        BL_RESOURCE_NAME_MAX, // bufsize
+    )
+
+    rsrc^.Size = file^.Size
+
+    filepages := file^.Size + 1
+    filepages += RTL_PAGE_SIZE - 1
+    filepages >>= RTL_PAGE_SHIFT
+
+    desc : ^BlMemoryDescriptor
+
+    rsrc^.Data = CAST BlAllocateMappedRange (
+        filepages, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    ) TO ^UBYTE
+
+    IF NOT rsrc^.Data THEN
+        RETURN NULLPTR
+    END
+
+    // Read the file contents.
+
+    BlReadFile (
+        file, // file
+        0, // offset
+        rsrc^.Data, // buf
+        file^.Size, // length
+    )
+
+    // Insert in resources list.
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.ResourceListHead, // head
+        &rsrc^.Entry, // entry
+    )
+
+    BlInfoBlock.ResourceCount += 1
+
+    RETURN rsrc
+END
+
+#DEFINE BL_RESOURCE_PATH_MAX 64
+
+FN (BlCallbackPerLineF) BlLoadResourceCallback (
+    IN buf : ^UBYTE,
+    IN context : ^VOID,
+    IN linenum : UWORD,
+)
+
+    WHILE buf^ == ' ' OR buf^ == '\t' DO
+        buf += 1
+    END
+
+    IF buf^ == '#' THEN
+        // Comment line. Ignore.
+
+        LEAVE
+    END
+
+    // Parse a resource line of the format:
+    // name path
+
+    name : UBYTE[BL_RESOURCE_NAME_MAX]
+    path : UBYTE[BL_RESOURCE_PATH_MAX]
+
+    next := RtlTokenize (
+        buf, // buffer
+        &name[0], // tokenbuffer
+        BL_RESOURCE_NAME_MAX, // bufsize
+        ' ', // delimiter
+    )
+
+    IF NOT next THEN
+        // Empty line.
+
+        LEAVE
+    END
+
+    next = RtlTokenize (
+        next, // buffer
+        &path[0], // tokenbuffer
+        BL_RESOURCE_PATH_MAX, // bufsize
+        ' ', // delimiter
+    )
+
+    IF NOT next THEN
+        RtlPrint ( "WARNING: Resources.txt:%d: Badly formatted\n", linenum )
+
+        LEAVE
+    END
+
+    rsrc := BlLoadResource (
+        BlResourceDirectory, // device
+        &name[0], // name
+        &path[0], // path
+    )
+
+    IF NOT rsrc THEN
+        RtlPrint (
+            "WARNING: Couldn't load %s (%s)\n", // fmt
+            &name[0],
+            &path[0],
+        )
+    END
+END
+
+FN BlLoadResources ()
+
+    // Initialize the resource list.
+
+    RtlInitializeList ( &BlInfoBlock.ResourceListHead )
+
+    // Open the Resources directory.
+
+    BlResourceDirectory = BlOpenFile (
+        BlSystemDirectory, // file
+        "BootResources", // path
+        BL_FILETYPE_DIRECTORY, // type
+    )
+
+    IF NOT BlSystemDirectory THEN
+        RtlPrint ( "WARNING: Couldn't open %s/BootResources/\n", BlSystemPath )
+
+        LEAVE
+    END
+
+    // Load all of the boot resources.
+
+    IF NOT BlCallbackPerLineFile (
+        BlSystemDirectory, // device
+        "BootResources.txt", // path
+        &BlLoadResourceCallback, // callback
+        NULLPTR, // context
+    ) THEN
+
+        RtlPrint ( "WARNING: Couldn't open %s/BootResources.txt\n", BlSystemPath )
+    END
+END

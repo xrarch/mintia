@@ -1,0 +1,173 @@
+//
+// Implements file I/O for the MINTIA bootloader.
+//
+
+#INCLUDE "Bl.hjk"
+
+PUBLIC BlBootDevice : BlFile
+
+PUBLIC BlTemporaryBuffer : UBYTE[BL_TEMP_BUFFER_SIZE]
+
+PUBLIC BlSystemDirectory : ^BlFile
+PUBLIC BlSystemPath : ^UBYTE
+
+EXTERN FN (BlMountF) BlMountAisixFs (
+    IN device : ^BlFile,
+) : UWORD
+
+BlMountTable : BlMountF[] = {
+    &BlMountAisixFs,
+
+    NULLPTR, // SENTINEL
+}
+
+FN BlMountDevice (
+    IN device : ^BlFile,
+) : UWORD
+
+    // Try to mount the device as one of the supported filesystems. Return TRUE
+    // if successful, FALSE otherwise.
+
+    IF device^.Open THEN
+        // Already mounted.
+
+        RETURN TRUE
+    END
+
+    mount := &BlMountTable[0]
+
+    WHILE mount^ DO
+        IF mount^^ ( device ) THEN
+            RETURN TRUE
+        END
+
+        mount += SIZEOF ^VOID
+    END
+
+    RETURN FALSE
+END
+
+FN BlOpenFile (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+    IN type : UWORD,
+) : ^BlFile
+
+    // Try to open a file. Return a pointer to the BlFile if success, otherwise
+    // NULLPTR.
+
+    IF NOT device^.Open THEN
+        // Not mounted.
+
+        RETURN NULLPTR
+    END
+
+    RETURN device^.Open (
+        device, // device
+        path, // path
+        type, // type
+    )
+END
+
+FN BlReadFile (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+    IF NOT file^.Read THEN
+        BlCrash ( "Read not supported on file\n" )
+    END
+
+    RETURN file^.Read (
+        file, // file
+        offset, // offset
+        buf, // buf
+        length, // length
+    )
+END
+
+FN BlIterateEntries (
+    IN file : ^BlFile,
+    IN callback : BlIterateEntriesCallbackF,
+    IN context : ^VOID,
+    IN type : UWORD,
+)
+
+    IF NOT file^.IterateEntries THEN
+        BlCrash ( "Iterating entries not supported on file\n" )
+    END
+
+    file^.IterateEntries (
+        file, // file
+        callback, // callback
+        context, // context
+        type, // type
+    )
+END
+
+FN BlInitializeFile (
+    IN file : ^BlFile,
+    IN type : UWORD,
+)
+
+    RtlFillMemoryWithUlong (
+        file, // dest
+        SIZEOF BlFile, // sz
+        0, // ulong
+    )
+
+    file^.Type = type
+END
+
+FN BlInitializeIo ()
+
+    // Initialize the boot device.
+
+    BlInitializeFile (
+        &BlBootDevice, // file
+        BL_FILETYPE_FILE, // type
+    )
+
+    // Call the platform code.
+
+    BxInitializeIo (
+        BlGetValueArg ( "BOOTDEV" ), // bootdevname
+    )
+
+    IF NOT BlMountDevice ( &BlBootDevice ) THEN
+        BlCrash (
+            "Inaccessible boot device %s\n", // fmt
+            &BlInfoBlock.BootDeviceName[0],
+        )
+    END
+
+    // Open the system directory.
+
+    BlSystemPath = BlGetValueArg ( "SYSDIR" )
+
+    IF NOT BlSystemPath THEN
+        BlSystemPath = "/mintia"
+    END
+
+    BlSystemDirectory = BlOpenFile (
+        &BlBootDevice, // file
+        BlSystemPath, // path
+        BL_FILETYPE_DIRECTORY, // type
+    )
+
+    IF NOT BlSystemDirectory THEN
+        BlCrash (
+            "Nonexistent system directory %s:%s\n", // fmt
+            &BlInfoBlock.BootDeviceName[0],
+            BlSystemPath,
+        )
+    END
+
+    RtlPrint (
+        "Selected boot directory is %s:%s.\n", // fmt
+        &BlInfoBlock.BootDeviceName[0],
+        BlSystemPath,
+    )
+END

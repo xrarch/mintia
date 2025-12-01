@@ -1,0 +1,666 @@
+//
+// Implements a trivial read-only AisixFS driver.
+//
+
+#INCLUDE "Bl.hjk"
+
+#DEFINE AFS_INODE_FILE 1
+#DEFINE AFS_INODE_DIR 2
+
+AfsInodeTypeToBlType : UBYTE[3] = {
+    [AFS_INODE_FILE] = BL_FILETYPE_FILE,
+    [AFS_INODE_DIR] = BL_FILETYPE_DIRECTORY,
+}
+
+STRUCT AfsSuperblock
+    Version : ULONG,
+    Magic : ULONG,
+    Dirty : ULONG,
+    ReservedBlocks : ULONG,
+    FatStart : ULONG,
+    FatSize : ULONG,
+    Istart : ULONG,
+    Icount : ULONG,
+    DataStart : ULONG,
+    DataSize : ULONG,
+    VolSize : ULONG,
+END
+
+STRUCT AfsDirent
+    Inumber : ULONG,
+    Name : UBYTE[60],
+END
+
+STRUCT AfsInode
+    Type : ULONG,
+    Permissions : ULONG,
+    Uid : ULONG,
+    Iparent : ULONG,
+    Timestamp : ULONG,
+    StartBlock : ULONG,
+    Gid : ULONG,
+    ByteSize : ULONG,
+END
+
+STRUCT AfsCacheControl
+    LruEntry : RtlListEntry,
+    SectorNumber : UWORD,
+    Block : ^VOID,
+END
+
+#DEFINE AFS_CACHE_BLOCKS [(RTL_PAGE_SIZE / 512)]
+
+STRUCT AfsContext
+    FatStart : UWORD,
+    Istart : UWORD,
+
+    MdCachePage : ^VOID,
+    DataCachePage : ^VOID,
+
+    MdCc : AfsCacheControl[AFS_CACHE_BLOCKS],
+    DataCc : AfsCacheControl[AFS_CACHE_BLOCKS],
+
+    MdListHead : RtlListEntry,
+    DataListHead : RtlListEntry,
+
+    RootInode : AfsInode,
+END
+
+FN AfsCacheRead (
+    IN device : ^BlFile,
+    IN sector : UWORD,
+    IN metadata : UWORD,
+) : ^VOID
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    listentry : ^RtlListEntry
+    listhead : ^RtlListEntry
+    cc : ^AfsCacheControl
+
+    IF metadata THEN
+        listhead = &ctx^.MdListHead
+    ELSE
+        listhead = &ctx^.DataListHead
+    END
+
+    listentry = listhead^.Next
+
+    WHILE listentry != listhead DO
+        cc = CONTAINEROF listentry TO AfsCacheControl.LruEntry
+
+        IF cc^.SectorNumber == sector THEN
+            // Already cached! Remove from the list and re-insert at the head.
+
+            RtlRemoveEntryList ( &cc^.LruEntry )
+
+            IF metadata THEN
+                RtlInsertAtHeadList (
+                    &ctx^.MdListHead, // head
+                    &cc^.LruEntry, // entry
+                )
+
+            ELSE
+                RtlInsertAtHeadList (
+                    &ctx^.DataListHead, // head
+                    &cc^.LruEntry, // entry
+                )
+            END
+
+            RETURN cc^.Block
+        END
+
+        listentry = listentry^.Next
+    END
+
+    // Not in the cache. Grab the guy at the tail. He should be the least
+    // recently used and we can reuse him for this sector.
+
+    listentry = listhead^.Prev
+
+    cc = CONTAINEROF listentry TO AfsCacheControl.LruEntry
+
+    cc^.SectorNumber = sector
+
+    IF BlReadFile (
+        device, // file
+        sector * 512, // offset
+        cc^.Block, // buf
+        512, // length
+    ) != 512 THEN
+
+        BlCrash ( "Failed to read sector into AFS cache\n" )
+    END
+
+    // Move to the head since he's now the most recently used.
+
+    RtlRemoveEntryList ( &cc^.LruEntry )
+
+    IF metadata THEN
+        RtlInsertAtHeadList (
+            &ctx^.MdListHead, // head
+            &cc^.LruEntry, // entry
+        )
+
+    ELSE
+        RtlInsertAtHeadList (
+            &ctx^.DataListHead, // head
+            &cc^.LruEntry, // entry
+        )
+    END
+
+    RETURN cc^.Block
+END
+
+FN AfsBlockStatus (
+    IN device : ^BlFile,
+    IN sector : UWORD,
+) : UWORD
+
+    // Return the status of the given sector in the FAT.
+
+    IF sector == 0xFFFFFFFF THEN
+        BlCrash ( "AFS sector == 0xFFFFFFFF\n" )
+    END
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    fatsector := sector / 128
+
+    fat := CAST AfsCacheRead (
+        device, // device
+        ctx^.FatStart + fatsector, // sector
+        TRUE, // metadata
+    ) TO ^ULONG
+
+    RETURN fat[sector % 128]
+END
+
+FN AfsReadInode (
+    IN device : ^BlFile,
+    IN inum : UWORD,
+) : ^AfsInode
+
+    // Read an inode into the cache and return the pointer.
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    isector := (inum * SIZEOF AfsInode) / 512
+
+    itable := CAST AfsCacheRead (
+        device, // device
+        ctx^.Istart + isector, // sector
+        TRUE, // metadata
+    ) TO ^AfsInode
+
+    RETURN &itable[inum % (512 / SIZEOF AfsInode)]
+END
+
+FN AfsSeekFat (
+    IN device : ^BlFile,
+    IN blkno : UWORD,
+    IN offset : UWORD,
+) : UWORD
+
+    // Seek to the specified offset from the starting sector.
+
+    seeks := offset / 512
+
+    WHILE seeks DO
+        blkno = AfsBlockStatus (
+            device, // device
+            blkno, // sector
+        )
+
+        seeks -= 1
+    END
+
+    RETURN blkno
+END
+
+FN AfsFindEntry (
+    IN device : ^BlFile,
+    IN ino : ^AfsInode,
+    IN name : ^UBYTE,
+) : ^AfsDirent
+
+    // Find a directory entry with a matching name or return NULLPTR.
+
+    blkno := ino^.StartBlock
+    bytesize := ino^.ByteSize
+
+    byteoff := 0
+
+    dirent : ^AfsDirent
+
+    WHILE byteoff < bytesize DO
+        IF byteoff & 511 == 0 THEN
+            // Read next block.
+
+            dirent = AfsCacheRead (
+                device, // device
+                blkno, // sector
+                TRUE, // metadata
+            )
+
+            blkno = AfsBlockStatus (
+                device, // device
+                blkno, // sector
+            )
+        END
+
+        IF dirent^.Inumber AND
+            RtlCompareString ( &dirent^.Name[0], name ) == 0 THEN
+
+            // Found it!
+
+            RETURN dirent
+        END
+
+        byteoff += SIZEOF AfsDirent
+        dirent += SIZEOF AfsDirent
+    END
+
+    RETURN NULLPTR
+END
+
+FN (BlReadF) AfsRead (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+    device := file^.Device
+
+    ino := CAST file^.DriverContext TO ^AfsInode
+
+    IF offset >= ino^.ByteSize THEN
+        RETURN 0
+    END
+
+    IF offset + length > ino^.ByteSize THEN
+        length = ino^.ByteSize - offset
+    END
+
+    blkno := AfsSeekFat (
+        device, // device
+        ino^.StartBlock, // startblkno
+        offset, // offset
+    )
+
+    tot := 0
+    ptr : ^VOID
+
+    IF offset & 511 THEN
+        ptr = AfsCacheRead (
+            device, // device
+            blkno, // sector
+            FALSE, // metadata
+        )
+
+        blkno = AfsBlockStatus (
+            device, // device
+            blkno, // sector
+        )
+    END
+
+    WHILE tot < length DO
+        IF offset & 511 == 0 THEN
+            ptr = AfsCacheRead (
+                device, // device
+                blkno, // sector
+                FALSE, // metadata
+            )
+
+            blkno = AfsBlockStatus (
+                device, // device
+                blkno, // sector
+            )
+        END
+
+        amt := 512 - (offset % 512)
+
+        IF amt > length - tot THEN
+            amt = length - tot
+        END
+
+        RtlCopyBytes (
+            buf, // dest
+            ptr + (offset % 512), // src
+            amt, // sz
+        )
+
+        buf += amt
+        tot += amt
+        offset += amt
+    END
+
+    RETURN length
+END
+
+FN (BlIterateEntriesF) AfsIterateEntries (
+    IN file : ^BlFile,
+    IN callback : BlIterateEntriesCallbackF,
+    IN context : ^VOID,
+    IN type : UWORD,
+)
+
+    // Iterate all of the entries in the given directory and invoke a callback
+    // for each one.
+
+    IF file^.Type != BL_FILETYPE_DIRECTORY THEN
+        BlCrash ( "AfsIterateEntries: not directory\n" )
+    END
+
+    ino := CAST file^.DriverContext TO ^AfsInode
+    device := file^.Device
+
+    blkno := ino^.StartBlock
+    bytesize := ino^.ByteSize
+
+    byteoff := 0
+
+    dirent : ^AfsDirent
+
+    WHILE byteoff < bytesize DO
+        IF byteoff & 511 == 0 AND byteoff != 0 THEN
+            // Advance in the FAT chain.
+
+            blkno = AfsBlockStatus (
+                device, // device
+                blkno, // sector
+            )
+        END
+
+        // Re-acquire a pointer to the dirent in the cache since the callback
+        // is allowed to read files and stuff and it could be invalid now. This
+        // is a little slow but hopefully we just hit in the cache every time
+        // anyways.
+
+        dirent = AfsCacheRead (
+            device, // device
+            blkno, // sector
+            TRUE, // metadata
+        ) + (byteoff & 511)
+
+        IF dirent^.Inumber THEN
+            // Found a directory entry.
+
+            IF type != BL_FILETYPE_ANY THEN
+                // Have to check the type.
+
+                ino = AfsReadInode (
+                    device, // device
+                    dirent^.Inumber, // inum
+                )
+
+                IF type != AfsInodeTypeToBlType[ino^.Type] THEN
+                    // Not the right type.
+
+                    GOTO NextEntry
+                END
+            END
+
+            // The dirent block could be overwritten in the cache so we need to
+            // save the name into an external buffer.
+
+            name : UBYTE[60]
+
+            RtlCopyString (
+                &name[0], // dest
+                &dirent^.Name[0], // src
+                60, // bufsize
+            )
+
+            // Call the callback.
+
+            IF NOT callback (
+                &name[0], // name
+                context, // context
+            ) THEN
+                // Stop iterating.
+
+                BREAK
+            END
+        END
+
+@NextEntry
+
+        byteoff += SIZEOF AfsDirent
+        dirent += SIZEOF AfsDirent
+    END
+END
+
+FN (BlOpenF) AfsOpen (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+    IN type : UWORD,
+) : ^BlFile
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    ino : ^AfsInode
+
+    IF ctx THEN
+        // This open is relative to the device root.
+        
+        ino = &ctx^.RootInode
+    ELSE
+        // This open is relative to a directory.
+
+        IF device^.Type != BL_FILETYPE_DIRECTORY THEN
+            BlCrash ( "Not relative to directory\n" )
+        END
+
+        ino = CAST device^.DriverContext TO ^AfsInode
+        device = device^.Device
+    END
+
+    pcomp : UBYTE[64]
+
+    WHILE TRUE DO
+        WHILE path^ == '/' DO
+            path += 1
+        END
+
+        IF NOT path^ THEN
+            BREAK
+        END
+
+        IF ino^.Type != AFS_INODE_DIR THEN
+            RETURN NULLPTR
+        END
+
+        len := 0
+
+        WHILE TRUE DO
+            IF path^ == '/' OR path^ == 0 THEN
+                BREAK
+            END
+
+            IF len >= 59 THEN
+                // Too long
+
+                RETURN NULLPTR
+            END
+
+            pcomp[len] = path^
+
+            path += 1
+            len += 1
+        END
+
+        pcomp[len] = 0
+
+        // Try to find this name in the directory we're currently looking at.
+
+        dirent := AfsFindEntry (
+            device, // device
+            ino, // ino
+            &pcomp[0], // name
+        )
+
+        IF NOT dirent THEN
+            RETURN NULLPTR
+        END
+
+        ino = AfsReadInode (
+            device, // device
+            dirent^.Inumber, // inum
+        )
+    END
+
+    bltype := AfsInodeTypeToBlType[ino^.Type]
+
+    IF type != BL_FILETYPE_ANY AND type != bltype THEN
+        // Wrong file type.
+
+        RETURN NULLPTR
+    END
+
+    file := CAST BlAllocateMemory (
+        SIZEOF BlFile + SIZEOF AfsInode, // bytes
+    ) TO ^BlFile
+
+    BlInitializeFile (
+        file, // file
+        AfsInodeTypeToBlType[ino^.Type], // type
+    )
+
+    dctx := CAST file + SIZEOF BlFile TO ^AfsInode
+
+    RtlCopyBytes (
+        dctx, // dest
+        ino, // src
+        SIZEOF AfsInode, // sz
+    )
+
+    file^.Size = ino^.ByteSize
+    file^.DriverContext = dctx
+    file^.Device = device
+    file^.Read = &AfsRead
+    file^.IterateEntries = &AfsIterateEntries
+
+    IF file^.Type == BL_FILETYPE_DIRECTORY THEN
+        file^.Open = &AfsOpen
+    END
+
+    RETURN file
+END
+
+FN (BlMountF) BlMountAisixFs (
+    IN device : ^BlFile,
+) : UWORD
+
+    // Try to mount the device as aisixfs. Return TRUE if successful.
+
+    // Read the superblock.
+
+    buf := &BlTemporaryBuffer[0]
+    buf += 511
+    buf &= ~511
+
+    IF BlReadFile (
+        device, // file
+        0, // offset
+        buf, // buf
+        512, // length
+    ) != 512 THEN
+
+        RETURN FALSE
+    END
+
+    sb := CAST buf TO ^AfsSuperblock
+
+    IF sb^.Version != 6 THEN
+        RETURN FALSE
+    END
+
+    IF sb^.Magic != 0xAFBBAFBB THEN
+        RETURN FALSE
+    END
+
+    // Good enough! Assemble the mount structures.
+
+    ctx := CAST BlAllocateMemory (
+        SIZEOF AfsContext, // bytes
+    ) TO ^AfsContext
+
+    ctx^.FatStart = sb^.FatStart
+    ctx^.Istart = sb^.Istart
+
+    RtlInitializeList ( &ctx^.MdListHead )
+    RtlInitializeList ( &ctx^.DataListHead )
+
+    garbagecan : ^BlMemoryDescriptor
+
+    ctx^.MdCachePage = BlAllocateMappedRange (
+        2, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_RECLAIMABLE, // type
+        OUT garbagecan, // desc
+    )
+
+    IF NOT ctx^.MdCachePage THEN
+        RtlPrint ( "WARNING: Failed to allocate AFS cache pages\n" )
+
+        RETURN FALSE
+    END
+
+    ctx^.DataCachePage = ctx^.MdCachePage + RTL_PAGE_SIZE
+
+    i := 0
+    cc := &ctx^.MdCc[0]
+
+    WHILE i < AFS_CACHE_BLOCKS DO
+        cc^.SectorNumber = -1
+        cc^.Block = ctx^.MdCachePage + (i * 512)
+
+        RtlInsertAtTailList (
+            &ctx^.MdListHead, // head
+            &cc^.LruEntry, // entry
+        )
+
+        i += 1
+        cc += SIZEOF AfsCacheControl
+    END
+
+    i = 0
+    cc = &ctx^.DataCc[0]
+
+    WHILE i < AFS_CACHE_BLOCKS DO
+        cc^.SectorNumber = -1
+        cc^.Block = ctx^.DataCachePage + (i * 512)
+
+        RtlInsertAtTailList (
+            &ctx^.DataListHead, // head
+            &cc^.LruEntry, // entry
+        )
+
+        i += 1
+        cc += SIZEOF AfsCacheControl
+    END
+
+    // Set up the device stuff.
+
+    device^.MountContext = ctx
+    device^.Open = &AfsOpen
+    device^.DriverName = "AisixFs"
+
+    // Stash the root inode.
+
+    rootino := AfsReadInode (
+        device, // device
+        1, // inum
+    )
+
+    RtlCopyBytes (
+        &ctx^.RootInode, // dest
+        rootino, // src
+        SIZEOF AfsInode, // sz
+    )
+
+    RETURN TRUE
+END

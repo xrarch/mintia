@@ -1,0 +1,122 @@
+//
+// Main routine for the MINTIA Loader.
+//
+
+#INCLUDE "Bl.hjk"
+
+#DEFINE PLATFORM_FULL_NAME_STR (
+    STRCAT ( STRCAT "\"" PLATFORM_FULL_NAME ) "\""
+)
+
+PUBLIC BlInfoBlock : BlInfoRecord
+
+PUBLIC BlDoRelinkAll : UWORD
+
+FN BlMain () : UWORD
+
+    RtlPrint (
+        "\nMINTIA START! %s.\n", // fmt
+        PLATFORM_FULL_NAME_STR,
+    )
+
+    BlDoRelinkAll = BlGetExistenceArg ( "-relink" )
+
+    // Initialize memory management.
+
+    BlInitializeMemory ()
+
+    // Initialize the simple I/O layer.
+
+    BlInitializeIo ()
+
+    // Load the boot resources.
+
+    BlLoadResources ()
+
+    // Initialize the DLL list.
+
+    RtlInitializeList ( &BlInfoBlock.DllListHead )
+
+    // Load the executive.
+
+    RtlPrint ( "Loading the system...\n" )
+
+    exec := BlLoadDll ( "OSKernel.exe" )
+
+    IF NOT exec THEN
+        BlCrash ( "Failed to load the Executive.\n" )
+    END
+
+    kemain : ^VOID
+
+    IF NOT BlLookupSymbol (
+        exec, // dll
+        "KeMain", // name
+        OUT kemain, // value
+    ) THEN
+        BlCrash ( "KeMain() not found in the Executive.\n" )
+    END
+
+    // Load the drivers.
+
+    BlLoadDrivers ()
+
+    IF BlGetExistenceArg ( "-dbg" ) THEN
+        // Load the debugger.
+
+        dbg := BlLoadDll ( "KDebug.dll" )
+
+        IF dbg THEN
+            IF NOT BlLookupSymbol (
+                dbg, // dll
+                "DebugInit", // name
+                OUT BlInfoBlock.DbgMain, // value
+            ) THEN
+                BlInfoBlock.DbgMain = NULLPTR
+            END
+        END
+    END
+
+    // Start the system.
+
+    RtlPrint ( "Starting the system...\n\n" )
+
+    BxStartSystem (
+        kemain, // entrypoint
+        BlInfoBlock.PhysicalPrbBase, // prbphysical
+    )
+
+    BlCrash ( "BxStartSystem returned\n" )
+END
+
+FN BlCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+    RtlPrint ( "\n*** Cannot continue: " )
+
+    RtlPrintByVarTable (
+        NULLPTR, // handle
+        fmt, // fmt
+        argv, // argv
+        argc, // argc
+    )
+
+    RtlPrint ( "\n" )
+
+    BlExit ( -1 )
+END
+
+EXTERN FN BxExit (
+    IN status : UWORD,
+)
+
+FN BlExit (
+    IN status : UWORD,
+)
+
+    // Call the platform exit code.
+
+    BxExit ( status )
+END

@@ -1,0 +1,652 @@
+//
+// Module and dynamic linking support for the MINTIA loader.
+//
+
+#INCLUDE "Bl.hjk"
+#INCLUDE "<ll>/Xlo.hjk"
+#INCLUDE "<ll>/../Xlo/XloRelocations.jkl"
+
+#IF ( == BLD_BITS 32 )
+
+#MACRO XloEncodeExternLink ( extern, ptr ) [
+    extern^.Padding2 = CAST ptr TO UWORD
+]
+
+#MACRO XloFetchExternLink ( extern ) [
+    CAST extern^.Padding2 TO ^VOID
+]
+
+#ELSE
+
+// This is necessary since the extern table entries are not necessarily UQUAD
+// aligned, and we will run on 64-bit architectures w/ alignment restrictions
+// (such as Aphelion).
+
+#MACRO XloEncodeExternLink ( extern, ptr ) [
+    extern^.Padding2 = (CAST ptr TO UWORD) & 0xFFFFFFFF
+    extern^.Padding3 = (CAST ptr TO UWORD) >> 32
+]
+
+#MACRO XloFetchExternLink ( extern ) [
+    CAST extern^.Padding2 | (extern^.Padding3 << 32) TO ^VOID
+]
+
+#END
+
+FN BlpOpenDll (
+    IN name : ^UBYTE,
+) : ^BlFile
+
+    IF RtlCompareString ( name, "HAL.dll" ) == 0 THEN
+        name = BlPlatformHalName
+    END
+
+    printafter := FALSE
+
+    IF RtlCompareStringWithMax ( name, "BootDrivers/", 12 ) == 0 THEN
+        printafter = TRUE
+
+    ELSE
+        RtlPrint ( " * %s...\n", name )
+    END
+
+    file := BlOpenFile (
+        BlSystemDirectory, // device
+        name, // path
+        BL_FILETYPE_FILE, // type
+    )
+
+    IF file AND printafter THEN
+        RtlPrint ( " * %s...\n", name )
+    END
+
+    RETURN file
+END
+
+FN BlpFindDll (
+    IN name : ^UBYTE,
+) : ^BlDll
+
+    // Search for the DLL with the given name.
+
+    listhead := &BlInfoBlock.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        dll := CONTAINEROF listentry TO BlDll.Entry
+
+        IF RtlCompareString ( &dll^.Name[0], name ) == 0 THEN
+            RETURN dll
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
+FN BlpMapSection (
+    IN sectioncount : UWORD,
+    IN sectionindex : UWORD,
+    IN sectionheader : ^XloSectionHeader,
+    IN file : ^BlFile,
+    IN dll : ^BlDll,
+) : UWORD
+
+    // Try to map in the DLL section.
+
+    length := sectionheader^.VirtualLength
+
+    IF length == 0 THEN
+        RETURN TRUE
+    END
+
+    datalength := sectionheader^.DataLength
+
+    // Allocate space for the section contents.
+
+    desc : ^BlMemoryDescriptor
+
+    realva := BlAllocateMappedRange (
+        (length + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // pages
+        CAST sectionheader^.VirtualAddress TO ^VOID, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    )
+
+    IF NOT realva THEN
+        RETURN FALSE
+    END
+
+    IF datalength THEN
+        // Read the data.
+
+        // RtlPrint ( "map %p %d\n", realva, datalength )
+
+        IF BlReadFile (
+            file, // file
+            sectionheader^.FileOffset, // offset
+            realva, // buf
+            datalength, // length
+        ) != datalength THEN
+
+            RETURN FALSE
+        END
+    END
+
+    IF length - datalength THEN
+        // Zero out the slack space.
+
+        // RtlPrint ( "zero %p %d\n", realva + datalength, length - datalength )
+
+        RtlFillMemoryWithUlong (
+            realva + datalength, // ptr
+            length - datalength, // sz
+            0, // ulong
+        )
+    END
+
+    IF realva != sectionheader^.VirtualAddress THEN
+        // Couldn't map at the preferred address. Mark the section relocated.
+
+        // RtlPrint ( "reloc from %p\n", sectionheader^.VirtualAddress )
+
+        dll^.Flags |= BL_DLL_RELOCATED
+        sectionheader^.Flags |= XLO_SECTION_RELOCATED
+
+        // Save the offset in the offset table. Create it if needed.
+
+        offtable := dll^.OffsetTable
+
+        IF NOT offtable THEN
+            offtable = BlAllocateMemory (
+                sectioncount * SIZEOF UWORD, // bytes
+            )
+
+            dll^.OffsetTable = offtable
+        END
+
+        offtable[sectionindex] = realva - sectionheader^.VirtualAddress
+
+        sectionheader^.VirtualAddress = realva
+    END
+
+    IF NOT dll^.Base THEN
+        dll^.Base = CAST sectionheader^.VirtualAddress TO ^VOID
+    END
+
+    RETURN TRUE
+END
+
+FN BlpMapDll (
+    IN dll : ^BlDll,
+    IN file : ^BlFile,
+) : UWORD
+
+    // Try to map in the DLL and read its sections.
+    // Return TRUE on success, FALSE otherwise.
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    count := head^.SectionCount
+    i := 0
+
+    WHILE i < count DO
+        sectionheader := &sectiontable[i]
+
+        IF sectionheader^.Flags & XLO_SECTION_MAP THEN
+            IF NOT BlpMapSection (
+                count, // sectioncount
+                i, // sectionindex
+                sectionheader, // sectionheader
+                file, // file
+                dll, // dll
+            ) THEN
+                RETURN FALSE
+            END
+        END
+
+        i += 1
+    END
+
+    RETURN TRUE
+END
+
+FN BlpProcessImportFixups (
+    IN dll : ^BlDll,
+    IN idll : ^BlDll,
+    IN import : ^XloImportEntry,
+) : UWORD
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+    stringtable := CAST head + head^.StringTableOffset TO ^UBYTE
+    externtable := CAST head + head^.ExternTableOffset TO ^XloExternEntry
+
+    fixup := CAST head + import^.FixupTableOffset TO ^XloImportFixupEntry
+    count := import^.FixupCount
+
+    i := 0
+
+    WHILE i < count DO
+        section := &sectiontable[fixup^.SectionIndex]
+        extern := &externtable[fixup^.ExternIndex]
+
+        addr := XloFetchExternLink ( extern )
+
+        IF extern^.Type != XLO_EXTERN_RESOLVED THEN
+            // Look it up in the library.
+
+            IF NOT BlLookupSymbol (
+                idll, // dll
+                stringtable + extern^.NameOffset, // name
+                OUT addr, // value
+            ) THEN
+
+                RtlPrint (
+                    "LINK: Symbol %s not found in %s, referenced by %s\n",
+                    stringtable + extern^.NameOffset,
+                    &idll^.Name[0],
+                    &dll^.Name[0],
+                )
+
+                RETURN FALSE
+            END
+
+            XloEncodeExternLink ( extern, addr )
+
+            extern^.Type = XLO_EXTERN_RESOLVED
+        END
+
+        fixptr := CAST section^.VirtualAddress +
+            fixup^.SectionOffset TO ^VOID
+
+        origval := fixup^.OriginalValue
+
+#IF ( == BLD_BITS 64 )
+        // Sign extend the 32-bit original value.
+
+        IF origval & 0x80000000 THEN
+            origval |= 0xFFFFFFFF00000000
+        END
+#END
+
+        // RtlPrint (
+        //    "Fixup %p to point to %p+%x\n",
+        //    fixptr,
+        //    addr,
+        //    fixup^.OriginalValue
+        // )
+
+        XloPerformRelocationTable[fixup^.Type] (
+            fixptr, // ptr
+            addr + origval, // value
+            BLD_BITS, // bits
+            TRUE, // absolute
+        )
+
+        // RtlPrint ( "New = %x\n", XloFetchRelocationTable[fixup^.Type] (
+        //     fixptr, // ptr
+        //     BLD_BITS, // bits
+        // ) )
+
+        i += 1
+        fixup += SIZEOF XloImportFixupEntry
+    END
+
+    RETURN TRUE
+END
+
+FN BlpDoImports (
+    IN dll : ^BlDll,
+) : UWORD
+
+    // Recursively process the import table for the DLL.
+
+    head := dll^.Head
+
+    importtable := CAST head + head^.ImportTableOffset TO ^XloImportEntry
+    stringtable := CAST head + head^.StringTableOffset TO ^UBYTE
+
+    count := head^.ImportCount
+    i := 0
+
+    WHILE i < count DO
+        import := &importtable[i]
+
+        idll := BlLoadDll ( stringtable + import^.NameOffset )
+
+        IF NOT idll THEN
+            RETURN FALSE
+        END
+
+        IF idll^.Flags & BL_DLL_RELOCATED OR
+            idll^.Timestamp != import^.ExpectedTimestamp THEN
+
+            // We have to process the import fixups.
+
+            IF NOT BlpProcessImportFixups (
+                dll, // dll
+                idll, // idll
+                import, // import
+            ) THEN
+                RETURN FALSE
+            END
+        END
+
+        i += 1
+    END
+
+    RETURN TRUE
+END
+
+FN BlpRelocateSection (
+    IN dll : ^BlDll,
+    IN sectionheader : ^XloSectionHeader,
+    IN offset : UWORD,
+)
+
+    // Relocate the section by the specified offset.
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    reloc := CAST head + sectionheader^.RelocTableOffset TO ^XloRelocEntry
+    count := sectionheader^.RelocCount
+
+    i := 0
+
+    WHILE i < count DO
+        section := &sectiontable[reloc^.SectionIndex]
+
+        fixptr := CAST section^.VirtualAddress +
+            reloc^.SectionOffset TO ^VOID
+
+        XloPerformRelocationTable[reloc^.Type] (
+            fixptr, // ptr
+            offset, // value
+            BLD_BITS, // bits
+            FALSE, // absolute
+        )
+
+        i += 1
+        reloc += SIZEOF XloRelocEntry
+    END
+END
+
+FN BlpProcessRelocations (
+    IN dll : ^BlDll,
+)
+
+    // Perform all of the relocations on sections that require it.
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    count := head^.SectionCount
+    i := 0
+
+    WHILE i < count DO
+        sectionheader := &sectiontable[i]
+
+        IF sectionheader^.Flags & XLO_SECTION_RELOCATED THEN
+            BlpRelocateSection (
+                dll, // dll
+                sectionheader, // sectionheader
+                dll^.OffsetTable[i], // offset
+            )
+        END
+
+        i += 1
+    END
+END
+
+FN BlpRemapCodeSections (
+    IN dll : ^BlDll,
+)
+
+    // Perform all of the relocations on sections that require it.
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    count := head^.SectionCount
+    i := 0
+
+    WHILE i < count DO
+        sectionheader := &sectiontable[i]
+
+        IF sectionheader^.Flags & XLO_SECTION_CODE THEN
+            pages := sectionheader^.VirtualLength + RTL_PAGE_SIZE - 1
+            pages >>= RTL_PAGE_SHIFT
+
+            BxRemapCodeRange (
+                CAST sectionheader^.VirtualAddress TO ^VOID, // vaddr
+                pages, // pages
+            )
+        END
+
+        i += 1
+    END
+END
+
+FN BlLookupSymbol (
+    IN dll : ^BlDll,
+    IN name : ^UBYTE,
+    OUT value : ^VOID,
+) : UWORD
+
+    // Look up the value of a symbol. Return TRUE on success, FALSE otherwise.
+
+    head := dll^.Head
+
+    symtable := CAST head + head^.SymbolTableOffset TO ^XloSymbolEntry
+    strtab := CAST head + head^.StringTableOffset TO ^UBYTE
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    count := head^.SymbolCount
+    i := 0
+
+    WHILE i < count DO
+        symbol := &symtable[i]
+
+        IF RtlCompareString ( strtab + symbol^.NameOffset, name ) == 0 THEN
+            // Found it.
+
+            sectionheader := &sectiontable[symbol^.SectionIndex]
+
+            value = CAST sectionheader^.VirtualAddress +
+                symbol^.SectionOffset TO ^VOID
+
+            RETURN TRUE
+        END
+
+        i += 1
+    END
+
+    RETURN FALSE
+END
+
+FN BlLoadDll (
+    IN name : ^UBYTE,
+) : ^BlDll
+
+    // First look for the DLL in the list.
+
+    dll := BlpFindDll ( name )
+
+    IF dll THEN
+        IF dll^.Flags & BL_DLL_DEFERRED_FREE THEN
+            // Failed to load it earlier.
+
+            RETURN NULLPTR
+        END
+
+        dll^.LoadCount += 1
+
+        RETURN dll
+    END
+
+    // Nope! Gotta load it now.
+
+    file := BlpOpenDll ( name )
+
+    IF NOT file THEN
+        RETURN NULLPTR
+    END
+
+    header : XloHeader
+
+    // Read in the header.
+
+    IF BlReadFile (
+        file, // file
+        0, // offset
+        &header, // buf
+        SIZEOF XloHeader, // length
+    ) != SIZEOF XloHeader THEN
+
+        RtlPrint ( "LOAD: Short module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    // Verify the header a bit.
+
+    IF header.Magic != XLO_MAGIC_NUMBER THEN
+        RtlPrint ( "LOAD: Bad module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    IF header.TargetArchitecture != XLO_THIS_ARCHITECTURE THEN
+        RtlPrint ( "LOAD: Wrong architecture on module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    IF header.Flags & XLO_FILE_FRAGMENT THEN
+        RtlPrint ( "LOAD: Fragmentary module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    dll = CAST BlAllocateMemory (
+        SIZEOF BlDll, // bytes
+    ) TO ^BlDll
+
+    RtlCopyString (
+        &dll^.Name[0], // dest
+        name, // src
+        BL_DLL_NAME_MAX, // bufsize
+    )
+
+    dll^.LoadCount = 1
+    dll^.Flags = 0
+    dll^.OffsetTable = NULLPTR
+
+    headsz := header.HeadLength
+
+    IF NOT headsz THEN
+        RtlPrint ( "LOAD: Head zero size for %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    // Read in the module head.
+
+    desc : ^BlMemoryDescriptor
+
+    headva := BlAllocateMappedRange (
+        (headsz + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_DEBUG, // type
+        OUT desc, // desc
+    )
+
+    IF NOT headva THEN
+        RtlPrint ( "LOAD: Head can't be allocated for %s\n", name )
+    END
+
+    IF BlReadFile (
+        file, // file
+        0, // offset
+        headva, // buf
+        headsz, // length
+    ) != headsz THEN
+
+        RtlPrint ( "LOAD: Short module 2 %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    dll^.Head = headva
+    dll^.HeadLength = headsz
+    dll^.Timestamp = header.Timestamp
+    dll^.DriverEntrypoint = NULLPTR
+    dll^.Base = NULLPTR
+
+    // Insert in the DLL list.
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.DllListHead, // head
+        &dll^.Entry, // entry
+    )
+
+    BlInfoBlock.DllCount += 1
+
+    // Now map the module sections.
+
+    IF NOT BlpMapDll (
+        dll, // dll
+        file, // file
+    ) THEN
+
+        dll^.Flags |= BL_DLL_DEFERRED_FREE
+
+        RtlPrint ( "LOAD: Failed to map %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    IF dll^.Flags & BL_DLL_RELOCATED THEN
+        // One or more sections was loaded at a non-preferred base.
+        // Process the relocations now.
+
+        IF header.Flags & XLO_FILE_STRIPPED THEN
+            dll^.Flags |= BL_DLL_DEFERRED_FREE
+
+            RtlPrint ( "LOAD: Stripped module %s\n", name )
+
+            RETURN NULLPTR
+        END
+
+        BlpProcessRelocations ( dll )
+    END
+
+    IF BlDoRelinkAll THEN
+        dll^.Flags |= BL_DLL_RELOCATED
+    END
+
+    // Process the import table.
+
+    IF NOT BlpDoImports ( dll ) THEN
+        dll^.Flags |= BL_DLL_DEFERRED_FREE
+
+        RETURN NULLPTR
+    END
+
+    // Remap the code sections read-only and executable.
+
+    BlpRemapCodeSections ( dll )
+
+    RETURN dll
+END

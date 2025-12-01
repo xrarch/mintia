@@ -1,0 +1,121 @@
+//
+// Miscellaneous utility functions for the loader.
+//
+
+#INCLUDE "Bl.hjk"
+
+FN BlCallbackPerLine (
+    IN buf : ^UBYTE,
+    IN callback : BlCallbackPerLineF,
+    IN context : ^VOID,
+)
+
+    // For each line in the buffer, call the callback function.
+
+    innl := TRUE
+    linestart := buf
+    linenum := 1
+
+    WHILE TRUE DO
+        c := buf^
+
+        IF c == 0 OR c == '\n' THEN
+            // Close the buffer.
+
+            buf^ = 0
+
+            // Callback.
+
+            callback (
+                linestart, // buf
+                context, // context
+                linenum, // linenum
+            )
+
+            IF c == 0 THEN
+                BREAK
+            END
+
+            // Replace the newline.
+
+            linenum += 1
+            buf^ = '\n'
+
+            innl = TRUE
+
+            linestart = buf + 1
+
+        ELSEIF innl THEN
+            linestart = buf
+
+            innl = FALSE
+        END
+
+        buf += 1
+    END
+END
+
+FN BlCallbackPerLineFile (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+    IN callback : BlCallbackPerLineF,
+    IN context : ^VOID,
+) : UWORD
+
+    // Open a file, read its contents, and call the callback.
+
+    file := BlOpenFile (
+        device, // device
+        path, // path
+        BL_FILETYPE_FILE, // type
+    )
+
+    IF NOT file THEN
+        RETURN FALSE
+    END
+
+    // Allocate a buffer for the file contents.
+
+    filepages := file^.Size + 1
+    filepages += RTL_PAGE_SIZE - 1
+    filepages >>= RTL_PAGE_SHIFT
+
+    desc : ^BlMemoryDescriptor
+
+    buf := CAST BlAllocateMappedRange (
+        filepages, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_RECLAIMABLE, // type
+        OUT desc, // desc
+    ) TO ^UBYTE
+
+    IF NOT buf THEN
+        RETURN FALSE
+    END
+
+    // Read the file.
+
+    BlReadFile (
+        file, // file
+        0, // offset
+        buf, // buf
+        file^.Size, // length
+    )
+
+    // Add a null terminator.
+
+    buf[file^.Size] = 0
+
+    // Perform callbacks.
+
+    BlCallbackPerLine (
+        buf, // buf
+        callback, // callback
+        context, // context
+    )
+
+    BlFreePhysicalRange ( desc )
+
+    RETURN TRUE
+END

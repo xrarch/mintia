@@ -1,0 +1,187 @@
+//
+// Implements access routines for the amtsu peripheral bus.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALLog.hjk"
+#INCLUDE "<inc>/HALXRstationCitron.hjk"
+#INCLUDE "<inc>/HALXRstationAmtsu.hjk"
+
+#INCLUDE "<inc>/HALIPL.hjk"
+#INCLUDE "<inc>/HALInterrupt.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALCrash.hjk"
+
+#DEFINE AMTSU_PORT_DEV 0x30
+#DEFINE AMTSU_PORT_MID 0x31
+#DEFINE AMTSU_PORT_CMD 0x32
+#DEFINE AMTSU_PORT_A   0x33
+#DEFINE AMTSU_PORT_B   0x34
+
+#DEFINE AMTSU_DEVICES 16
+
+// disabling and restoring interrupts is up to the user of these functions
+
+FN HALXRstationAmtsuCheckMID (
+    IN num : UWORD,
+) : UWORD
+
+    HALXRstationAmtsuSelect ( num )
+
+    RETURN HALXRstationAmtsuReadMID ()
+END
+
+FN HALXRstationAmtsuSelect (
+    IN num : UWORD
+)
+
+    HALXRstationCitronOutb (
+        num, // byte
+        AMTSU_PORT_DEV, // port
+    )
+END
+
+FN HALXRstationAmtsuReadMID () : UWORD
+
+    RETURN HALXRstationCitronInl ( AMTSU_PORT_MID )
+END
+
+FN HALXRstationAmtsuCommand (
+    IN cmd : UWORD,
+)
+
+    HALXRstationCitronOutl (
+        cmd, // long
+        AMTSU_PORT_CMD, // port
+    )
+
+    WHILE HALXRstationCitronInl ( AMTSU_PORT_CMD ) DO END
+END
+
+FN HALXRstationAmtsuCommandAsync (
+    IN cmd : UWORD,
+)
+
+    HALXRstationCitronOutl (
+        cmd, // long
+        AMTSU_PORT_CMD, // port
+    )
+END
+
+FN HALXRstationAmtsuWriteA (
+    IN long : UWORD,
+)
+
+    HALXRstationCitronOutl (
+        long, // long
+        AMTSU_PORT_A, // port
+    )
+END
+
+FN HALXRstationAmtsuWriteB (
+    IN long : UWORD,
+)
+
+    HALXRstationCitronOutl (
+        long, // long
+        AMTSU_PORT_B, // port
+    )
+END
+
+FN HALXRstationAmtsuReadA () : UWORD
+
+    RETURN HALXRstationCitronInl ( AMTSU_PORT_A )
+END
+
+FN HALXRstationAmtsuReadB () : UWORD
+
+    RETURN HALXRstationCitronInl ( AMTSU_PORT_B )
+END
+
+FN HALXRstationAmtsuSpecialCMD (
+    IN a : UWORD,
+    IN b : UWORD,
+    IN cmd : UWORD,
+)
+
+    HALXRstationAmtsuSelect ( 0 )
+    HALXRstationAmtsuWriteA ( a )
+    HALXRstationAmtsuWriteB ( b )
+    HALXRstationAmtsuCommand ( cmd )
+END
+
+FN HALXRstationAmtsuSetInterrupt (
+    IN dev : UWORD,
+)
+
+    HALXRstationAmtsuSpecialCMD (
+        0, // a
+        dev, // b
+        1, // cmd
+    )
+END
+
+FN HALXRstationAmtsuClearInterrupt (
+    IN dev : UWORD,
+)
+
+    HALXRstationAmtsuSpecialCMD (
+        0, // a
+        dev, // b
+        3, // cmd
+    )
+END
+
+FN HALXRstationAmtsuReset ()
+
+    HALXRstationAmtsuSpecialCMD (
+        0, // a
+        0, // b
+        2, // cmd
+    )
+END
+
+#SECTION "INITtext"
+FN HALXRstationAmtsuInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    HALXRstationAmtsuReset ()
+END
+
+FN HALXRstationAmtsuEnumerate (
+    IN func : HALXRstationAmtsuCallbackF,
+    IN mid : UWORD,
+) : UWORD
+
+    id := 1
+    count := 0
+
+    WHILE id < AMTSU_DEVICES DO
+        IF HALXRstationAmtsuCheckMID ( id ) == mid THEN
+            count += 1
+
+            func ( id )
+        END
+
+        id += 1
+    END
+
+    RETURN count
+END
+
+FN HALXRstationAmtsuIDToIrq (
+    IN id : UWORD,
+) : UWORD
+
+    RETURN id + 48
+END
+
+FN HALXRstationAmtsuIrqToID (
+    IN irq : UWORD,
+) : UWORD
+
+    RETURN irq - 48
+END

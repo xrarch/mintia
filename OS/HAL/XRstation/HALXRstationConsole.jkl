@@ -1,0 +1,168 @@
+//
+// Implements the platform-dependent part of the HAL console.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALConsole.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALMap.hjk"
+
+Palette : UBYTE[] = {
+    255, // 0: white
+    249, // 1: yellow
+    121, // 2: orange
+    24,  // 3: red
+    27,  // 4: magenta
+    12,  // 5: purple
+    4,   // 6: blue 
+    166, // 7: cyan
+    161, // 8: green
+    96,  // 9: dark green
+    40,  // 10: brown
+    114, // 11: tan
+    222, // 12: light gray
+    148, // 13: gray
+    74,  // 14: dark gray
+    0,   // 15: black
+}
+
+FBAddr : ^UBYTE
+FBSize : ULONG
+FBModulo : ULONG
+
+EXTERN FN HALCPUFastDrawGlyph (
+    IN fg : UWORD,
+    IN width : UWORD,
+    IN bg : UWORD,
+    IN height : UWORD,
+    IN start : UWORD,
+    IN mod : UWORD,
+    IN bmp : UWORD,
+)
+
+EXTERN FN HALCPUFastDrawGlyphBackwards (
+    IN fg : UWORD,
+    IN width : UWORD,
+    IN bg : UWORD,
+    IN height : UWORD,
+    IN start : UWORD,
+    IN mod : UWORD,
+    IN bmp : UWORD,
+)
+
+FN HALPlatformConsoleDrawChar (
+    IN bmp : ^VOID,
+    IN x : UWORD,
+    IN y : UWORD,
+)
+
+    IF HALConsoleFontFlags & HCFFLAG_REVERSE THEN
+        HALCPUFastDrawGlyphBackwards (
+            bmp, // bmp
+            FBModulo, // mod
+            FBAddr + (y * HALConsoleWidthPix + x), // start
+            HALConsoleFontHeight, // height
+            Palette[CONSOLE_BG], // bg
+            HALConsoleFontWidth, // width
+            Palette[CONSOLE_FG], // fg
+        )
+    ELSE
+        HALCPUFastDrawGlyph (
+            bmp, // bmp
+            FBModulo, // mod
+            FBAddr + (y * HALConsoleWidthPix + x), // start
+            HALConsoleFontHeight, // height
+            Palette[CONSOLE_BG], // bg
+            HALConsoleFontWidth, // width
+            Palette[CONSOLE_FG], // fg
+        )
+    END
+END
+
+FN HALPlatformConsoleShutter ()
+
+    // do a cool shutter effect on the framebuffer
+
+    size := FBSize
+    addr := FBAddr
+    height := HALConsoleHeightPix
+
+    WHILE height DO
+        width := HALConsoleWidthPix
+
+        off := height & 1
+
+        WHILE width >= 1 DO
+            addr[off] = 0
+            width -= 2
+            addr += 2
+        END
+
+        height -= 1
+    END
+END
+
+FN HALPlatformConsoleClear (
+    IN color : UWORD,
+)
+
+    c := Palette[color]
+
+    c32 := c | (c << 8) | (c << 16) | (c << 24)
+
+    RtlFillMemoryWithUlong (
+        FBAddr, // dest
+        FBSize, // size
+        c32, // ulong
+    )
+END
+
+FN HALPlatformConsoleScroll (
+    IN color : UWORD,
+)
+
+    c := Palette[color]
+
+    c32 := c | (c << 8) | (c << 16) | (c << 24)
+
+    marginbytes := HALConsoleFontHeight * HALConsoleWidthPix
+
+    scrollbytes := FBSize - marginbytes
+
+    fb := FBAddr
+
+    RtlCopyBytes (
+        fb, // dest
+        fb + marginbytes, // src
+        scrollbytes, // sz
+    )
+
+    RtlFillMemoryWithUlong (
+        fb + scrollbytes, // ptr
+        marginbytes, // sz
+        c32, // ulong
+    )
+END
+
+EXTERN HALLoaderInfo : ^BlInfoRecord
+
+FN HALPlatformConsoleInit (
+    IN wantmode : UWORD,
+) : UWORD
+
+    IF wantmode == CONSOLE_MODE_SCREEN THEN
+        IF HALLoaderInfo^.BootFbBase THEN
+            FBAddr = HALLoaderInfo^.BootFbBase
+            FBSize = HALConsoleWidthPix * HALConsoleHeightPix
+            FBModulo = HALConsoleWidthPix - HALConsoleFontWidth
+
+            RETURN CONSOLE_MODE_SCREEN
+        ELSE
+            RETURN CONSOLE_MODE_TTY
+        END
+    ELSE
+        RETURN wantmode
+    END
+END

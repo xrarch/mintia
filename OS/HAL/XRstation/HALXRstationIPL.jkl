@@ -1,0 +1,282 @@
+//
+// Implements the platform-dependent part of interrupt support;
+// specifically, driving the XRstation Interrupt Controller (LSIC).
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALLog.hjk"
+#INCLUDE "<inc>/HALXRstationCitron.hjk"
+
+#INCLUDE "<inc>/HALIPL.hjk"
+#INCLUDE "<inc>/HALInterrupt.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALCrash.hjk"
+
+#INCLUDE "<ll>/OSDLL/OS.hjk"
+
+PUBLIC KeIPLCurrent := IPL_DPC
+
+HALXRstationIPLMasks : ULONG[] = {
+    //   32-63      00-31
+    0x00000000, 0x00000000, // 00: IPLLOW
+    0x00000000, 0x00000000, // 01: IPLAPC
+    0x00000000, 0x00000000, // 02: IPLDPC
+    0x00000000, 0x00000000, // 03:
+
+    0xFFFF0000, 0x00000000, // 04: IPLINTERACTIVE (mask out amanatsu)
+    0xFFFFFFFF, 0xFFFF0000, // 05: IPLBOARDS (mask out ebus)
+    0xFFFFFFFF, 0xFFFFFFF0, // 06: IPLSERIAL (mask out serial ports)
+    0xFFFFFFFF, 0xFFFFFFF8, // 07: IPLDISK (mask out satsuma)
+    0xFFFFFFFF, 0xFFFFFFFE, // 08: IPLDMA (mask out dma (all except clock))
+
+    0xFFFFFFFF, 0xFFFFFFFE, // 09:
+    0xFFFFFFFF, 0xFFFFFFFE, // 10:
+    0xFFFFFFFF, 0xFFFFFFFE, // 11:
+    0xFFFFFFFF, 0xFFFFFFFE, // 12:
+    0xFFFFFFFF, 0xFFFFFFFE, // 13:
+    0xFFFFFFFF, 0xFFFFFFFE, // 14:
+    0xFFFFFFFF, 0xFFFFFFFE, // 15:
+    0xFFFFFFFF, 0xFFFFFFFE, // 16:
+    0xFFFFFFFF, 0xFFFFFFFE, // 17:
+    0xFFFFFFFF, 0xFFFFFFFE, // 18:
+    0xFFFFFFFF, 0xFFFFFFFE, // 19:
+    0xFFFFFFFF, 0xFFFFFFFE, // 20:
+    0xFFFFFFFF, 0xFFFFFFFE, // 21:
+    0xFFFFFFFF, 0xFFFFFFFE, // 22:
+    0xFFFFFFFF, 0xFFFFFFFE, // 23:
+    0xFFFFFFFF, 0xFFFFFFFE, // 24:
+    0xFFFFFFFF, 0xFFFFFFFE, // 25:
+    0xFFFFFFFF, 0xFFFFFFFE, // 26:
+    0xFFFFFFFF, 0xFFFFFFFE, // 27:
+    0xFFFFFFFF, 0xFFFFFFFE, // 28:
+
+    0xFFFFFFFF, 0xFFFFFFFF, // 29: IPLCLOCK
+    0xFFFFFFFF, 0xFFFFFFFF, // 30:
+    0xFFFFFFFF, 0xFFFFFFFF, // 31: IPLHIGH
+}
+
+HALXRstationLSICBase : ^Lsic
+
+STRUCT Lsic
+    Mask00_31 : ULONG,
+    Mask32_63 : ULONG,
+    Interrupting00_31 : ULONG,
+    Interrupting32_63 : ULONG,
+    ClaimComplete : ULONG,
+END
+
+PUBLIC HALXRstationLSICClaimComplete : ^ULONG
+
+PUBLIC HALPlatformInterruptHandlers : ^VOID[64 * 2]
+
+FN (HALInterruptHandler) HALXRstationInterruptSpurious (
+    IN trapframe : ^OSContext,
+    IN int : UWORD,
+)
+
+    HALCrash ( "spurious interrupt: %d\n", int )
+END
+
+#SECTION "INITtext"
+FN HALXRstationLSICInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    HALXRstationLSICBase = ldrinfo^.U.Xr.LsicBase
+
+    HALXRstationLSICClaimComplete =
+        ldrinfo^.U.Xr.LsicBase + OFFSETOF Lsic.ClaimComplete
+
+    HALXRstationLSICBase^.Interrupting00_31 = 0
+    HALXRstationLSICBase^.Interrupting32_63 = 0
+
+    HALXRstationLSICBase^.Mask00_31 = 0
+    HALXRstationLSICBase^.Mask32_63 = 0
+
+    i := 0
+
+    WHILE i < 64 DO
+        HALPlatformInterruptHandlers[i * 2] = &HALXRstationInterruptSpurious
+
+        i += 1
+    END
+END
+
+FN HALPlatformInterruptRegister (
+    IN handler : HALInterruptHandler,
+    IN int : UWORD,
+    IN ipl : UWORD,
+)
+
+    IF HALPlatformInterruptHandlers[int * 2] != &HALXRstationInterruptSpurious THEN
+        HALCrash ( "HALPlatformInterruptRegister: attempt to register IRQ #%d twice\n", int )
+    END
+
+    HALPlatformInterruptHandlers[int * 2] = handler
+    HALPlatformInterruptHandlers[int * 2 + 1] = CAST ipl TO ^VOID
+END
+
+FN HALPlatformInterruptUnregister (
+    IN handler : HALInterruptHandler,
+    IN int : UWORD,
+    IN ipl : UWORD,
+)
+
+    IF HALPlatformInterruptHandlers[int * 2] == &HALXRstationInterruptSpurious THEN
+        HALCrash ( "HALPlatformInterruptUnregister: attempt to unregister IRQ #%d; wasn't registered\n", int )
+    END
+
+    HALPlatformInterruptHandlers[int * 2] = &HALXRstationInterruptSpurious
+END
+
+PUBLIC HALInterruptNested := 0
+
+EXTERN HALInterruptStackTop : ^VOID
+
+#ASM [
+
+HALInterrupt:
+.global HALInterrupt
+    subi sp, sp, 40
+    mov  long [sp], lr
+    mov  long [sp + 4], s0
+    mov  long [sp + 8], s1
+    mov  long [sp + 12], s2
+    mov  long [sp + 16], s3
+    mov  long [sp + 20], s4
+    mov  long [sp + 24], s5
+    mov  long [sp + 28], s6
+    mov  long [sp + 32], s7
+    mov  long [sp + 36], s8
+
+    mov  s6, a0
+
+    mov  s0, long [HALXRstationLSICBase]
+
+    addi s8, s0, Lsic_ClaimComplete
+
+    la   s7, HALInterruptStackTop
+    mov  s7, long [s7]
+
+    la   s5, HALInterruptNested
+
+    la   s4, HALXRstationIPLMasks
+
+    la   s1, HALPlatformInterruptHandlers
+
+    la   s3, KeIPLCurrent
+    mov  s2, long [s3]
+
+.loop:
+    mov  a0, long [s8]
+    beq  a0, .done
+
+    mov  long [s8], a0
+
+    lshi t1, a0, 3
+    add  t1, t1, s1
+
+    mov  t2, long [t1]     // get handler
+    mov  t3, long [t1 + 4] // get IPL
+
+    mov  long [s3], t3
+
+// inlined set LSIC mask
+
+    lshi t3, t3, 3
+    add  t3, t3, s4
+
+    mov  t4, long [t3]
+    mov  long [s0 + Lsic_Mask32_63], t4
+
+    mov  t4, long [t3 + 4]
+    mov  long [s0 + Lsic_Mask00_31], t4
+
+// is this a nested interrupt?
+
+    mov  t3, long [s5]
+    bne  t3, .nested
+
+// no it is not.
+
+    mov  long [s5], 1
+
+// call handler in context of interrupt stack
+
+    mov  t0, sp
+    mov  sp, s7
+
+    subi sp, sp, 8
+    mov  long [sp + 4], t0
+    mov  long [sp], zero
+
+    mfcr t0, rs
+    ori  t0, t0, XR17032_RS_INT
+    mtcr rs, t0
+
+    mov  a1, s6
+    jalr lr, t2, 0
+
+    mfcr t0, rs
+    subi t1, zero, 3
+    and  t1, t0, t1
+    mtcr rs, t1
+
+    mov  sp, long [sp + 4]
+
+    mov  long [s5], 0
+
+    b .loop
+
+.nested:
+
+// inlined enable interrupts
+
+    mfcr t0, rs
+    ori  t0, t0, XR17032_RS_INT
+    mtcr rs, t0
+
+// call handler
+
+    mov  a1, s6
+    jalr lr, t2, 0
+
+// inlined disable interrupts
+
+    mfcr t0, rs
+    subi t1, zero, 3
+    and  t1, t0, t1
+    mtcr rs, t1
+
+    b    .loop
+
+.done:
+    mov  long [s3], s2
+
+// inlined restore LSIC mask
+
+    lshi t3, s2, 3
+    add  t3, t3, s4
+
+    mov  t4, long [t3]
+    mov  long [s0 + Lsic_Mask32_63], t4
+
+    mov  t4, long [t3 + 4]
+    mov  long [s0 + Lsic_Mask00_31], t4
+
+    mov  lr, long [sp]
+    mov  s0, long [sp + 4]
+    mov  s1, long [sp + 8]
+    mov  s2, long [sp + 12]
+    mov  s3, long [sp + 16]
+    mov  s4, long [sp + 20]
+    mov  s5, long [sp + 24]
+    mov  s6, long [sp + 28]
+    mov  s7, long [sp + 32]
+    mov  s8, long [sp + 36]
+    addi sp, sp, 40
+    ret
+
+]

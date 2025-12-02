@@ -3,13 +3,176 @@
 //
 
 #INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
 
-#INCLUDE "<inc>/HALLog.h"
-#INCLUDE "<inc>/HALDriver.h"
-#INCLUDE "<inc>/HALCrash.h"
-#INCLUDE "<inc>/HALMap.h"
-#INCLUDE "<inc>/HALRTC.h"
-#INCLUDE "<inc>/HALConsole.h"
-#INCLUDE "<inc>/HALCPU.h"
+#INCLUDE "<inc>/HALLog.hjk"
+#INCLUDE "<inc>/HALDriver.hjk"
+#INCLUDE "<inc>/HALCrash.hjk"
+#INCLUDE "<inc>/HALMap.hjk"
+#INCLUDE "<inc>/HALRTC.hjk"
+#INCLUDE "<inc>/HALConsole.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
 
-#INCLUDE "<ll>/OSDLL/OS.h"
+#INCLUDE "<ll>/OSDLL/OS.hjk"
+
+EXTERN FN HALArgsInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+EXTERN FN HALConsoleInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+EXTERN FN HALPlatformInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+EXTERN FN HALPlatformExit (
+    IN ret : UWORD,
+    IN mode : UWORD,
+)
+
+EXTERN FN HALDebugInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+PUBLIC HALLoaderInfo : ^BlInfoRecord
+
+PUBLIC HALLoaderPFDB : ^VOID
+
+PUBLIC HALLoaderTotalRAM : ULONG
+
+PUBLIC HALLoaderBootDeviceName : ^UBYTE
+
+HALLocalLoaderBootDeviceName : UBYTE[32]
+
+PUBLIC HALInterruptStackTop : ^VOID
+
+HALLocalLoaderInfo : BlInfoRecord
+
+#ENTERSECTION "INITtext"
+
+FN HALDriverInit (
+    IN stage : UWORD,
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    listhead := &ldrinfo^.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        dll := CONTAINEROF listentry TO BlDll.Entry
+
+        func := CAST dll^.DriverEntrypoint TO FDriverInit
+
+        IF func THEN
+            IF stage == STAGE_THREAD THEN
+                HALLog ( "HALDriverInit", "initializing %s\n", &dll^.Name[0] )
+            END
+
+            ok := func ( stage )
+
+            IF ok THEN
+                HALCrash (
+                    "HALDriverInit: driver '%s' failed to initialize (%d)\n",
+                    &dll^.Name[0],
+                    ok,
+                )
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+
+    IF stage == STAGE_PRETASKING THEN
+        // we need these things to have been defined by some driver
+
+        IF NOT HALRTCQueryFunction THEN
+            HALCrash ( "HALDriverInit: HALRTCQueryFunction not defined\n" )
+        END
+
+        IF NOT HALUptimeQueryFunction THEN
+            HALCrash ( "HALDriverInit: HALUptimeQueryFunction not defined\n" )
+        END
+
+        IF NOT HALRTCInterval THEN
+            HALCrash ( "HALDriverInit: HALRTCInterval not defined\n" )
+        END
+
+        IF NOT HALRTCSetFunction THEN
+            HALCrash ( "HALDriverInit: HALRTCSetFunction not defined\n" )
+        END
+    END
+END
+
+FN HALMain (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    RtlCopyBytes (
+        &HALLocalLoaderInfo, // dest
+        ldrinfo, // src
+        SIZEOF BlInfoRecord, // sz
+    )
+
+    ldrinfo = &HALLocalLoaderInfo
+    HALLoaderInfo = ldrinfo
+
+    ldrinfo^.ResourceListHead.Next^.Prev = &ldrinfo^.ResourceListHead
+    ldrinfo^.ResourceListHead.Prev^.Next = &ldrinfo^.ResourceListHead
+
+    ldrinfo^.DllListHead.Next^.Prev = &ldrinfo^.DllListHead
+    ldrinfo^.DllListHead.Prev^.Next = &ldrinfo^.DllListHead
+
+    ldrinfo^.DescriptorListHead.Next^.Prev = &ldrinfo^.DescriptorListHead
+    ldrinfo^.DescriptorListHead.Prev^.Next = &ldrinfo^.DescriptorListHead
+
+    HALArgsInit ( ldrinfo )
+
+    HALConsoleInit ( ldrinfo )
+
+    HALLoaderPFDB = ldrinfo^.PfnDatabase
+
+    RtlCopyString (
+        &HALLocalLoaderBootDeviceName[0], // dest
+        &ldrinfo^.BootDeviceName[0], // src
+        -1, // max
+    )
+
+    HALLoaderBootDeviceName = &HALLocalLoaderBootDeviceName[0]
+
+    HALPlatformKernelPageDirectory =
+        ldrinfo^.SystemPageDirectoryPfn << RTL_PAGE_SHIFT
+
+    HALDebugInit ( ldrinfo )
+
+    HALPlatformInit ( ldrinfo )
+
+    HALLog ( "HALMain", "MINTIA is awake!\n" )
+
+    RtlPrint ( "\n" )
+
+    IF HALConsoleMode == CONSOLE_MODE_SCREEN THEN
+        HALLog (
+            "HALMain",
+            "Font: %s %dx%d\n",
+            HALConsoleFontName,
+            HALConsoleFontWidth,
+            HALConsoleFontHeight,
+        )
+    END
+
+    HALDriverInit ( STAGE_PRETASKING, ldrinfo )
+END
+
+#LEAVESECTION
+
+FN HALExit (
+    IN ret : UWORD,
+    IN mode : UWORD,
+)
+
+    rs := HALCPUInterruptDisable ()
+    HALPlatformExit ( ret, mode )
+    HALCPUInterruptRestore ( rs )
+END

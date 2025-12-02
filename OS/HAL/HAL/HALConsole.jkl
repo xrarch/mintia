@@ -1,0 +1,296 @@
+//
+// Implements the generic part of the HAL console.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALArgs.hjk"
+#INCLUDE "<inc>/HALConsole.hjk"
+#INCLUDE "<inc>/HALResource.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALLog.hjk"
+
+EXTERN FN HALPlatformConsoleInit (
+    IN wantmode : UWORD,
+) : UWORD
+
+EXTERN FN HALPlatformConsolePutc (
+    IN c : UWORD,
+)
+
+EXTERN FN HALPlatformConsoleDrawChar (
+    IN bmp : ^VOID,
+    IN x : UWORD,
+    IN y : UWORD,
+)
+
+EXTERN FN HALPlatformConsoleClear (
+    IN color : UWORD,
+)
+
+EXTERN FN HALPlatformConsoleScroll (
+    IN color : UWORD,
+)
+
+EXTERN FN HALPlatformConsoleShutter ()
+
+EXTERN FN HALPlatformConsoleGetc () : UWORD
+
+PUBLIC HALConsoleMode : ULONG
+
+PUBLIC HALConsoleFont : ^VOID
+
+PUBLIC HALConsoleFontWidth : ULONG
+
+PUBLIC HALConsoleFontHeight : ULONG
+
+PUBLIC HALConsoleWidthChars : ULONG
+
+PUBLIC HALConsoleHeightChars : ULONG
+
+PUBLIC HALConsoleWidthPix : ULONG
+
+PUBLIC HALConsoleHeightPix : ULONG
+
+PUBLIC HALConsoleFontFlags : ULONG
+
+PUBLIC HALConsoleFontName : ^UBYTE
+
+HALConsoleFontGlyphSize : ULONG
+
+HALConsoleX := 0
+HALConsoleY := 0
+
+#ASM [
+
+LookAt:
+    b LookAt
+
+]
+
+EXTERN FN LookAt ( IN a : UWORD )
+
+#ENTERSECTION "INITtext"
+
+FN HALConsoleInitParameters (
+    IN ldrinfo : ^BlInfoRecord,
+    IN font : ^HCFHeader,
+)
+
+    HALConsoleFont = font + SIZEOF HCFHeader
+
+    cw := font^.Width
+
+    HALConsoleFontWidth = cw
+
+    ch := font^.Height
+
+    HALConsoleFontHeight = ch
+
+    HALConsoleFontFlags = font^.Flags
+
+    HALConsoleFontGlyphSize = ((cw + 7) >> 3) * ch
+
+    sw := ldrinfo^.BootFbWidth
+
+    HALConsoleWidthPix = sw
+
+    sh := ldrinfo^.BootFbHeight
+
+    HALConsoleHeightPix = sh
+
+    HALConsoleWidthChars = sw / cw
+    HALConsoleHeightChars = sh / ch
+
+    HALConsoleFontName = &font^.FontName[0]
+END
+
+FN HALConsoleInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    mode := CONSOLE_MODE_TTY
+
+    font := NULLPTR
+
+    IF NOT HALArgsCheck ( "-ttymode" ) THEN
+        IF ldrinfo^.BootFbBase THEN
+            font = HALResourceByName ( "HALFont" )
+
+            IF font THEN
+                HALResourceWire ( font )
+
+                fonthdr := CAST HALResourceData ( font ) TO ^HCFHeader
+
+                IF fonthdr^.Magic == HCF_MAGIC THEN
+                    HALConsoleInitParameters ( ldrinfo, fonthdr )
+
+                    mode = CONSOLE_MODE_SCREEN
+                END
+            END
+        END
+    END
+
+    mode = HALPlatformConsoleInit ( mode )
+
+    HALConsoleMode = mode
+
+    IF mode == CONSOLE_MODE_SCREEN THEN
+        HALPlatformConsoleClear ( CONSOLE_BG )
+    END
+END
+
+#LEAVESECTION
+
+FN HALConsoleScroll ()
+
+    HALConsoleX = 0
+    HALConsoleY = HALConsoleHeightChars - 1
+
+    HALPlatformConsoleScroll ( CONSOLE_BG )
+END
+
+FN HALConsoleNewline ()
+
+    HALConsoleY += 1
+    HALConsoleX = 0
+
+    IF HALConsoleY > HALConsoleHeightChars THEN
+        HALConsoleScroll ()
+    END
+END
+
+FN HALConsoleSetMode (
+    IN newmode : UWORD,
+) : UWORD
+
+    oldmode := HALConsoleMode
+    HALConsoleMode = newmode
+
+    RETURN oldmode
+END
+
+FN HALGetc () : UWORD
+
+    IF HALConsoleMode != CONSOLE_MODE_TTY THEN
+        RETURN -1
+    END
+
+    RETURN HALPlatformConsoleGetc ()
+END
+
+FN HALPutc (
+    IN c : UWORD,
+)
+
+    IF HALConsoleMode == CONSOLE_MODE_SCREEN THEN
+        rs := HALCPUInterruptDisable ()
+
+        IF c == '\n' THEN
+            HALConsoleNewline ()
+        ELSE
+            IF HALConsoleX == HALConsoleWidthChars THEN
+                HALConsoleNewline ()
+            END
+
+            IF HALConsoleY == HALConsoleHeightChars THEN
+                HALConsoleScroll ()
+            END
+
+            HALPlatformConsoleDrawChar (
+                HALConsoleFont + (c * HALConsoleFontGlyphSize), // bmp
+                HALConsoleX * HALConsoleFontWidth, // x
+                HALConsoleY * HALConsoleFontHeight, // y
+            )
+
+            HALConsoleX += 1
+        END
+
+        HALCPUInterruptRestore ( rs )
+    ELSE
+        HALPlatformConsolePutc ( c )
+    END
+END
+
+FN HALConsoleQuery (
+    OUT w : UWORD,
+    OUT h : UWORD,
+    OUT x : UWORD,
+    OUT y : UWORD,
+)
+
+    IF HALConsoleMode != CONSOLE_MODE_SCREEN THEN
+        w = 80
+        h = 25
+        x = 0
+        y = 0
+    ELSE
+        w = HALConsoleWidthChars
+        h = HALConsoleHeightChars
+        x = HALConsoleX
+        y = HALConsoleY
+    END
+END
+
+FN HALConsoleSetCursor (
+    IN x : UWORD,
+    IN y : UWORD,
+)
+
+    HALConsoleX = x
+    HALConsoleY = y
+END
+
+FN HALConsoleClear ()
+
+    HALConsoleX = 0
+    HALConsoleY = 0
+
+    IF HALConsoleMode == CONSOLE_MODE_SCREEN THEN
+        HALPlatformConsoleClear ( CONSOLE_BG )
+    END
+END
+
+FN HALConsoleStolen ()
+
+    HALConsoleX = 0
+    HALConsoleY = 0
+END
+
+FN HALConsoleShutter ()
+
+    HALConsoleX = 0
+    HALConsoleY = 0
+
+    IF HALConsoleMode == CONSOLE_MODE_SCREEN THEN
+        HALPlatformConsoleShutter ()
+    END
+END
+
+FN (RtlPrintCallbackF) RtljPrintCallback (
+    IN byte : UBYTE,
+    IN context : ^VOID,
+)
+
+    HALPutc ( byte )
+END
+
+FN RtljLockStream (
+    IN handle : ^VOID,
+) : UWORD
+
+    // Called by RTL before it prints a line.
+
+    // TMP
+END
+
+FN RtljUnlockStream (
+    IN handle : ^VOID,
+    IN lockcontext : UWORD,
+)
+
+    // Called by RTL after it prints a line.
+
+    // TMP
+END

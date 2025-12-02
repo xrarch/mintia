@@ -1,0 +1,174 @@
+//
+// Implements NVRAM control for XR/station.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALLog.hjk"
+
+#INCLUDE "<inc>/HALIPL.hjk"
+#INCLUDE "<inc>/HALInterrupt.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALCrash.hjk"
+#INCLUDE "<inc>/HALNvram.hjk"
+
+#INCLUDE "<ll>/OSDLL/OS.hjk"
+
+// synchronization for these functions is provided by the caller.
+
+#DEFINE NVRAM_SIZE     4096
+#DEFINE NVRAM_VAR_COUNT 31
+
+STRUCT NVRAMHeader
+    Magic : ULONG,
+    Padding : UBYTE[60],
+    PermanentlyReserved : UBYTE[64],
+END
+
+STRUCT NVRAMVariable
+    Name : UBYTE[32],
+    Contents : UBYTE[96],
+END
+
+EXTERN HALLoaderInfo : ^BlInfoRecord
+
+FN HALNvramQuery (
+    IN query : ^OSNvramQuery,
+) : UWORD
+
+    // query a specific variable by name.
+
+    // caller made sure query is valid and null terminated properly.
+
+    i := 0
+
+    sp : ^NVRAMVariable = HALLoaderInfo^.U.Xr.NvramBase + SIZEOF NVRAMHeader
+
+    WHILE i < NVRAM_VAR_COUNT DO
+        IF RtlCompareStringWithMax (
+            &sp^.Name[0], &query^.Name[0], 31 ) == 0 THEN
+
+            RtlCopyString (
+                &query^.Contents[0], // dest
+                &sp^.Contents[0], // src
+                96, // bufsize
+            )
+
+            RETURN 0
+        END
+
+        i += 1
+        sp += SIZEOF NVRAMVariable
+    END
+
+    RETURN STATUS_NO_VARIABLE
+END
+
+FN HALNvramSet (
+    IN delete : UWORD,
+    IN query : ^OSNvramQuery,
+) : UWORD
+
+    // set a specific variable.
+
+    // caller made sure query is valid and null terminated properly.
+
+    i := 0
+
+    lastfree : ^NVRAMVariable = NULLPTR
+
+    sp : ^NVRAMVariable = HALLoaderInfo^.U.Xr.NvramBase + SIZEOF NVRAMHeader
+
+    WHILE i < NVRAM_VAR_COUNT DO
+        IF RtlCompareStringWithMax (
+            &sp^.Name[0], &query^.Name[0], 31 ) == 0 THEN
+
+            IF delete THEN
+                sp^.Name[0] = 0
+            ELSE
+                RtlCopyString (
+                    &sp^.Contents[0], // dest
+                    &query^.Contents[0], // src
+                    96, // bufsize
+                )
+            END
+
+            RETURN 0
+
+        ELSEIF sp^.Name[0] == 0 THEN
+            lastfree = sp
+        END
+
+        i += 1
+        sp += SIZEOF NVRAMVariable
+    END
+
+    IF delete THEN
+        RETURN 0
+    END
+
+    IF NOT lastfree THEN
+        RETURN STATUS_END_OF_DISK
+    END
+
+    // new variable
+
+    RtlCopyString (
+        &lastfree^.Name[0], // dest
+        &query^.Name[0], // src
+        32, // bufsize
+    )
+
+    RtlCopyString (
+        &lastfree^.Contents[0], // dest
+        &query^.Contents[0], // src
+        96, // bufsize
+    )
+
+    RETURN 0
+END
+
+FN HALNvramRead (
+    IN query : ^OSNvramQuery,
+    IN index : UWORD,
+    OUT nextindex : UWORD,
+) : UWORD
+
+    // query a variable by opaque index and return the next index value.
+    // if -1 is provided, then the first variable will be read.
+
+    // caller made sure query is valid and null terminated properly.
+
+    IF index == -1 THEN
+        index = 0
+    END
+
+    sp : ^NVRAMVariable = HALLoaderInfo^.U.Xr.NvramBase +
+        SIZEOF NVRAMHeader + (index * SIZEOF NVRAMVariable)
+
+    WHILE index < NVRAM_VAR_COUNT DO
+        IF sp^.Name[0] != 0 THEN
+            RtlCopyString (
+                &query^.Name[0], // dest
+                &sp^.Name[0], // src
+                32, // bufsize
+            )
+
+            RtlCopyString (
+                &query^.Contents[0], // dest
+                &sp^.Contents[0], // src
+                96, // bufsize
+            )
+
+            nextindex = index + 1
+
+            RETURN 0
+        END
+
+        index += 1
+        sp += SIZEOF NVRAMVariable
+    END
+
+    RETURN STATUS_NO_VARIABLE
+END

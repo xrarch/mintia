@@ -1,0 +1,142 @@
+//
+// Implements the bluescreen.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<inc>/HALCrash.hjk"
+#INCLUDE "<inc>/HALConsole.hjk"
+#INCLUDE "<inc>/HALLog.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALDebug.hjk"
+#INCLUDE "<inc>/HALExit.hjk"
+
+#INCLUDE "<ll>/OSDLL/OS.hjk"
+
+EXTERN FN HALPlatformInfo ()
+
+EXTERN FN HALPlatformIsComputerOnFire (
+    OUT isonfire : UWORD,
+) : UWORD
+
+PUBLIC HALCrashed := 0
+
+FN HALCenterPrint (
+    IN str : ^UBYTE,
+    IN w : UWORD,
+)
+
+    pad := (w / 2) - (RtlMeasureString ( str ) / 2)
+
+    WHILE pad DO
+        HALPutc ( ' ' )
+        pad -= 1
+    END
+
+    RtlPrint ( "%s\n", str )
+END
+
+FN HALVCrash (
+    IN fmt : ^UBYTE,
+    IN argc : UWORD,
+    IN argv : ^^VOID,
+)
+
+    HALCPUInterruptDisable ()
+
+    HALPlatformCrash ()
+
+    IF HALCrashed THEN
+        // nested crash! just loop
+        WHILE TRUE DO
+            HALCPUHalt ()
+        END
+    END
+
+    HALCrashed = 1
+
+    HALConsoleShutter ()
+
+    garbage : UWORD
+    w : UWORD
+    h : UWORD
+
+    HALConsoleQuery (
+        OUT w, // w
+        OUT h, // h
+        OUT garbage, // x
+        OUT garbage, // y
+    )
+
+    RtlPrint ( "*** STOP: " )
+
+    HALPlatformInfo ()
+
+    HALPutc ( '\n' )
+
+    RtlPrintByVarTable (
+        NULLPTR, // handle
+        fmt, // fmt
+        argv, // argv
+        argc, // argc
+    )
+
+    HALDebugDump (
+        h - 5, // rows
+        w, // cols
+    )
+
+    HALConsoleSetCursor (
+        0, // x
+        h - 3, // y
+    )
+
+    HALCenterPrint (
+        "An error occurred! Please take a screenshot and report the issue.",
+        w,
+    )
+
+    HALCenterPrint (
+        "The repository can be found at http://www.github.com/xrarch/mintia.",
+        w,
+    )
+
+    HALConsoleSetCursor ( 0, 0 )
+
+    IF NOT HALDebug () THEN
+        // interrupts should be disabled, so the assumption here is that
+        // HALCPUHalt will only return upon some programmer's key esque NMI.
+
+        HALCPUHalt ()
+
+#IF ( STRCMP ARCHITECTURE "fox32" )
+        WHILE TRUE DO END
+#END
+
+        // once it does return, exit the system.
+    END
+
+    HALExit ( -1, OSSHUTDOWN_HALT )
+END
+
+FN HALCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+    HALVCrash (
+        fmt, // fmt
+        argc, // argc
+        argv, // argv
+    )
+END
+
+FN HALIsComputerOnFire (
+    OUT isonfire : UWORD,
+) : UWORD
+
+    // defer to the platform specific code.
+
+    RETURN HALPlatformIsComputerOnFire (
+        OUT isonfire, // isonfire
+    )
+END

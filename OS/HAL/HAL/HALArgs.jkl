@@ -1,0 +1,104 @@
+//
+// Implements HAL argument checking.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+HALLocalArgsBuffer : UBYTE[256]
+HALLocalArgsTable : ^UBYTE[16]
+HALLocalArgsCount : ULONG
+
+#SECTION "INITtext"
+FN HALArgsInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    i := 0
+    offset := 0
+    argtable := ldrinfo^.ArgTable
+    localargtable := &HALLocalArgsTable[0]
+    HALLocalArgsCount = ldrinfo^.ArgCount
+
+    WHILE i < ldrinfo^.ArgCount DO
+        len := RtlMeasureString ( argtable[i] ) + 1
+
+        RtlCopyBytes (
+            &HALLocalArgsBuffer[offset], // dest
+            argtable[i], // src
+            len, // sz
+        )
+
+        localargtable[i] = &HALLocalArgsBuffer[offset]
+
+        offset += len
+        i += 1
+    END
+END
+
+FN HALArgsCheck (
+    IN arg : ^UBYTE,
+) : UWORD
+
+    // Check if an argument matching the provided string was passed.
+
+    argcount := HALLocalArgsCount
+    argtable := &HALLocalArgsTable[0]
+
+    i := 0
+
+    WHILE i < argcount DO
+        IF RtlCompareString ( arg, argtable[i] ) == 0 THEN
+            RETURN TRUE
+        END
+
+        i += 1
+    END
+
+    RETURN FALSE
+END
+
+FN HALArgsValue (
+    IN arg : ^UBYTE,
+) : ^UBYTE
+
+    // Return a pointer to the value part of a key=value argument.
+    // This is a pointer into the argument string itself and shouldn't
+    // be manipulated. If the key does not exist, NULLPTR is returned.
+
+    argcount := HALLocalArgsCount
+    argtable := &HALLocalArgsTable[0]
+
+    i := 0
+
+    WHILE i < argcount DO
+        str := argtable[i]
+        j := 0
+        name : UBYTE[16]
+
+        WHILE str^ DO
+            IF str^ == '=' THEN
+                name[j] = 0
+
+                IF RtlCompareString ( arg, &name[0] ) == 0 THEN
+                    RETURN str + 1
+                END
+
+                BREAK
+            END
+
+            IF j == 15 THEN
+                BREAK
+            END
+
+            name[j] = str^
+
+            j += 1
+            str += 1
+        END
+
+        i += 1
+    END
+
+    RETURN NULLPTR
+END

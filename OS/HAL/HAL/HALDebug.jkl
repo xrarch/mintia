@@ -1,0 +1,124 @@
+//
+// Implements the HAL debugger entrypoints.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALLog.hjk"
+#INCLUDE "<inc>/HALDebug.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALMap.hjk"
+
+FNPTR DebugDump (
+    IN rows : UWORD,
+    IN cols : UWORD,
+)
+
+FNPTR DebugMain ()
+
+PUBLIC HALDebugDumpFunction : DebugDump
+
+PUBLIC HALDebuggerFunction : DebugMain
+
+EXTERN HALLoaderInfo : ^BlInfoRecord
+
+FNPTR DebugInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+#SECTION "INITtext"
+FN HALDebugInit (
+    IN ldrinfo : ^BlInfoRecord,
+)
+
+    di := CAST ldrinfo^.DbgMain TO DebugInit
+
+    IF di THEN
+        di ( ldrinfo )
+    END
+END
+
+FN HALDebug () : UWORD
+
+    debugger := HALDebuggerFunction
+
+    ran := 0
+
+    IF debugger THEN
+        ran = 1
+
+        rs := HALCPUInterruptDisable ()
+
+        debugger ()
+
+        HALCPUInterruptRestore ( rs )
+    END
+
+    RETURN ran
+END
+
+EXTERN FN HALPlatformDebugDump (
+    IN rows : UWORD,
+    IN cols : UWORD,
+)
+
+FN HALDebugDump (
+    IN rows : UWORD,
+    IN cols : UWORD,
+)
+
+    IF rows >= 5 THEN
+        RtlPrint ( "\n" )
+
+        rows -= 1
+
+        infocols := cols / 40
+
+        i := infocols
+
+        WHILE i DO
+            RtlPrint ( "DLL Base TimeStmp Name                 " )
+            i -= 1
+        END
+
+        RtlPrint ( "\n" )
+
+        rows -= 1
+
+        listhead := &HALLoaderInfo^.DllListHead
+        listentry := listhead^.Next
+
+        WHILE listentry != listhead AND rows DO
+            i = infocols
+
+            WHILE listentry != listhead AND i DO
+                dll := CONTAINEROF listentry TO BlDll.Entry
+
+                RtlPrint (
+                    "%08x %08x %-20s ",
+                    dll^.Base,
+                    dll^.Timestamp,
+                    &dll^.Name[0],
+                )
+
+                i -= 1
+                listentry = listentry^.Next
+            END
+
+            RtlPrint ( "\n" )
+
+            rows -= 1
+        END
+    END
+
+    dbg := HALDebugDumpFunction
+
+    IF dbg THEN
+        // do whatever fancy thing the installed debugger has in mind
+        dbg ( rows, cols )
+    ELSE
+        // do the platform's generic debug dump
+        HALPlatformDebugDump ( rows, cols )
+    END
+END

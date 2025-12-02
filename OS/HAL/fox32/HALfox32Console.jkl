@@ -1,0 +1,164 @@
+//
+// Implements the platform-dependent part of the HAL console.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALConsole.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALMap.hjk"
+
+EXTERN HALfox32IndexPalette : ULONG[]
+
+Palette : UBYTE[] = {
+    255, // 0: white
+    249, // 1: yellow
+    121, // 2: orange
+    24,  // 3: red
+    27,  // 4: magenta
+    12,  // 5: purple
+    4,   // 6: blue 
+    166, // 7: cyan
+    161, // 8: green
+    96,  // 9: dark green
+    40,  // 10: brown
+    114, // 11: tan
+    222, // 12: light gray
+    148, // 13: gray
+    74,  // 14: dark gray
+    0,   // 15: black
+}
+
+FBAddr : ^ULONG
+FBSize : ULONG
+FBModulo : ULONG
+
+EXTERN FN KVBlitBitsFastBackwardsFGBG (
+    IN fg : UWORD,
+    IN bg : UWORD,
+    IN ptr : ^VOID,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+EXTERN FN KVBlitBitsFastFGBG (
+    IN fg : UWORD,
+    IN bg : UWORD,
+    IN ptr : ^VOID,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+FN HALPlatformConsoleDrawChar (
+    IN bmp : ^VOID,
+    IN x : UWORD,
+    IN y : UWORD,
+)
+
+    IF HALConsoleFontFlags & HCFFLAG_REVERSE THEN
+        KVBlitBitsFastFGBG (
+            HALfox32IndexPalette[Palette[CONSOLE_FG]], // fg
+            HALfox32IndexPalette[Palette[CONSOLE_BG]], // bg
+            bmp, // ptr
+            FBAddr + (y * HALConsoleWidthPix * 4 + x * 4), // dest
+            FBModulo, // mod
+            HALConsoleFontWidth, // w
+            HALConsoleFontHeight, // h
+        )
+    ELSE
+        KVBlitBitsFastBackwardsFGBG (
+            HALfox32IndexPalette[Palette[CONSOLE_FG]], // fg
+            HALfox32IndexPalette[Palette[CONSOLE_BG]], // bg
+            bmp, // ptr
+            FBAddr + (y * HALConsoleWidthPix * 4 + x * 4), // dest
+            FBModulo, // mod
+            HALConsoleFontWidth, // w
+            HALConsoleFontHeight, // h
+        )
+    END
+END
+
+FN HALPlatformConsoleShutter ()
+
+    // do a cool shutter effect on the framebuffer
+
+    size := FBSize
+    addr := FBAddr
+    height := HALConsoleHeightPix
+
+    WHILE height DO
+        width := HALConsoleWidthPix
+
+        off := height & 1
+
+        WHILE width >= 1 DO
+            addr[off] = 0
+            width -= 2
+            addr += 8
+        END
+
+        height -= 1
+    END
+END
+
+FN HALPlatformConsoleClear (
+    IN color : UWORD,
+)
+
+    RtlFillMemoryWithUlong (
+        FBAddr, // dest
+        FBSize, // size
+        HALfox32IndexPalette[Palette[color]], // ulong
+    )
+END
+
+FN HALPlatformConsoleScroll (
+    IN color : UWORD,
+)
+
+    c32 := HALfox32IndexPalette[Palette[color]]
+
+    marginbytes := HALConsoleFontHeight * HALConsoleWidthPix * 4
+
+    scrollbytes := FBSize - marginbytes
+
+    fb := FBAddr
+
+    RtlCopyBytes (
+        fb, // dest
+        fb + marginbytes, // src
+        scrollbytes, // sz
+    )
+
+    RtlFillMemoryWithUlong (
+        fb + scrollbytes, // ptr
+        marginbytes, // sz
+        c32, // ulong
+    )
+END
+
+EXTERN HALLoaderInfo : ^BlInfoRecord
+
+FN HALPlatformConsoleInit (
+    IN wantmode : UWORD,
+) : UWORD
+
+    IF wantmode == CONSOLE_MODE_SCREEN THEN
+        IF HALLoaderInfo^.BootFbBase THEN
+            FBAddr = HALLoaderInfo^.BootFbBase
+            FBSize = HALConsoleWidthPix * HALConsoleHeightPix * 4
+            FBModulo = (HALConsoleWidthPix - HALConsoleFontWidth) * 4
+
+            RETURN CONSOLE_MODE_SCREEN
+        ELSE
+            RETURN CONSOLE_MODE_TTY
+        END
+    ELSE
+        RETURN wantmode
+    END
+END

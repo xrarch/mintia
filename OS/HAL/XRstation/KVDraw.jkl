@@ -1,0 +1,855 @@
+//
+// Implements basic kernel video support.
+// Used primarily by CoVideoConsole.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../OSLoader/Headers/Loader.hjk"
+
+#INCLUDE "<inc>/HALConsole.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALMap.hjk"
+#INCLUDE "<inc>/HALResource.hjk"
+#INCLUDE "<inc>/HALCrash.hjk"
+
+EXTERN HALLoaderInfo : ^BlInfoRecord
+
+FBAddr : ^ULONG
+FBSize : ULONG
+FBModulo : ULONG
+
+#SECTION "INITtext"
+FN KVInit ()
+
+    IF NOT HALLoaderInfo^.BootFbBase THEN
+        LEAVE
+    END
+
+    FBAddr = HALLoaderInfo^.BootFbBase
+    FBSize = HALConsoleWidthPix * HALConsoleHeightPix
+    FBModulo = HALConsoleWidthPix - HALConsoleFontWidth
+END
+
+FN KVQuery (
+    OUT w : UWORD,
+    OUT h : UWORD,
+) : UWORD
+    
+    IF NOT FBAddr THEN
+        RETURN -1
+    END
+
+    w = HALConsoleWidthPix
+    h = HALConsoleHeightPix
+
+    RETURN 0
+END
+
+FN KVFontGet (
+    IN name : ^UBYTE,
+    OUT font : ^HCFHeader,
+) : UWORD
+
+    rsrc := HALResourceByName ( name )
+
+    IF NOT rsrc THEN
+        RETURN -1
+    END
+
+    font = rsrc^.Data
+
+    IF font^.Magic != HCF_MAGIC THEN
+        RETURN -1
+    END
+
+    HALResourceWire ( rsrc )
+
+    RETURN 0
+END
+
+FN KVFontQuery (
+    IN font : ^HCFHeader,
+    OUT width : UWORD,
+    OUT height : UWORD,
+)
+
+    width = font^.Width
+    height = font^.Height
+END
+
+FN KVI8ToNative (
+    IN i8 : UWORD,
+) : UWORD
+
+    RETURN i8 & 0xFF
+END
+
+FN KVClearScreen (
+    IN nativecolor : UWORD,
+)
+
+    c32 := nativecolor | (nativecolor << 8) | (nativecolor << 16) | (nativecolor << 24)
+
+    RtlFillMemoryWithUlong (
+        FBAddr, // ptr
+        FBSize, // sz
+        c32, // ulong
+    )
+END
+
+FN KVDrawFilledRectangle (
+    IN nativecolor : UWORD,
+    IN x : UWORD,
+    IN y : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    c32 := nativecolor | (nativecolor << 8) | (nativecolor << 16) | (nativecolor << 24)
+
+    row := 0
+    gw := HALConsoleWidthPix
+
+    fb := FBAddr
+
+    ptr := fb + (y * gw + x)
+
+    WHILE row < h DO
+        RtlFillMemoryWithUlong (
+            ptr, // ptr
+            w, // sz
+            c32, // ulong
+        )
+
+        row += 1
+        ptr += gw
+    END
+END
+
+FN KVDrawEmptyRectangle (
+    IN nativecolor : UWORD,
+    IN x : UWORD,
+    IN y : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    gw := HALConsoleWidthPix
+
+    kptr := FBAddr + (y * gw + x)
+
+    // top edge
+    RtlFillMemoryWithUlong (
+        kptr, // ptr
+        w, // sz
+        nativecolor, // ulong
+    )
+
+    IF h > 1 THEN
+        bptr := kptr + (h - 1) * gw
+
+        // bottom edge
+        RtlFillMemoryWithUlong (
+            bptr, // ptr
+            w, // sz
+            nativecolor, // ulong
+        )
+    END
+
+    ptr := kptr
+
+    hk := h
+
+    // left edge
+    WHILE hk DO
+        ptr^ = nativecolor
+
+        hk -= 1
+        ptr += gw
+    END
+
+    IF w > 1 THEN
+        ptr = kptr + (w - 1)
+
+        hk = h
+
+        // right edge
+        WHILE hk DO
+            ptr^ = nativecolor
+
+            ptr += gw
+            hk -= 1
+        END
+    END
+END
+
+// mountains of redundant functions for various bit blit ops
+
+FN KVBlitBitsFastFG (
+    IN fg : UWORD,
+    IN ptr : ^UBYTE,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    destp := CAST dest TO ^UBYTE
+
+    j : UWORD
+    byte : UWORD
+    left : UWORD
+
+    WHILE h DO
+        left = w >> 3
+        WHILE left DO
+            byte = ptr^
+
+            IF byte THEN
+                IF byte & 128 THEN
+                    destp[7] = fg
+                END
+
+                IF byte & 64 THEN
+                    destp[6] = fg
+                END
+
+                IF byte & 32 THEN
+                    destp[5] = fg
+                END
+
+                IF byte & 16 THEN
+                    destp[4] = fg
+                END
+
+                IF byte & 8 THEN
+                    destp[3] = fg
+                END
+
+                IF byte & 4 THEN
+                    destp[2] = fg
+                END
+
+                IF byte & 2 THEN
+                    destp[1] = fg
+                END
+
+                IF byte & 1 THEN
+                    destp[0] = fg
+                END
+            END
+
+            destp += 8
+            left -= 1
+            ptr += 1
+        END
+
+        left = w & 7
+        IF left THEN
+            byte = ptr^
+            ptr += 1
+            j = 1
+
+            WHILE left DO
+                IF byte & j THEN
+                    destp[0] = fg
+                END
+
+                destp += 1
+                j <<= 1
+                left -= 1
+            END
+        END
+
+        destp += mod
+        h -= 1
+    END
+END
+
+FN KVBlitBitsFastBG (
+    IN bg : UWORD,
+    IN ptr : ^UBYTE,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    destp := CAST dest TO ^UBYTE
+
+    j : UWORD
+    byte : UWORD
+    left : UWORD
+
+    WHILE h DO
+        left = w >> 3
+        WHILE left DO
+            byte = ptr^
+
+            IF NOT byte THEN
+                destp[0] = bg
+                destp[1] = bg
+                destp[2] = bg
+                destp[3] = bg
+                destp[4] = bg
+                destp[5] = bg
+                destp[6] = bg
+                destp[7] = bg
+            ELSE
+                IF NOT (byte & 128) THEN
+                    destp[7] = bg
+                END
+
+                IF NOT (byte & 64) THEN
+                    destp[6] = bg
+                END
+
+                IF NOT (byte & 32) THEN
+                    destp[5] = bg
+                END
+
+                IF NOT (byte & 16) THEN
+                    destp[4] = bg
+                END
+
+                IF NOT (byte & 8) THEN
+                    destp[3] = bg
+                END
+
+                IF NOT (byte & 4) THEN
+                    destp[2] = bg
+                END
+
+                IF NOT (byte & 2) THEN
+                    destp[1] = bg
+                END
+
+                IF NOT (byte & 1) THEN
+                    destp[0] = bg
+                END
+            END
+
+            destp += 8
+            left -= 1
+            ptr += 1
+        END
+
+        left = w & 7
+        IF left THEN
+            byte = ptr^
+            ptr += 1
+            j = 1
+
+            WHILE left DO
+                IF NOT (byte & j) THEN
+                    destp[0] = bg
+                END
+
+                destp += 1
+                j <<= 1
+                left -= 1
+            END
+        END
+
+        destp += mod
+        h -= 1
+    END
+END
+
+FN KVBlitBitsFastFGBG (
+    IN fg : UWORD,
+    IN bg : UWORD,
+    IN ptr : ^UBYTE,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    destp := CAST dest TO ^UBYTE
+
+    j : UWORD
+    byte : UWORD
+    left : UWORD
+
+    WHILE h DO
+        left = w >> 3
+        WHILE left DO
+            byte = ptr^
+
+            IF NOT byte THEN
+                destp[0] = bg
+                destp[1] = bg
+                destp[2] = bg
+                destp[3] = bg
+                destp[4] = bg
+                destp[5] = bg
+                destp[6] = bg
+                destp[7] = bg
+            ELSE
+                IF byte & 128 THEN
+                    destp[7] = fg
+                ELSE
+                    destp[7] = bg
+                END
+
+                IF byte & 64 THEN
+                    destp[6] = fg
+                ELSE
+                    destp[6] = bg
+                END
+
+                IF byte & 32 THEN
+                    destp[5] = fg
+                ELSE
+                    destp[5] = bg
+                END
+
+                IF byte & 16 THEN
+                    destp[4] = fg
+                ELSE
+                    destp[4] = bg
+                END
+
+                IF byte & 8 THEN
+                    destp[3] = fg
+                ELSE
+                    destp[3] = bg
+                END
+
+                IF byte & 4 THEN
+                    destp[2] = fg
+                ELSE
+                    destp[2] = bg
+                END
+
+                IF byte & 2 THEN
+                    destp[1] = fg
+                ELSE
+                    destp[1] = bg
+                END
+
+                IF byte & 1 THEN
+                    destp[0] = fg
+                ELSE
+                    destp[0] = bg
+                END
+            END
+
+            destp += 8
+            left -= 1
+            ptr += 1
+        END
+
+        left = w & 7
+        IF left THEN
+            byte = ptr^
+            ptr += 1
+            j = 1
+
+            WHILE left DO
+                IF byte & j THEN
+                    destp[0] = fg
+                ELSE
+                    destp[0] = bg
+                END
+
+                destp += 1
+                j <<= 1
+                left -= 1
+            END
+        END
+
+        destp += mod
+        h -= 1
+    END
+END
+
+// reversed ones
+
+FN KVBlitBitsFastBackwardsFG (
+    IN fg : UWORD,
+    IN ptr : ^UBYTE,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    destp := CAST dest TO ^UBYTE
+
+    j : UWORD
+    byte : UWORD
+    left : UWORD
+
+    WHILE h DO
+        left = w >> 3
+        WHILE left DO
+            byte = ptr^
+
+            IF byte THEN
+                IF byte & 128 THEN
+                    destp[0] = fg
+                END
+
+                IF byte & 64 THEN
+                    destp[1] = fg
+                END
+
+                IF byte & 32 THEN
+                    destp[2] = fg
+                END
+
+                IF byte & 16 THEN
+                    destp[3] = fg
+                END
+
+                IF byte & 8 THEN
+                    destp[4] = fg
+                END
+
+                IF byte & 4 THEN
+                    destp[5] = fg
+                END
+
+                IF byte & 2 THEN
+                    destp[6] = fg
+                END
+
+                IF byte & 1 THEN
+                    destp[7] = fg
+                END
+            END
+
+            destp += 8
+            left -= 1
+            ptr += 1
+        END
+
+        left = w & 7
+        IF left THEN
+            byte = ptr^
+            ptr += 1
+            
+            IF w >> 3 THEN
+                j = 128
+            ELSE
+                j = 1 << left
+            END
+
+            WHILE left DO
+                IF byte & j THEN
+                    destp[0] = fg
+                END
+
+                destp += 1
+                j >>= 1
+                left -= 1
+            END
+        END
+
+        destp += mod
+        h -= 1
+    END
+END
+
+FN KVBlitBitsFastBackwardsBG (
+    IN bg : UWORD,
+    IN ptr : ^UBYTE,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    destp := CAST dest TO ^UBYTE
+
+    j : UWORD
+    byte : UWORD
+    left : UWORD
+
+    WHILE h DO
+        left = w >> 3
+        WHILE left DO
+            byte = ptr^
+
+            IF NOT byte THEN
+                destp[0] = bg
+                destp[1] = bg
+                destp[2] = bg
+                destp[3] = bg
+                destp[4] = bg
+                destp[5] = bg
+                destp[6] = bg
+                destp[7] = bg
+            ELSE
+                IF NOT (byte & 128) THEN
+                    destp[0] = bg
+                END
+
+                IF NOT (byte & 64) THEN
+                    destp[1] = bg
+                END
+
+                IF NOT (byte & 32) THEN
+                    destp[2] = bg
+                END
+
+                IF NOT (byte & 16) THEN
+                    destp[3] = bg
+                END
+
+                IF NOT (byte & 8) THEN
+                    destp[4] = bg
+                END
+
+                IF NOT (byte & 4) THEN
+                    destp[5] = bg
+                END
+
+                IF NOT (byte & 2) THEN
+                    destp[6] = bg
+                END
+
+                IF NOT (byte & 1) THEN
+                    destp[7] = bg
+                END
+            END
+
+            destp += 8
+            left -= 1
+            ptr += 1
+        END
+
+        left = w & 7
+        IF left THEN
+            byte = ptr^
+            ptr += 1
+            
+            IF w >> 3 THEN
+                j = 128
+            ELSE
+                j = 1 << left
+            END
+
+            WHILE left DO
+                IF NOT (byte & j) THEN
+                    destp[0] = bg
+                END
+
+                destp += 1
+                j >>= 1
+                left -= 1
+            END
+        END
+
+        destp += mod
+        h -= 1
+    END
+END
+
+FN KVBlitBitsFastBackwardsFGBG (
+    IN fg : UWORD,
+    IN bg : UWORD,
+    IN ptr : ^UBYTE,
+    IN dest : ^VOID,
+    IN mod : UWORD,
+    IN w : UWORD,
+    IN h : UWORD,
+)
+
+    destp := CAST dest TO ^UBYTE
+
+    j : UWORD
+    byte : UWORD
+    left : UWORD
+
+    WHILE h DO
+        left = w >> 3
+        WHILE left DO
+            byte = ptr^
+
+            IF NOT byte THEN
+                destp[0] = bg
+                destp[1] = bg
+                destp[2] = bg
+                destp[3] = bg
+                destp[4] = bg
+                destp[5] = bg
+                destp[6] = bg
+                destp[7] = bg
+            ELSE
+                IF byte & 128 THEN
+                    destp[0] = fg
+                ELSE
+                    destp[0] = bg
+                END
+
+                IF byte & 64 THEN
+                    destp[1] = fg
+                ELSE
+                    destp[1] = bg
+                END
+
+                IF byte & 32 THEN
+                    destp[2] = fg
+                ELSE
+                    destp[2] = bg
+                END
+
+                IF byte & 16 THEN
+                    destp[3] = fg
+                ELSE
+                    destp[3] = bg
+                END
+
+                IF byte & 8 THEN
+                    destp[4] = fg
+                ELSE
+                    destp[4] = bg
+                END
+
+                IF byte & 4 THEN
+                    destp[5] = fg
+                ELSE
+                    destp[5] = bg
+                END
+
+                IF byte & 2 THEN
+                    destp[6] = fg
+                ELSE
+                    destp[6] = bg
+                END
+
+                IF byte & 1 THEN
+                    destp[7] = fg
+                ELSE
+                    destp[7] = bg
+                END
+            END
+
+            destp += 8
+            left -= 1
+            ptr += 1
+        END
+
+        left = w & 7
+        IF left THEN
+            byte = ptr^
+            ptr += 1
+            
+            IF w >> 3 THEN
+                j = 128
+            ELSE
+                j = 1 << left
+            END
+
+            WHILE left DO
+                IF byte & j THEN
+                    destp[0] = fg
+                ELSE
+                    destp[0] = bg
+                END
+
+                destp += 1
+                j >>= 1
+                left -= 1
+            END
+        END
+
+        destp += mod
+        h -= 1
+    END
+END
+
+FN KVDrawCharacter (
+    IN char : UWORD,
+    IN nativefg : UWORD,
+    IN nativebg : UWORD,
+    IN x : UWORD,
+    IN y : UWORD,
+    IN font : ^HCFHeader,
+)
+
+    gw := HALConsoleWidthPix
+
+    w := font^.Width
+
+    h := font^.Height
+
+    dest := FBAddr + (y * gw + x)
+
+    mod := gw - w
+
+    bmp : ^VOID = font + SIZEOF HCFHeader + ((w + 7) >> 3) * h * char
+
+    bitd := NOT (font^.Flags & HCFFLAG_REVERSE)
+
+    IF nativefg == -1 THEN
+        IF nativebg == -1 THEN
+            LEAVE
+        END
+
+        IF bitd THEN
+            KVBlitBitsFastBackwardsBG (
+                nativebg, // bg
+                bmp, // bmp
+                dest, // dest
+                mod, // mod
+                w, // w
+                h, // h
+            )
+        ELSE
+            KVBlitBitsFastBG (
+                nativebg, // bg
+                bmp, // bmp
+                dest, // dest
+                mod, // mod
+                w, // w
+                h, // h
+            )
+        END
+    ELSEIF nativebg == -1 THEN
+        IF bitd THEN
+            KVBlitBitsFastBackwardsFG (
+                nativefg, // fg
+                bmp, // bmp
+                dest, // dest
+                mod, // mod
+                w, // w
+                h, // h
+            )
+        ELSE
+            KVBlitBitsFastFG (
+                nativefg, // fg
+                bmp, // bmp
+                dest, // dest
+                mod, // mod
+                w, // w
+                h, // h
+            )
+        END
+    ELSE
+        IF bitd THEN
+            KVBlitBitsFastBackwardsFGBG (
+                nativefg, // fg
+                nativebg, // bg
+                bmp, // bmp
+                dest, // dest
+                mod, // mod
+                w, // w
+                h, // h
+            )
+        ELSE
+            KVBlitBitsFastFGBG (
+                nativefg, // fg
+                nativebg, // bg
+                bmp, // bmp
+                dest, // dest
+                mod, // mod
+                w, // w
+                h, // h
+            )
+        END
+    END
+END

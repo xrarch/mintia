@@ -1,0 +1,357 @@
+#DEFINE KERNEL_MODE 1
+#DEFINE USER_MODE   2
+
+#DEFINE KE_PROCESS_NAME_LEN 16
+
+#DEFINE PROCESSSTATE_RESIDENT   1
+#DEFINE PROCESSSTATE_TRANSITION 2
+#DEFINE PROCESSSTATE_OUTSWAPPED 3
+
+#DEFINE KE_PRIORITIES 32
+
+#DEFINE QUANTUM_DEFAULT_MS    20 // in milliseconds (next multiple of platform clock will be used)
+#DEFINE QUANTUM_UNITS_PER_TICK 2
+
+STRUCT KeProcess
+    Name : UBYTE[KE_PROCESS_NAME_LEN],
+
+    // scheduler information
+
+    ThreadListHead : ^KeThread,
+
+    SignalThread : ^KeThread,
+
+    KilledStatus : ULONG,
+
+    UserTimeMs : ULONG,
+    SystemTimeMs : ULONG,
+    DPCTimeMs : ULONG,
+
+    // memory manager information
+
+    PageDirectory : ULONG,
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    Asid : ULONG,
+    ASIDSequenceNumber : ULONG,
+#END
+
+    SwapListNext : ^KeProcess,
+    DeferredThreadListHead : ^KeThread,
+
+    ResidentStackCount : UINT,
+    ThreadCount : UINT,
+
+    MemoryState : UBYTE,
+    Terminated : UBYTE,
+    BasePriority : UBYTE,
+    BaseQuantumB : UBYTE,
+END
+
+#DEFINE THREADSTATUS_INITIALIZED        1 // thread was just initialized
+#DEFINE THREADSTATUS_READY              2 // thread is in priority queue or process swap list
+#DEFINE THREADSTATUS_SUSPENDED          3 // thread is suspended
+#DEFINE THREADSTATUS_RUNNING            4 // thread is the current thread
+#DEFINE THREADSTATUS_WAITINGALERTABLE   5 // thread is waiting alertably
+#DEFINE THREADSTATUS_WAITINGUNALERTABLE 6 // thread is waiting unalertably
+#DEFINE THREADSTATUS_TERMINATED         7 // thread yielded for the final time
+#DEFINE THREADSTATUS_TRANSITION         8 // thread is in the global swap list
+#DEFINE THREADSTATUS_STANDBY            9 // thread is currently the KiThreadNext
+
+#DEFINE KE_THREAD_NAME_LEN   15
+#DEFINE KE_THREAD_STACK_SIZE 4096
+
+STRUCT KeThread
+    KernelStackTop : ^VOID,
+
+    Context : ^OSContext,
+
+    ActualProcess : ^KeProcess,
+    Process : ^KeProcess,
+
+    ProcessNext : ^KeThread,
+    ProcessPrev : ^KeThread,
+
+    QueueNext : ^KeThread,
+    QueuePrev : ^KeThread,
+
+    // a special swap list link is needed because QueueNext/QueuePrev may be
+    // pulling double duty as links for the global thread wait list.
+
+    SwapListNext : ^KeThread,
+
+    KilledStatus : ULONG,
+
+    WaitStatus : ULONG,
+
+    MutexListHead : ^KeMutex,
+
+    WaitOrReadyTimeSec : ULONG,
+
+    WaitBlocks : KeDispatchWaitBlock[THREAD_WAIT_BLOCKS],
+
+    TimeoutWaitBlock : KeDispatchWaitBlock,
+
+    WaitBlockTable : ^KeDispatchWaitBlock,
+
+    Timer : KeTimer,
+
+    SafeAccessAbort : ^VOID,
+    SafeAccessSP : ^VOID,
+
+    Signals : ULONG,
+    SignalAcceptMask : ULONG,
+    SignalDeliverOnWaitMask : ULONG,
+
+    TrapFrame : ^OSContext,
+
+    UserTimeMs : ULONG,
+    SystemTimeMs : ULONG,
+    DPCTimeMs : ULONG,
+
+    APCListHead : RtlListEntry,
+
+    UserAPCListHead : RtlListEntry,
+
+    APCDisableCount : ULONG,
+    IgnoreKill : ULONG,
+
+    WaitMode : UBYTE,
+    KernelStackResident : UBYTE,
+    KernelStackCanBeSwapped : UBYTE,
+    InstantDecay : UBYTE,
+
+    InSwapList : UBYTE,
+    BasePriority : UBYTE,
+    Priority : UBYTE,
+    Quantum : UBYTE,
+
+    Suspended : UBYTE,
+    APCInProgress : UBYTE,
+    Status : UBYTE,
+    WaitIPL : UBYTE,
+
+    WaitBlockCount : UBYTE,
+    WasPreempted : UBYTE,
+    QuantumEndCount : UBYTE,  // since last voluntary block
+    UserAPCTriggered : UBYTE,
+
+    // KETHREADNAMELEN is 15, which gives us 1 byte to use for the next field.
+
+    Name : UBYTE[KE_THREAD_NAME_LEN],
+
+    UserInterrupt : UBYTE,
+END
+
+EXTERN FN KeSafeCopyIn (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN size : UWORD,
+) : UWORD
+
+EXTERN FN KeSafeCopyOut (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN size : UWORD,
+) : UWORD
+
+EXTERN FN KeSafeStringCopyIn (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN max : UWORD,
+) : UWORD
+
+EXTERN FN KeSafeStringCopyOut (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN max : UWORD,
+) : UWORD
+
+EXTERN FN KeSafeMemset (
+    IN ptr : ^VOID,
+    IN size : UWORD,
+    IN word : UWORD,
+) : UWORD
+
+EXTERN FN KeSafeStoreByte (
+    IN byte : UWORD,
+    IN dest : ^VOID,
+) : UWORD
+
+EXTERN FN KeSafeProbeWrite (
+    IN dest : ^VOID,
+) : UWORD
+
+EXTERN FN KeSafeGetByte (
+    IN src : ^VOID,
+    OUT byte : UWORD,
+) : UWORD
+
+EXTERN FN KeSafeProbeSystemByte (
+    IN src : ^VOID,
+    OUT byte : UWORD,
+) : UWORD
+
+EXTERN FN KeInterlockedIncrement (
+    IN inc : UWORD,
+    IN ptr : ^VOID,
+) : UWORD
+
+EXTERN FN KeThreadContinue (
+    IN alertable : UWORD,
+    IN signum : UWORD,
+    IN context : ^OSContext,
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeEnterUserMode (
+    IN teb : ^VOID,
+    IN exitfunc : ^VOID,
+    IN context : ^OSContext,
+    IN ustack : ^VOID,
+    IN entryfunc : ^VOID,
+)
+
+EXTERN FN KeProcessQuerySignalThread (
+    IN query : ^OSProcessInformation,
+    IN process : ^KeProcess,
+)
+
+EXTERN FN KeProcessCurrent () : ^KeProcess
+
+EXTERN FN KeProcessInitialize (
+    IN name : ^UBYTE,
+    IN parentprocess : ^KeProcess,
+    IN process : ^KeProcess,
+)
+
+EXTERN FN KeProcessSignal (
+    IN signal : UWORD,
+    IN process : ^KeProcess,
+) : UWORD
+
+EXTERN FN KeProcessBasePrioritySet (
+    IN priority : UWORD,
+    IN process : ^KeProcess,
+)
+
+EXTERN FN KeProcessAttach (
+    IN try : UWORD,
+    IN process : ^KeProcess,
+    OUT ipl : UWORD,
+) : UWORD
+
+EXTERN FN KeProcessDetach (
+    IN ipl : UWORD,
+)
+
+EXTERN FN KeAddressSpaceSwitch (
+    IN process : ^KeProcess,
+)
+
+EXTERN KeProcessListHead : ^KeProcess
+EXTERN KeIdleProcess : KeProcess
+EXTERN KeProcessSwapInListHead : ^KeProcess
+
+EXTERN FN KeThreadInitialize (
+    IN context1 : ^VOID,
+    IN context2 : ^VOID,
+    IN startfunc : ^VOID,
+    IN process : ^KeProcess,
+    IN kstacksize : UWORD,
+    IN kstack : ^VOID,
+    IN name : ^UBYTE,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadUninitialize (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadIgnoreKill (
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeThreadAcceptKill (
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeThreadSignal (
+    IN signal : UWORD,
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeThreadTerminate (
+    IN status : UWORD,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadSuspend (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadResume (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadMaskSignal (
+    IN signal : UWORD,
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeThreadDeliverOnWaitSignal (
+    IN signal : UWORD,
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeThreadRundown (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadDispatchSignal (
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^OSContext,
+)
+
+EXTERN FN KeThreadReady (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadBlock (
+    IN status : UWORD,
+)
+
+EXTERN FN KeThreadPriorityBoost (
+    IN boost : UWORD,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadSleep (
+    IN ms : UWORD,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+) : UWORD
+
+EXTERN FN KeThreadBasePrioritySet (
+    IN priority : UWORD,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadPrioritySet (
+    IN priority : UWORD,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeThreadAPCDisable (
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeThreadAPCEnable (
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KeBoostReadyThreads ()
+
+EXTERN KeThreadCurrent : ^KeThread
+EXTERN KeThreadSwapInListHead : ^KeThread
+EXTERN KeThreadWaitListHead : ^KeThread

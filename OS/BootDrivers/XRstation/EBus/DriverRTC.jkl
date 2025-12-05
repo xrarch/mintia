@@ -1,0 +1,137 @@
+//
+// Implements the XRstation RTC driver.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+
+#INCLUDE "<inc>/HALLog.hjk"
+#INCLUDE "<inc>/HALDriver.hjk"
+#INCLUDE "<inc>/HALRTC.hjk"
+#INCLUDE "<inc>/HALXRstationCitron.hjk"
+#INCLUDE "<inc>/HALInterrupt.hjk"
+#INCLUDE "<inc>/HALCPU.hjk"
+
+#INCLUDE "<inc>/Kernel.hjk"
+
+#INCLUDE "<ll>/OSDLL/OSStatistics.hjk"
+#INCLUDE "<ll>/OSDLL/OSContext.hjk"
+
+#DEFINE RTC_INTERVAL 10
+
+#DEFINE RTC_PORT_CMD   0x20
+#DEFINE RTC_PORT_DATA  0x21
+#DEFINE RTC_INTERRUPT 2
+
+#DEFINE RTC_CMD_INTERVAL 1
+#DEFINE RTC_CMD_QUERY_SEC 2
+#DEFINE RTC_CMD_QUERY_MS  3
+#DEFINE RTC_CMD_SET_SEC   4
+#DEFINE RTC_CMD_SET_MS    5
+
+DriverRTCTimeCurrent : KeTime
+DriverRTCUptime : KeTime
+
+FN (HALRTCQueryF) DriverRTCQuery (
+    IN time : ^KeTime,
+)
+
+    ctime := &DriverRTCTimeCurrent
+
+    time^.SecPart = ctime^.SecPart
+    time^.MsPart = ctime^.MsPart
+END
+
+FN (HALUptimeQueryF) DriverRTCUptimeQuery (
+    IN time : ^KeTime,
+)
+
+    ctime := &DriverRTCUptime
+
+    time^.SecPart = ctime^.SecPart
+    time^.MsPart = ctime^.MsPart
+END
+
+FN DriverRTCQuerySlow (
+    IN time : ^KeTime,
+)
+
+    rs := HALCPUInterruptDisable ()
+
+    HALXRstationCitronCommand ( RTC_CMD_QUERY_SEC, RTC_PORT_CMD )
+    time^.SecPart = HALXRstationCitronInl ( RTC_PORT_DATA )
+
+    HALXRstationCitronCommand ( RTC_CMD_QUERY_MS, RTC_PORT_CMD )
+    time^.MsPart = HALXRstationCitronInl ( RTC_PORT_DATA )
+
+    HALCPUInterruptRestore ( rs )
+END
+
+FN (HALRTCSetF) DriverRTCSet (
+    IN time : ^KeTime,
+) : UWORD
+
+    rs := HALCPUInterruptDisable ()
+
+    HALXRstationCitronOutl ( time^.SecPart, RTC_PORT_DATA )
+    HALXRstationCitronCommand ( RTC_CMD_SET_SEC, RTC_PORT_CMD )
+
+    HALXRstationCitronOutl ( time^.MsPart, RTC_PORT_DATA )
+    HALXRstationCitronCommand ( RTC_CMD_SET_MS, RTC_PORT_CMD )
+
+    HALCPUInterruptRestore ( rs )
+
+    RETURN 0
+END
+
+FN (HALInterruptHandler) DriverRTCInterrupt (
+    IN trapframe : ^OSContext,
+    IN int : UWORD,
+)
+
+    DriverRTCQuerySlow ( &DriverRTCTimeCurrent )
+
+    uptime := &DriverRTCUptime
+
+    ms := uptime^.MsPart
+
+    ms += RTC_INTERVAL
+
+    IF ms >= 1000 THEN
+        ms -= 1000
+        uptime^.SecPart += 1
+    END
+
+    uptime^.MsPart = ms
+
+    KeClockTick (
+        RTC_INTERVAL, // interval
+        trapframe, // trapframe
+    )
+END
+
+FN (FDriverInit) DriverInitRTC (
+    IN stage : UWORD,
+) : UWORD
+
+    IF stage == STAGE_PRETASKING THEN
+        // start the clock interrupt
+
+        HALInterruptRegister (
+            &DriverRTCInterrupt, // function
+            RTC_INTERRUPT, // interrupt number
+            IPL_CLOCK, // interrupt priority level
+        )
+
+        HALXRstationCitronOutl ( RTC_INTERVAL, RTC_PORT_DATA )
+        HALXRstationCitronCommand ( RTC_CMD_INTERVAL, RTC_PORT_CMD )
+
+        DriverRTCQuerySlow ( &DriverRTCTimeCurrent )
+
+        HALRTCQueryFunction = &DriverRTCQuery
+        HALUptimeQueryFunction = &DriverRTCUptimeQuery
+        HALRTCSetFunction = &DriverRTCSet
+        HALRTCInterval = RTC_INTERVAL
+    END
+
+    RETURN 0
+END

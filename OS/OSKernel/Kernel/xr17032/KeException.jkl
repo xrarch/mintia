@@ -1,0 +1,712 @@
+#INCLUDE "<ll>/Rtl.hjk"
+
+#INCLUDE "<inc>/HALCPU.hjk"
+#INCLUDE "<inc>/HALMap.hjk"
+#INCLUDE "<inc>/HALInterrupt.hjk"
+#INCLUDE "<inc>/HALConsole.hjk"
+
+#INCLUDE "<inc>/HALDebug.hjk"
+
+#INCLUDE "<inc>/Kernel.hjk"
+
+#INCLUDE "<ll>/OSDLL/OS.hjk"
+
+#INCLUDE "../KeInternal.hjk"
+#INCLUDE "../../../OSLoader/Headers/Loader.hjk"
+
+// if this seems janked up, its because it is, because this all used to be in
+// the HAL, and the process of moving it into the kernel was rough.
+
+#DEFINE ECAUSE_INTERRUPT 1
+#DEFINE ECAUSE_SYS       2
+#DEFINE ECAUSE_NMI       5
+#DEFINE ECAUSE_BRK       6
+#DEFINE ECAUSE_INVALID   7
+#DEFINE ECAUSE_PRIVVIOL  8
+#DEFINE ECAUSE_UNALIGNED 9
+#DEFINE ECAUSE_PAGEFAULT 12
+#DEFINE ECAUSE_PAGEWRITE 13
+
+EXTERN HALXRstationInterruptHandlers : ^VOID[64 * 2]
+
+EXTERN KeThreadCurrentStackTop : ^VOID
+EXTERN KeThreadCurrentStackBottom : ^VOID
+EXTERN HALInterruptStackTop : ^VOID
+
+EXTERN OSCallCount : ULONG
+EXTERN OSCallTable : ^^VOID
+
+EXTERN KeIPLCurrent : ULONG
+
+EXTERN FN HALXr17032TLBFlushAll ()
+
+EXTERN FN KiContinue (
+    IN tf : ^OSContext,
+)
+
+#ASM [
+
+KiXr17032ExceptionVector:
+.global KiXr17032ExceptionVector
+    mtcr scratch0, t0 // save t0 to free it as scratch
+    mtcr scratch1, t1 // ditto with t1
+    mtcr scratch2, sp // save stack pointer
+    mtcr scratch3, sp // save trace link
+
+    mfcr t0, rs
+
+    andi t1, t0, XR17032_ERS_USER
+    beq  t1, .waskernel
+
+    mov  sp, long [KeThreadCurrentStackTop] // load new sp for current thread
+
+    mtcr scratch3, zero // this was a usermode sp, zero out the trace link
+
+.waskernel:
+    subi sp, sp, OSContext__SIZEOF
+
+    mov  t1, long [HALInterruptNested]
+    bne  t1, .skipoverflowcheck
+
+    mov  t1, long [KeThreadCurrentStackBottom]
+    sub  t1, sp, t1
+    blt  t1, .overflow
+
+.skipoverflowcheck:
+    mfcr t1, scratch2
+    mov  long [sp + OSContext_sp],  t1
+    mov  long [sp + OSContext_ers], t0 // ers was still in t0
+
+    mfcr t1, epc
+    mov  long [sp + OSContext_epc], t1
+
+    mfcr t1, scratch0
+    mov  long [sp + OSContext_t0],  t1
+
+    mfcr t1, scratch1
+    mov  long [sp + OSContext_t1],  t1
+
+    mov  long [sp + OSContext_t2],  t2
+    mov  long [sp + OSContext_t3],  t3
+    mov  long [sp + OSContext_t4],  t4
+    mov  long [sp + OSContext_t5],  t5
+    mov  long [sp + OSContext_a0],  a0
+    mov  long [sp + OSContext_a1],  a1
+    mov  long [sp + OSContext_a2],  a2
+    mov  long [sp + OSContext_a3],  a3
+    mov  long [sp + OSContext_s0],  s0
+    mov  long [sp + OSContext_s1],  s1
+    mov  long [sp + OSContext_s2],  s2
+    mov  long [sp + OSContext_s3],  s3
+    mov  long [sp + OSContext_s4],  s4
+    mov  long [sp + OSContext_s5],  s5
+    mov  long [sp + OSContext_s6],  s6
+    mov  long [sp + OSContext_s7],  s7
+    mov  long [sp + OSContext_s8],  s8
+    mov  long [sp + OSContext_s9],  s9
+    mov  long [sp + OSContext_s10], s10
+    mov  long [sp + OSContext_s11], s11
+    mov  long [sp + OSContext_s12], s12
+    mov  long [sp + OSContext_s13], s13
+    mov  long [sp + OSContext_s14], s14
+    mov  long [sp + OSContext_s15], s15
+    mov  long [sp + OSContext_s16], s16
+    mov  long [sp + OSContext_s17], s17
+    mov  long [sp + OSContext_s18], tp
+    mov  long [sp + OSContext_lr],  lr
+
+    rshi a0, t0, 28
+    andi a0, a0, 15
+    mfcr a2, ebadaddr
+    mov  a3, sp // give KiXr17032Exception our context
+
+    subi sp, sp, 12
+    mov  long [sp + 8], lr
+    mfcr t0, epc
+    mov  long [sp + 4], t0
+    mfcr t0, scratch3
+    mov  long [sp], t0
+
+    jal  KiXr17032Exception // call KiXr17032Exception, to handle the exception
+
+    addi sp, sp, 12
+
+    mov  t0, long [sp + OSContext_ers]
+    mtcr rs, t0
+
+    mov  t0, long [sp + OSContext_epc]
+    mtcr epc, t0
+
+    mov  t0,  long [sp + OSContext_t0]
+    mov  t1,  long [sp + OSContext_t1]
+    mov  t2,  long [sp + OSContext_t2]
+    mov  t3,  long [sp + OSContext_t3]
+    mov  t4,  long [sp + OSContext_t4]
+    mov  t5,  long [sp + OSContext_t5]
+    mov  a0,  long [sp + OSContext_a0]
+    mov  a1,  long [sp + OSContext_a1]
+    mov  a2,  long [sp + OSContext_a2]
+    mov  a3,  long [sp + OSContext_a3]
+    mov  s0,  long [sp + OSContext_s0]
+    mov  s1,  long [sp + OSContext_s1]
+    mov  s2,  long [sp + OSContext_s2]
+    mov  s3,  long [sp + OSContext_s3]
+    mov  s4,  long [sp + OSContext_s4]
+    mov  s5,  long [sp + OSContext_s5]
+    mov  s6,  long [sp + OSContext_s6]
+    mov  s7,  long [sp + OSContext_s7]
+    mov  s8,  long [sp + OSContext_s8]
+    mov  s9,  long [sp + OSContext_s9]
+    mov  s10, long [sp + OSContext_s10]
+    mov  s11, long [sp + OSContext_s11]
+    mov  s12, long [sp + OSContext_s12]
+    mov  s13, long [sp + OSContext_s13]
+    mov  s14, long [sp + OSContext_s14]
+    mov  s15, long [sp + OSContext_s15]
+    mov  s16, long [sp + OSContext_s16]
+    mov  s17, long [sp + OSContext_s17]
+    mov  tp,  long [sp + OSContext_s18]
+
+    mov  lr, long [sp + OSContext_lr]
+    mov  sp, long [sp + OSContext_sp]
+
+    rfe
+
+.overflow:
+    mov  a1, sp
+    mov  sp, long [HALInterruptStackTop]
+
+    subi sp, sp, 8
+    mfcr t0, epc
+    mov  long [sp + 4], t0
+    mfcr t0, scratch3
+    mov  long [sp], t0
+
+    mfcr a0, rs
+    jal  KiStackOverflow
+
+.hang:
+    b    .hang
+
+KiLoadInitialContext:
+.global KiLoadInitialContext
+    mov  t0, long [sp + OSContext_ers]
+    mtcr rs, t0
+
+    mov  t0, long [sp + OSContext_epc]
+    mtcr epc, t0
+
+    mov  t0,  long [sp + OSContext_t0]
+    mov  t1,  long [sp + OSContext_t1]
+    mov  t2,  long [sp + OSContext_t2]
+    mov  t3,  long [sp + OSContext_t3]
+    mov  t4,  long [sp + OSContext_t4]
+    mov  t5,  long [sp + OSContext_t5]
+    mov  a0,  long [sp + OSContext_a0]
+    mov  a1,  long [sp + OSContext_a1]
+    mov  a2,  long [sp + OSContext_a2]
+    mov  a3,  long [sp + OSContext_a3]
+    mov  s0,  long [sp + OSContext_s0]
+    mov  s1,  long [sp + OSContext_s1]
+    mov  s2,  long [sp + OSContext_s2]
+    mov  s3,  long [sp + OSContext_s3]
+    mov  s4,  long [sp + OSContext_s4]
+    mov  s5,  long [sp + OSContext_s5]
+    mov  s6,  long [sp + OSContext_s6]
+    mov  s7,  long [sp + OSContext_s7]
+    mov  s8,  long [sp + OSContext_s8]
+    mov  s9,  long [sp + OSContext_s9]
+    mov  s10, long [sp + OSContext_s10]
+    mov  s11, long [sp + OSContext_s11]
+    mov  s12, long [sp + OSContext_s12]
+    mov  s13, long [sp + OSContext_s13]
+    mov  s14, long [sp + OSContext_s14]
+    mov  s15, long [sp + OSContext_s15]
+    mov  s16, long [sp + OSContext_s16]
+    mov  s17, long [sp + OSContext_s17]
+    mov  tp,  long [sp + OSContext_s18]
+
+    mov  lr, long [sp + OSContext_lr]
+    mov  sp, long [sp + OSContext_sp]
+
+    rfe
+
+KiThreadTrampoline:
+    mov  s0, a0
+    mov  s1, a1
+    mov  s2, a2
+
+    li   a0, IPL_LOW
+    jal  KeIPLLower
+
+    mov  a1, s0
+    mov  a0, s1
+
+    jr   s2
+
+// a0 - tf
+KiContinue:
+    mov  sp, a0
+    j    KiLoadInitialContext
+
+// a0 - tf
+KiXr17032Syscall:
+.global KiXr17032Syscall
+    subi sp, sp, 20
+    mov  long [sp], zero
+    mov  long [sp + 4], s0
+    mov  long [sp + 8], s1
+    mov  long [sp + 12], s17
+    mov  long [sp + 16], lr
+
+    mov  s17, a0 //trampolines expect trapframe in s17
+
+    mov  t1, long [a0 + OSContext_t0]
+    beq  t1, .sysout
+
+    mov  t0, long [OSCallCount]
+    slt  t0, t0, t1
+    bne  t0, .sysout
+
+    la   t0, OSCallTable
+    mov  t0, long [t0 + t1 LSH 2]
+
+    jalr lr, t0, 0
+
+.sysout:
+    mov  lr, long [sp + 16]
+    mov  s17, long [sp + 12]
+    mov  s1, long [sp + 8]
+    mov  s0, long [sp + 4]
+    addi sp, sp, 20
+
+    ret
+
+.section INITtext
+
+KiXr17032Init:
+.global KiXr17032Init
+    mtcr eb, a0
+
+    mtcr ebadaddr, zero
+
+    j    HALXr17032TLBFlushAll
+
+.section text
+
+KeIPLCurrentGet:
+.global KeIPLCurrentGet
+    mov  a3, long [KeIPLCurrent]
+    ret
+
+// don't let HALXr17032MapSwitch cross a page boundary or bad things might
+// happen if there's a TLB miss in the middle
+
+.align 128
+
+// MUST BE CALLED WITH INTERRUPTS DISABLED
+// asid pgtb --
+HALXr17032MapSwitch:
+.global HALXr17032MapSwitch
+    // set the new page directory in TLB entry 0
+
+    mfcr t1, itbindex
+    mfcr t2, dtbindex
+
+    mtcr itbindex, zero
+    mtcr dtbindex, zero
+
+    la   t0, PAGE_DIRECTORY
+    rshi t0, t0, 12
+    mtcr itbtag, t0
+    mtcr dtbtag, t0
+
+    mov  t0, a1
+    rshi t0, t0, 12
+    lshi t0, t0, 5
+    ori  t0, t0, 0x17
+    mtcr itbpte, t0
+    mtcr dtbpte, t0
+
+    mtcr itbindex, t1
+    mtcr dtbindex, t2
+
+    // set the asid
+
+    lshi a0, a0, 20
+    mtcr itbtag, a0
+    mtcr dtbtag, a0
+
+    ret
+
+.section text
+
+]
+
+EXTERN HALLoaderInfo : ^BlInfoRecord
+
+EXTERN FN KiXr17032Init (
+    IN eb : ^VOID,
+)
+
+EXTERN KiXr17032ExceptionVector : UBYTE
+
+EXTERN KiLoadInitialContext : UBYTE
+
+FN KiCPUInit ()
+
+    ptr : ^ULONG = HALLoaderInfo^.U.Xr.ExceptionBlock
+
+    // Construct a jump instruction that just jumps to our exception handler,
+    // and then copy it to the first instruction of each entry of the exception
+    // block, except for the TLB miss handler, which has already been set up by
+    // OSLoader.
+
+    jmpinstruction := 6
+    jmpinstruction |= ((CAST &KiXr17032ExceptionVector TO UWORD) >> 2) << 3
+
+    i := 0
+
+    WHILE i < 14 DO
+        ptr[0] = jmpinstruction
+
+        i += 1
+        ptr += 256
+    END
+
+    KiXr17032Init ( HALLoaderInfo^.U.Xr.ExceptionBlock )
+END
+
+EXTERN FN KiThreadTrampoline ()
+
+EXTERN FN KiXr17032Syscall (
+    IN tf : ^OSContext,
+)
+
+#DEFINE EXC_NAMES_MAX 15
+
+ExceptionNames : ^UBYTE[] = {
+    "EXC0",
+    "INTERRUPT",
+    "SYSCALL",
+    "FWCALL",
+    "BUSERROR",
+    "EXC5",
+    "BREAKPOINT",
+    "INVALIDINSTRUCTION",
+    "PRIVILEGEVIOLATION",
+    "UNALIGNEDADDR",
+    "EXC10",
+    "EXC11",
+    "PAGEFAULT(READ)",
+    "PAGEFAULT(WRITE)",
+    "EXC14",
+    "EXC15",
+}
+
+EXTERN FN PsDispatchUsermodeInterrupts (
+    IN trapframe : ^OSContext,
+)
+
+FN HALCPUIsUserTrapFrame (
+    IN tf : ^OSContext,
+) : UWORD
+
+    RETURN tf^.ers & XR17032_ERS_USER
+END
+
+FN HALCPUTrapFrameAbort (
+    IN ok : UWORD,
+    IN abort : ^VOID,
+    IN tf : ^OSContext,
+)
+
+    tf^.a0 = ok
+    tf^.epc = abort
+END
+
+FN KiStackOverflow (
+    IN rs : UWORD,
+    IN sp : UWORD,
+)
+
+    current := KeThreadCurrent
+
+    IF current THEN
+        KeCrash (
+            "process '%s' thread '%s' kernel stack overflow (sp=%x bottom=%x)\n",
+            &current^.Process^.Name[0],
+            &current^.Name[0],
+            sp,
+            KeThreadCurrentStackBottom,
+        )
+    END
+
+    KeCrash ( "Kernel stack overflow %x\n", rs )
+END
+
+FN KiInterruptUsermode (
+    IN context : ^OSContext,
+    IN userfunc : ^VOID,
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^OSContext,
+)
+
+    // Cause a usermode interrupt of the current thread by saving the context
+    // on the user stack and redirecting the trapframe to the usermode
+    // interrupt handler. This is used to implement signal and APC dispatch.
+
+    KeCrash ( "TBT: KiInterruptUsermode\n" )
+END
+
+FN KeThreadContinue (
+    IN alertable : UWORD,
+    IN signum : UWORD,
+    IN context : ^OSContext,
+    IN thread : ^KeThread,
+) : UWORD
+
+    // Restore context and continue out of a usermode interrupt handler.
+
+    KeCrash ( "TBT: KeThreadContinue\n" )
+END
+
+FN KiXr17032Exception (
+    IN badaddr : ^VOID,
+    IN ecause : UWORD,
+    IN tf : ^OSContext,
+)
+
+    signal := 0
+
+    tf^.badaddr = badaddr
+    KiOldIPL = KeIPLCurrent
+
+    IF tf^.ers & XR17032_ERS_USER THEN
+        KeThreadCurrent^.TrapFrame = tf
+    END
+
+    handled := 0
+
+    IF ecause == ECAUSE_INTERRUPT THEN
+        KeStatistics^.Interrupts += 1
+
+        HALInterrupt ( tf )
+
+        IF KeIPLCurrent < IPL_DPC AND
+            KiPendingSoftwareInterrupts THEN
+
+            KiDispatchSoftwareInterrupts ()
+        END
+
+        handled = 1
+    ELSE
+        HALCPUInterruptEnable ()
+
+        IF ecause == ECAUSE_SYS THEN
+            KeStatistics^.SystemCalls += 1
+
+            KiXr17032Syscall ( tf )
+
+            handled = 1
+        ELSEIF ecause == ECAUSE_PAGEFAULT THEN
+            KeCrash ( "TBT: KiXr17032Exception PF" )
+        ELSEIF ecause == ECAUSE_PAGEWRITE THEN
+            KeCrash ( "TBT: KiXr17032Exception PFW" )
+        ELSEIF ecause == ECAUSE_INVALID THEN
+            signal = OSSIGNAL_ILL
+        ELSEIF ecause == ECAUSE_PRIVVIOL THEN
+            signal = OSSIGNAL_ILL
+        ELSEIF ecause == ECAUSE_UNALIGNED THEN
+            signal = OSSIGNAL_BUS
+        ELSEIF ecause == ECAUSE_BRK THEN
+            handled = 1
+            // TODO debugging stuff
+        END
+
+        IF signal THEN
+            IF tf^.ers & XR17032_ERS_USER THEN
+                KeCrash ( "TBT: KiXr17032Exception signal\n" )
+            ELSEIF ecause == ECAUSE_UNALIGNED THEN
+                abort := KeThreadCurrent^.SafeAccessAbort
+
+                IF abort THEN
+                    // thought this might happen.
+
+                    HALCPUTrapFrameAbort ( STATUS_FAULT, abort, tf )
+
+                    handled = 1
+                END
+            END
+        END
+
+        HALCPUInterruptDisable ()
+    END
+
+    IF NOT handled THEN
+        excname : ^UBYTE
+
+        IF ecause > EXC_NAMES_MAX THEN
+            excname = "UNKNOWN"
+        ELSE
+            excname = ExceptionNames[ecause]
+        END
+
+        IF ecause == ECAUSE_NMI THEN
+            HALDebug ()
+
+            LEAVE
+        END
+
+        KeCrash (
+            "Fault: IPL=%d ERS=%08x EPC=%08x BADADDR=%08x ECAUSE=%s\n",
+            KeIPLCurrent,
+            tf^.ers,
+            tf^.epc,
+            badaddr,
+            excname,
+        )
+    END
+
+    IF tf^.ers & XR17032_ERS_USER AND
+        KeThreadCurrent^.UserInterrupt THEN
+
+        KeCrash ( "TBT: KiXr17032Exception dispatch user ints\n" )
+    END
+END
+
+FN KeEnterUserMode (
+    IN teb : ^VOID,
+    IN exitfunc : ^VOID,
+    IN context : ^OSContext,
+    IN ustack : ^VOID,
+    IN entryfunc : ^VOID,
+)
+
+    // make a fake trap frame to return to
+
+    tf : OSContext
+
+    RtlFillMemoryWithUlong (
+        &tf, // ptr
+        SIZEOF OSContext, // size
+        0, // ulong
+    )
+
+    tf.s18 = teb
+
+    tf.ers = XR17032_ERS_UTHREAD | XR17032_RS_MMU
+
+    tf.epc = entryfunc
+    tf.lr = exitfunc
+
+    tf.a0 = context
+
+    tf.sp = ustack
+
+    HALCPUInterruptDisable ()
+
+    IF KeThreadCurrent^.UserInterrupt THEN
+        KeCrash ( "TBT: KeEnterUserMode\n" )
+    END
+
+    KiContinue ( &tf )
+END
+
+#DEFINE MAX_ASID 4096
+
+KiASIDNext := 1
+
+KiASIDSequenceNumber := 0
+
+EXTERN FN HALXr17032MapSwitch (
+    IN asid : UWORD,
+    IN pgtb : UWORD,
+)
+
+FN KeAddressSpaceSwitch (
+    IN process : ^KeProcess,
+)
+
+    asid := process^.Asid
+
+    rs := HALCPUInterruptDisable ()
+
+    IF process^.PageDirectory == HALPlatformKernelPageDirectory THEN
+        HALXr17032MapSwitch (
+            0, // asid
+            HALPlatformKernelPageDirectory, // pgtb
+        )
+    ELSE
+        IF process^.ASIDSequenceNumber != KiASIDSequenceNumber THEN
+            // the ASIDs rolled over at some point, so we have to give this
+            // process a new one.
+
+            asid = KiASIDNext
+            KiASIDNext = asid + 1
+
+            IF asid >= MAX_ASID THEN
+                // roll over! flush TLB and increment sequence number.
+
+                asid = 1
+                KiASIDNext = 2
+                KiASIDSequenceNumber += 1
+
+                HALXr17032TLBFlushAll ()
+            END
+
+            process^.Asid = asid
+            process^.ASIDSequenceNumber = KiASIDSequenceNumber
+        END
+
+        HALXr17032MapSwitch (
+            asid, // asid
+            (process^.PageDirectory >> 5) << 12, // pgtb
+        )
+    END
+
+    HALCPUInterruptRestore ( rs )
+END
+
+FN HALCPUContextInit (
+    IN context1 : ^VOID,
+    IN context2 : ^VOID,
+    IN startfunc : ^VOID,
+    IN kstack : ^VOID,
+    IN process : ^KeProcess,
+) : ^OSContext
+
+    kstack -= 8
+
+    kstackul := CAST kstack TO ^ULONG
+
+    kstackul[0] = 0
+    kstackul[1] = startfunc
+
+    ctx : ^OSContext = kstack - SIZEOF OSContext
+
+    RtlFillMemoryWithUlong (
+        ctx, // ptr
+        SIZEOF OSContext, // sz
+        0, // ulong
+    )
+
+    ctx^.a2 = startfunc
+    ctx^.a1 = context1
+    ctx^.a0 = context2
+
+    // enable interrupts and paging in the thread's context
+    ctx^.ers = XR17032_ERS_KTHREAD | XR17032_RS_MMU
+
+    ctx^.epc = &KiThreadTrampoline
+
+    ctx^.sp = kstack
+
+    ctx -= SIZEOF OSContext
+
+    ctx^.ers = XR17032_RS_MMU
+
+    ctx^.lr = &KiLoadInitialContext
+
+    RETURN ctx
+END

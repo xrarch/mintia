@@ -23,6 +23,7 @@ fantasy computer and planned future ports to other architectures as well.
 
 <a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-17032.png" width="256"></a>
 <a href="https://github.com/fox32-arch/fox32"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-fox32.png" width="256"></a>
+<a href="https://github.com/monkuous/mintia386"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-i386.png" width="256"></a>
 
 ## Building
 

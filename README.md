@@ -42,7 +42,7 @@ seems to have problems with the SDK. Multi-core builds are encouraged with the
 To build for fox32, type `make PLATFORM=fox32` and the distribution image should
 be placed at `build/mintia-fox32-fre.img`.
 
-## Testing
+## Testing on XR/station
 
 With the XR/station emulator (`./xremu/`) and MINTIA repository (`./mintia/`) in your current directory, run this command:
 
@@ -51,6 +51,18 @@ With the XR/station emulator (`./xremu/`) and MINTIA repository (`./mintia/`) in
 If it doesn't boot automatically, type this command at the firmware prompt:
 
 `boot /disks/0/a`
+
+MINTIA should boot to the `username:` prompt.
+
+Logging in as `guest` has no password, and the default password for `root` is `mintia`.
+
+## Testing on x86
+
+A prebuilt image of the x86 port can be found [here](https://github.com/xrarch/mintia/raw/refs/heads/main/build/mintia-PC-fre.img.zip). The source code is in [this repository](https://github.com/monkuous/mintia386).
+
+Run it with the following command:
+
+`qemu-system-i386 -M q35 mintia-pc-fre.img`
 
 MINTIA should boot to the `username:` prompt.
 

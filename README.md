@@ -4,7 +4,15 @@
 
 MINTIA is a custom operating system written in a custom programming language, as
 part of a half-decade personal project to create a fully from-scratch RISC
-workstation computer called [XR/station](https://github.com/xrarch/xremu).
+workstation computer called [XR/station](https://github.com/xrarch/xremu). It
+now also runs on other architectures thanks to its portability, including [a port](https://github.com/monkuous/mintia386)
+to Intel x86, and a port to the [fox32](https://github.com/fox32) fantasy computer.
+
+## Supported Architectures
+
+<a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-17032.png" width="256"></a>
+<a href="https://github.com/fox32-arch/fox32"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-fox32.png" width="256"></a>
+<a href="https://github.com/monkuous/mintia386"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-i386.png" width="256"></a>
 
 Its kernel design pays homage to the Windows NT operating system. In particular
 the virtual memory manager has been written with similar goals, with the
@@ -13,17 +21,9 @@ tables, and even ~50% of its own kernel code and heap.
 
 MINTIA aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
-a pretty strong system at the time. It is also very portable to other
-32-bit architectures, with a finished port to the unrelated [fox32](https://github.com/fox32-arch/fox32)
-fantasy computer and planned future ports to other architectures as well.
+a pretty strong system at the time.
 
 ![Running](https://raw.githubusercontent.com/xrarch/mintia/main/screenshot.png)
-
-## Supported Architectures
-
-<a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-17032.png" width="256"></a>
-<a href="https://github.com/fox32-arch/fox32"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-fox32.png" width="256"></a>
-<a href="https://github.com/monkuous/mintia386"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-i386.png" width="256"></a>
 
 ## License
 
